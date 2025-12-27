@@ -29,6 +29,8 @@ class _LoginPageState extends State<LoginPage> {
   bool _hasSavedCredentials = false;
   String _biometricType = 'Biometria';
   bool _saveCredentials = false;
+  bool _biometricLoginAttempted = false; // Flag para evitar múltiplas tentativas
+  bool _isBiometricLoginInProgress = false; // Flag para evitar chamadas simultâneas
 
   @override
   void initState() {
@@ -292,7 +294,12 @@ class _LoginPageState extends State<LoginPage> {
         });
 
         // Se há credenciais salvas E biometria está disponível, tentar login automático
-        if (hasCredentials && _biometricAvailable && mounted) {
+        // Mas apenas se ainda não tentou (evita múltiplas tentativas)
+        if (hasCredentials && 
+            _biometricAvailable && 
+            mounted && 
+            !_biometricLoginAttempted && 
+            !_isBiometricLoginInProgress) {
           debugPrint(
             '🚀 [BIOMETRIA] Iniciando login automático com biometria...',
           );
@@ -303,12 +310,21 @@ class _LoginPageState extends State<LoginPage> {
           await Future.delayed(const Duration(milliseconds: 800));
 
           // Verificar novamente se ainda está montado e as condições ainda são válidas
-          if (mounted && _biometricAvailable && _hasSavedCredentials) {
-            _handleBiometricLogin();
+          // E se não há outra tentativa em progresso
+          if (mounted && 
+              _biometricAvailable && 
+              _hasSavedCredentials && 
+              !_biometricLoginAttempted && 
+              !_isBiometricLoginInProgress) {
+            _handleBiometricLogin(isManual: false);
+          } else {
+            debugPrint(
+              '⚠️ [BIOMETRIA] Condições mudaram durante o delay - não iniciando login automático',
+            );
           }
         } else {
           debugPrint(
-            'ℹ️ [BIOMETRIA] Login automático não iniciado - Biometria: $_biometricAvailable, Credenciais: $hasCredentials',
+            'ℹ️ [BIOMETRIA] Login automático não iniciado - Biometria: $_biometricAvailable, Credenciais: $hasCredentials, Já tentado: $_biometricLoginAttempted, Em progresso: $_isBiometricLoginInProgress',
           );
         }
       }
@@ -324,8 +340,15 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   /// Realiza login com biometria
-  Future<void> _handleBiometricLogin() async {
+  Future<void> _handleBiometricLogin({bool isManual = false}) async {
     debugPrint('🔐 [BIOMETRIA] Iniciando processo de login com biometria...');
+    debugPrint('🔐 [BIOMETRIA] Modo: ${isManual ? "Manual" : "Automático"}');
+
+    // Proteção contra chamadas simultâneas
+    if (_isBiometricLoginInProgress) {
+      debugPrint('⚠️ [BIOMETRIA] Login biométrico já está em progresso, ignorando nova chamada');
+      return;
+    }
 
     if (!_biometricAvailable || !_hasSavedCredentials || _isLoading) {
       debugPrint(
@@ -334,27 +357,73 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-    });
+    // Se já tentou automaticamente e não é manual, não tentar novamente
+    if (!isManual && _biometricLoginAttempted) {
+      debugPrint('⚠️ [BIOMETRIA] Login automático já foi tentado, aguardando ação manual do usuário');
+      return;
+    }
+
+    // Marcar como em progresso
+    _isBiometricLoginInProgress = true;
+    
+    if (!isManual) {
+      _biometricLoginAttempted = true; // Marcar como tentado apenas se for automático
+    }
+
+    // NÃO setar _isLoading antes de chamar authenticate, pois isso pode causar o "piscar"
+    // O LoadingOverlay será ativado apenas após a autenticação bem-sucedida
 
     try {
       // Autenticar com biometria
       debugPrint('👆 [BIOMETRIA] Solicitando autenticação biométrica...');
+      debugPrint('👆 [BIOMETRIA] Reason: Use $_biometricType para fazer login');
       final biometricService = BiometricService.instance;
+      
+      // Verificar novamente antes de chamar authenticate
+      final hasBiometrics = await biometricService.hasBiometrics();
+      debugPrint('👆 [BIOMETRIA] Verificação final - hasBiometrics: $hasBiometrics');
+      
+      if (!hasBiometrics) {
+        debugPrint('❌ [BIOMETRIA] Biometria não disponível na verificação final');
+        _isBiometricLoginInProgress = false;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Biometria não disponível no momento'),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+        }
+        return;
+      }
+      
       final authenticated = await biometricService.authenticate(
         reason: 'Use $_biometricType para fazer login',
       );
+      
+      debugPrint('👆 [BIOMETRIA] Resultado da autenticação: $authenticated');
 
       if (!authenticated) {
         debugPrint('❌ [BIOMETRIA] Autenticação biométrica cancelada ou falhou');
-        setState(() {
-          _isLoading = false;
-        });
+        _isBiometricLoginInProgress = false; // Liberar flag
+        // Não precisa setar _isLoading pois não foi setado antes
+        // Se foi cancelado manualmente, permitir nova tentativa
+        if (isManual) {
+          debugPrint('ℹ️ [BIOMETRIA] Cancelamento manual - usuário pode tentar novamente');
+        } else {
+          debugPrint('ℹ️ [BIOMETRIA] Cancelamento automático - aguardando ação do usuário');
+        }
         return;
       }
 
       debugPrint('✅ [BIOMETRIA] Autenticação biométrica bem-sucedida');
+      
+      // Agora sim, ativar o loading para o processo de login
+      if (mounted) {
+        setState(() {
+          _isLoading = true;
+        });
+      }
 
       // Buscar credenciais salvas
       debugPrint('💾 [BIOMETRIA] Buscando credenciais salvas...');
@@ -363,9 +432,12 @@ class _LoginPageState extends State<LoginPage> {
 
       if (email == null || password == null) {
         debugPrint('❌ [BIOMETRIA] Credenciais não encontradas');
-        setState(() {
-          _isLoading = false;
-        });
+        _isBiometricLoginInProgress = false; // Liberar flag
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
         return;
       }
 
@@ -476,6 +548,7 @@ class _LoginPageState extends State<LoginPage> {
       }
     } finally {
       debugPrint('🏁 [BIOMETRIA] Finalizando processo de login com biometria');
+      _isBiometricLoginInProgress = false; // Sempre liberar flag no finally
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -880,7 +953,7 @@ class _LoginPageState extends State<LoginPage> {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: _isLoading ? null : _handleBiometricLogin,
+          onTap: _isLoading ? null : () => _handleBiometricLogin(isManual: true),
           borderRadius: BorderRadius.circular(16),
           splashColor: AppColors.primary.primary.withOpacity(0.1),
           highlightColor: AppColors.primary.primary.withOpacity(0.05),

@@ -5,6 +5,7 @@ import 'core/theme/app_theme.dart';
 import 'core/routes/app_routes.dart';
 import 'shared/services/theme_service.dart';
 import 'features/notifications/controllers/notification_controller.dart';
+import 'features/appointments/controllers/appointment_controller.dart';
 
 // GlobalKey para o Navigator - permite navegação sem contexto
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -48,13 +49,19 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) {
-        final controller = NotificationController.instance;
-        // Inicializar controller (conectar WebSocket, etc)
-        controller.initialize();
-        return controller;
-      },
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(
+          create: (_) {
+            final controller = NotificationController.instance;
+            controller.initialize();
+            return controller;
+          },
+        ),
+        ChangeNotifierProvider(
+          create: (_) => AppointmentController.instance,
+        ),
+      ],
       child: MaterialApp(
         title: 'Dream Keys',
         debugShowCheckedModeBanner: false,

@@ -45,6 +45,18 @@ class ApiConstants {
   static const String markNotificationsReadBulk = '/notifications/read/bulk';
   static const String markNotificationsReadAll = '/notifications/read/all';
 
+  // Endpoints de Agendamentos
+  static const String appointments = '/appointments';
+  static String appointmentById(String id) => '/appointments/$id';
+  static String appointmentParticipant(String appointmentId, String userId) => '/appointments/$appointmentId/participants/$userId';
+  
+  // Endpoints de Convites de Agendamento
+  static const String appointmentInvites = '/appointment-invites';
+  static const String appointmentInvitesMyInvites = '/appointment-invites/my-invites';
+  static const String appointmentInvitesPending = '/appointment-invites/pending';
+  static String appointmentInviteById(String id) => '/appointment-invites/$id';
+  static String appointmentInviteRespond(String id) => '/appointment-invites/$id/respond';
+
   // WebSocket
   static Uri getWebSocketUri({String? token}) {
     // Parse da URL base

@@ -173,6 +173,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
                 showModalBottomSheet(
                   context: context,
                   isScrollControlled: true,
+                  useSafeArea: true,
                   barrierColor: Colors.black54,
                   shape: const RoundedRectangleBorder(
                     borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -196,6 +197,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
                 showModalBottomSheet(
                   context: context,
                   isScrollControlled: true,
+                  useSafeArea: true,
                   barrierColor: Colors.black54,
                   shape: const RoundedRectangleBorder(
                     borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -383,6 +385,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       barrierColor: Colors.black54,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -572,6 +575,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
       showModalBottomSheet(
         context: context,
         isScrollControlled: true,
+        useSafeArea: true,
         barrierColor: Colors.black54,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -667,6 +671,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
       showModalBottomSheet(
         context: context,
         isScrollControlled: true,
+        useSafeArea: true,
         barrierColor: Colors.black54,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -1175,6 +1180,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
                           final confirm = await showModalBottomSheet<bool>(
                             context: context,
                             isScrollControlled: true,
+                            useSafeArea: true,
                             barrierColor: Colors.black54,
                             shape: const RoundedRectangleBorder(
                               borderRadius: BorderRadius.vertical(top: Radius.circular(20)),

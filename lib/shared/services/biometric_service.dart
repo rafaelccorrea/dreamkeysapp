@@ -1,5 +1,6 @@
 import 'package:local_auth/local_auth.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 
 /// Serviço para autenticação biométrica
 class BiometricService {
@@ -54,11 +55,19 @@ class BiometricService {
     bool stickyAuth = true,
   }) async {
     try {
+      debugPrint('🔐 [BIOMETRIC_SERVICE] Iniciando autenticação...');
+      debugPrint('🔐 [BIOMETRIC_SERVICE] Reason: $reason');
+      
       // Verifica se há biometria disponível
-      if (!await hasBiometrics()) {
+      final hasBiometricsResult = await hasBiometrics();
+      debugPrint('🔐 [BIOMETRIC_SERVICE] hasBiometrics: $hasBiometricsResult');
+      
+      if (!hasBiometricsResult) {
+        debugPrint('❌ [BIOMETRIC_SERVICE] Biometria não disponível');
         return false;
       }
 
+      debugPrint('🔐 [BIOMETRIC_SERVICE] Chamando _localAuth.authenticate...');
       final didAuthenticate = await _localAuth.authenticate(
         localizedReason: reason,
         options: AuthenticationOptions(
@@ -68,21 +77,32 @@ class BiometricService {
         ),
       );
 
+      debugPrint('🔐 [BIOMETRIC_SERVICE] Resultado da autenticação: $didAuthenticate');
       return didAuthenticate;
     } on PlatformException catch (e) {
+      debugPrint('❌ [BIOMETRIC_SERVICE] PlatformException: ${e.code} - ${e.message}');
       // Trata erros específicos da plataforma
       if (e.code == 'NotAvailable') {
         // Biometria não disponível
+        debugPrint('❌ [BIOMETRIC_SERVICE] Biometria não disponível (NotAvailable)');
         return false;
       } else if (e.code == 'NotEnrolled') {
         // Biometria não configurada
+        debugPrint('❌ [BIOMETRIC_SERVICE] Biometria não configurada (NotEnrolled)');
         return false;
       } else if (e.code == 'LockedOut' || e.code == 'PermanentlyLockedOut') {
         // Muitas tentativas falhadas
+        debugPrint('❌ [BIOMETRIC_SERVICE] Biometria bloqueada (${e.code})');
+        return false;
+      } else if (e.code == 'UserCancel') {
+        debugPrint('ℹ️ [BIOMETRIC_SERVICE] Usuário cancelou a autenticação');
         return false;
       }
+      debugPrint('❌ [BIOMETRIC_SERVICE] Erro desconhecido: ${e.code}');
       return false;
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint('❌ [BIOMETRIC_SERVICE] Erro genérico: $e');
+      debugPrint('📚 [BIOMETRIC_SERVICE] StackTrace: $stackTrace');
       return false;
     }
   }

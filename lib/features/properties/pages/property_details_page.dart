@@ -78,6 +78,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final confirm = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       barrierColor: Colors.black54,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),

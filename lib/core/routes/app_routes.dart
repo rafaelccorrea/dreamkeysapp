@@ -13,6 +13,10 @@ import '../../features/properties/pages/property_details_page.dart';
 import '../../features/properties/pages/create_property_page.dart';
 import '../../features/properties/pages/property_offers_page.dart';
 import '../../features/properties/pages/offer_details_page.dart';
+import '../../features/appointments/pages/calendar_page.dart';
+import '../../features/appointments/pages/create_appointment_page.dart';
+import '../../features/appointments/pages/edit_appointment_page.dart';
+import '../../features/appointments/pages/appointment_details_page.dart';
 
 /// Rotas da aplicação com transições customizadas
 class AppRoutes {
@@ -31,6 +35,10 @@ class AppRoutes {
   static const String propertyCreate = '/properties/create';
   static const String propertyOffers = '/properties/offers';
   static const String notifications = '/notifications';
+  static const String calendar = '/calendar';
+  static const String calendarCreate = '/calendar/create';
+  static String calendarEdit(String id) => '/calendar/edit/$id';
+  static String calendarDetails(String id) => '/calendar/details/$id';
   
   static String propertyOfferDetails(String offerId) => '/properties/offers/$offerId';
   
@@ -77,6 +85,22 @@ class AppRoutes {
       return _buildRoute(const PropertiesPage(), settings);
     } else if (routeName == AppRoutes.notifications) {
       return _buildRoute(const NotificationsPage(), settings);
+    } else if (routeName == AppRoutes.calendar) {
+      return _buildRoute(const CalendarPage(), settings);
+    } else if (routeName == AppRoutes.calendarCreate) {
+      return _buildRoute(const CreateAppointmentPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/calendar/')) {
+      final segments = routeName.split('/');
+      if (segments.length >= 3) {
+        final action = segments[2];
+        final id = segments.length > 3 ? segments[3] : null;
+        
+        if (action == 'edit' && id != null) {
+          return _buildRoute(EditAppointmentPage(appointmentId: id), settings);
+        } else if (action == 'details' && id != null) {
+          return _buildRoute(AppointmentDetailsPage(appointmentId: id), settings);
+        }
+      }
     } else if (routeName != null && routeName.startsWith('/properties/') && routeName != AppRoutes.propertyCreate) {
       // Detalhes ou edição de propriedade
       final segments = routeName.split('/');

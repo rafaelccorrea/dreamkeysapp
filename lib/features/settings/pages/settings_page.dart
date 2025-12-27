@@ -773,6 +773,7 @@ class _SettingsPageState extends State<SettingsPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       barrierColor: Colors.black54,
       backgroundColor: Colors.transparent,
       shape: const RoundedRectangleBorder(

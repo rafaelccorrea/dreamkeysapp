@@ -9,6 +9,7 @@ import '../../../../shared/services/ai_service.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/custom_text_field.dart';
 import '../../../../shared/widgets/custom_button.dart';
+import '../../../../shared/widgets/skeleton_box.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 
@@ -1029,7 +1030,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     if (_isLoadingProperty) {
       return AppScaffold(
         title: widget.propertyId != null ? 'Editar Imóvel' : 'Novo Imóvel',
-        body: const Center(child: CircularProgressIndicator()),
+        body: _buildSkeleton(context, theme),
       );
     }
 
@@ -2601,6 +2602,207 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildSkeleton(BuildContext context, ThemeData theme) {
+    return Column(
+      children: [
+        // Skeleton do indicador de etapas
+        Container(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            children: List.generate(_totalSteps, (index) {
+              return Expanded(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: SkeletonBox(
+                        height: 4,
+                        borderRadius: 2,
+                        margin: EdgeInsets.only(
+                          right: index < _totalSteps - 1 ? 8 : 0,
+                        ),
+                      ),
+                    ),
+                    if (index < _totalSteps - 1)
+                      SkeletonBox(
+                        width: 24,
+                        height: 24,
+                        borderRadius: 12,
+                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                      ),
+                  ],
+                ),
+              );
+            }),
+          ),
+        ),
+
+        // Skeleton do conteúdo do formulário
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Skeleton do título da etapa
+                SkeletonText(
+                  width: 200,
+                  height: 24,
+                  margin: const EdgeInsets.only(bottom: 24),
+                ),
+
+                // Skeleton dos campos de entrada
+                SkeletonText(
+                  width: double.infinity,
+                  height: 16,
+                  margin: const EdgeInsets.only(bottom: 8),
+                ),
+                SkeletonBox(
+                  width: double.infinity,
+                  height: 56,
+                  borderRadius: 8,
+                  margin: const EdgeInsets.only(bottom: 16),
+                ),
+
+                SkeletonText(
+                  width: double.infinity,
+                  height: 16,
+                  margin: const EdgeInsets.only(bottom: 8),
+                ),
+                SkeletonBox(
+                  width: double.infinity,
+                  height: 120,
+                  borderRadius: 8,
+                  margin: const EdgeInsets.only(bottom: 16),
+                ),
+
+                // Skeleton de campos em linha
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SkeletonText(
+                            width: 100,
+                            height: 16,
+                            margin: const EdgeInsets.only(bottom: 8),
+                          ),
+                          SkeletonBox(
+                            width: double.infinity,
+                            height: 56,
+                            borderRadius: 8,
+                            margin: const EdgeInsets.only(bottom: 16),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SkeletonText(
+                            width: 100,
+                            height: 16,
+                            margin: const EdgeInsets.only(bottom: 8),
+                          ),
+                          SkeletonBox(
+                            width: double.infinity,
+                            height: 56,
+                            borderRadius: 8,
+                            margin: const EdgeInsets.only(bottom: 16),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+
+                // Skeleton de chips (tipo de imóvel, status, etc)
+                SkeletonText(
+                  width: 150,
+                  height: 16,
+                  margin: const EdgeInsets.only(bottom: 8, top: 8),
+                ),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: List.generate(4, (index) {
+                    return SkeletonBox(
+                      width: 100,
+                      height: 32,
+                      borderRadius: 16,
+                    );
+                  }),
+                ),
+
+                const SizedBox(height: 24),
+
+                // Skeleton de mais campos
+                SkeletonText(
+                  width: double.infinity,
+                  height: 16,
+                  margin: const EdgeInsets.only(bottom: 8),
+                ),
+                SkeletonBox(
+                  width: double.infinity,
+                  height: 56,
+                  borderRadius: 8,
+                  margin: const EdgeInsets.only(bottom: 16),
+                ),
+
+                SkeletonText(
+                  width: double.infinity,
+                  height: 16,
+                  margin: const EdgeInsets.only(bottom: 8),
+                ),
+                SkeletonBox(
+                  width: double.infinity,
+                  height: 56,
+                  borderRadius: 8,
+                  margin: const EdgeInsets.only(bottom: 16),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        // Skeleton dos botões de navegação
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: ThemeHelpers.cardBackgroundColor(context),
+            border: Border(
+              top: BorderSide(
+                color: ThemeHelpers.borderColor(context),
+              ),
+            ),
+          ),
+          child: SafeArea(
+            child: Row(
+              children: [
+                Expanded(
+                  child: SkeletonBox(
+                    height: 48,
+                    borderRadius: 8,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: SkeletonBox(
+                    height: 48,
+                    borderRadius: 8,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
