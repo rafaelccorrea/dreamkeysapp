@@ -230,7 +230,7 @@ class _SplashPageState extends State<SplashPage>
                 Opacity(
                   opacity: _fadeAnimation.value,
                   child: Text(
-                    'Corretor',
+                    'Dream Keys',
                     style: theme.textTheme.titleLarge?.copyWith(
                       color: theme.textTheme.bodyMedium?.color,
                     ),

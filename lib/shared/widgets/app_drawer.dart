@@ -7,7 +7,7 @@ import '../services/token_refresh_service.dart';
 import '../services/company_service.dart';
 import '../services/profile_service.dart';
 import '../services/dashboard_service.dart';
-import 'package:dreamkeys_corretor_app/shared/widgets/permission_wrapper.dart';
+import 'package:dreamkeys_app/shared/widgets/permission_wrapper.dart';
 
 /// Drawer (menu lateral) do aplicativo
 class AppDrawer extends StatefulWidget {

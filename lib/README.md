@@ -1,4 +1,4 @@
-# 📁 Estrutura do Projeto - Dream Keys Corretor App
+# 📁 Estrutura do Projeto - Dream Keys
 
 ## 🎯 Visão Geral
 
@@ -73,7 +73,7 @@ As cores estão centralizadas em `lib/core/theme/app_colors.dart` e suportam:
 
 **Uso:**
 ```dart
-import 'package:dreamkeys_corretor_app/core/theme/app_colors.dart';
+import 'package:dreamkeys_app/core/theme/app_colors.dart';
 
 // Acessar cores
 AppColors.primary.primary          // Cor primária

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 /// Sistema de cores centralizado do aplicativo
 /// Suporta Light Mode e Dark Mode
-/// Baseado na documentação oficial de cores do App Corretor
+/// Baseado na documentação oficial de cores do Dream Keys
 class AppColors {
   AppColors._();
 

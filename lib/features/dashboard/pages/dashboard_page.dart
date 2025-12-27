@@ -203,8 +203,16 @@ class _DashboardPageState extends State<DashboardPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SkeletonText(width: 200, height: 24, margin: const EdgeInsets.only(bottom: 8)),
-                    SkeletonText(width: 180, height: 16, margin: const EdgeInsets.only(bottom: 8)),
+                    SkeletonText(
+                      width: 200,
+                      height: 24,
+                      margin: const EdgeInsets.only(bottom: 8),
+                    ),
+                    SkeletonText(
+                      width: 180,
+                      height: 16,
+                      margin: const EdgeInsets.only(bottom: 8),
+                    ),
                     SkeletonText(width: 150, height: 14),
                   ],
                 ),
@@ -220,7 +228,11 @@ class _DashboardPageState extends State<DashboardPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SkeletonText(width: 180, height: 20, margin: const EdgeInsets.only(bottom: 16)),
+                SkeletonText(
+                  width: 180,
+                  height: 20,
+                  margin: const EdgeInsets.only(bottom: 16),
+                ),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -228,7 +240,11 @@ class _DashboardPageState extends State<DashboardPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          SkeletonText(width: 100, height: 16, margin: const EdgeInsets.only(bottom: 8)),
+                          SkeletonText(
+                            width: 100,
+                            height: 16,
+                            margin: const EdgeInsets.only(bottom: 8),
+                          ),
                           SkeletonText(width: 80, height: 32),
                         ],
                       ),
@@ -237,14 +253,22 @@ class _DashboardPageState extends State<DashboardPage> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                SkeletonText(width: double.infinity, height: 8, borderRadius: 4),
+                SkeletonText(
+                  width: double.infinity,
+                  height: 8,
+                  borderRadius: 4,
+                ),
               ],
             ),
           ),
           const SizedBox(height: 32),
 
           // Skeleton dos cards de estatísticas
-          SkeletonText(width: 120, height: 20, margin: const EdgeInsets.only(bottom: 16)),
+          SkeletonText(
+            width: 120,
+            height: 20,
+            margin: const EdgeInsets.only(bottom: 16),
+          ),
           Row(
             children: [
               Expanded(
@@ -319,19 +343,36 @@ class _DashboardPageState extends State<DashboardPage> {
           const SizedBox(height: 32),
 
           // Skeleton da seção de atividades
-          SkeletonText(width: 120, height: 20, margin: const EdgeInsets.only(bottom: 16)),
+          SkeletonText(
+            width: 120,
+            height: 20,
+            margin: const EdgeInsets.only(bottom: 16),
+          ),
           SkeletonList(itemCount: 3, itemHeight: 80),
           const SizedBox(height: 32),
 
           // Skeleton de metas mensais
-          SkeletonText(width: 120, height: 20, margin: const EdgeInsets.only(bottom: 16)),
+          SkeletonText(
+            width: 120,
+            height: 20,
+            margin: const EdgeInsets.only(bottom: 16),
+          ),
           SkeletonCard(
             height: 150,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SkeletonText(width: 100, height: 16, margin: const EdgeInsets.only(bottom: 12)),
-                SkeletonText(width: double.infinity, height: 8, borderRadius: 4, margin: const EdgeInsets.only(bottom: 8)),
+                SkeletonText(
+                  width: 100,
+                  height: 16,
+                  margin: const EdgeInsets.only(bottom: 12),
+                ),
+                SkeletonText(
+                  width: double.infinity,
+                  height: 8,
+                  borderRadius: 4,
+                  margin: const EdgeInsets.only(bottom: 8),
+                ),
                 SkeletonText(width: 80, height: 14),
               ],
             ),
@@ -439,7 +480,7 @@ class _DashboardPageState extends State<DashboardPage> {
             final crossAxisCount = screenWidth > 600 ? 3 : 2;
             final spacing = screenWidth > 600 ? 16.0 : 12.0;
             final childAspectRatio = screenWidth > 600 ? 1.1 : 1.2;
-            
+
             return GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -451,39 +492,42 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
               itemCount: achievements.length > 6 ? 6 : achievements.length,
               itemBuilder: (context, index) {
-            final achievement = achievements[index];
-            return Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: ThemeHelpers.cardBackgroundColor(context),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: ThemeHelpers.shadowColor(context),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
+                final achievement = achievements[index];
+                return Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: ThemeHelpers.cardBackgroundColor(context),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: ThemeHelpers.shadowColor(context),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(achievement.icon, style: const TextStyle(fontSize: 32)),
-                  const SizedBox(height: 8),
-                  Text(
-                    achievement.name,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: ThemeHelpers.textColor(context),
-                    ),
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        achievement.icon,
+                        style: const TextStyle(fontSize: 32),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        achievement.name,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: ThemeHelpers.textColor(context),
+                        ),
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            );
-          },
+                );
+              },
             );
           },
         ),
@@ -500,7 +544,7 @@ class _DashboardPageState extends State<DashboardPage> {
         final screenWidth = constraints.maxWidth;
         final isTablet = screenWidth > 600;
         final isDesktop = screenWidth > 900;
-        
+
         // Em telas grandes, mostrar 4 cards em uma linha
         if (isDesktop) {
           return Column(
@@ -558,7 +602,7 @@ class _DashboardPageState extends State<DashboardPage> {
             ],
           );
         }
-        
+
         // Em tablets, mostrar 2x2
         if (isTablet) {
           return Column(
@@ -620,7 +664,7 @@ class _DashboardPageState extends State<DashboardPage> {
             ],
           );
         }
-        
+
         // Em mobile, manter 2x2
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -695,25 +739,25 @@ class _DashboardPageState extends State<DashboardPage> {
     final activityStats = _dashboardData?.activityStats;
     if (stats == null) return const SizedBox.shrink();
 
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildSectionTitle('Atividades'),
-          const SizedBox(height: 16),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionTitle('Atividades'),
+        const SizedBox(height: 16),
         LayoutBuilder(
           builder: (context, constraints) {
             final screenWidth = constraints.maxWidth;
             final isTablet = screenWidth > 600;
             final spacing = isTablet ? 16.0 : 12.0;
-            
+
             return Row(
               children: [
                 Expanded(
                   child: _buildActivityCard(
                     context: context,
                     theme: theme,
-                title: 'Tarefas',
-                value: _formatNumber(stats.myTasks),
+                    title: 'Tarefas',
+                    value: _formatNumber(stats.myTasks),
                     icon: Icons.assignment_outlined,
                     color: const Color(0xFF3b82f6),
                   ),
@@ -723,8 +767,10 @@ class _DashboardPageState extends State<DashboardPage> {
                   child: _buildActivityCard(
                     context: context,
                     theme: theme,
-                title: 'Agendamentos',
-                value: _formatNumber(activityStats?.appointmentsThisMonth ?? 0),
+                    title: 'Agendamentos',
+                    value: _formatNumber(
+                      activityStats?.appointmentsThisMonth ?? 0,
+                    ),
                     subtitle: 'Este mês',
                     icon: Icons.calendar_today_outlined,
                     color: const Color(0xFFf59e0b),
@@ -735,8 +781,8 @@ class _DashboardPageState extends State<DashboardPage> {
                   child: _buildActivityCard(
                     context: context,
                     theme: theme,
-                title: 'Matches',
-                value: _formatNumber(stats.myMatches),
+                    title: 'Matches',
+                    value: _formatNumber(stats.myMatches),
                     subtitle: 'Pendentes',
                     icon: Icons.favorite_outline,
                     color: const Color(0xFF10b981),
@@ -817,7 +863,7 @@ class _DashboardPageState extends State<DashboardPage> {
         final padding = isSmall ? 12.0 : 16.0;
         final iconSize = isSmall ? 18.0 : 20.0;
         final iconPadding = isSmall ? 6.0 : 8.0;
-        
+
         return Container(
           padding: EdgeInsets.all(padding),
           decoration: BoxDecoration(
@@ -1202,9 +1248,7 @@ class _DashboardPageState extends State<DashboardPage> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Expanded(
-              child: _buildSectionTitle('Próximos Compromissos'),
-            ),
+            Expanded(child: _buildSectionTitle('Próximos Compromissos')),
             TextButton(
               onPressed: () {
                 Navigator.of(context).pushNamed(AppRoutes.calendar);
@@ -1228,7 +1272,8 @@ class _DashboardPageState extends State<DashboardPage> {
           _buildEmptyState(
             icon: Icons.calendar_today_outlined,
             title: 'Nenhum agendamento',
-            message: 'Você não tem compromissos agendados no momento. Que tal agendar uma visita?',
+            message:
+                'Você não tem compromissos agendados no momento. Que tal agendar uma visita?',
             actionLabel: 'Ir para Agenda',
             onAction: () {
               Navigator.of(context).pushNamed(AppRoutes.calendar);
@@ -1246,9 +1291,9 @@ class _DashboardPageState extends State<DashboardPage> {
   }) {
     return InkWell(
       onTap: () {
-        Navigator.of(context).pushNamed(
-          AppRoutes.calendarDetails(appointment.id),
-        );
+        Navigator.of(
+          context,
+        ).pushNamed(AppRoutes.calendarDetails(appointment.id));
       },
       borderRadius: BorderRadius.circular(12),
       child: Container(
@@ -1257,62 +1302,65 @@ class _DashboardPageState extends State<DashboardPage> {
         decoration: BoxDecoration(
           color: ThemeHelpers.cardBackgroundColor(context),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: ThemeHelpers.borderLightColor(context), width: 1),
+          border: Border.all(
+            color: ThemeHelpers.borderLightColor(context),
+            width: 1,
+          ),
         ),
         child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppColors.primary.primary.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.primary.primary.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                Icons.calendar_today,
+                color: AppColors.primary.primary,
+                size: 24,
+              ),
             ),
-            child: Icon(
-              Icons.calendar_today,
-              color: AppColors.primary.primary,
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  appointment.title,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: ThemeHelpers.textColor(context),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    appointment.title,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: ThemeHelpers.textColor(context),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  appointment.client,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.access_time,
-                      size: 14,
+                  const SizedBox(height: 4),
+                  Text(
+                    appointment.client,
+                    style: theme.textTheme.bodySmall?.copyWith(
                       color: ThemeHelpers.textSecondaryColor(context),
                     ),
-                    const SizedBox(width: 4),
-                    Text(
-                      '${appointment.date} às ${appointment.time}',
-                      style: theme.textTheme.bodySmall?.copyWith(
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.access_time,
+                        size: 14,
                         color: ThemeHelpers.textSecondaryColor(context),
                       ),
-                    ),
-                  ],
-                ),
-              ],
+                      const SizedBox(width: 4),
+                      Text(
+                        '${appointment.date} às ${appointment.time}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: ThemeHelpers.textSecondaryColor(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
         ),
       ),
     );
@@ -1340,7 +1388,8 @@ class _DashboardPageState extends State<DashboardPage> {
           _buildEmptyState(
             icon: Icons.history_outlined,
             title: 'Nenhuma atividade recente',
-            message: 'Suas atividades aparecerão aqui conforme você usar o sistema.',
+            message:
+                'Suas atividades aparecerão aqui conforme você usar o sistema.',
             actionLabel: null,
             onAction: null,
             isCard: false,
@@ -1403,8 +1452,8 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _buildMonthlyGoalsSection(BuildContext context, ThemeData theme) {
     final goals = _dashboardData?.monthlyGoals;
-    final hasGoals = goals != null &&
-        (goals.sales != null || goals.commissions != null);
+    final hasGoals =
+        goals != null && (goals.sales != null || goals.commissions != null);
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -1424,13 +1473,14 @@ class _DashboardPageState extends State<DashboardPage> {
         children: [
           _buildSectionTitle('Metas Mensais'),
           const SizedBox(height: 16),
-          if (hasGoals) 
+          if (hasGoals)
             _buildGoalsContent(context, theme, goals)
           else
             _buildEmptyState(
               icon: Icons.track_changes_outlined,
               title: 'Nenhuma meta definida',
-              message: 'Configure suas metas mensais para acompanhar seu progresso e alcançar seus objetivos!',
+              message:
+                  'Configure suas metas mensais para acompanhar seu progresso e alcançar seus objetivos!',
               actionLabel: null,
               onAction: null,
             ),
@@ -1627,7 +1677,7 @@ class _DashboardPageState extends State<DashboardPage> {
   /// Formata valores monetários com máscara brasileira
   String _formatCurrency(double value) {
     if (value == 0) return 'R\$ 0,00';
-    
+
     // Para valores muito grandes, usar formato compacto
     if (value >= 1000000000) {
       final billions = value / 1000000000;
@@ -1639,7 +1689,7 @@ class _DashboardPageState extends State<DashboardPage> {
       final thousands = value / 1000;
       return 'R\$ ${thousands.toStringAsFixed(thousands >= 10 ? 1 : 2)}k';
     }
-    
+
     // Para valores menores, usar formatação completa com separadores
     return _currencyFormatter.format(value);
   }
@@ -1675,20 +1725,26 @@ class _DashboardPageState extends State<DashboardPage> {
     bool isCard = true,
   }) {
     final theme = Theme.of(context);
-    
+
     final content = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: AppColors.primary.primary.withOpacity(0.1),
+            color:
+                (theme.brightness == Brightness.dark
+                        ? AppColors.primary.primaryDarkMode
+                        : AppColors.primary.primary)
+                    .withOpacity(0.1),
             shape: BoxShape.circle,
           ),
           child: Icon(
             icon,
             size: 48,
-            color: AppColors.primary.primary,
+            color: theme.brightness == Brightness.dark
+                ? AppColors.primary.primaryDarkMode
+                : AppColors.primary.primary,
           ),
         ),
         const SizedBox(height: 16),
@@ -1712,15 +1768,17 @@ class _DashboardPageState extends State<DashboardPage> {
           const SizedBox(height: 16),
           ElevatedButton.icon(
             onPressed: onAction,
-            icon: const Icon(Icons.add, size: 18),
-            label: Text(actionLabel),
+            icon: const Icon(Icons.add, size: 18, color: Colors.white),
+            label: Text(
+              actionLabel,
+              style: const TextStyle(color: Colors.white),
+            ),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary.primary,
-              foregroundColor: ThemeHelpers.onPrimaryColor(context),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 12,
-              ),
+              backgroundColor: theme.brightness == Brightness.dark
+                  ? AppColors.primary.primaryDarkMode
+                  : AppColors.primary.primary,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -1769,7 +1827,7 @@ class _DashboardPageState extends State<DashboardPage> {
         final padding = isSmall ? 12.0 : 16.0;
         final iconSize = isSmall ? 20.0 : 24.0;
         final iconPadding = isSmall ? 8.0 : 12.0;
-        
+
         return Container(
           padding: EdgeInsets.all(padding),
           decoration: BoxDecoration(

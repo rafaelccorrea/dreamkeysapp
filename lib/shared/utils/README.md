@@ -18,7 +18,7 @@ Sistema completo de validações reutilizáveis.
 ### Uso Básico
 
 ```dart
-import 'package:dreamkeys_corretor_app/shared/utils/validators.dart';
+import 'package:dreamkeys_app/shared/utils/validators.dart';
 
 // Validação de email
 String? emailValidator(String? value) {
@@ -83,7 +83,7 @@ Sistema de máscaras para formatação de dados.
 ### Uso Básico
 
 ```dart
-import 'package:dreamkeys_corretor_app/shared/utils/masks.dart';
+import 'package:dreamkeys_app/shared/utils/masks.dart';
 
 // Aplicar máscara
 String cpfFormatado = Masks.cpf('12345678901'); // '123.456.789-01'
@@ -131,7 +131,7 @@ Formatters para aplicar máscaras automaticamente em TextFields.
 ### Uso Básico
 
 ```dart
-import 'package:dreamkeys_corretor_app/shared/utils/input_formatters.dart';
+import 'package:dreamkeys_app/shared/utils/input_formatters.dart';
 
 TextField(
   inputFormatters: [CpfInputFormatter()],
@@ -188,7 +188,7 @@ Widget completo que combina máscara, formatter e validação.
 ### Uso
 
 ```dart
-import 'package:dreamkeys_corretor_app/shared/widgets/masked_text_field.dart';
+import 'package:dreamkeys_app/shared/widgets/masked_text_field.dart';
 
 MaskedTextField(
   label: 'CPF',
