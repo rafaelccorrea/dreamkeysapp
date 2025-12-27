@@ -31,8 +31,8 @@ class LoadingOverlay extends StatelessWidget {
                 child: Center(
                   child: Lottie.asset(
                     AppAssets.loadingHome,
-                    width: 128,
-                    height: 128,
+                    width: 80,
+                    height: 80,
                     fit: BoxFit.contain,
                     repeat: true,
                     animate: true,

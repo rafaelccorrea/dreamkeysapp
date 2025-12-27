@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../features/auth/login/pages/login_page.dart';
 import '../../features/splash/pages/splash_page.dart';
+import '../../features/dashboard/pages/dashboard_page.dart';
 
 /// Rotas da aplicação com transições customizadas
 class AppRoutes {
@@ -16,6 +17,8 @@ class AppRoutes {
         return _buildRoute(const SplashPage(), settings);
       case login:
         return _buildRoute(const LoginPage(), settings);
+      case home:
+        return _buildRoute(const DashboardPage(), settings);
       default:
         return _buildRoute(
           const Scaffold(

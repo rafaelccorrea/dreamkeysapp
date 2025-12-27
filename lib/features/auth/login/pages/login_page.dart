@@ -3,6 +3,7 @@ import '../../../../shared/services/auth_service.dart';
 import '../../../../shared/services/biometric_service.dart';
 import '../../../../shared/services/secure_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/routes/app_routes.dart';
 import '../../../../shared/widgets/image_curve_clipper.dart';
 import '../../../../shared/widgets/loading_overlay.dart';
 import '../../../../shared/utils/validators.dart';
@@ -31,8 +32,15 @@ class _LoginPageState extends State<LoginPage> {
   @override
   void initState() {
     super.initState();
-    _checkBiometricAvailability();
-    _checkSavedCredentials();
+    _initializeBiometrics();
+  }
+
+  /// Inicializa verificação de biometria e credenciais salvas
+  Future<void> _initializeBiometrics() async {
+    // Verificar biometria primeiro
+    await _checkBiometricAvailability();
+    // Depois verificar credenciais (precisa saber se biometria está disponível)
+    await _checkSavedCredentials();
   }
 
   @override
@@ -128,20 +136,23 @@ class _LoginPageState extends State<LoginPage> {
             email: email,
             password: _passwordController.text,
           );
-          setState(() {
-            _hasSavedCredentials = true;
-          });
+          if (mounted) {
+            setState(() {
+              _hasSavedCredentials = true;
+            });
+          }
           debugPrint('✅ [LOGIN] Credenciais salvas com sucesso');
+        } else if (_biometricAvailable && !_saveCredentials) {
+          debugPrint(
+            'ℹ️ [LOGIN] Biometria disponível mas usuário não optou por salvar credenciais',
+          );
         }
 
         if (mounted) {
-          // TODO: Navegar para a tela principal do app
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Login realizado com sucesso!'),
-              backgroundColor: Color(0xFF10B981),
-            ),
-          );
+          // Navegar para o dashboard
+          Navigator.of(
+            context,
+          ).pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
         }
       } else {
         debugPrint('❌ [LOGIN] Login falhou');
@@ -245,43 +256,74 @@ class _LoginPageState extends State<LoginPage> {
 
   /// Verifica se a biometria está disponível no dispositivo
   Future<void> _checkBiometricAvailability() async {
-    debugPrint('🔍 [BIOMETRIA] Verificando disponibilidade de biometria...');
-    final biometricService = BiometricService.instance;
-    final hasBiometrics = await biometricService.hasBiometrics();
-    final biometricType = await biometricService.getBiometricTypeDescription();
+    try {
+      debugPrint('🔍 [BIOMETRIA] Verificando disponibilidade de biometria...');
+      final biometricService = BiometricService.instance;
+      
+      final isSupported = await biometricService.isDeviceSupported();
+      debugPrint('📱 [BIOMETRIA] Dispositivo suporta: $isSupported');
+      
+      final canCheck = await biometricService.canCheckBiometrics();
+      debugPrint('✅ [BIOMETRIA] Pode verificar: $canCheck');
+      
+      final availableBiometrics = await biometricService.getAvailableBiometrics();
+      debugPrint('👆 [BIOMETRIA] Biometrias disponíveis: $availableBiometrics');
+      
+      final hasBiometrics = await biometricService.hasBiometrics();
+      final biometricType = await biometricService.getBiometricTypeDescription();
 
-    debugPrint(
-      '🔍 [BIOMETRIA] Disponível: $hasBiometrics, Tipo: $biometricType',
-    );
+      debugPrint(
+        '🔍 [BIOMETRIA] Disponível: $hasBiometrics, Tipo: $biometricType',
+      );
 
-    if (mounted) {
-      setState(() {
-        _biometricAvailable = hasBiometrics;
-        _biometricType = biometricType;
-      });
+      if (mounted) {
+        setState(() {
+          _biometricAvailable = hasBiometrics;
+          _biometricType = biometricType;
+        });
+        debugPrint('🔄 [BIOMETRIA] Estado atualizado - Disponível: $_biometricAvailable');
+      }
+    } catch (e, stackTrace) {
+      debugPrint('❌ [BIOMETRIA] Erro ao verificar biometria: $e');
+      debugPrint('📚 [BIOMETRIA] StackTrace: $stackTrace');
+      if (mounted) {
+        setState(() {
+          _biometricAvailable = false;
+        });
+      }
     }
   }
 
   /// Verifica se existem credenciais salvas
   Future<void> _checkSavedCredentials() async {
-    debugPrint('💾 [CREDENCIAIS] Verificando credenciais salvas...');
-    final hasCredentials = await SecureStorageService.instance
-        .hasSavedCredentials();
-    debugPrint('💾 [CREDENCIAIS] Credenciais encontradas: $hasCredentials');
+    try {
+      debugPrint('💾 [CREDENCIAIS] Verificando credenciais salvas...');
+      final hasCredentials = await SecureStorageService.instance
+          .hasSavedCredentials();
+      debugPrint('💾 [CREDENCIAIS] Credenciais encontradas: $hasCredentials');
 
-    if (mounted) {
-      setState(() {
-        _hasSavedCredentials = hasCredentials;
-      });
+      if (mounted) {
+        setState(() {
+          _hasSavedCredentials = hasCredentials;
+        });
 
-      // Se há credenciais salvas, tentar login automático com biometria
-      if (hasCredentials && _biometricAvailable) {
-        debugPrint(
-          '🚀 [BIOMETRIA] Iniciando login automático com biometria...',
-        );
-        // Aguardar um pouco para a UI carregar
-        await Future.delayed(const Duration(milliseconds: 500));
-        _handleBiometricLogin();
+        // Se há credenciais salvas, tentar login automático com biometria
+        if (hasCredentials && _biometricAvailable) {
+          debugPrint(
+            '🚀 [BIOMETRIA] Iniciando login automático com biometria...',
+          );
+          // Aguardar um pouco para a UI carregar
+          await Future.delayed(const Duration(milliseconds: 500));
+          _handleBiometricLogin();
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ [CREDENCIAIS] Erro ao verificar credenciais: $e');
+      // Continuar mesmo com erro - não impede o uso do app
+      if (mounted) {
+        setState(() {
+          _hasSavedCredentials = false;
+        });
       }
     }
   }
@@ -357,34 +399,10 @@ class _LoginPageState extends State<LoginPage> {
           '👤 [BIOMETRIA] Usuário: ${response.data?.user.name} (${response.data?.user.email})',
         );
         if (mounted) {
-          // TODO: Navegar para a tela principal do app
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Row(
-                children: [
-                  Icon(
-                    Icons.check_circle_outline,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Login realizado com $_biometricType!',
-                      style: const TextStyle(color: Colors.white, fontSize: 14),
-                    ),
-                  ),
-                ],
-              ),
-              backgroundColor: const Color(0xFF10B981),
-              behavior: SnackBarBehavior.floating,
-              margin: const EdgeInsets.all(16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              duration: const Duration(seconds: 2),
-            ),
-          );
+          // Navegar para o dashboard
+          Navigator.of(
+            context,
+          ).pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
         }
       } else {
         debugPrint('❌ [BIOMETRIA] Login falhou');
@@ -604,16 +622,61 @@ class _LoginPageState extends State<LoginPage> {
                         // Login Button
                         _buildLoginButton(screenHeight),
 
+                        // Log de debug para ver estado atual
+                        Builder(
+                          builder: (context) {
+                            debugPrint(
+                              '🔍 [UI] Build - Biometria: $_biometricAvailable, Credenciais: $_hasSavedCredentials, Tipo: $_biometricType',
+                            );
+                            return const SizedBox.shrink();
+                          },
+                        ),
+
                         // Botão de Biometria (se disponível e há credenciais salvas)
                         if (_biometricAvailable && _hasSavedCredentials) ...[
                           SizedBox(height: screenHeight * 0.02),
                           _buildBiometricButton(),
                         ],
 
-                        // Checkbox para salvar credenciais (se biometria disponível)
+                        // Checkbox para salvar credenciais (se biometria disponível e não há credenciais salvas)
                         if (_biometricAvailable && !_hasSavedCredentials) ...[
                           SizedBox(height: screenHeight * 0.02),
                           _buildSaveCredentialsCheckbox(),
+                        ],
+
+                        // Mensagem informativa se já tem credenciais salvas mas não mostra botão (edge case)
+                        if (_biometricAvailable && _hasSavedCredentials && false) ...[
+                          SizedBox(height: screenHeight * 0.02),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary.primary.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: AppColors.primary.primary.withOpacity(0.2),
+                                width: 1,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.info_outline,
+                                  color: AppColors.primary.primary,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Credenciais salvas. Use $_biometricType para login rápido.',
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: AppColors.text.textSecondary,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ],
 
                         SizedBox(height: screenHeight * 0.03),
@@ -888,42 +951,55 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Widget _buildSaveCredentialsCheckbox() {
-    return Row(
-      children: [
-        SizedBox(
-          height: 24,
-          width: 24,
-          child: Checkbox(
-            value: _saveCredentials,
-            onChanged: (value) {
-              setState(() {
-                _saveCredentials = value ?? false;
-              });
-            },
-            activeColor: AppColors.primary.primary,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: GestureDetector(
-            onTap: () {
-              setState(() {
-                _saveCredentials = !_saveCredentials;
-              });
-            },
-            child: Text(
-              'Salvar credenciais para $_biometricType',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: AppColors.text.textSecondary,
-                fontSize: 14,
+    debugPrint(
+      '🔲 [CHECKBOX] Renderizando checkbox - Biometria: $_biometricAvailable, Salvar: $_saveCredentials',
+    );
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          SizedBox(
+            height: 24,
+            width: 24,
+            child: Checkbox(
+              value: _saveCredentials,
+              onChanged: (value) {
+                debugPrint(
+                  '☑️ [CHECKBOX] Checkbox alterado: ${value ?? false}',
+                );
+                setState(() {
+                  _saveCredentials = value ?? false;
+                });
+              },
+              activeColor: AppColors.primary.primary,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(4),
               ),
             ),
           ),
-        ),
-      ],
+          const SizedBox(width: 8),
+          Expanded(
+            child: GestureDetector(
+              onTap: () {
+                debugPrint(
+                  '👆 [CHECKBOX] Texto clicado, alternando de $_saveCredentials',
+                );
+                setState(() {
+                  _saveCredentials = !_saveCredentials;
+                });
+              },
+              child: Text(
+                'Salvar credenciais para $_biometricType',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: AppColors.text.textSecondary,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
