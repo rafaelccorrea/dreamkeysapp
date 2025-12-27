@@ -3,6 +3,8 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
+import '../../../../shared/widgets/custom_text_field.dart';
+import '../../../../shared/widgets/custom_button.dart';
 import '../../../../shared/services/settings_service.dart';
 import '../../../../shared/services/profile_service.dart';
 import '../../../../shared/services/theme_service.dart';
@@ -768,184 +770,266 @@ class _SettingsPageState extends State<SettingsPage> {
     final formKey = GlobalKey<FormState>();
     bool isLoading = false;
 
-    showDialog(
+    showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
+      barrierColor: Colors.black54,
+      backgroundColor: Colors.transparent,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      clipBehavior: Clip.antiAlias,
       builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Alterar Senha'),
-          content: Form(
-            key: formKey,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextFormField(
-                    controller: currentPasswordController,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Senha Atual',
-                      prefixIcon: Icon(Icons.lock_outline),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Campo obrigatório';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: newPasswordController,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Nova Senha',
-                      prefixIcon: Icon(Icons.lock),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Campo obrigatório';
-                      }
-                      if (value.length < 6) {
-                        return 'Senha deve ter no mínimo 6 caracteres';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: confirmPasswordController,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Confirmar Nova Senha',
-                      prefixIcon: Icon(Icons.lock),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Campo obrigatório';
-                      }
-                      if (value != newPasswordController.text) {
-                        return 'Senhas não coincidem';
-                      }
-                      return null;
-                    },
-                  ),
-                ],
+        builder: (context, setDialogState) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+          ),
+          child: Container(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.9,
+            ),
+            decoration: BoxDecoration(
+              color: Theme.of(context).scaffoldBackgroundColor,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(20),
               ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Header
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.primary.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          Icons.lock_outline,
+                          color: AppColors.primary.primary,
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Alterar Senha',
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: Icon(
+                          Icons.close,
+                          color: Theme.of(context).iconTheme.color,
+                        ),
+                        onPressed: isLoading
+                            ? null
+                            : () => Navigator.of(context).pop(),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                // Form
+                Flexible(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(20),
+                    child: Form(
+                      key: formKey,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          CustomTextField(
+                            label: 'Senha Atual',
+                            controller: currentPasswordController,
+                            obscureText: true,
+                            prefixIcon: Icon(
+                              Icons.lock_outline,
+                              color: Theme.of(context).iconTheme.color,
+                            ),
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Campo obrigatório';
+                              }
+                              return null;
+                            },
+                            textInputAction: TextInputAction.next,
+                          ),
+                          const SizedBox(height: 20),
+                          CustomTextField(
+                            label: 'Nova Senha',
+                            controller: newPasswordController,
+                            obscureText: true,
+                            prefixIcon: Icon(
+                              Icons.lock,
+                              color: Theme.of(context).iconTheme.color,
+                            ),
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Campo obrigatório';
+                              }
+                              if (value.length < 6) {
+                                return 'Senha deve ter no mínimo 6 caracteres';
+                              }
+                              return null;
+                            },
+                            textInputAction: TextInputAction.next,
+                          ),
+                          const SizedBox(height: 20),
+                          CustomTextField(
+                            label: 'Confirmar Nova Senha',
+                            controller: confirmPasswordController,
+                            obscureText: true,
+                            prefixIcon: Icon(
+                              Icons.lock,
+                              color: Theme.of(context).iconTheme.color,
+                            ),
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Campo obrigatório';
+                              }
+                              if (value != newPasswordController.text) {
+                                return 'Senhas não coincidem';
+                              }
+                              return null;
+                            },
+                            textInputAction: TextInputAction.done,
+                          ),
+                          const SizedBox(height: 24),
+                          // Botões
+                          CustomButton(
+                            text: 'Alterar Senha',
+                            icon: Icons.check_circle_outline,
+                            onPressed: isLoading
+                                ? null
+                                : () async {
+                                    if (formKey.currentState!.validate()) {
+                                      setDialogState(() {
+                                        isLoading = true;
+                                      });
+
+                                      final response =
+                                          await ProfileService.instance
+                                              .changePassword(
+                                        currentPassword:
+                                            currentPasswordController.text,
+                                        newPassword:
+                                            newPasswordController.text,
+                                      );
+
+                                      if (context.mounted) {
+                                        setDialogState(() {
+                                          isLoading = false;
+                                        });
+
+                                        if (response.success) {
+                                          Navigator.of(context).pop();
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                            SnackBar(
+                                              content: Row(
+                                                children: [
+                                                  const Icon(
+                                                    Icons.check_circle,
+                                                    color: Colors.white,
+                                                    size: 20,
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  const Expanded(
+                                                    child: Text(
+                                                      'Senha alterada com sucesso',
+                                                      style: TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 14,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              backgroundColor:
+                                                  AppColors.status.success,
+                                              behavior:
+                                                  SnackBarBehavior.floating,
+                                              margin: const EdgeInsets.all(16),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                              ),
+                                              duration:
+                                                  const Duration(seconds: 3),
+                                            ),
+                                          );
+                                        } else {
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                            SnackBar(
+                                              content: Row(
+                                                children: [
+                                                  const Icon(
+                                                    Icons.error_outline,
+                                                    color: Colors.white,
+                                                    size: 20,
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Expanded(
+                                                    child: Text(
+                                                      response.message ??
+                                                          'Erro ao alterar senha',
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 14,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              backgroundColor:
+                                                  AppColors.status.error,
+                                              behavior:
+                                                  SnackBarBehavior.floating,
+                                              margin: const EdgeInsets.all(16),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                              ),
+                                              duration:
+                                                  const Duration(seconds: 3),
+                                            ),
+                                          );
+                                        }
+                                      }
+                                    }
+                                  },
+                            isLoading: isLoading,
+                            isFullWidth: true,
+                          ),
+                          const SizedBox(height: 12),
+                          CustomButton(
+                            text: 'Cancelar',
+                            variant: ButtonVariant.secondary,
+                            icon: Icons.close,
+                            onPressed: isLoading
+                                ? null
+                                : () => Navigator.of(context).pop(),
+                            isFullWidth: true,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: isLoading
-                  ? null
-                  : () {
-                      Navigator.of(context).pop();
-                    },
-              child: const Text('Cancelar'),
-            ),
-            ElevatedButton(
-              onPressed: isLoading
-                  ? null
-                  : () async {
-                      if (formKey.currentState!.validate()) {
-                        setDialogState(() {
-                          isLoading = true;
-                        });
-
-                        final response = await ProfileService.instance
-                            .changePassword(
-                              currentPassword: currentPasswordController.text,
-                              newPassword: newPasswordController.text,
-                            );
-
-                        if (context.mounted) {
-                          setDialogState(() {
-                            isLoading = false;
-                          });
-
-                          if (response.success) {
-                            Navigator.of(context).pop();
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.check_circle,
-                                      color: Colors.white,
-                                      size: 20,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    const Expanded(
-                                      child: Text(
-                                        'Senha alterada com sucesso',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 14,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                backgroundColor: AppColors.status.success,
-                                behavior: SnackBarBehavior.floating,
-                                margin: const EdgeInsets.all(16),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                duration: const Duration(seconds: 3),
-                              ),
-                            );
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.error_outline,
-                                      color: Colors.white,
-                                      size: 20,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        response.message ??
-                                            'Erro ao alterar senha',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 14,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                backgroundColor: AppColors.status.error,
-                                behavior: SnackBarBehavior.floating,
-                                margin: const EdgeInsets.all(16),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                duration: const Duration(seconds: 3),
-                              ),
-                            );
-                          }
-                        }
-                      }
-                    },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary.primary,
-                foregroundColor: ThemeHelpers.onPrimaryColor(context),
-              ),
-              child: isLoading
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    )
-                  : const Text('Alterar'),
-            ),
-          ],
         ),
       ),
     );

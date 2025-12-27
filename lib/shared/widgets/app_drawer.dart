@@ -5,6 +5,8 @@ import '../../../core/theme/app_colors.dart';
 import '../services/auth_service.dart';
 import '../services/token_refresh_service.dart';
 import '../services/company_service.dart';
+import '../services/profile_service.dart';
+import '../services/dashboard_service.dart';
 import 'package:dreamkeys_corretor_app/shared/widgets/permission_wrapper.dart';
 
 /// Drawer (menu lateral) do aplicativo
@@ -29,11 +31,112 @@ class AppDrawer extends StatefulWidget {
 class _AppDrawerState extends State<AppDrawer> {
   String? _companyName;
   bool _isLoadingCompany = true;
+  
+  // Dados do usuário carregados do serviço
+  String? _loadedUserName;
+  String? _loadedUserEmail;
+  String? _loadedUserAvatar;
+  bool _isLoadingProfile = false;
 
   @override
   void initState() {
     super.initState();
     _loadCompany();
+    // Sempre tentar carregar perfil, mas priorizar dados fornecidos
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadProfile();
+    });
+  }
+  
+  @override
+  void didUpdateWidget(AppDrawer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Se os parâmetros mudaram e agora temos dados, não precisa recarregar
+    // Se os parâmetros foram removidos, recarregar
+    if ((oldWidget.userName != null || oldWidget.userEmail != null) &&
+        (widget.userName == null || widget.userEmail == null)) {
+      // Dados foram removidos, recarregar
+      _loadProfile();
+    }
+  }
+
+  Future<void> _loadProfile() async {
+    // Se já temos os dados completos via parâmetros, não precisa carregar
+    if (widget.userName != null && 
+        widget.userName!.isNotEmpty && 
+        widget.userEmail != null && 
+        widget.userEmail!.isNotEmpty) {
+      debugPrint('✅ [APP_DRAWER] Dados do usuário já fornecidos via parâmetros');
+      // Limpar dados carregados anteriormente se agora temos via parâmetros
+      if (_loadedUserName != null || _loadedUserEmail != null) {
+        setState(() {
+          _loadedUserName = null;
+          _loadedUserEmail = null;
+          _loadedUserAvatar = null;
+        });
+      }
+      return;
+    }
+    
+    // Se já temos dados carregados, não precisa recarregar
+    if (_loadedUserName != null && _loadedUserEmail != null && !_isLoadingProfile) {
+      debugPrint('✅ [APP_DRAWER] Dados do usuário já carregados anteriormente');
+      return;
+    }
+    
+    debugPrint('📡 [APP_DRAWER] Carregando perfil do usuário...');
+    
+    setState(() {
+      _isLoadingProfile = true;
+    });
+    
+    try {
+      // Tentar primeiro o ProfileService
+      final profileService = ProfileService.instance;
+      final profileResponse = await profileService.getProfile();
+
+      debugPrint('📡 [APP_DRAWER] Resposta do perfil: success=${profileResponse.success}');
+
+      if (profileResponse.success && profileResponse.data != null) {
+        if (mounted) {
+          setState(() {
+            _loadedUserName = profileResponse.data!.name;
+            _loadedUserEmail = profileResponse.data!.email;
+            _loadedUserAvatar = profileResponse.data!.avatar;
+            debugPrint('✅ [APP_DRAWER] Perfil carregado via ProfileService: ${profileResponse.data!.name} (${profileResponse.data!.email})');
+            _isLoadingProfile = false;
+          });
+        }
+        return;
+      }
+      
+      // Se ProfileService falhou, tentar DashboardService como fallback
+      debugPrint('⚠️ [APP_DRAWER] ProfileService falhou, tentando DashboardService como fallback...');
+      final dashboardService = DashboardService.instance;
+      final dashboardResponse = await dashboardService.getUserDashboard();
+
+      if (mounted) {
+        setState(() {
+          if (dashboardResponse.success && dashboardResponse.data != null) {
+            _loadedUserName = dashboardResponse.data!.user.name;
+            _loadedUserEmail = dashboardResponse.data!.user.email;
+            _loadedUserAvatar = dashboardResponse.data!.user.avatar;
+            debugPrint('✅ [APP_DRAWER] Perfil carregado via DashboardService: ${dashboardResponse.data!.user.name} (${dashboardResponse.data!.user.email})');
+          } else {
+            debugPrint('❌ [APP_DRAWER] Erro ao carregar perfil (ambos os serviços falharam): ${dashboardResponse.message}');
+          }
+          _isLoadingProfile = false;
+        });
+      }
+    } catch (e, stackTrace) {
+      debugPrint('❌ [APP_DRAWER] Erro ao carregar perfil: $e');
+      debugPrint('📚 [APP_DRAWER] StackTrace: $stackTrace');
+      if (mounted) {
+        setState(() {
+          _isLoadingProfile = false;
+        });
+      }
+    }
   }
 
   Future<void> _loadCompany() async {
@@ -56,6 +159,11 @@ class _AppDrawerState extends State<AppDrawer> {
       }
     }
   }
+  
+  // Métodos para obter os dados do usuário (prioriza parâmetros, depois dados carregados)
+  String? get _userName => widget.userName ?? _loadedUserName;
+  String? get _userEmail => widget.userEmail ?? _loadedUserEmail;
+  String? get _userAvatar => widget.userAvatar ?? _loadedUserAvatar;
 
   String _getCurrentRoute(BuildContext context) {
     if (widget.currentRoute != null && widget.currentRoute!.isNotEmpty) {
@@ -94,43 +202,73 @@ class _AppDrawerState extends State<AppDrawer> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  CircleAvatar(
-                    radius: 32,
-                    backgroundColor: Colors.white,
-                    backgroundImage: widget.userAvatar != null
-                        ? NetworkImage(widget.userAvatar!)
-                        : null,
-                    child: widget.userAvatar == null
-                        ? Text(
-                            (widget.userName ?? 'U')[0].toUpperCase(),
-                            style: TextStyle(
-                              color: theme.brightness == Brightness.dark
-                                  ? AppColors.primary.primaryDarkMode
-                                  : AppColors.primary.primary,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 24,
-                            ),
-                          )
-                        : null,
-                  ),
+                  if (_isLoadingProfile)
+                    const SizedBox(
+                      width: 64,
+                      height: 64,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  else
+                    CircleAvatar(
+                      radius: 32,
+                      backgroundColor: Colors.white,
+                      backgroundImage: _userAvatar != null
+                          ? NetworkImage(_userAvatar!)
+                          : null,
+                      child: _userAvatar == null
+                          ? Text(
+                              (_userName ?? 'U')[0].toUpperCase(),
+                              style: TextStyle(
+                                color: theme.brightness == Brightness.dark
+                                    ? AppColors.primary.primaryDarkMode
+                                    : AppColors.primary.primary,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 24,
+                              ),
+                            )
+                          : null,
+                    ),
                   const SizedBox(height: 16),
-                  Text(
-                    widget.userName ?? 'Usuário',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 18,
-                      color: Colors.white,
+                  if (_isLoadingProfile)
+                    const SizedBox(
+                      width: 120,
+                      height: 20,
+                      child: LinearProgressIndicator(
+                        backgroundColor: Colors.white24,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  else
+                    Text(
+                      _userName ?? 'Usuário',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 18,
+                        color: Colors.white,
+                      ),
                     ),
-                  ),
                   const SizedBox(height: 4),
-                  Text(
-                    widget.userEmail ?? '',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w400,
-                      color: Colors.white,
+                  if (_isLoadingProfile)
+                    const SizedBox(
+                      width: 100,
+                      height: 16,
+                      child: LinearProgressIndicator(
+                        backgroundColor: Colors.white24,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  else
+                    Text(
+                      _userEmail ?? '',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w400,
+                        color: Colors.white,
+                      ),
                     ),
-                  ),
                   if (_companyName != null && _companyName!.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     Container(
