@@ -34,6 +34,44 @@ class ApiConstants {
   // Endpoints de Configurações
   static const String settings = '/settings';
 
+  // Endpoints de Notificações
+  static const String notifications = '/notifications';
+  static const String notificationsUnreadList = '/notifications/unread/list';
+  static const String notificationsUnreadCount = '/notifications/unread-count';
+  static const String notificationsUnreadCountByCompany = '/notifications/unread-count-by-company';
+  static String notificationById(String id) => '/notifications/$id';
+  static String markNotificationRead(String id) => '/notifications/$id/read';
+  static String markNotificationUnread(String id) => '/notifications/$id/unread';
+  static const String markNotificationsReadBulk = '/notifications/read/bulk';
+  static const String markNotificationsReadAll = '/notifications/read/all';
+
+  // WebSocket
+  static Uri getWebSocketUri({String? token}) {
+    // Parse da URL base
+    final baseUri = Uri.parse(baseUrl);
+    
+    // Determinar o scheme correto (wss para https, ws para http)
+    final scheme = baseUri.scheme == 'https' ? 'wss' : 'ws';
+    
+    // Construir URI do WebSocket
+    final uri = Uri(
+      scheme: scheme,
+      host: baseUri.host,
+      port: baseUri.port == 443 || baseUri.port == 80 ? null : baseUri.port,
+      path: '/notifications',
+      queryParameters: token != null && token.isNotEmpty 
+          ? {'token': token} 
+          : null,
+    );
+    
+    return uri;
+  }
+  
+  // Método de compatibilidade que retorna String
+  static String getWebSocketUrl({String? token}) {
+    return getWebSocketUri(token: token).toString();
+  }
+
   // Headers
   static const String contentTypeHeader = 'Content-Type';
   static const String authorizationHeader = 'Authorization';

@@ -226,16 +226,6 @@ class _SplashPageState extends State<SplashPage>
                     ),
                   ),
                 ),
-                const SizedBox(height: 8),
-                Opacity(
-                  opacity: _fadeAnimation.value,
-                  child: Text(
-                    'Corretor',
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      color: theme.textTheme.bodyMedium?.color,
-                    ),
-                  ),
-                ),
                 const SizedBox(height: 60),
                 // Indicador de carregamento sutil
                 Opacity(

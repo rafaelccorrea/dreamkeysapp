@@ -195,6 +195,8 @@ class _AppDrawerState extends State<AppDrawer> {
                   title: 'Dashboard',
                   onTap: () {
                     Navigator.pop(context);
+                    // Se já está na tela home, não navega novamente
+                    if (activeRoute == AppRoutes.home) return;
                     Navigator.of(
                       context,
                     ).pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
@@ -206,14 +208,18 @@ class _AppDrawerState extends State<AppDrawer> {
                   child: _buildDrawerItem(
                     context: context,
                     currentRoute: activeRoute,
-                    route: '/properties',
+                    route: AppRoutes.properties,
                     icon: Icons.home_outlined,
                     activeIcon: Icons.home,
                     title: 'Imóveis',
                     onTap: () {
                       Navigator.pop(context);
-                      // TODO: Navegar para tela de imóveis
-                      _showComingSoon(context);
+                      // Se já está na tela de propriedades, não navega novamente
+                      if (activeRoute == AppRoutes.properties) return;
+                      Navigator.of(context).pushNamedAndRemoveUntil(
+                        AppRoutes.properties,
+                        (route) => false,
+                      );
                     },
                   ),
                 ),
@@ -322,6 +328,8 @@ class _AppDrawerState extends State<AppDrawer> {
                   title: 'Configurações',
                   onTap: () {
                     Navigator.pop(context);
+                    // Se já está na tela de configurações, não navega novamente
+                    if (activeRoute == AppRoutes.settings) return;
                     Navigator.of(context).pushNamed(AppRoutes.settings);
                   },
                 ),

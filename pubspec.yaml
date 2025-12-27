@@ -55,6 +55,12 @@ dependencies:
   
   # Armazenamento local de preferências
   shared_preferences: ^2.3.0
+  
+  # WebSocket para notificações em tempo real
+  web_socket_channel: ^3.0.1
+  
+  # Provider para gerenciamento de estado
+  provider: ^6.1.2
 
 dev_dependencies:
   flutter_test:

@@ -4,6 +4,8 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../../../../shared/services/dashboard_service.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
+import '../../../../shared/widgets/skeleton_box.dart';
+import '../../notifications/widgets/notification_center.dart';
 
 // Formatters globais
 final _currencyFormatter = NumberFormat.currency(
@@ -80,18 +82,7 @@ class _DashboardPageState extends State<DashboardPage> {
       userEmail: _dashboardData?.user.email,
       userAvatar: _dashboardData?.user.avatar,
       actions: [
-        IconButton(
-          icon: const Icon(Icons.notifications_outlined),
-          onPressed: () {
-            // TODO: Implementar notificações
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Notificações em breve'),
-                duration: Duration(seconds: 2),
-              ),
-            );
-          },
-        ),
+        const NotificationCenter(),
         IconButton(
           icon: const Icon(Icons.refresh),
           onPressed: _loadDashboardData,
@@ -99,7 +90,7 @@ class _DashboardPageState extends State<DashboardPage> {
         ),
       ],
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? _buildSkeleton(context, theme)
           : _errorMessage != null
           ? _buildErrorState(context, theme)
           : RefreshIndicator(
@@ -158,6 +149,157 @@ class _DashboardPageState extends State<DashboardPage> {
                 ),
               ),
             ),
+    );
+  }
+
+  Widget _buildSkeleton(BuildContext context, ThemeData theme) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Skeleton do cabeçalho
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonText(width: 200, height: 24, margin: const EdgeInsets.only(bottom: 8)),
+                    SkeletonText(width: 180, height: 16, margin: const EdgeInsets.only(bottom: 8)),
+                    SkeletonText(width: 150, height: 14),
+                  ],
+                ),
+              ),
+              SkeletonBox(width: 48, height: 48, borderRadius: 24),
+            ],
+          ),
+          const SizedBox(height: 32),
+
+          // Skeleton do card de performance
+          SkeletonCard(
+            height: 200,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SkeletonText(width: 180, height: 20, margin: const EdgeInsets.only(bottom: 16)),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SkeletonText(width: 100, height: 16, margin: const EdgeInsets.only(bottom: 8)),
+                          SkeletonText(width: 80, height: 32),
+                        ],
+                      ),
+                    ),
+                    SkeletonBox(width: 60, height: 60, borderRadius: 30),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                SkeletonText(width: double.infinity, height: 8, borderRadius: 4),
+              ],
+            ),
+          ),
+          const SizedBox(height: 32),
+
+          // Skeleton dos cards de estatísticas
+          SkeletonText(width: 120, height: 20, margin: const EdgeInsets.only(bottom: 16)),
+          Row(
+            children: [
+              Expanded(
+                child: SkeletonCard(
+                  height: 140,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonBox(width: 48, height: 48, borderRadius: 12),
+                      const SizedBox(height: 12),
+                      SkeletonText(width: 80, height: 24),
+                      const SizedBox(height: 4),
+                      SkeletonText(width: 60, height: 16),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: SkeletonCard(
+                  height: 140,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonBox(width: 48, height: 48, borderRadius: 12),
+                      const SizedBox(height: 12),
+                      SkeletonText(width: 80, height: 24),
+                      const SizedBox(height: 4),
+                      SkeletonText(width: 60, height: 16),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: SkeletonCard(
+                  height: 140,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonBox(width: 48, height: 48, borderRadius: 12),
+                      const SizedBox(height: 12),
+                      SkeletonText(width: 80, height: 24),
+                      const SizedBox(height: 4),
+                      SkeletonText(width: 60, height: 16),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: SkeletonCard(
+                  height: 140,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonBox(width: 48, height: 48, borderRadius: 12),
+                      const SizedBox(height: 12),
+                      SkeletonText(width: 80, height: 24),
+                      const SizedBox(height: 4),
+                      SkeletonText(width: 60, height: 16),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 32),
+
+          // Skeleton da seção de atividades
+          SkeletonText(width: 120, height: 20, margin: const EdgeInsets.only(bottom: 16)),
+          SkeletonList(itemCount: 3, itemHeight: 80),
+          const SizedBox(height: 32),
+
+          // Skeleton de metas mensais
+          SkeletonText(width: 120, height: 20, margin: const EdgeInsets.only(bottom: 16)),
+          SkeletonCard(
+            height: 150,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SkeletonText(width: 100, height: 16, margin: const EdgeInsets.only(bottom: 12)),
+                SkeletonText(width: double.infinity, height: 8, borderRadius: 4, margin: const EdgeInsets.only(bottom: 8)),
+                SkeletonText(width: 80, height: 14),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 

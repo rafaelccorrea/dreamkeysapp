@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show debugPrint;
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
+import '../../../../shared/widgets/skeleton_box.dart';
 import '../../../../shared/services/settings_service.dart';
 import '../../../../shared/services/profile_service.dart';
 import '../../../../shared/services/theme_service.dart';
@@ -29,7 +29,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _loadData() async {
     debugPrint('⚙️ [SETTINGS PAGE] Iniciando carregamento de dados');
-    
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -38,35 +38,43 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       debugPrint('⚙️ [SETTINGS PAGE] Buscando configurações...');
       final settingsResponse = await SettingsService.instance.getSettings();
-      debugPrint('⚙️ [SETTINGS PAGE] Configurações recebidas: success=${settingsResponse.success}');
-      
+      debugPrint(
+        '⚙️ [SETTINGS PAGE] Configurações recebidas: success=${settingsResponse.success}',
+      );
+
       debugPrint('⚙️ [SETTINGS PAGE] Buscando perfil...');
       final profileResponse = await ProfileService.instance.getProfile();
-      debugPrint('⚙️ [SETTINGS PAGE] Perfil recebido: success=${profileResponse.success}');
+      debugPrint(
+        '⚙️ [SETTINGS PAGE] Perfil recebido: success=${profileResponse.success}',
+      );
 
       if (mounted) {
         setState(() {
           if (settingsResponse.success && settingsResponse.data != null) {
             _settings = settingsResponse.data;
-            debugPrint('✅ [SETTINGS PAGE] Configurações carregadas com sucesso');
+            debugPrint(
+              '✅ [SETTINGS PAGE] Configurações carregadas com sucesso',
+            );
           } else {
             debugPrint('⚠️ [SETTINGS PAGE] Configurações não foram carregadas');
           }
-          
+
           if (profileResponse.success && profileResponse.data != null) {
             _profile = profileResponse.data;
             debugPrint('✅ [SETTINGS PAGE] Perfil carregado com sucesso');
           } else {
             debugPrint('⚠️ [SETTINGS PAGE] Perfil não foi carregado');
           }
-          
+
           _isLoading = false;
-          
+
           if (_settings == null && _profile == null) {
             _errorMessage = 'Erro ao carregar dados';
             debugPrint('❌ [SETTINGS PAGE] Nenhum dado foi carregado');
           } else {
-            debugPrint('✅ [SETTINGS PAGE] Dados carregados: Settings=${_settings != null}, Profile=${_profile != null}');
+            debugPrint(
+              '✅ [SETTINGS PAGE] Dados carregados: Settings=${_settings != null}, Profile=${_profile != null}',
+            );
           }
         });
       }
@@ -87,18 +95,20 @@ class _SettingsPageState extends State<SettingsPage> {
     required NotificationSettings Function(NotificationSettings, bool) setValue,
   }) async {
     if (_settings == null) {
-      debugPrint('⚠️ [SETTINGS PAGE] Tentativa de atualizar configuração sem dados carregados');
+      debugPrint(
+        '⚠️ [SETTINGS PAGE] Tentativa de atualizar configuração sem dados carregados',
+      );
       return;
     }
 
     final currentNotifications = _settings!.notifications;
     final oldValue = getValue(currentNotifications);
     final newValue = !oldValue;
-    
+
     debugPrint('⚙️ [SETTINGS PAGE] Atualizando configuração de notificação');
     debugPrint('   - Valor antigo: $oldValue');
     debugPrint('   - Novo valor: $newValue');
-    
+
     final updatedNotifications = setValue(currentNotifications, newValue);
     final updatedSettings = Settings(
       notifications: updatedNotifications,
@@ -112,9 +122,13 @@ class _SettingsPageState extends State<SettingsPage> {
     });
 
     debugPrint('⚙️ [SETTINGS PAGE] Enviando atualização para API...');
-    final response = await SettingsService.instance.updateSettings(updatedSettings);
-    
-    debugPrint('⚙️ [SETTINGS PAGE] Resposta da API: success=${response.success}');
+    final response = await SettingsService.instance.updateSettings(
+      updatedSettings,
+    );
+
+    debugPrint(
+      '⚙️ [SETTINGS PAGE] Resposta da API: success=${response.success}',
+    );
 
     if (response.success) {
       debugPrint('✅ [SETTINGS PAGE] Configuração atualizada com sucesso!');
@@ -170,35 +184,173 @@ class _SettingsPageState extends State<SettingsPage> {
       currentBottomNavIndex: 4,
       showBottomNavigation: true,
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? _buildSkeleton(context, theme)
           : _errorMessage != null && _settings == null
-              ? _buildErrorState(context, theme)
-              : RefreshIndicator(
-                  onRefresh: _loadData,
-                  child: SingleChildScrollView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Seção de Notificações
-                        _buildNotificationsSection(context, theme),
-                        const SizedBox(height: 32),
+          ? _buildErrorState(context, theme)
+          : RefreshIndicator(
+              onRefresh: _loadData,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Seção de Notificações
+                    _buildNotificationsSection(context, theme),
+                    const SizedBox(height: 32),
 
-                        // Seção de Preferências de Notificação
-                        _buildNotificationPreferencesSection(context, theme),
-                        const SizedBox(height: 32),
+                    // Seção de Preferências de Notificação
+                    _buildNotificationPreferencesSection(context, theme),
+                    const SizedBox(height: 32),
 
-                        // Seção de Aparência
-                        _buildAppearanceSection(context, theme),
-                        const SizedBox(height: 32),
+                    // Seção de Aparência
+                    _buildAppearanceSection(context, theme),
+                    const SizedBox(height: 32),
 
-                        // Seção de Conta
-                        _buildAccountSection(context, theme),
-                      ],
-                    ),
+                    // Seção de Conta
+                    _buildAccountSection(context, theme),
+                  ],
+                ),
+              ),
+            ),
+    );
+  }
+
+  Widget _buildSkeleton(BuildContext context, ThemeData theme) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Skeleton do perfil
+          SkeletonCard(
+            child: Row(
+              children: [
+                SkeletonBox(width: 64, height: 64, borderRadius: 32),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonText(
+                        width: 150,
+                        height: 20,
+                        margin: const EdgeInsets.only(bottom: 8),
+                      ),
+                      SkeletonText(width: 200, height: 16),
+                    ],
                   ),
                 ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 32),
+
+          // Skeleton de seções
+          SkeletonText(
+            width: 120,
+            height: 18,
+            margin: const EdgeInsets.only(bottom: 16),
+          ),
+          SkeletonCard(
+            child: Column(
+              children: List.generate(
+                3,
+                (index) => Padding(
+                  padding: EdgeInsets.only(bottom: index < 2 ? 16 : 0),
+                  child: Row(
+                    children: [
+                      SkeletonBox(width: 24, height: 24, borderRadius: 12),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SkeletonText(
+                              width: 100,
+                              height: 16,
+                              margin: const EdgeInsets.only(bottom: 4),
+                            ),
+                            SkeletonText(width: 180, height: 14),
+                          ],
+                        ),
+                      ),
+                      SkeletonBox(width: 48, height: 28, borderRadius: 14),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 32),
+
+          // Segunda seção
+          SkeletonText(
+            width: 120,
+            height: 18,
+            margin: const EdgeInsets.only(bottom: 16),
+          ),
+          SkeletonCard(
+            child: Column(
+              children: List.generate(
+                2,
+                (index) => Padding(
+                  padding: EdgeInsets.only(bottom: index < 1 ? 16 : 0),
+                  child: Row(
+                    children: [
+                      SkeletonBox(width: 24, height: 24, borderRadius: 12),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SkeletonText(
+                              width: 120,
+                              height: 16,
+                              margin: const EdgeInsets.only(bottom: 4),
+                            ),
+                            SkeletonText(width: 200, height: 14),
+                          ],
+                        ),
+                      ),
+                      SkeletonBox(width: 48, height: 28, borderRadius: 14),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 32),
+
+          // Terceira seção
+          SkeletonText(
+            width: 120,
+            height: 18,
+            margin: const EdgeInsets.only(bottom: 16),
+          ),
+          SkeletonCard(
+            child: Column(
+              children: List.generate(
+                2,
+                (index) => Padding(
+                  padding: EdgeInsets.only(bottom: index < 1 ? 12 : 0),
+                  child: Row(
+                    children: [
+                      SkeletonBox(width: 24, height: 24, borderRadius: 12),
+                      const SizedBox(width: 16),
+                      Expanded(child: SkeletonText(width: 150, height: 16)),
+                      const Icon(
+                        Icons.chevron_right,
+                        color: Colors.transparent,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -209,11 +361,7 @@ class _SettingsPageState extends State<SettingsPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: AppColors.status.error,
-            ),
+            Icon(Icons.error_outline, size: 64, color: AppColors.status.error),
             const SizedBox(height: 16),
             Text(
               _errorMessage ?? 'Erro ao carregar dados',
@@ -292,7 +440,10 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildNotificationPreferencesSection(BuildContext context, ThemeData theme) {
+  Widget _buildNotificationPreferencesSection(
+    BuildContext context,
+    ThemeData theme,
+  ) {
     final notifications = _settings?.notifications;
 
     return _buildSection(
@@ -351,15 +502,13 @@ class _SettingsPageState extends State<SettingsPage> {
       context: context,
       theme: theme,
       title: 'Aparência',
-      children: [
-        _buildThemeTile(context, theme),
-      ],
+      children: [_buildThemeTile(context, theme)],
     );
   }
 
   Widget _buildThemeTile(BuildContext context, ThemeData theme) {
     final themeService = ThemeService.instance;
-    
+
     return ListTile(
       leading: Container(
         padding: const EdgeInsets.all(8),
@@ -528,9 +677,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ],
           ),
-          child: Column(
-            children: children,
-          ),
+          child: Column(children: children),
         ),
       ],
     );
@@ -704,10 +851,11 @@ class _SettingsPageState extends State<SettingsPage> {
                           isLoading = true;
                         });
 
-                        final response = await ProfileService.instance.changePassword(
-                          currentPassword: currentPasswordController.text,
-                          newPassword: newPasswordController.text,
-                        );
+                        final response = await ProfileService.instance
+                            .changePassword(
+                              currentPassword: currentPasswordController.text,
+                              newPassword: newPasswordController.text,
+                            );
 
                         if (context.mounted) {
                           setDialogState(() {
@@ -720,12 +868,19 @@ class _SettingsPageState extends State<SettingsPage> {
                               SnackBar(
                                 content: Row(
                                   children: [
-                                    const Icon(Icons.check_circle, color: Colors.white, size: 20),
+                                    const Icon(
+                                      Icons.check_circle,
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
                                     const SizedBox(width: 8),
                                     const Expanded(
                                       child: Text(
                                         'Senha alterada com sucesso',
-                                        style: TextStyle(color: Colors.white, fontSize: 14),
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 14,
+                                        ),
                                       ),
                                     ),
                                   ],
@@ -744,12 +899,20 @@ class _SettingsPageState extends State<SettingsPage> {
                               SnackBar(
                                 content: Row(
                                   children: [
-                                    const Icon(Icons.error_outline, color: Colors.white, size: 20),
+                                    const Icon(
+                                      Icons.error_outline,
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
                                     const SizedBox(width: 8),
                                     Expanded(
                                       child: Text(
-                                        response.message ?? 'Erro ao alterar senha',
-                                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                                        response.message ??
+                                            'Erro ao alterar senha',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 14,
+                                        ),
                                       ),
                                     ),
                                   ],
@@ -788,4 +951,3 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 }
-

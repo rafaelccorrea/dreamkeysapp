@@ -71,17 +71,23 @@ class AppBottomNavigation extends StatelessWidget {
 
   /// Navega para a tela correspondente ao índice
   static void navigateToIndex(BuildContext context, int index) {
+    final currentRoute = ModalRoute.of(context)?.settings.name;
+
     switch (index) {
       case 0:
+        // Se já está na tela home, não navega novamente
+        if (currentRoute == AppRoutes.home) return;
         Navigator.of(context).pushNamedAndRemoveUntil(
           AppRoutes.home,
           (route) => route.settings.name == AppRoutes.home,
         );
         break;
       case 1:
-        // TODO: Navegar para imóveis
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Tela de Imóveis em breve')),
+        // Se já está na tela de propriedades, não navega novamente
+        if (currentRoute == AppRoutes.properties) return;
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          AppRoutes.properties,
+          (route) => route.settings.name == AppRoutes.properties,
         );
         break;
       case 2:
@@ -97,6 +103,8 @@ class AppBottomNavigation extends StatelessWidget {
         );
         break;
       case 4:
+        // Se já está na tela de configurações, não navega novamente
+        if (currentRoute == AppRoutes.settings) return;
         // Navegar para configurações (temporariamente, depois criar tela de perfil)
         Navigator.of(context).pushNamed(AppRoutes.settings);
         break;

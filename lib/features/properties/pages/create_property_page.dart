@@ -1,0 +1,1820 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'dart:io';
+// import 'package:image_picker/image_picker.dart'; // TODO: Adicionar ao pubspec.yaml
+import '../../../../shared/services/property_service.dart';
+import '../../../../shared/services/gallery_service.dart';
+import '../../../../shared/services/cep_service.dart';
+import '../../../../shared/services/ai_service.dart';
+import '../../../../shared/widgets/app_scaffold.dart';
+import '../../../../shared/widgets/custom_text_field.dart';
+import '../../../../shared/widgets/custom_button.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/theme_helpers.dart';
+
+/// Página de criação/edição de propriedade com formulário multi-etapas
+class CreatePropertyPage extends StatefulWidget {
+  final String? propertyId; // Se fornecido, é edição
+
+  const CreatePropertyPage({
+    super.key,
+    this.propertyId,
+  });
+
+  @override
+  State<CreatePropertyPage> createState() => _CreatePropertyPageState();
+}
+
+class _CreatePropertyPageState extends State<CreatePropertyPage> {
+  final PageController _pageController = PageController();
+  final PropertyService _propertyService = PropertyService.instance;
+  
+  int _currentStep = 0;
+  final int _totalSteps = 6;
+  
+  // Controllers do formulário
+  final _formKey = GlobalKey<FormState>();
+  
+  // Etapa 1: Informações Básicas
+  final _titleController = TextEditingController();
+  final _descriptionController = TextEditingController();
+  PropertyType _selectedType = PropertyType.house;
+  PropertyStatus _selectedStatus = PropertyStatus.draft;
+  
+  // Etapa 2: Localização
+  final _streetController = TextEditingController();
+  final _numberController = TextEditingController();
+  final _complementController = TextEditingController();
+  final _neighborhoodController = TextEditingController();
+  final _cityController = TextEditingController();
+  final _stateController = TextEditingController();
+  final _zipCodeController = TextEditingController();
+  
+  // Etapa 3: Características
+  final _totalAreaController = TextEditingController();
+  final _builtAreaController = TextEditingController();
+  final _bedroomsController = TextEditingController();
+  final _bathroomsController = TextEditingController();
+  final _parkingSpacesController = TextEditingController();
+  final List<String> _selectedFeatures = [];
+  
+  // Etapa 4: Valores
+  final _salePriceController = TextEditingController();
+  final _rentPriceController = TextEditingController();
+  final _condominiumFeeController = TextEditingController();
+  final _iptuController = TextEditingController();
+  bool _acceptsNegotiation = false;
+  final _minSalePriceController = TextEditingController();
+  final _minRentPriceController = TextEditingController();
+  String? _offerBelowMinSaleAction;
+  String? _offerBelowMinRentAction;
+  
+  // Etapa 5: Galeria
+  final List<File> _selectedImages = [];
+  final List<GalleryImage> _uploadedImages = [];
+  // final ImagePicker _imagePicker = ImagePicker(); // TODO: Adicionar ao pubspec.yaml
+  bool _isUploadingImages = false;
+  
+  // Etapa 6: Clientes e Proprietário
+  final List<String> _selectedClientIds = []; // TODO: Buscar clientes reais
+  
+  // Serviços
+  final GalleryService _galleryService = GalleryService.instance;
+  final CepService _cepService = CepService.instance;
+  final AiService _aiService = AiService.instance;
+  
+  // IA
+  List<GeneratedDescription> _generatedVariants = [];
+  bool _isGeneratingDescription = false;
+  
+  // Proprietário (obrigatórios)
+  final _ownerNameController = TextEditingController();
+  final _ownerEmailController = TextEditingController();
+  final _ownerPhoneController = TextEditingController();
+  final _ownerDocumentController = TextEditingController();
+  final _ownerAddressController = TextEditingController();
+  
+  bool _isLoading = false;
+  bool _isLoadingProperty = false;
+  
+  @override
+  void initState() {
+    super.initState();
+    if (widget.propertyId != null) {
+      _loadProperty();
+    }
+  }
+  
+  @override
+  void dispose() {
+    _pageController.dispose();
+    _titleController.dispose();
+    _descriptionController.dispose();
+    _streetController.dispose();
+    _numberController.dispose();
+    _complementController.dispose();
+    _neighborhoodController.dispose();
+    _cityController.dispose();
+    _stateController.dispose();
+    _zipCodeController.dispose();
+    _totalAreaController.dispose();
+    _builtAreaController.dispose();
+    _bedroomsController.dispose();
+    _bathroomsController.dispose();
+    _parkingSpacesController.dispose();
+    _salePriceController.dispose();
+    _rentPriceController.dispose();
+    _condominiumFeeController.dispose();
+    _iptuController.dispose();
+    _minSalePriceController.dispose();
+    _minRentPriceController.dispose();
+    _ownerNameController.dispose();
+    _ownerEmailController.dispose();
+    _ownerPhoneController.dispose();
+    _ownerDocumentController.dispose();
+    _ownerAddressController.dispose();
+    super.dispose();
+  }
+  
+  Future<void> _loadProperty() async {
+    if (widget.propertyId == null) return;
+    
+    setState(() {
+      _isLoadingProperty = true;
+    });
+    
+    try {
+      final response = await _propertyService.getPropertyById(widget.propertyId!);
+      
+      if (mounted && response.success && response.data != null) {
+        final property = response.data!;
+        _populateForm(property);
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar propriedade: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingProperty = false;
+        });
+      }
+    }
+  }
+  
+  void _populateForm(Property property) {
+    _titleController.text = property.title;
+    _descriptionController.text = property.description;
+    _selectedType = property.type;
+    _selectedStatus = property.status;
+    
+    _streetController.text = property.street;
+    _numberController.text = property.number;
+    _complementController.text = property.complement ?? '';
+    _neighborhoodController.text = property.neighborhood;
+    _cityController.text = property.city;
+    _stateController.text = property.state;
+    _zipCodeController.text = property.zipCode;
+    
+    _totalAreaController.text = property.totalArea > 0 ? property.totalArea.toString() : '';
+    _builtAreaController.text = property.builtArea?.toString() ?? '';
+    _bedroomsController.text = property.bedrooms?.toString() ?? '';
+    _bathroomsController.text = property.bathrooms?.toString() ?? '';
+    _parkingSpacesController.text = property.parkingSpaces?.toString() ?? '';
+    _selectedFeatures.clear();
+    _selectedFeatures.addAll(property.features);
+    
+    _salePriceController.text = property.salePrice?.toString() ?? '';
+    _rentPriceController.text = property.rentPrice?.toString() ?? '';
+    _condominiumFeeController.text = property.condominiumFee?.toString() ?? '';
+    _iptuController.text = property.iptu?.toString() ?? '';
+    _acceptsNegotiation = property.acceptsNegotiation ?? false;
+    _minSalePriceController.text = property.minSalePrice?.toString() ?? '';
+    _minRentPriceController.text = property.minRentPrice?.toString() ?? '';
+    _offerBelowMinSaleAction = property.offerBelowMinSaleAction;
+    _offerBelowMinRentAction = property.offerBelowMinRentAction;
+    
+    // Proprietário
+    if (property.owner != null) {
+      _ownerNameController.text = property.owner!.name ?? '';
+      _ownerEmailController.text = property.owner!.email ?? '';
+      _ownerPhoneController.text = property.owner!.phone ?? '';
+      _ownerDocumentController.text = property.owner!.document ?? '';
+      _ownerAddressController.text = property.owner!.address ?? '';
+    }
+    
+    if (property.images != null) {
+      _uploadedImages.clear();
+      // Converter PropertyImage para GalleryImage (aproximação)
+      // Em produção, você pode buscar as imagens completas via GalleryService
+    }
+  }
+  
+  Future<void> _searchCep() async {
+    final cep = _zipCodeController.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (cep.length != 8) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('CEP deve ter 8 dígitos')),
+      );
+      return;
+    }
+    
+    try {
+      final address = await _cepService.searchCep(cep);
+      if (address != null && mounted) {
+        setState(() {
+          _streetController.text = address.street ?? '';
+          _neighborhoodController.text = address.neighborhood ?? '';
+          _cityController.text = address.city ?? '';
+          _stateController.text = address.state ?? '';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('CEP encontrado!')),
+        );
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('CEP não encontrado')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Erro ao buscar CEP: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Erro ao buscar CEP')),
+        );
+      }
+    }
+  }
+  
+  Future<void> _pickImages() async {
+    // TODO: Implementar seleção de imagens quando image_picker for adicionado
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Seleção de imagens será implementada. Adicione image_picker ao pubspec.yaml'),
+      ),
+    );
+    // try {
+    //   final List<XFile> images = await _imagePicker.pickMultiImage();
+    //   if (images.isNotEmpty) {
+    //     setState(() {
+    //       _selectedImages.addAll(images.map((xFile) => File(xFile.path)));
+    //     });
+    //   }
+    // } catch (e) {
+    //   debugPrint('Erro ao selecionar imagens: $e');
+    //   if (mounted) {
+    //     ScaffoldMessenger.of(context).showSnackBar(
+    //       SnackBar(content: Text('Erro ao selecionar imagens: $e')),
+    //     );
+    //   }
+    // }
+  }
+  
+  Future<void> _uploadImages(String propertyId) async {
+    if (_selectedImages.isEmpty) return;
+    
+    setState(() {
+      _isUploadingImages = true;
+    });
+    
+    try {
+      final response = await _galleryService.uploadImages(
+        propertyId: propertyId,
+        files: _selectedImages,
+      );
+      
+      if (mounted) {
+        if (response.success && response.data != null) {
+          setState(() {
+            _uploadedImages.addAll(response.data!);
+            _selectedImages.clear();
+          });
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(response.message ?? 'Erro ao fazer upload das imagens'),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Erro ao fazer upload: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Erro ao fazer upload das imagens')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploadingImages = false;
+        });
+      }
+    }
+  }
+  
+  Future<void> _generateDescription() async {
+    if (_totalAreaController.text.trim().isEmpty ||
+        _cityController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Preencha pelo menos: tipo, cidade e área total'),
+        ),
+      );
+      return;
+    }
+    
+    setState(() {
+      _isGeneratingDescription = true;
+    });
+    
+    try {
+      final request = GenerateDescriptionRequest(
+        type: _selectedType.value,
+        city: _cityController.text.trim(),
+        neighborhood: _neighborhoodController.text.trim().isEmpty
+            ? null
+            : _neighborhoodController.text.trim(),
+        totalArea: double.tryParse(_totalAreaController.text) ?? 0.0,
+        builtArea: _builtAreaController.text.trim().isEmpty
+            ? null
+            : double.tryParse(_builtAreaController.text),
+        bedrooms: _bedroomsController.text.trim().isEmpty
+            ? null
+            : int.tryParse(_bedroomsController.text),
+        bathrooms: _bathroomsController.text.trim().isEmpty
+            ? null
+            : int.tryParse(_bathroomsController.text),
+        parkingSpaces: _parkingSpacesController.text.trim().isEmpty
+            ? null
+            : int.tryParse(_parkingSpacesController.text),
+        salePrice: _salePriceController.text.trim().isEmpty
+            ? null
+            : double.tryParse(_salePriceController.text),
+        rentPrice: _rentPriceController.text.trim().isEmpty
+            ? null
+            : double.tryParse(_rentPriceController.text),
+        condominiumFee: _condominiumFeeController.text.trim().isEmpty
+            ? null
+            : double.tryParse(_condominiumFeeController.text),
+        iptu: _iptuController.text.trim().isEmpty
+            ? null
+            : double.tryParse(_iptuController.text),
+        features: _selectedFeatures.isEmpty ? null : _selectedFeatures,
+      );
+      
+      final response = await _aiService.generatePropertyDescription(request);
+      
+      if (mounted) {
+        if (response.success && response.data != null) {
+          setState(() {
+            _titleController.text = response.data!.title;
+            _descriptionController.text = response.data!.description;
+            _generatedVariants.add(response.data!);
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Descrição gerada com sucesso!')),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(response.message ?? 'Erro ao gerar descrição'),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Erro ao gerar descrição: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Erro ao gerar descrição')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isGeneratingDescription = false;
+        });
+      }
+    }
+  }
+  
+  void _nextStep() {
+    if (_currentStep < _totalSteps - 1) {
+      _pageController.nextPage(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+      );
+      setState(() {
+        _currentStep++;
+      });
+    }
+  }
+  
+  void _previousStep() {
+    if (_currentStep > 0) {
+      _pageController.previousPage(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+      );
+      setState(() {
+        _currentStep--;
+      });
+    }
+  }
+  
+  Future<void> _saveProperty() async {
+    if (!_formKey.currentState!.validate()) {
+      // Voltar para a primeira etapa com erro
+      _pageController.jumpToPage(0);
+      setState(() {
+        _currentStep = 0;
+      });
+      return;
+    }
+    
+    setState(() {
+      _isLoading = true;
+    });
+    
+    try {
+      final data = <String, dynamic>{
+        'title': _titleController.text.trim(),
+        'description': _descriptionController.text.trim(),
+        'type': _selectedType.value,
+        'status': _selectedStatus.value,
+        'street': _streetController.text.trim(),
+        'number': _numberController.text.trim(),
+        if (_complementController.text.trim().isNotEmpty)
+          'complement': _complementController.text.trim(),
+        'neighborhood': _neighborhoodController.text.trim(),
+        'city': _cityController.text.trim(),
+        'state': _stateController.text.trim(),
+        'zipCode': _zipCodeController.text.trim(),
+        'totalArea': double.tryParse(_totalAreaController.text) ?? 0.0,
+        if (_builtAreaController.text.trim().isNotEmpty)
+          'builtArea': double.tryParse(_builtAreaController.text),
+        if (_bedroomsController.text.trim().isNotEmpty)
+          'bedrooms': int.tryParse(_bedroomsController.text),
+        if (_bathroomsController.text.trim().isNotEmpty)
+          'bathrooms': int.tryParse(_bathroomsController.text),
+        if (_parkingSpacesController.text.trim().isNotEmpty)
+          'parkingSpaces': int.tryParse(_parkingSpacesController.text),
+        if (_salePriceController.text.trim().isNotEmpty)
+          'salePrice': double.tryParse(_salePriceController.text),
+        if (_rentPriceController.text.trim().isNotEmpty)
+          'rentPrice': double.tryParse(_rentPriceController.text),
+        if (_condominiumFeeController.text.trim().isNotEmpty)
+          'condominiumFee': double.tryParse(_condominiumFeeController.text),
+        if (_iptuController.text.trim().isNotEmpty)
+          'iptu': double.tryParse(_iptuController.text),
+        'features': _selectedFeatures,
+        'acceptsNegotiation': _acceptsNegotiation,
+        if (_minSalePriceController.text.trim().isNotEmpty)
+          'minSalePrice': double.tryParse(_minSalePriceController.text),
+        if (_minRentPriceController.text.trim().isNotEmpty)
+          'minRentPrice': double.tryParse(_minRentPriceController.text),
+        if (_offerBelowMinSaleAction != null)
+          'offerBelowMinSaleAction': _offerBelowMinSaleAction,
+        if (_offerBelowMinRentAction != null)
+          'offerBelowMinRentAction': _offerBelowMinRentAction,
+        // Proprietário (obrigatórios)
+        'ownerName': _ownerNameController.text.trim(),
+        'ownerEmail': _ownerEmailController.text.trim(),
+        'ownerPhone': _ownerPhoneController.text.trim(),
+        'ownerDocument': _ownerDocumentController.text.trim(),
+        'ownerAddress': _ownerAddressController.text.trim(),
+      };
+      
+      final response = widget.propertyId != null
+          ? await _propertyService.updateProperty(widget.propertyId!, data)
+          : await _propertyService.createProperty(data);
+      
+      if (mounted) {
+        if (response.success && response.data != null) {
+          // Fazer upload das imagens se houver
+          if (_selectedImages.isNotEmpty) {
+            await _uploadImages(response.data!.id);
+          }
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                widget.propertyId != null 
+                    ? 'Propriedade atualizada com sucesso!' 
+                    : 'Propriedade criada com sucesso!',
+              ),
+              backgroundColor: AppColors.status.success,
+            ),
+          );
+          Navigator.of(context).pop(true);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(response.message ?? 'Erro ao salvar propriedade'),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Erro ao salvar propriedade: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Erro ao conectar com o servidor'),
+            backgroundColor: AppColors.status.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
+    if (_isLoadingProperty) {
+      return AppScaffold(
+        title: widget.propertyId != null ? 'Editar Imóvel' : 'Novo Imóvel',
+        body: const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+    
+    return AppScaffold(
+      title: widget.propertyId != null ? 'Editar Imóvel' : 'Novo Imóvel',
+      body: Form(
+        key: _formKey,
+        child: Column(
+          children: [
+            // Indicador de progresso
+            _buildStepIndicator(theme),
+            
+            // Conteúdo das etapas
+            Expanded(
+              child: PageView(
+                controller: _pageController,
+                physics: const NeverScrollableScrollPhysics(),
+                children: [
+                  _buildStep1BasicInfo(theme),
+                  _buildStep2Location(theme),
+                  _buildStep3Characteristics(theme),
+                  _buildStep4Values(theme),
+                  _buildStep5Gallery(theme),
+                  _buildStep6Clients(theme),
+                ],
+              ),
+            ),
+            
+            // Botões de navegação
+            _buildNavigationButtons(theme),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildStepIndicator(ThemeData theme) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      child: Row(
+        children: List.generate(_totalSteps, (index) {
+          final isActive = index == _currentStep;
+          final isCompleted = index < _currentStep;
+          
+          return Expanded(
+            child: Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: isCompleted || isActive
+                          ? AppColors.primary.primary
+                          : ThemeHelpers.borderColor(context),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                if (index < _totalSteps - 1) const SizedBox(width: 8),
+              ],
+            ),
+          );
+        }),
+      ),
+    );
+  }
+  
+  Widget _buildStep1BasicInfo(ThemeData theme) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Informações Básicas',
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 24),
+          
+          CustomTextField(
+            controller: _titleController,
+            label: 'Título *',
+            hint: 'Ex: Casa com 3 quartos em condomínio fechado',
+            validator: (value) {
+              if (value == null || value.trim().isEmpty) {
+                return 'Título é obrigatório';
+              }
+              if (value.trim().length < 3) {
+                return 'Título deve ter pelo menos 3 caracteres';
+              }
+              if (value.trim().length > 255) {
+                return 'Título deve ter no máximo 255 caracteres';
+              }
+              return null;
+            },
+          ),
+          const SizedBox(height: 16),
+          
+          Row(
+            children: [
+              Expanded(
+                child: CustomTextField(
+                  controller: _descriptionController,
+                  label: 'Descrição *',
+                  hint: 'Descreva o imóvel em detalhes...',
+                  maxLines: 6,
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Descrição é obrigatória';
+                    }
+                    if (value.trim().length < 10) {
+                      return 'Descrição deve ter pelo menos 10 caracteres';
+                    }
+                    if (value.trim().length > 5000) {
+                      return 'Descrição deve ter no máximo 5000 caracteres';
+                    }
+                    return null;
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: _isGeneratingDescription
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.auto_awesome),
+                onPressed: _isGeneratingDescription ? null : _generateDescription,
+                tooltip: 'Gerar descrição com IA',
+                style: IconButton.styleFrom(
+                  backgroundColor: AppColors.primary.primary.withValues(alpha: 0.1),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          
+          Text(
+            'Tipo de Imóvel *',
+            style: theme.textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: PropertyType.values.map((type) {
+              final isSelected = _selectedType == type;
+              return ChoiceChip(
+                label: Text(type.label),
+                selected: isSelected,
+                onSelected: (selected) {
+                  if (selected) {
+                    setState(() {
+                      _selectedType = type;
+                    });
+                  }
+                },
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 24),
+          
+          Text(
+            'Status',
+            style: theme.textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: PropertyStatus.values.map((status) {
+              final isSelected = _selectedStatus == status;
+              return ChoiceChip(
+                label: Text(status.label),
+                selected: isSelected,
+                onSelected: (selected) {
+                  if (selected) {
+                    setState(() {
+                      _selectedStatus = status;
+                    });
+                  }
+                },
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildStep2Location(ThemeData theme) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Localização',
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 24),
+          
+          Row(
+            children: [
+              Expanded(
+                flex: 3,
+                child: CustomTextField(
+                  controller: _streetController,
+                  label: 'Rua *',
+                  hint: 'Nome da rua',
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Rua é obrigatória';
+                    }
+                    return null;
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 1,
+                child: CustomTextField(
+                  controller: _numberController,
+                  label: 'Número *',
+                  hint: '123',
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Número é obrigatório';
+                    }
+                    return null;
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          
+          CustomTextField(
+            controller: _complementController,
+            label: 'Complemento',
+            hint: 'Apartamento, bloco, etc.',
+          ),
+          const SizedBox(height: 16),
+          
+          CustomTextField(
+                  controller: _neighborhoodController,
+                  label: 'Bairro *',
+                  hint: 'Nome do bairro',
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Bairro é obrigatório';
+                    }
+                    if (value.trim().length < 2) {
+                      return 'Bairro deve ter pelo menos 2 caracteres';
+                    }
+                    if (value.trim().length > 100) {
+                      return 'Bairro deve ter no máximo 100 caracteres';
+                    }
+                    return null;
+                  },
+                ),
+          const SizedBox(height: 16),
+          
+          Row(
+            children: [
+              Expanded(
+                flex: 2,
+                child: CustomTextField(
+                  controller: _cityController,
+                  label: 'Cidade *',
+                  hint: 'Nome da cidade',
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Cidade é obrigatória';
+                    }
+                    return null;
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildFormField(
+                  theme,
+                  controller: _stateController,
+                  label: 'Estado *',
+                  hint: 'UF',
+                  maxLength: 2,
+                  textCapitalization: TextCapitalization.characters,
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Estado é obrigatório';
+                    }
+                    if (value.trim().length != 2) {
+                      return 'Digite 2 letras';
+                    }
+                    return null;
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildFormField(
+                  theme,
+                  controller: _zipCodeController,
+                  label: 'CEP',
+                  hint: '00000-000',
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(8),
+                    TextInputFormatter.withFunction((oldValue, newValue) {
+                      final text = newValue.text;
+                      if (text.length <= 5) {
+                        return newValue;
+                      }
+                      return TextEditingValue(
+                        text: '${text.substring(0, 5)}-${text.substring(5)}',
+                        selection: TextSelection.collapsed(offset: newValue.selection.end + 1),
+                      );
+                    }),
+                  ],
+                  suffix: IconButton(
+                    icon: const Icon(Icons.search),
+                    onPressed: _searchCep,
+                    tooltip: 'Buscar CEP',
+                  ) as Widget?,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildStep3Characteristics(ThemeData theme) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Características',
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 24),
+          
+          Row(
+            children: [
+              Expanded(
+                child: _buildFormField(
+                  theme,
+                  controller: _totalAreaController,
+                  label: 'Área Total (m²) *',
+                  hint: '0.0',
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+                  ],
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Área total é obrigatória';
+                    }
+                    final area = double.tryParse(value);
+                    if (area == null || area <= 0) {
+                      return 'Área deve ser maior que zero';
+                    }
+                    if (area >= 1000000) {
+                      return 'Área total deve ser menor que 1.000.000 m²';
+                    }
+                    return null;
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildFormField(
+                  theme,
+                  controller: _builtAreaController,
+                  label: 'Área Construída (m²)',
+                  hint: '0.0',
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+                  ],
+                  validator: (value) {
+                    if (value != null && value.trim().isNotEmpty) {
+                      final area = double.tryParse(value);
+                      if (area != null) {
+                        if (area <= 0) {
+                          return 'Área construída deve ser positiva';
+                        }
+                        if (area >= 1000000) {
+                          return 'Área construída deve ser menor que 1.000.000 m²';
+                        }
+                        // Validar se não é maior que área total
+                        final totalArea = double.tryParse(_totalAreaController.text);
+                        if (totalArea != null && area > totalArea) {
+                          return 'Área construída não pode ser maior que área total';
+                        }
+                      }
+                    }
+                    return null;
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          
+          Row(
+            children: [
+              Expanded(
+                child: _buildFormField(
+                  theme,
+                  controller: _bedroomsController,
+                  label: 'Quartos',
+                  hint: '0',
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                  ],
+                  validator: (value) {
+                    if (value != null && value.trim().isNotEmpty) {
+                      final bedrooms = int.tryParse(value);
+                      if (bedrooms != null && bedrooms < 0) {
+                        return 'Número de quartos não pode ser negativo';
+                      }
+                      if (bedrooms != null && bedrooms >= 50) {
+                        return 'Número de quartos deve ser menor que 50';
+                      }
+                    }
+                    return null;
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildFormField(
+                  theme,
+                  controller: _bathroomsController,
+                  label: 'Banheiros',
+                  hint: '0',
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                  ],
+                  validator: (value) {
+                    if (value != null && value.trim().isNotEmpty) {
+                      final bathrooms = int.tryParse(value);
+                      if (bathrooms != null && bathrooms < 0) {
+                        return 'Número de banheiros não pode ser negativo';
+                      }
+                      if (bathrooms != null && bathrooms >= 20) {
+                        return 'Número de banheiros deve ser menor que 20';
+                      }
+                    }
+                    return null;
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildFormField(
+                  theme,
+                  controller: _parkingSpacesController,
+                  label: 'Vagas',
+                  hint: '0',
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                  ],
+                  validator: (value) {
+                    if (value != null && value.trim().isNotEmpty) {
+                      final parking = int.tryParse(value);
+                      if (parking != null && parking < 0) {
+                        return 'Número de vagas não pode ser negativo';
+                      }
+                      if (parking != null && parking >= 20) {
+                        return 'Número de vagas deve ser menor que 20';
+                      }
+                    }
+                    return null;
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          
+          Text(
+            'Recursos do Imóvel',
+            style: theme.textTheme.titleMedium,
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              'Ar condicionado',
+              'Aquecimento',
+              'Elevador',
+              'Portaria 24h',
+              'Segurança 24h',
+              'Piscina',
+              'Academia',
+              'Playground',
+              'Churrasqueira',
+              'Área gourmet',
+              'Jardim',
+              'Terraço',
+              'Varanda',
+              'Sacada',
+              'Vista para o mar',
+              'Vista para a montanha',
+              'Próximo ao metrô',
+              'Próximo a escolas',
+              'Próximo a hospitais',
+              'Próximo a shopping',
+              'Garagem coberta',
+              'Garagem descoberta',
+              'Depósito',
+              'Lavanderia',
+              'Closet',
+              'Home office',
+              'Lareira',
+              'Sistema de alarme',
+              'Câmeras de segurança',
+              'Interfone',
+              'Antena parabólica',
+              'TV a cabo',
+              'Internet',
+              'Gás encanado',
+              'Água quente',
+              'Energia solar',
+              'Mobiliado',
+              'Semi-mobiliado',
+              'Pronto para morar',
+              'Em construção',
+              'Novo',
+              'Usado',
+            ].map((feature) {
+              final isSelected = _selectedFeatures.contains(feature);
+              return FilterChip(
+                label: Text(feature),
+                selected: isSelected,
+                onSelected: (selected) {
+                  setState(() {
+                    if (selected) {
+                      _selectedFeatures.add(feature);
+                    } else {
+                      _selectedFeatures.remove(feature);
+                    }
+                  });
+                },
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildStep4Values(ThemeData theme) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Valores',
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 24),
+          
+          Row(
+            children: [
+              Expanded(
+                child: _buildFormField(
+                  theme,
+                  controller: _salePriceController,
+                  label: 'Preço de Venda',
+                  hint: '0.00',
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+                  ],
+                  prefixText: 'R\$ ',
+                  validator: (value) {
+                    if (value != null && value.trim().isNotEmpty) {
+                      final price = double.tryParse(value);
+                      if (price != null && price <= 0) {
+                        return 'Preço de venda deve ser positivo';
+                      }
+                      if (price != null && price >= 1000000000) {
+                        return 'Preço de venda deve ser menor que R\$ 1 bilhão';
+                      }
+                    }
+                    return null;
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildFormField(
+                  theme,
+                  controller: _rentPriceController,
+                  label: 'Preço de Aluguel',
+                  hint: '0.00',
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+                  ],
+                  prefixText: 'R\$ ',
+                  validator: (value) {
+                    if (value != null && value.trim().isNotEmpty) {
+                      final price = double.tryParse(value);
+                      if (price != null && price <= 0) {
+                        return 'Preço de aluguel deve ser positivo';
+                      }
+                      if (price != null && price >= 1000000) {
+                        return 'Preço de aluguel deve ser menor que R\$ 1 milhão';
+                      }
+                    }
+                    return null;
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          
+          Row(
+            children: [
+              Expanded(
+                child: _buildFormField(
+                  theme,
+                  controller: _condominiumFeeController,
+                  label: 'Condomínio',
+                  hint: '0.00',
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+                  ],
+                  prefixText: 'R\$ ',
+                  validator: (value) {
+                    if (value != null && value.trim().isNotEmpty) {
+                      final fee = double.tryParse(value);
+                      if (fee != null && fee <= 0) {
+                        return 'Valor do condomínio deve ser positivo';
+                      }
+                      if (fee != null && fee >= 100000) {
+                        return 'Valor do condomínio deve ser menor que R\$ 100 mil';
+                      }
+                    }
+                    return null;
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildFormField(
+                  theme,
+                  controller: _iptuController,
+                  label: 'IPTU',
+                  hint: '0.00',
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+                  ],
+                  prefixText: 'R\$ ',
+                  validator: (value) {
+                    if (value != null && value.trim().isNotEmpty) {
+                      final iptu = double.tryParse(value);
+                      if (iptu != null && iptu <= 0) {
+                        return 'IPTU deve ser positivo';
+                      }
+                      if (iptu != null && iptu >= 100000) {
+                        return 'IPTU deve ser menor que R\$ 100 mil';
+                      }
+                    }
+                    return null;
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          
+          SwitchListTile(
+            title: const Text('Aceita Negociação'),
+            subtitle: const Text('Permite ofertas abaixo do preço mínimo'),
+            value: _acceptsNegotiation,
+            onChanged: (value) {
+              setState(() {
+                _acceptsNegotiation = value;
+              });
+            },
+          ),
+            if (_acceptsNegotiation) ...[
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildFormField(
+                    theme,
+                    controller: _minSalePriceController,
+                    label: 'Preço Mínimo de Venda',
+                    hint: '0.00',
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+                    ],
+                    prefixText: 'R\$ ',
+                    validator: (value) {
+                      if (value != null && value.trim().isNotEmpty) {
+                        final minPrice = double.tryParse(value);
+                        if (minPrice == null) {
+                          return 'Preço inválido';
+                        }
+                        if (minPrice <= 0) {
+                          return 'Preço mínimo deve ser positivo';
+                        }
+                        final salePriceText = _salePriceController.text.trim();
+                        if (salePriceText.isNotEmpty) {
+                          final salePrice = double.tryParse(salePriceText);
+                          if (salePrice != null && minPrice >= salePrice) {
+                            return 'Preço mínimo deve ser menor que preço de venda';
+                          }
+                        }
+                      }
+                      return null;
+                    },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildFormField(
+                    theme,
+                    controller: _minRentPriceController,
+                    label: 'Preço Mínimo de Aluguel',
+                    hint: '0.00',
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+                    ],
+                    prefixText: 'R\$ ',
+                    validator: (value) {
+                      if (value != null && value.trim().isNotEmpty) {
+                        final minPrice = double.tryParse(value);
+                        if (minPrice == null) {
+                          return 'Preço inválido';
+                        }
+                        if (minPrice <= 0) {
+                          return 'Preço mínimo deve ser positivo';
+                        }
+                        final rentPriceText = _rentPriceController.text.trim();
+                        if (rentPriceText.isNotEmpty) {
+                          final rentPrice = double.tryParse(rentPriceText);
+                          if (rentPrice != null && minPrice >= rentPrice) {
+                            return 'Preço mínimo deve ser menor que preço de aluguel';
+                          }
+                        }
+                      }
+                      return null;
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Ação para ofertas abaixo do mínimo',
+              style: theme.textTheme.titleSmall,
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _offerBelowMinSaleAction,
+                    decoration: InputDecoration(
+                      labelText: 'Venda',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'reject', child: Text('Rejeitar')),
+                      DropdownMenuItem(value: 'pending', child: Text('Pendente')),
+                      DropdownMenuItem(value: 'notify', child: Text('Notificar')),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        _offerBelowMinSaleAction = value;
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _offerBelowMinRentAction,
+                    decoration: InputDecoration(
+                      labelText: 'Aluguel',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'reject', child: Text('Rejeitar')),
+                      DropdownMenuItem(value: 'pending', child: Text('Pendente')),
+                      DropdownMenuItem(value: 'notify', child: Text('Notificar')),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        _offerBelowMinRentAction = value;
+                      });
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildStep5Gallery(ThemeData theme) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Galeria de Imagens',
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 24),
+          
+          OutlinedButton.icon(
+            onPressed: _isUploadingImages ? null : _pickImages,
+            icon: _isUploadingImages
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.add_photo_alternate),
+            label: Text(_isUploadingImages ? 'Enviando...' : 'Adicionar Imagens'),
+          ),
+          const SizedBox(height: 16),
+          
+          if (_selectedImages.isEmpty && _uploadedImages.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(40),
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: ThemeHelpers.borderColor(context),
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.image_outlined,
+                    size: 48,
+                    color: ThemeHelpers.textSecondaryColor(context),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Nenhuma imagem adicionada',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: ThemeHelpers.textSecondaryColor(context),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+              ),
+              itemCount: _selectedImages.length + _uploadedImages.length,
+              itemBuilder: (context, index) {
+                if (index < _selectedImages.length) {
+                  // Imagem selecionada (ainda não enviada)
+                  return Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.file(
+                          _selectedImages[index],
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                          height: double.infinity,
+                        ),
+                      ),
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: IconButton(
+                          icon: const Icon(Icons.close, size: 20),
+                          color: Colors.white,
+                          style: IconButton.styleFrom(
+                            backgroundColor: Colors.black54,
+                            padding: const EdgeInsets.all(4),
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _selectedImages.removeAt(index);
+                            });
+                          },
+                        ),
+                      ),
+                    ],
+                  );
+                } else {
+                  // Imagem já enviada
+                  final imageIndex = index - _selectedImages.length;
+                  final image = _uploadedImages[imageIndex];
+                  return Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.network(
+                          image.url,
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                          height: double.infinity,
+                        ),
+                      ),
+                      if (image.isMain)
+                        Positioned(
+                          top: 4,
+                          left: 4,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary.primary,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              'Principal',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: Colors.white,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ),
+                        ),
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: IconButton(
+                          icon: const Icon(Icons.close, size: 20),
+                          color: Colors.white,
+                          style: IconButton.styleFrom(
+                            backgroundColor: Colors.black54,
+                            padding: const EdgeInsets.all(4),
+                          ),
+                          onPressed: () async {
+                            final response = await _galleryService.deleteImage(image.id);
+                            if (mounted) {
+                              if (response.success) {
+                                setState(() {
+                                  _uploadedImages.removeAt(imageIndex);
+                                });
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(response.message ?? 'Erro ao remover imagem'),
+                                    backgroundColor: AppColors.status.error,
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  );
+                }
+              },
+            ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildStep6Clients(ThemeData theme) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Proprietário',
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Informações obrigatórias do proprietário',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: ThemeHelpers.textSecondaryColor(context),
+            ),
+          ),
+          const SizedBox(height: 24),
+          
+          CustomTextField(
+            controller: _ownerNameController,
+            label: 'Nome do Proprietário *',
+            hint: 'Nome completo',
+            validator: (value) {
+              if (value == null || value.trim().isEmpty) {
+                return 'Nome do proprietário é obrigatório';
+              }
+              if (value.trim().length < 3) {
+                return 'Nome deve ter pelo menos 3 caracteres';
+              }
+              return null;
+            },
+          ),
+          const SizedBox(height: 16),
+          
+          CustomTextField(
+            controller: _ownerEmailController,
+            label: 'Email do Proprietário *',
+            hint: 'email@exemplo.com',
+            keyboardType: TextInputType.emailAddress,
+            validator: (value) {
+              if (value == null || value.trim().isEmpty) {
+                return 'Email do proprietário é obrigatório';
+              }
+              if (!value.contains('@') || !value.contains('.')) {
+                return 'Email inválido';
+              }
+              return null;
+            },
+          ),
+          const SizedBox(height: 16),
+          
+          CustomTextField(
+            controller: _ownerPhoneController,
+            label: 'Telefone do Proprietário *',
+            hint: '(00) 00000-0000',
+            keyboardType: TextInputType.phone,
+            validator: (value) {
+              if (value == null || value.trim().isEmpty) {
+                return 'Telefone do proprietário é obrigatório';
+              }
+              if (value.trim().length < 10) {
+                return 'Telefone deve ter pelo menos 10 caracteres';
+              }
+              return null;
+            },
+          ),
+          const SizedBox(height: 16),
+          
+          CustomTextField(
+            controller: _ownerDocumentController,
+            label: 'CPF/CNPJ do Proprietário *',
+            hint: '000.000.000-00 ou 00.000.000/0000-00',
+            validator: (value) {
+              if (value == null || value.trim().isEmpty) {
+                return 'CPF/CNPJ do proprietário é obrigatório';
+              }
+              if (value.trim().length < 11) {
+                return 'CPF/CNPJ deve ter pelo menos 11 caracteres';
+              }
+              return null;
+            },
+          ),
+          const SizedBox(height: 16),
+          
+          CustomTextField(
+            controller: _ownerAddressController,
+            label: 'Endereço do Proprietário *',
+            hint: 'Endereço completo',
+            maxLines: 2,
+            validator: (value) {
+              if (value == null || value.trim().isEmpty) {
+                return 'Endereço do proprietário é obrigatório';
+              }
+              if (value.trim().length < 10) {
+                return 'Endereço deve ter pelo menos 10 caracteres';
+              }
+              return null;
+            },
+          ),
+          const SizedBox(height: 32),
+          
+          Text(
+            'Clientes Interessados',
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Opcional - você pode adicionar clientes depois',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: ThemeHelpers.textSecondaryColor(context),
+            ),
+          ),
+          const SizedBox(height: 16),
+          
+          OutlinedButton.icon(
+            onPressed: () {
+              // TODO: Implementar seleção de clientes
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Seleção de clientes em breve')),
+              );
+            },
+            icon: const Icon(Icons.person_add),
+            label: const Text('Adicionar Clientes'),
+          ),
+          const SizedBox(height: 16),
+          
+          if (_selectedClientIds.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(40),
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: ThemeHelpers.borderColor(context),
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.people_outline,
+                    size: 48,
+                    color: ThemeHelpers.textSecondaryColor(context),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Nenhum cliente adicionado',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: ThemeHelpers.textSecondaryColor(context),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Você pode adicionar clientes depois',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: ThemeHelpers.textSecondaryColor(context),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildFormField(
+    ThemeData theme, {
+    required TextEditingController controller,
+    String? label,
+    String? hint,
+    TextInputType? keyboardType,
+    String? Function(String?)? validator,
+    int? maxLength,
+    TextCapitalization? textCapitalization,
+    List<TextInputFormatter>? inputFormatters,
+    String? prefixText,
+    Widget? suffix,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (label != null) ...[
+          Text(
+            label,
+            style: theme.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+        TextFormField(
+          controller: controller,
+          keyboardType: keyboardType,
+          validator: validator,
+          maxLength: maxLength,
+          textCapitalization: textCapitalization ?? TextCapitalization.none,
+          inputFormatters: inputFormatters,
+          style: theme.textTheme.bodyLarge?.copyWith(
+            color: theme.colorScheme.onSurface,
+          ),
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: theme.textTheme.bodyLarge?.copyWith(
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+            ),
+            prefixText: prefixText,
+            suffixIcon: suffix,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNavigationButtons(ThemeData theme) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: ThemeHelpers.cardBackgroundColor(context),
+        border: Border(
+          top: BorderSide(
+            color: ThemeHelpers.borderColor(context),
+          ),
+        ),
+      ),
+      child: SafeArea(
+        child: Row(
+          children: [
+            if (_currentStep > 0)
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _previousStep,
+                  child: const Text('Voltar'),
+                ),
+              ),
+            if (_currentStep > 0) const SizedBox(width: 12),
+            Expanded(
+              flex: 2,
+              child: _currentStep < _totalSteps - 1
+                  ? CustomButton(
+                      text: 'Próximo',
+                      onPressed: _nextStep,
+                      icon: Icons.arrow_forward,
+                    )
+                  : CustomButton(
+                      text: widget.propertyId != null ? 'Salvar' : 'Criar',
+                      onPressed: _isLoading ? null : _saveProperty,
+                      isLoading: _isLoading,
+                      icon: Icons.check,
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

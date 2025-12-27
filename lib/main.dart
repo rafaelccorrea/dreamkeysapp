@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:provider/provider.dart';
 import 'core/theme/app_theme.dart';
 import 'core/routes/app_routes.dart';
 import 'shared/services/theme_service.dart';
+import 'features/notifications/controllers/notification_controller.dart';
 
 // GlobalKey para o Navigator - permite navegação sem contexto
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -46,15 +48,23 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Dream Keys',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme,
-      darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeService.instance.themeMode,
-      navigatorKey: navigatorKey,
-      initialRoute: AppRoutes.splash,
-      onGenerateRoute: AppRoutes.generateRoute,
+    return ChangeNotifierProvider(
+      create: (_) {
+        final controller = NotificationController.instance;
+        // Inicializar controller (conectar WebSocket, etc)
+        controller.initialize();
+        return controller;
+      },
+      child: MaterialApp(
+        title: 'Dream Keys',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.lightTheme,
+        darkTheme: AppTheme.darkTheme,
+        themeMode: ThemeService.instance.themeMode,
+        navigatorKey: navigatorKey,
+        initialRoute: AppRoutes.splash,
+        onGenerateRoute: AppRoutes.generateRoute,
+      ),
     );
   }
 }
