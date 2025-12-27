@@ -309,293 +309,659 @@ class _OfferDetailsPageState extends State<OfferDetailsPage> {
   Widget _buildOfferDetails(BuildContext context, ThemeData theme, PropertyOffer offer) {
     final canAccept = offer.status == 'pending';
     final canReject = offer.status == 'pending';
+    final isDark = theme.brightness == Brightness.dark;
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Status e tipo
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: _getStatusColor(offer.status).withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  _getStatusLabel(offer.status),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: _getStatusColor(offer.status),
-                    fontWeight: FontWeight.w600,
+          // Header com status e tipo
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? AppColors.background.backgroundSecondaryDarkMode
+                  : AppColors.background.backgroundSecondary,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isDark
+                    ? AppColors.border.borderDarkMode
+                    : AppColors.border.border,
+                width: 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            offer.type == 'sale'
+                                ? Icons.sell_outlined
+                                : Icons.home_work_outlined,
+                            size: 20,
+                            color: AppColors.primary.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            offer.type == 'sale' ? 'Venda' : 'Aluguel',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.primary.primary,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        offer.property?.title ?? 'Propriedade #${offer.propertyId}',
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: ThemeHelpers.textColor(context),
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  offer.type == 'sale' ? 'Venda' : 'Aluguel',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: AppColors.primary.primary,
-                    fontWeight: FontWeight.w600,
+                const SizedBox(width: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: _getStatusColor(offer.status).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: _getStatusColor(offer.status).withValues(alpha: 0.3),
+                      width: 1,
+                    ),
+                  ),
+                  child: Text(
+                    _getStatusLabel(offer.status),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: _getStatusColor(offer.status),
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-          const SizedBox(height: 24),
+
+          // Valores (destaque)
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? AppColors.background.backgroundSecondaryDarkMode
+                  : AppColors.background.backgroundSecondary,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isDark
+                    ? AppColors.border.borderDarkMode
+                    : AppColors.border.border,
+                width: 1,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.attach_money_outlined,
+                      size: 20,
+                      color: AppColors.primary.primary,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Valores',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: ThemeHelpers.textColor(context),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                // Valor oferecido
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppColors.primary.primary.withValues(alpha: 0.2),
+                      width: 1,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Valor Oferecido',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: ThemeHelpers.textSecondaryColor(context),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _currencyFormatter.format(offer.offeredValue),
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.primary.primary,
+                          fontSize: 24,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (offer.property != null) ...[
+                  const SizedBox(height: 16),
+                  // Preço original
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Preço Original',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: ThemeHelpers.textSecondaryColor(context),
+                                fontSize: 12,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              offer.type == 'sale'
+                                  ? (offer.property!.salePrice != null
+                                      ? _currencyFormatter.format(offer.property!.salePrice!)
+                                      : '-')
+                                  : (offer.property!.rentPrice != null
+                                      ? _currencyFormatter.format(offer.property!.rentPrice!)
+                                      : '-'),
+                              style: theme.textTheme.bodyLarge?.copyWith(
+                                color: ThemeHelpers.textSecondaryColor(context),
+                                decoration: TextDecoration.lineThrough,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      // Diferença
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: _getDifferenceColor(offer).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: _getDifferenceColor(offer).withValues(alpha: 0.3),
+                            width: 1,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              'Diferença',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: ThemeHelpers.textSecondaryColor(context),
+                                fontSize: 10,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _calculateDifference(offer).split(' ').first,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: _getDifferenceColor(offer),
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
 
           // Propriedade
           if (offer.property != null) ...[
-            Text(
-              'Propriedade',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w600,
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? AppColors.background.backgroundSecondaryDarkMode
+                    : AppColors.background.backgroundSecondary,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: isDark
+                      ? AppColors.border.borderDarkMode
+                      : AppColors.border.border,
+                  width: 1,
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            Card(
-              child: ListTile(
-                title: Text(offer.property!.title),
-                subtitle: Text('ID: ${offer.property!.id}'),
-                trailing: IconButton(
-                  icon: const Icon(Icons.arrow_forward),
-                  onPressed: () {
-                    Navigator.of(context).pushNamed(
-                      '/properties/${offer.property!.id}',
-                    );
-                  },
+              child: InkWell(
+                onTap: () {
+                  Navigator.of(context).pushNamed(
+                    '/properties/${offer.property!.id}',
+                  );
+                },
+                borderRadius: BorderRadius.circular(16),
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.primary.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          Icons.home_outlined,
+                          size: 24,
+                          color: AppColors.primary.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Propriedade',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: ThemeHelpers.textSecondaryColor(context),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              offer.property!.title,
+                              style: theme.textTheme.bodyLarge?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: ThemeHelpers.textColor(context),
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(
+                        Icons.arrow_forward_ios,
+                        size: 16,
+                        color: ThemeHelpers.textSecondaryColor(context),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-            const SizedBox(height: 24),
           ],
-
-          // Valores
-          Text(
-            'Valores',
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  _buildValueRow(
-                    theme,
-                    'Valor Oferecido',
-                    _currencyFormatter.format(offer.offeredValue),
-                    AppColors.primary.primary,
-                    isBold: true,
-                  ),
-                  if (offer.property != null) ...[
-                    const Divider(),
-                    _buildValueRow(
-                      theme,
-                      'Preço Original',
-                      offer.type == 'sale'
-                          ? (offer.property!.salePrice != null
-                              ? _currencyFormatter.format(offer.property!.salePrice)
-                              : '-')
-                          : (offer.property!.rentPrice != null
-                              ? _currencyFormatter.format(offer.property!.rentPrice)
-                              : '-'),
-                      ThemeHelpers.textSecondaryColor(context),
-                    ),
-                    const Divider(),
-                    _buildValueRow(
-                      theme,
-                      'Diferença',
-                      _calculateDifference(offer),
-                      _getDifferenceColor(offer),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
 
           // Ofertante
           if (offer.publicUser != null) ...[
-            Text(
-              'Ofertante',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Card(
-              child: ListTile(
-                leading: CircleAvatar(
-                  child: Icon(Icons.person),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? AppColors.background.backgroundSecondaryDarkMode
+                    : AppColors.background.backgroundSecondary,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: isDark
+                      ? AppColors.border.borderDarkMode
+                      : AppColors.border.border,
+                  width: 1,
                 ),
-                title: Text(offer.publicUser!.email),
-                subtitle: Text(offer.publicUser!.phone),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.person_outline,
+                        size: 20,
+                        color: AppColors.primary.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Ofertante',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: ThemeHelpers.textColor(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.primary.withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.person,
+                          size: 24,
+                          color: AppColors.primary.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              offer.publicUser!.email,
+                              style: theme.textTheme.bodyLarge?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: ThemeHelpers.textColor(context),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (offer.publicUser!.phone.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                offer.publicUser!.phone,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: ThemeHelpers.textSecondaryColor(context),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 24),
           ],
 
           // Mensagem do ofertante
           if (offer.message != null && offer.message!.isNotEmpty) ...[
-            Text(
-              'Mensagem do Ofertante',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(
-                  offer.message!,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: ThemeHelpers.textColor(context),
-                  ),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? AppColors.background.backgroundSecondaryDarkMode
+                    : AppColors.background.backgroundSecondary,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: isDark
+                      ? AppColors.border.borderDarkMode
+                      : AppColors.border.border,
+                  width: 1,
                 ),
               ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.message_outlined,
+                        size: 20,
+                        color: AppColors.primary.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Mensagem do Ofertante',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: ThemeHelpers.textColor(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? AppColors.background.backgroundSecondaryDarkMode
+                          : Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      offer.message!,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: ThemeHelpers.textColor(context),
+                        height: 1.5,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 24),
           ],
 
           // Resposta (se houver)
           if (offer.responseMessage != null && offer.responseMessage!.isNotEmpty) ...[
-            Text(
-              'Resposta',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(
-                  offer.responseMessage!,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: ThemeHelpers.textColor(context),
-                  ),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? AppColors.background.backgroundSecondaryDarkMode
+                    : AppColors.background.backgroundSecondary,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: isDark
+                      ? AppColors.border.borderDarkMode
+                      : AppColors.border.border,
+                  width: 1,
                 ),
               ),
-            ),
-            const SizedBox(height: 24),
-          ],
-
-          // Informações
-          Text(
-            'Informações',
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildInfoRow(theme, 'Criada em', _formatDate(offer.createdAt)),
-                  if (offer.respondedAt != null)
-                    _buildInfoRow(theme, 'Respondida em', _formatDate(offer.respondedAt!)),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.reply_outlined,
+                        size: 20,
+                        color: AppColors.status.success,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Resposta',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: ThemeHelpers.textColor(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.status.success.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: AppColors.status.success.withValues(alpha: 0.2),
+                        width: 1,
+                      ),
+                    ),
+                    child: Text(
+                      offer.responseMessage!,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: ThemeHelpers.textColor(context),
+                        height: 1.5,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
+          ],
+
+          // Informações
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? AppColors.background.backgroundSecondaryDarkMode
+                  : AppColors.background.backgroundSecondary,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isDark
+                    ? AppColors.border.borderDarkMode
+                    : AppColors.border.border,
+                width: 1,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      size: 20,
+                      color: ThemeHelpers.textSecondaryColor(context),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Informações',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: ThemeHelpers.textColor(context),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                _buildInfoRow(theme, 'Criada em', _formatDate(offer.createdAt)),
+                if (offer.respondedAt != null) ...[
+                  const SizedBox(height: 12),
+                  _buildInfoRow(theme, 'Respondida em', _formatDate(offer.respondedAt!)),
+                ],
+              ],
+            ),
           ),
-          const SizedBox(height: 32),
 
           // Ações
           if (canAccept || canReject) ...[
-            Row(
-              children: [
-                if (canReject)
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _isProcessing ? null : () => _showActionDialog('rejected'),
-                      icon: const Icon(Icons.close),
-                      label: const Text('Rejeitar'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.status.error,
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  if (canAccept)
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: _isProcessing
+                            ? null
+                            : () => _showActionDialog('accepted'),
+                        icon: const Icon(Icons.check_circle_outline),
+                        label: const Text('Aceitar Oferta'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.status.success,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                if (canReject && canAccept) const SizedBox(width: 12),
-                if (canAccept)
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _isProcessing ? null : () => _showActionDialog('accepted'),
-                      icon: const Icon(Icons.check),
-                      label: const Text('Aceitar'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.status.success,
+                  if (canAccept && canReject) const SizedBox(height: 12),
+                  if (canReject)
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _isProcessing
+                            ? null
+                            : () => _showActionDialog('rejected'),
+                        icon: const Icon(Icons.cancel_outlined),
+                        label: const Text('Rejeitar Oferta'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.status.error,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          side: BorderSide(
+                            color: AppColors.status.error,
+                            width: 1.5,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ],
+          const SizedBox(height: 16),
         ],
       ),
-    );
-  }
-
-  Widget _buildValueRow(
-    ThemeData theme,
-    String label,
-    String value,
-    Color valueColor, {
-    bool isBold = false,
-  }) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(context),
-          ),
-        ),
-        Text(
-          value,
-          style: theme.textTheme.bodyLarge?.copyWith(
-            color: valueColor,
-            fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-          ),
-        ),
-      ],
     );
   }
 
   Widget _buildInfoRow(ThemeData theme, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            label,
-            style: theme.textTheme.bodyMedium?.copyWith(
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Row(
+          children: [
+            Icon(
+              Icons.access_time_outlined,
+              size: 16,
               color: ThemeHelpers.textSecondaryColor(context),
             ),
-          ),
-          Text(
-            value,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: ThemeHelpers.textColor(context),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: ThemeHelpers.textSecondaryColor(context),
+                fontSize: 14,
+              ),
             ),
+          ],
+        ),
+        Text(
+          value,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: ThemeHelpers.textColor(context),
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 

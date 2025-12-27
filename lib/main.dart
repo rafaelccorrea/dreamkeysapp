@@ -58,9 +58,7 @@ class _MyAppState extends State<MyApp> {
             return controller;
           },
         ),
-        ChangeNotifierProvider(
-          create: (_) => AppointmentController.instance,
-        ),
+        ChangeNotifierProvider(create: (_) => AppointmentController.instance),
       ],
       child: MaterialApp(
         title: 'Dream Keys',

@@ -60,6 +60,15 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
     _endDate = widget.initialEndDate ?? now.add(const Duration(hours: 1));
     _startTime = TimeOfDay.fromDateTime(_startDate!);
     _endTime = TimeOfDay.fromDateTime(_endDate!);
+    
+    // Adicionar listeners para validação em tempo real
+    _titleController.addListener(_validateForm);
+    _descriptionController.addListener(_validateForm);
+    _notesController.addListener(_validateForm);
+  }
+  
+  void _validateForm() {
+    setState(() {});
   }
 
   @override
@@ -99,6 +108,7 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
           );
         }
       });
+      _validateForm();
     }
   }
 
@@ -132,28 +142,75 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
           );
         }
       });
+      _validateForm();
     }
   }
 
   String? _validateDates() {
-    if (_startDate == null || _endDate == null) {
+    if (_startDate == null || _endDate == null || _startTime == null || _endTime == null) {
       return 'Selecione data e horário de início e término';
     }
 
     final now = DateTime.now();
-    if (_startDate!.isBefore(now)) {
+    final startDateTime = DateTime(
+      _startDate!.year,
+      _startDate!.month,
+      _startDate!.day,
+      _startTime!.hour,
+      _startTime!.minute,
+    );
+    
+    final endDateTime = DateTime(
+      _endDate!.year,
+      _endDate!.month,
+      _endDate!.day,
+      _endTime!.hour,
+      _endTime!.minute,
+    );
+
+    if (startDateTime.isBefore(now.subtract(const Duration(minutes: 1)))) {
       return 'A data/hora de início não pode estar no passado';
     }
 
-    if (_endDate!.isBefore(now)) {
+    if (endDateTime.isBefore(now.subtract(const Duration(minutes: 1)))) {
       return 'A data/hora de término não pode estar no passado';
     }
 
-    if (_endDate!.isBefore(_startDate!) || _endDate!.isAtSameMomentAs(_startDate!)) {
+    if (endDateTime.isBefore(startDateTime) || endDateTime.isAtSameMomentAs(startDateTime)) {
       return 'A data/hora de término deve ser posterior à data/hora de início';
     }
 
     return null;
+  }
+  
+  /// Verifica se o formulário está válido
+  bool _isFormValid() {
+    // Título obrigatório
+    if (_titleController.text.trim().isEmpty) {
+      return false;
+    }
+    
+    // Datas e horários obrigatórios
+    if (_startDate == null || _endDate == null || _startTime == null || _endTime == null) {
+      return false;
+    }
+    
+    // Validar datas
+    if (_validateDates() != null) {
+      return false;
+    }
+    
+    // Validar descrição (máximo 300 caracteres)
+    if (_descriptionController.text.length > 300) {
+      return false;
+    }
+    
+    // Validar observações (máximo 300 caracteres)
+    if (_notesController.text.length > 300) {
+      return false;
+    }
+    
+    return true;
   }
 
   Future<void> _save() async {
@@ -175,6 +232,23 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
     });
 
     try {
+      // Combinar data e hora para criar DateTime completo
+      final startDateTime = DateTime(
+        _startDate!.year,
+        _startDate!.month,
+        _startDate!.day,
+        _startTime!.hour,
+        _startTime!.minute,
+      );
+      
+      final endDateTime = DateTime(
+        _endDate!.year,
+        _endDate!.month,
+        _endDate!.day,
+        _endTime!.hour,
+        _endTime!.minute,
+      );
+
       final controller = context.read<AppointmentController>();
       final success = await controller.createAppointment(
         CreateAppointmentData(
@@ -184,8 +258,8 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
               : _descriptionController.text.trim(),
           type: _selectedType,
           visibility: _selectedVisibility,
-          startDate: _startDate!,
-          endDate: _endDate!,
+          startDate: startDateTime,
+          endDate: endDateTime,
           location: _locationController.text.trim().isEmpty
               ? null
               : _locationController.text.trim(),
@@ -255,6 +329,7 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
                 }
                 return null;
               },
+              onChanged: (_) => _validateForm(),
             ),
             const SizedBox(height: 16),
             CustomTextField(
@@ -267,6 +342,7 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
                 }
                 return null;
               },
+              onChanged: (_) => _validateForm(),
             ),
             const SizedBox(height: 16),
             // Tipo
@@ -328,6 +404,24 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
                 ),
               ],
             ),
+            if (_startDate != null && _startTime != null && _endDate != null && _endTime != null)
+              Builder(
+                builder: (context) {
+                  final dateError = _validateDates();
+                  if (dateError != null) {
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        dateError,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: AppColors.status.error,
+                        ),
+                      ),
+                    );
+                  }
+                  return const SizedBox.shrink();
+                },
+              ),
             const SizedBox(height: 16),
             // Data e Hora Fim
             Text(
@@ -378,6 +472,7 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
                 }
                 return null;
               },
+              onChanged: (_) => _validateForm(),
             ),
             const SizedBox(height: 24),
             // Visibilidade
@@ -453,7 +548,7 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
             CustomButton(
               text: 'Criar Agendamento',
               icon: Icons.check,
-              onPressed: _isLoading ? null : _save,
+              onPressed: (_isLoading || !_isFormValid()) ? null : _save,
               isLoading: _isLoading,
               isFullWidth: true,
             ),

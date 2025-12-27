@@ -15,12 +15,10 @@ final _currencyFormatter = NumberFormat.currency(
 
 /// Página de listagem de ofertas de propriedades
 class PropertyOffersPage extends StatefulWidget {
-  final String? propertyId; // Se fornecido, filtra apenas ofertas desta propriedade
+  final String?
+  propertyId; // Se fornecido, filtra apenas ofertas desta propriedade
 
-  const PropertyOffersPage({
-    super.key,
-    this.propertyId,
-  });
+  const PropertyOffersPage({super.key, this.propertyId});
 
   @override
   State<PropertyOffersPage> createState() => _PropertyOffersPageState();
@@ -31,7 +29,7 @@ class _PropertyOffersPageState extends State<PropertyOffersPage> {
   bool _isLoading = true;
   List<PropertyOffer> _offers = [];
   String? _errorMessage;
-  
+
   // Filtros
   String? _selectedStatus;
   String? _selectedType;
@@ -40,6 +38,8 @@ class _PropertyOffersPageState extends State<PropertyOffersPage> {
   @override
   void initState() {
     super.initState();
+    debugPrint('💰 [OFFERS_PAGE] initState chamado');
+    debugPrint('💰 [OFFERS_PAGE] propertyId: ${widget.propertyId}');
     _loadOffers();
   }
 
@@ -50,6 +50,7 @@ class _PropertyOffersPageState extends State<PropertyOffersPage> {
   }
 
   Future<void> _loadOffers() async {
+    debugPrint('💰 [OFFERS_PAGE] Iniciando carregamento de ofertas...');
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -62,26 +63,94 @@ class _PropertyOffersPageState extends State<PropertyOffersPage> {
         type: _selectedType,
       );
 
+      debugPrint(
+        '💰 [OFFERS_PAGE] Filtros: propertyId=${filters.propertyId}, status=${filters.status}, type=${filters.type}',
+      );
+      debugPrint('💰 [OFFERS_PAGE] Chamando getAllOffers...');
+
       final response = await _offersService.getAllOffers(filters: filters);
+
+      debugPrint('💰 [OFFERS_PAGE] Resposta recebida:');
+      debugPrint('   - success: ${response.success}');
+      debugPrint('   - statusCode: ${response.statusCode}');
+      debugPrint('   - message: ${response.message}');
+      debugPrint('   - data is null: ${response.data == null}');
+      debugPrint('   - data type: ${response.data?.runtimeType}');
+
+      if (response.data != null && response.data is List) {
+        debugPrint('   - data length: ${(response.data as List).length}');
+      }
 
       if (mounted) {
         if (response.success && response.data != null) {
-          setState(() {
-            _offers = response.data!;
-            _isLoading = false;
-          });
+          try {
+            // Verificar se é uma lista
+            if (response.data is List) {
+              final dataList = response.data as List;
+              debugPrint(
+                '💰 [OFFERS_PAGE] Dados são uma lista com ${dataList.length} itens',
+              );
+
+              // Verificar se todos os itens são PropertyOffer
+              final offers = <PropertyOffer>[];
+              for (var i = 0; i < dataList.length; i++) {
+                final item = dataList[i];
+                if (item is PropertyOffer) {
+                  offers.add(item);
+                } else {
+                  debugPrint(
+                    '⚠️ [OFFERS_PAGE] Item $i não é PropertyOffer: ${item.runtimeType}',
+                  );
+                }
+              }
+
+              debugPrint(
+                '✅ [OFFERS_PAGE] ${offers.length} ofertas carregadas com sucesso',
+              );
+              setState(() {
+                _offers = offers;
+                _isLoading = false;
+              });
+            } else {
+              debugPrint(
+                '❌ [OFFERS_PAGE] Dados não são uma lista: ${response.data.runtimeType}',
+              );
+              if (mounted) {
+                setState(() {
+                  _errorMessage = 'Formato de dados inválido';
+                  _isLoading = false;
+                });
+              }
+            }
+          } catch (castError, stackTrace) {
+            debugPrint('❌ [OFFERS_PAGE] Erro ao processar dados: $castError');
+            debugPrint('📚 [OFFERS_PAGE] StackTrace: $stackTrace');
+            debugPrint(
+              '📋 [OFFERS_PAGE] Tipo de dados: ${response.data.runtimeType}',
+            );
+            if (mounted) {
+              setState(() {
+                _errorMessage = 'Erro ao processar dados das ofertas';
+                _isLoading = false;
+              });
+            }
+          }
         } else {
-          setState(() {
-            _errorMessage = response.message ?? 'Erro ao carregar ofertas';
-            _isLoading = false;
-          });
+          debugPrint('❌ [OFFERS_PAGE] Resposta não bem-sucedida ou sem dados');
+          if (mounted) {
+            setState(() {
+              _errorMessage = response.message ?? 'Erro ao carregar ofertas';
+              _isLoading = false;
+            });
+          }
         }
       }
-    } catch (e) {
-      debugPrint('❌ [OFFERS_PAGE] Erro: $e');
+    } catch (e, stackTrace) {
+      debugPrint('❌ [OFFERS_PAGE] Exceção capturada: $e');
+      debugPrint('📚 [OFFERS_PAGE] StackTrace: $stackTrace');
       if (mounted) {
         setState(() {
-          _errorMessage = 'Erro ao conectar com o servidor';
+          _errorMessage = 'Erro ao conectar com o servidor: ${e.toString()}';
           _isLoading = false;
         });
       }
@@ -119,9 +188,21 @@ class _PropertyOffersPageState extends State<PropertyOffersPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SkeletonText(width: 200, height: 20, margin: const EdgeInsets.only(bottom: 8)),
-              SkeletonText(width: 150, height: 16, margin: const EdgeInsets.only(bottom: 8)),
-              SkeletonText(width: double.infinity, height: 16, margin: const EdgeInsets.only(bottom: 8)),
+              SkeletonText(
+                width: 200,
+                height: 20,
+                margin: const EdgeInsets.only(bottom: 8),
+              ),
+              SkeletonText(
+                width: 150,
+                height: 16,
+                margin: const EdgeInsets.only(bottom: 8),
+              ),
+              SkeletonText(
+                width: double.infinity,
+                height: 16,
+                margin: const EdgeInsets.only(bottom: 8),
+              ),
             ],
           ),
         ),
@@ -137,11 +218,7 @@ class _PropertyOffersPageState extends State<PropertyOffersPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: AppColors.status.error,
-            ),
+            Icon(Icons.error_outline, size: 64, color: AppColors.status.error),
             const SizedBox(height: 16),
             Text(
               _errorMessage ?? 'Erro ao carregar ofertas',
@@ -194,7 +271,7 @@ class _PropertyOffersPageState extends State<PropertyOffersPage> {
     return RefreshIndicator(
       onRefresh: _loadOffers,
       child: ListView.builder(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.symmetric(vertical: 8),
         itemCount: _offers.length,
         itemBuilder: (context, index) {
           final offer = _offers[index];
@@ -204,13 +281,17 @@ class _PropertyOffersPageState extends State<PropertyOffersPage> {
     );
   }
 
-  Widget _buildOfferCard(BuildContext context, ThemeData theme, PropertyOffer offer) {
+  Widget _buildOfferCard(
+    BuildContext context,
+    ThemeData theme,
+    PropertyOffer offer,
+  ) {
     final isDark = theme.brightness == Brightness.dark;
 
     return Card(
-      margin: const EdgeInsets.only(bottom: 16),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         side: BorderSide(
           color: isDark
               ? AppColors.border.borderDarkMode
@@ -218,175 +299,397 @@ class _PropertyOffersPageState extends State<PropertyOffersPage> {
           width: 1,
         ),
       ),
+      clipBehavior: Clip.antiAlias,
+      elevation: 0,
       child: InkWell(
         onTap: () {
-          Navigator.of(context).pushNamed(
-            '/properties/offers/${offer.id}',
-          );
+          Navigator.of(context).pushNamed('/properties/offers/${offer.id}');
         },
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header com título e status
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? AppColors.background.backgroundSecondaryDarkMode
+                    : AppColors.background.backgroundSecondary,
+                border: Border(
+                  bottom: BorderSide(
+                    color: ThemeHelpers.borderColor(context),
+                    width: 1,
+                  ),
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        Row(
+                          children: [
+                            Icon(
+                              offer.type == 'sale'
+                                  ? Icons.sell_outlined
+                                  : Icons.home_work_outlined,
+                              size: 18,
+                              color: AppColors.primary.primary,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              offer.type == 'sale' ? 'Venda' : 'Aluguel',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: AppColors.primary.primary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
                         Text(
-                          offer.property?.title ?? 'Propriedade #${offer.propertyId}',
+                          offer.property?.title ??
+                              'Propriedade #${offer.propertyId}',
                           style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.w700,
                             color: ThemeHelpers.textColor(context),
+                            fontSize: 16,
                           ),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          offer.type == 'sale' ? 'Venda' : 'Aluguel',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: ThemeHelpers.textSecondaryColor(context),
-                          ),
-                        ),
                       ],
                     ),
                   ),
+                  const SizedBox(width: 12),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
-                      color: _getStatusColor(offer.status).withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(6),
+                      color: _getStatusColor(
+                        offer.status,
+                      ).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: _getStatusColor(
+                          offer.status,
+                        ).withValues(alpha: 0.3),
+                        width: 1,
+                      ),
                     ),
                     child: Text(
                       _getStatusLabel(offer.status),
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: _getStatusColor(offer.status),
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 11,
                       ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            ),
+
+            // Valores
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Valor Oferecido',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                        ),
+                  // Valor oferecido (destaque)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.primary.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: AppColors.primary.primary.withValues(alpha: 0.2),
+                        width: 1,
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _currencyFormatter.format(offer.offeredValue),
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.primary.primary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (offer.property != null) ...[
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Preço Original',
+                          'Valor Oferecido',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: ThemeHelpers.textSecondaryColor(context),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 6),
                         Text(
-                          offer.type == 'sale'
-                              ? (offer.property!.salePrice != null
-                                  ? _currencyFormatter.format(offer.property!.salePrice)
-                                  : '-')
-                              : (offer.property!.rentPrice != null
-                                  ? _currencyFormatter.format(offer.property!.rentPrice)
-                                  : '-'),
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: ThemeHelpers.textSecondaryColor(context),
-                            decoration: TextDecoration.lineThrough,
+                          _currencyFormatter.format(offer.offeredValue),
+                          style: theme.textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.primary.primary,
+                            fontSize: 22,
                           ),
                         ),
+                      ],
+                    ),
+                  ),
+
+                  // Comparação com preço original
+                  if (offer.property != null) ...[
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Preço Original',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: ThemeHelpers.textSecondaryColor(
+                                    context,
+                                  ),
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                offer.type == 'sale'
+                                    ? (offer.property!.salePrice != null
+                                          ? _currencyFormatter.format(
+                                              offer.property!.salePrice!,
+                                            )
+                                          : '-')
+                                    : (offer.property!.rentPrice != null
+                                          ? _currencyFormatter.format(
+                                              offer.property!.rentPrice!,
+                                            )
+                                          : '-'),
+                                style: theme.textTheme.bodyLarge?.copyWith(
+                                  color: ThemeHelpers.textSecondaryColor(
+                                    context,
+                                  ),
+                                  decoration: TextDecoration.lineThrough,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (offer.property!.salePrice != null ||
+                            offer.property!.rentPrice != null) ...[
+                          const SizedBox(width: 12),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color:
+                                  offer.offeredValue <
+                                      (offer.type == 'sale'
+                                          ? (offer.property!.salePrice ?? 0)
+                                          : (offer.property!.rentPrice ?? 0))
+                                  ? AppColors.status.warning.withValues(
+                                      alpha: 0.1,
+                                    )
+                                  : AppColors.status.success.withValues(
+                                      alpha: 0.1,
+                                    ),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              offer.offeredValue <
+                                      (offer.type == 'sale'
+                                          ? (offer.property!.salePrice ?? 0)
+                                          : (offer.property!.rentPrice ?? 0))
+                                  ? 'Abaixo'
+                                  : 'Acima',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color:
+                                    offer.offeredValue <
+                                        (offer.type == 'sale'
+                                            ? (offer.property!.salePrice ?? 0)
+                                            : (offer.property!.rentPrice ?? 0))
+                                    ? AppColors.status.warning
+                                    : AppColors.status.success,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ],
                 ],
               ),
-              if (offer.publicUser != null) ...[
-                const SizedBox(height: 16),
-                Divider(color: ThemeHelpers.borderColor(context)),
-                const SizedBox(height: 8),
-                Row(
+            ),
+
+            // Informações do cliente
+            if (offer.publicUser != null) ...[
+              Divider(
+                height: 1,
+                thickness: 1,
+                color: ThemeHelpers.borderColor(context),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
                   children: [
-                    Icon(
-                      Icons.person_outline,
-                      size: 16,
-                      color: ThemeHelpers.textSecondaryColor(context),
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.primary.withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.person_outline,
+                        size: 20,
+                        color: AppColors.primary.primary,
+                      ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
+                            'Cliente',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: ThemeHelpers.textSecondaryColor(context),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
                             offer.publicUser!.email,
                             style: theme.textTheme.bodyMedium?.copyWith(
                               color: ThemeHelpers.textColor(context),
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14,
                             ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          Text(
-                            offer.publicUser!.phone,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: ThemeHelpers.textSecondaryColor(context),
+                          if (offer.publicUser!.phone.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              offer.publicUser!.phone,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: ThemeHelpers.textSecondaryColor(context),
+                                fontSize: 12,
+                              ),
                             ),
-                          ),
+                          ],
                         ],
                       ),
                     ),
                   ],
                 ),
-              ],
-              if (offer.message != null && offer.message!.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? AppColors.background.backgroundSecondaryDarkMode
-                        : AppColors.background.backgroundSecondary,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    offer.message!,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textColor(context),
+              ),
+            ],
+
+            // Mensagem
+            if (offer.message != null && offer.message!.isNotEmpty) ...[
+              Divider(
+                height: 1,
+                thickness: 1,
+                color: ThemeHelpers.borderColor(context),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.message_outlined,
+                          size: 16,
+                          color: ThemeHelpers.textSecondaryColor(context),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Mensagem',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: ThemeHelpers.textSecondaryColor(context),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
                     ),
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 12),
-              Text(
-                'Criada em ${_formatDate(offer.createdAt)}',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                  fontSize: 12,
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? AppColors.background.backgroundSecondaryDarkMode
+                            : AppColors.background.backgroundSecondary,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        offer.message!,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: ThemeHelpers.textColor(context),
+                          fontSize: 13,
+                          height: 1.4,
+                        ),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
-          ),
+
+            // Footer com data
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? AppColors.background.backgroundSecondaryDarkMode
+                    : AppColors.background.backgroundSecondary,
+                border: Border(
+                  top: BorderSide(
+                    color: ThemeHelpers.borderColor(context),
+                    width: 1,
+                  ),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.access_time_outlined,
+                    size: 14,
+                    color: ThemeHelpers.textSecondaryColor(context),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Criada em ${_formatDate(offer.createdAt)}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: ThemeHelpers.textSecondaryColor(context),
+                      fontSize: 11,
+                    ),
+                  ),
+                  const Spacer(),
+                  Icon(
+                    Icons.arrow_forward_ios,
+                    size: 12,
+                    color: ThemeHelpers.textSecondaryColor(context),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -484,9 +787,18 @@ class _PropertyOffersPageState extends State<PropertyOffersPage> {
                   ),
                   items: [
                     const DropdownMenuItem(value: null, child: Text('Todos')),
-                    const DropdownMenuItem(value: 'pending', child: Text('Pendente')),
-                    const DropdownMenuItem(value: 'accepted', child: Text('Aceita')),
-                    const DropdownMenuItem(value: 'rejected', child: Text('Rejeitada')),
+                    const DropdownMenuItem(
+                      value: 'pending',
+                      child: Text('Pendente'),
+                    ),
+                    const DropdownMenuItem(
+                      value: 'accepted',
+                      child: Text('Aceita'),
+                    ),
+                    const DropdownMenuItem(
+                      value: 'rejected',
+                      child: Text('Rejeitada'),
+                    ),
                   ],
                   onChanged: (value) {
                     setState(() {
@@ -504,7 +816,10 @@ class _PropertyOffersPageState extends State<PropertyOffersPage> {
                   items: [
                     const DropdownMenuItem(value: null, child: Text('Todos')),
                     const DropdownMenuItem(value: 'sale', child: Text('Venda')),
-                    const DropdownMenuItem(value: 'rental', child: Text('Aluguel')),
+                    const DropdownMenuItem(
+                      value: 'rental',
+                      child: Text('Aluguel'),
+                    ),
                   ],
                   onChanged: (value) {
                     setState(() {
@@ -563,4 +878,3 @@ class _PropertyOffersPageState extends State<PropertyOffersPage> {
     );
   }
 }
-

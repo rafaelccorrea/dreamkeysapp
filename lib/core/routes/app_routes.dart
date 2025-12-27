@@ -17,6 +17,8 @@ import '../../features/appointments/pages/calendar_page.dart';
 import '../../features/appointments/pages/create_appointment_page.dart';
 import '../../features/appointments/pages/edit_appointment_page.dart';
 import '../../features/appointments/pages/appointment_details_page.dart';
+import '../../features/profile/pages/profile_page.dart';
+import '../../features/profile/pages/edit_profile_page.dart';
 
 /// Rotas da aplicação com transições customizadas
 class AppRoutes {
@@ -31,6 +33,8 @@ class AppRoutes {
   static const String twoFactor = '/two-factor';
   static const String home = '/home';
   static const String settings = '/settings';
+  static const String profile = '/profile';
+  static const String profileEdit = '/profile/edit';
   static const String properties = '/properties';
   static const String propertyCreate = '/properties/create';
   static const String propertyOffers = '/properties/offers';
@@ -81,6 +85,10 @@ class AppRoutes {
       return _buildRoute(const DashboardPage(), settings);
     } else if (routeName == AppRoutes.settings) {
       return _buildRoute(const SettingsPage(), settings);
+    } else if (routeName == AppRoutes.profile) {
+      return _buildRoute(const ProfilePage(), settings);
+    } else if (routeName == AppRoutes.profileEdit) {
+      return _buildRoute(const EditProfilePage(), settings);
     } else if (routeName == AppRoutes.properties) {
       return _buildRoute(const PropertiesPage(), settings);
     } else if (routeName == AppRoutes.notifications) {
@@ -101,8 +109,30 @@ class AppRoutes {
           return _buildRoute(AppointmentDetailsPage(appointmentId: id), settings);
         }
       }
-    } else if (routeName != null && routeName.startsWith('/properties/') && routeName != AppRoutes.propertyCreate) {
-      // Detalhes ou edição de propriedade
+    } else if (routeName == AppRoutes.propertyCreate) {
+      return _buildRoute(
+        const CreatePropertyPage(),
+        settings,
+      );
+    } else if (routeName == AppRoutes.propertyOffers) {
+      // IMPORTANTE: Esta rota deve vir ANTES da verificação genérica de /properties/
+      debugPrint('🛣️ [ROUTES] Navegando para PropertyOffersPage');
+      return _buildRoute(
+        const PropertyOffersPage(),
+        settings,
+      );
+    } else if (routeName != null && routeName.startsWith('/properties/offers/')) {
+      // Detalhes de oferta: /properties/offers/:offerId
+      final segments = routeName.split('/');
+      if (segments.length == 4) {
+        final offerId = segments[3];
+        return _buildRoute(
+          OfferDetailsPage(offerId: offerId),
+          settings,
+        );
+      }
+    } else if (routeName != null && routeName.startsWith('/properties/')) {
+      // Detalhes ou edição de propriedade (deve vir DEPOIS das rotas de ofertas)
       final segments = routeName.split('/');
       if (segments.length >= 3) {
         final id = segments[2];
@@ -125,26 +155,6 @@ class AppRoutes {
         const Scaffold(body: Center(child: Text('Página não encontrada'))),
         settings,
       );
-    } else if (routeName == AppRoutes.propertyCreate) {
-      return _buildRoute(
-        const CreatePropertyPage(),
-        settings,
-      );
-    } else if (routeName == AppRoutes.propertyOffers) {
-      return _buildRoute(
-        const PropertyOffersPage(),
-        settings,
-      );
-    } else if (routeName != null && routeName.startsWith('/properties/offers/')) {
-      // Detalhes de oferta: /properties/offers/:offerId
-      final segments = routeName.split('/');
-      if (segments.length == 4) {
-        final offerId = segments[3];
-        return _buildRoute(
-          OfferDetailsPage(offerId: offerId),
-          settings,
-        );
-      }
     }
     
     // Rota não encontrada

@@ -34,14 +34,38 @@ class AppointmentService {
       if (limit != null) params['limit'] = limit.toString();
       if (onlyMyData != null) params['onlyMyData'] = onlyMyData.toString();
 
-      final response = await _apiService.get<Map<String, dynamic>>(
+      final response = await _apiService.get(
         ApiConstants.appointments,
         queryParameters: params.isEmpty ? null : params,
       );
 
       if (response.success && response.data != null) {
         try {
-          final listResponse = AppointmentListResponse.fromJson(response.data!);
+          AppointmentListResponse listResponse;
+          
+          // Verificar se a resposta é uma lista direta ou um objeto com paginação
+          if (response.data is List) {
+            // Se for uma lista direta, criar um objeto de resposta com paginação padrão
+            final appointments = (response.data as List)
+                .map((e) => Appointment.fromJson(e as Map<String, dynamic>))
+                .toList();
+            
+            listResponse = AppointmentListResponse(
+              appointments: appointments,
+              pagination: PaginationInfo(
+                page: page ?? 1,
+                limit: limit ?? 20,
+                total: appointments.length,
+                totalPages: 1,
+              ),
+            );
+          } else if (response.data is Map<String, dynamic>) {
+            // Se for um objeto com paginação, fazer parse normal
+            listResponse = AppointmentListResponse.fromJson(response.data as Map<String, dynamic>);
+          } else {
+            throw Exception('Formato de resposta não reconhecido');
+          }
+          
           return ApiResponse.success(
             data: listResponse,
             statusCode: response.statusCode,
@@ -49,6 +73,7 @@ class AppointmentService {
         } catch (e, stackTrace) {
           debugPrint('❌ [APPOINTMENT_SERVICE] Erro ao fazer parse: $e');
           debugPrint('📚 [APPOINTMENT_SERVICE] StackTrace: $stackTrace');
+          debugPrint('📦 [APPOINTMENT_SERVICE] Tipo da resposta: ${response.data.runtimeType}');
           return ApiResponse.error(
             message: 'Erro ao processar resposta',
             statusCode: response.statusCode,

@@ -381,14 +381,18 @@ class _AppDrawerState extends State<AppDrawer> {
                 _buildDrawerItem(
                   context: context,
                   currentRoute: activeRoute,
-                  route: '/appointments',
+                  route: AppRoutes.calendar,
                   icon: Icons.calendar_today_outlined,
                   activeIcon: Icons.calendar_today,
                   title: 'Agenda',
                   onTap: () {
                     Navigator.pop(context);
-                    // TODO: Navegar para tela de agenda
-                    _showComingSoon(context);
+                    // Se já está na tela de agenda, não navega novamente
+                    if (activeRoute == AppRoutes.calendar) return;
+                    Navigator.of(context).pushNamedAndRemoveUntil(
+                      AppRoutes.calendar,
+                      (route) => false,
+                    );
                   },
                 ),
                 _buildDrawerItem(
@@ -447,14 +451,15 @@ class _AppDrawerState extends State<AppDrawer> {
                 _buildDrawerItem(
                   context: context,
                   currentRoute: activeRoute,
-                  route: '/profile',
+                  route: AppRoutes.profile,
                   icon: Icons.person_outline,
                   activeIcon: Icons.person,
                   title: 'Perfil',
                   onTap: () {
                     Navigator.pop(context);
-                    // TODO: Navegar para tela de perfil
-                    _showComingSoon(context);
+                    // Se já está na tela de perfil, não navega novamente
+                    if (activeRoute == AppRoutes.profile) return;
+                    Navigator.of(context).pushNamed(AppRoutes.profile);
                   },
                 ),
                 _buildDrawerItem(

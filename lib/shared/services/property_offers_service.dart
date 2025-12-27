@@ -549,20 +549,69 @@ class PropertyOffersService {
     debugPrint('💰 [OFFERS_SERVICE] Buscando oferta: $offerId');
 
     try {
-      final response = await _apiService.get<Map<String, dynamic>>(
+      final response = await _apiService.get<dynamic>(
         '/properties/offers/detail/$offerId',
       );
 
+      debugPrint('💰 [OFFERS_SERVICE] Resposta recebida:');
+      debugPrint('   - success: ${response.success}');
+      debugPrint('   - statusCode: ${response.statusCode}');
+      debugPrint('   - message: ${response.message}');
+      debugPrint('   - data type: ${response.data?.runtimeType}');
+      debugPrint('   - data is null: ${response.data == null}');
+
       if (response.success && response.data != null) {
         try {
-          final offer = PropertyOffer.fromJson(response.data!);
+          debugPrint('💰 [OFFERS_SERVICE] Iniciando parsing da oferta...');
+          debugPrint(
+            '💰 [OFFERS_SERVICE] response.data completo: ${response.data}',
+          );
+
+          // Verificar se os dados estão dentro de um objeto 'data'
+          dynamic dataToParse = response.data;
+          debugPrint(
+            '💰 [OFFERS_SERVICE] dataToParse inicial type: ${dataToParse.runtimeType}',
+          );
+
+          // Se for um Map, tentar extrair 'data'
+          if (dataToParse is Map<String, dynamic>) {
+            debugPrint(
+              '💰 [OFFERS_SERVICE] dataToParse é um Map, tentando extrair data',
+            );
+            debugPrint(
+              '💰 [OFFERS_SERVICE] Chaves do Map: ${dataToParse.keys.toList()}',
+            );
+            dataToParse = dataToParse['data'] ?? dataToParse;
+            debugPrint(
+              '💰 [OFFERS_SERVICE] dataToParse após extração type: ${dataToParse.runtimeType}',
+            );
+          }
+
+          // Garantir que é um Map
+          if (dataToParse is! Map<String, dynamic>) {
+            debugPrint(
+              '❌ [OFFERS_SERVICE] Resposta não é um Map: ${dataToParse.runtimeType}',
+            );
+            debugPrint('📋 [OFFERS_SERVICE] Dados recebidos: $dataToParse');
+            return ApiResponse.error(
+              message:
+                  'Formato de resposta inválido: esperado Map<String, dynamic>, recebido ${dataToParse.runtimeType}',
+              statusCode: response.statusCode,
+              data: response.error,
+            );
+          }
+
+          debugPrint('💰 [OFFERS_SERVICE] Fazendo fromJson...');
+          final offer = PropertyOffer.fromJson(dataToParse);
           debugPrint('✅ [OFFERS_SERVICE] Oferta encontrada: $offerId');
           return ApiResponse.success(
             data: offer,
             statusCode: response.statusCode,
           );
-        } catch (e) {
+        } catch (e, stackTrace) {
           debugPrint('❌ [OFFERS_SERVICE] Erro ao parsear resposta: $e');
+          debugPrint('📚 [OFFERS_SERVICE] StackTrace: $stackTrace');
+          debugPrint('📋 [OFFERS_SERVICE] Dados recebidos: ${response.data}');
           return ApiResponse.error(
             message: 'Erro ao processar dados: ${e.toString()}',
             statusCode: response.statusCode,
@@ -576,8 +625,9 @@ class PropertyOffersService {
         statusCode: response.statusCode,
         data: response.error,
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
       debugPrint('❌ [OFFERS_SERVICE] Erro de conexão: $e');
+      debugPrint('📚 [OFFERS_SERVICE] StackTrace: $stackTrace');
       return ApiResponse.error(
         message: 'Erro de conexão: ${e.toString()}',
         statusCode: 0,
@@ -601,21 +651,71 @@ class PropertyOffersService {
         data['responseMessage'] = responseMessage;
       }
 
-      final response = await _apiService.put<Map<String, dynamic>>(
+      final response = await _apiService.put<dynamic>(
         '/properties/offers/detail/$offerId/status',
         body: data,
       );
 
+      debugPrint('💰 [OFFERS_SERVICE] Resposta recebida:');
+      debugPrint('   - success: ${response.success}');
+      debugPrint('   - statusCode: ${response.statusCode}');
+      debugPrint('   - message: ${response.message}');
+      debugPrint('   - data type: ${response.data?.runtimeType}');
+
       if (response.success && response.data != null) {
         try {
-          final offer = PropertyOffer.fromJson(response.data!);
+          debugPrint(
+            '💰 [OFFERS_SERVICE] Iniciando parsing da oferta atualizada...',
+          );
+          debugPrint(
+            '💰 [OFFERS_SERVICE] response.data completo: ${response.data}',
+          );
+
+          // Verificar se os dados estão dentro de um objeto 'data'
+          dynamic dataToParse = response.data;
+          debugPrint(
+            '💰 [OFFERS_SERVICE] dataToParse inicial type: ${dataToParse.runtimeType}',
+          );
+
+          // Se for um Map, tentar extrair 'data'
+          if (dataToParse is Map<String, dynamic>) {
+            debugPrint(
+              '💰 [OFFERS_SERVICE] dataToParse é um Map, tentando extrair data',
+            );
+            debugPrint(
+              '💰 [OFFERS_SERVICE] Chaves do Map: ${dataToParse.keys.toList()}',
+            );
+            dataToParse = dataToParse['data'] ?? dataToParse;
+            debugPrint(
+              '💰 [OFFERS_SERVICE] dataToParse após extração type: ${dataToParse.runtimeType}',
+            );
+          }
+
+          // Garantir que é um Map
+          if (dataToParse is! Map<String, dynamic>) {
+            debugPrint(
+              '❌ [OFFERS_SERVICE] Resposta não é um Map: ${dataToParse.runtimeType}',
+            );
+            debugPrint('📋 [OFFERS_SERVICE] Dados recebidos: $dataToParse');
+            return ApiResponse.error(
+              message:
+                  'Formato de resposta inválido: esperado Map<String, dynamic>, recebido ${dataToParse.runtimeType}',
+              statusCode: response.statusCode,
+              data: response.error,
+            );
+          }
+
+          debugPrint('💰 [OFFERS_SERVICE] Fazendo fromJson...');
+          final offer = PropertyOffer.fromJson(dataToParse);
           debugPrint('✅ [OFFERS_SERVICE] Oferta atualizada: $offerId');
           return ApiResponse.success(
             data: offer,
             statusCode: response.statusCode,
           );
-        } catch (e) {
+        } catch (e, stackTrace) {
           debugPrint('❌ [OFFERS_SERVICE] Erro ao parsear resposta: $e');
+          debugPrint('📚 [OFFERS_SERVICE] StackTrace: $stackTrace');
+          debugPrint('📋 [OFFERS_SERVICE] Dados recebidos: ${response.data}');
           return ApiResponse.error(
             message: 'Erro ao processar dados: ${e.toString()}',
             statusCode: response.statusCode,
@@ -629,8 +729,9 @@ class PropertyOffersService {
         statusCode: response.statusCode,
         data: response.error,
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
       debugPrint('❌ [OFFERS_SERVICE] Erro de conexão: $e');
+      debugPrint('📚 [OFFERS_SERVICE] StackTrace: $stackTrace');
       return ApiResponse.error(
         message: 'Erro de conexão: ${e.toString()}',
         statusCode: 0,

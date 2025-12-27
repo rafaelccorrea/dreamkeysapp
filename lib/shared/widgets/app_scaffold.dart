@@ -23,7 +23,7 @@ class AppScaffold extends StatelessWidget {
     this.title,
     this.actions,
     this.showBottomNavigation = true,
-    this.currentBottomNavIndex = 0,
+    this.currentBottomNavIndex = -1, // -1 significa detectar automaticamente pela rota
     this.onBottomNavTap,
     this.userName,
     this.userEmail,
@@ -36,6 +36,13 @@ class AppScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    
+    // Determinar o índice da bottom navigation baseado na rota atual se não foi especificado
+    final route = ModalRoute.of(context);
+    final routeName = route?.settings.name;
+    final bottomNavIndex = currentBottomNavIndex >= 0 
+        ? currentBottomNavIndex 
+        : AppBottomNavigation.getIndexForRoute(routeName);
     
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -61,7 +68,7 @@ class AppScaffold extends StatelessWidget {
       body: body,
       bottomNavigationBar: showBottomNavigation
           ? AppBottomNavigation(
-              currentIndex: currentBottomNavIndex,
+              currentIndex: bottomNavIndex,
               onTap: onBottomNavTap ??
                   (index) {
                     AppBottomNavigation.navigateToIndex(context, index);

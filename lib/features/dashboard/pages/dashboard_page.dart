@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
+import '../../../../core/routes/app_routes.dart';
 import '../../../../shared/services/dashboard_service.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
 import '../../notifications/widgets/notification_center.dart';
+import '../widgets/dashboard_filters_drawer.dart';
 
 // Formatters globais
 final _currencyFormatter = NumberFormat.currency(
@@ -28,6 +30,7 @@ class _DashboardPageState extends State<DashboardPage> {
   bool _isLoading = true;
   DashboardResponse? _dashboardData;
   String? _errorMessage;
+  DashboardFilters _filters = DashboardFilters.defaultFilters();
 
   @override
   void initState() {
@@ -42,7 +45,15 @@ class _DashboardPageState extends State<DashboardPage> {
     });
 
     try {
-      final response = await DashboardService.instance.getUserDashboard();
+      final response = await DashboardService.instance.getUserDashboard(
+        dateRange: _filters.dateRange ?? '30d',
+        compareWith: _filters.compareWith ?? 'previous_period',
+        metric: _filters.metric ?? 'all',
+        startDate: _filters.startDate,
+        endDate: _filters.endDate,
+        activitiesLimit: _filters.activitiesLimit,
+        appointmentsLimit: _filters.appointmentsLimit,
+      );
 
       if (response.success && response.data != null) {
         if (mounted) {
@@ -71,6 +82,28 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
+  void _showFiltersDialog(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      barrierColor: Colors.black54,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      builder: (context) => DashboardFiltersDrawer(
+        initialFilters: _filters,
+        onFiltersChanged: (newFilters) {
+          setState(() {
+            _filters = newFilters;
+          });
+          _loadDashboardData();
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -83,6 +116,11 @@ class _DashboardPageState extends State<DashboardPage> {
       userAvatar: _dashboardData?.user.avatar,
       actions: [
         const NotificationCenter(),
+        IconButton(
+          icon: const Icon(Icons.filter_list),
+          onPressed: () => _showFiltersDialog(context),
+          tooltip: 'Filtros',
+        ),
         IconButton(
           icon: const Icon(Icons.refresh),
           onPressed: _loadDashboardData,
@@ -358,48 +396,29 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget _buildGreeting(BuildContext context, ThemeData theme) {
     final userName = _dashboardData?.user.name ?? 'Usuário';
 
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '${_getGreeting()}, ${userName.split(' ').first}! 👋',
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: ThemeHelpers.textColor(context),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Aqui está um resumo das suas atividades',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _formatFullDate(),
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                ),
-              ),
-            ],
+        Text(
+          '${_getGreeting()}, ${userName.split(' ').first}! 👋',
+          style: theme.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+            color: ThemeHelpers.textColor(context),
           ),
         ),
-        IconButton(
-          icon: const Icon(Icons.filter_list),
-          onPressed: () {
-            // TODO: Implementar drawer de filtros
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Filtros em breve'),
-                duration: Duration(seconds: 2),
-              ),
-            );
-          },
-          tooltip: 'Filtros',
+        const SizedBox(height: 8),
+        Text(
+          'Aqui está um resumo das suas atividades',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: ThemeHelpers.textSecondaryColor(context),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _formatFullDate(),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: ThemeHelpers.textSecondaryColor(context),
+          ),
         ),
       ],
     );
@@ -1180,7 +1199,20 @@ class _DashboardPageState extends State<DashboardPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildSectionTitle('Próximos Compromissos'),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: _buildSectionTitle('Próximos Compromissos'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pushNamed(AppRoutes.calendar);
+              },
+              child: const Text('Ver todos'),
+            ),
+          ],
+        ),
         const SizedBox(height: 16),
         if (appointments.isNotEmpty)
           ...appointments
@@ -1197,8 +1229,10 @@ class _DashboardPageState extends State<DashboardPage> {
             icon: Icons.calendar_today_outlined,
             title: 'Nenhum agendamento',
             message: 'Você não tem compromissos agendados no momento. Que tal agendar uma visita?',
-            actionLabel: null,
-            onAction: null,
+            actionLabel: 'Ir para Agenda',
+            onAction: () {
+              Navigator.of(context).pushNamed(AppRoutes.calendar);
+            },
             isCard: false,
           ),
       ],
@@ -1210,15 +1244,22 @@ class _DashboardPageState extends State<DashboardPage> {
     required ThemeData theme,
     required DashboardAppointment appointment,
   }) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: ThemeHelpers.borderLightColor(context), width: 1),
-      ),
-      child: Row(
+    return InkWell(
+      onTap: () {
+        Navigator.of(context).pushNamed(
+          AppRoutes.calendarDetails(appointment.id),
+        );
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: ThemeHelpers.cardBackgroundColor(context),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: ThemeHelpers.borderLightColor(context), width: 1),
+        ),
+        child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(12),
@@ -1272,6 +1313,7 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
           ),
         ],
+        ),
       ),
     );
   }
