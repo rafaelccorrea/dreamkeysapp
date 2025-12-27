@@ -7,6 +7,9 @@ class AppAssets {
   static const String logo = 'assets/images/logo.png';
   static const String backgroundLogin = 'assets/images/background.jpg';
 
+  // Animações Lottie
+  static const String loadingHome = 'assets/loading-home.json';
+
   // Ícones (se houver pasta de ícones)
   // static const String iconHome = 'assets/icons/home.png';
   

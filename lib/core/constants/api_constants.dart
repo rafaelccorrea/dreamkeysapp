@@ -3,9 +3,8 @@ class ApiConstants {
   ApiConstants._();
 
   // Base URL - TODO: Configurar através de variáveis de ambiente
-  static const String baseUrl = 'https://api.example.com';
-  static const String apiVersion = 'v1';
-  static const String baseApiUrl = '$baseUrl/api/$apiVersion';
+  static const String baseUrl = 'https://api.dreamkeys.com.br';
+  static const String baseApiUrl = baseUrl;
 
   // Endpoints de Autenticação
   static const String login = '/auth/login';

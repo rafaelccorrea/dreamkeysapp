@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import '../../core/constants/api_constants.dart';
 import 'api_service.dart';
 
@@ -31,8 +32,8 @@ class LoginResponse {
   factory LoginResponse.fromJson(Map<String, dynamic> json) {
     return LoginResponse(
       user: User.fromJson(json['user'] as Map<String, dynamic>),
-      token: json['token'] as String,
-      refreshToken: json['refreshToken'] as String,
+      token: json['access_token'] as String? ?? json['token'] as String? ?? json['accessToken'] as String? ?? '',
+      refreshToken: json['refresh_token'] as String? ?? json['refreshToken'] as String? ?? '',
     );
   }
 }
@@ -44,12 +45,14 @@ class User {
   final String role;
   final bool owner;
   final String? avatar;
-  final String companyId;
+  final String? companyId;
   final String createdAt;
-  final String updatedAt;
+  final String? updatedAt;
   final String? managerId;
   final List<String>? managedUserIds;
   final bool? isAvailableForPublicSite;
+  final String? document;
+  final String? phone;
 
   User({
     required this.id,
@@ -58,31 +61,37 @@ class User {
     required this.role,
     required this.owner,
     this.avatar,
-    required this.companyId,
+    this.companyId,
     required this.createdAt,
-    required this.updatedAt,
+    this.updatedAt,
     this.managerId,
     this.managedUserIds,
     this.isAvailableForPublicSite,
+    this.document,
+    this.phone,
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
     return User(
-      id: json['id'] as String,
-      name: json['name'] as String,
-      email: json['email'] as String,
-      role: json['role'] as String,
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      email: json['email']?.toString() ?? '',
+      role: json['role']?.toString() ?? '',
       owner: json['owner'] as bool? ?? false,
-      avatar: json['avatar'] as String?,
-      companyId: json['companyId'] as String,
-      createdAt: json['createdAt'] as String,
-      updatedAt: json['updatedAt'] as String,
-      managerId: json['managerId'] as String?,
+      avatar: json['avatar']?.toString(),
+      companyId: json['companyId']?.toString() ?? json['company_id']?.toString(),
+      createdAt: json['createdAt']?.toString() ?? json['created_at']?.toString() ?? '',
+      updatedAt: json['updatedAt']?.toString() ?? json['updated_at']?.toString(),
+      managerId: json['managerId']?.toString() ?? json['manager_id']?.toString(),
       managedUserIds: json['managedUserIds'] != null
-          ? List<String>.from(json['managedUserIds'] as List)
-          : null,
+          ? List<String>.from((json['managedUserIds'] as List).map((e) => e.toString()))
+          : json['managed_user_ids'] != null
+              ? List<String>.from((json['managed_user_ids'] as List).map((e) => e.toString()))
+              : null,
       isAvailableForPublicSite:
-          json['isAvailableForPublicSite'] as bool? ?? false,
+          json['isAvailableForPublicSite'] as bool? ?? json['is_available_for_public_site'] as bool? ?? false,
+      document: json['document']?.toString(),
+      phone: json['phone']?.toString(),
     );
   }
 }
@@ -123,13 +132,23 @@ class AuthService {
     );
 
     if (response.success && response.data != null) {
-      final loginResponse = LoginResponse.fromJson(response.data!);
-      // Define o token no serviço de API
-      _apiService.setToken(loginResponse.token);
-      return ApiResponse.success(
-        data: loginResponse,
-        statusCode: response.statusCode,
-      );
+      // Log para debug
+      debugPrint('📥 [AUTH_SERVICE] Response data: ${response.data}');
+      
+      try {
+        final loginResponse = LoginResponse.fromJson(response.data!);
+        // Define o token no serviço de API
+        _apiService.setToken(loginResponse.token);
+        return ApiResponse.success(
+          data: loginResponse,
+          statusCode: response.statusCode,
+        );
+      } catch (e, stackTrace) {
+        debugPrint('❌ [AUTH_SERVICE] Erro ao fazer parse do LoginResponse: $e');
+        debugPrint('📚 [AUTH_SERVICE] StackTrace: $stackTrace');
+        debugPrint('📋 [AUTH_SERVICE] JSON recebido: ${response.data}');
+        rethrow;
+      }
     }
 
     return ApiResponse.error(
