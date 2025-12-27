@@ -1,7 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'dart:async';
 import '../../../../core/routes/app_routes.dart';
 import '../../../../core/constants/app_assets.dart';
+import '../../../../shared/services/auth_service.dart';
+import '../../../../shared/services/api_service.dart';
+import '../../../../shared/services/biometric_service.dart';
+import '../../../../shared/services/secure_storage_service.dart';
+import '../../../../shared/services/token_refresh_service.dart';
+import '../../../../shared/services/company_service.dart';
+import '../../../../shared/services/module_access_service.dart';
 
 class SplashPage extends StatefulWidget {
   const SplashPage({super.key});
@@ -63,17 +71,99 @@ class _SplashPageState extends State<SplashPage>
     // Iniciar animação
     _controller.forward();
 
-    // Navegar para login após 2.5 segundos
-    Timer(const Duration(milliseconds: 2500), () {
-      if (mounted) {
+    // Verificar autenticação e navegar
+    _checkAuthenticationAndNavigate();
+  }
+
+  /// Verifica autenticação e navega para a tela apropriada
+  Future<void> _checkAuthenticationAndNavigate() async {
+    try {
+      // Aguardar um pouco para a animação aparecer
+      await Future.delayed(const Duration(milliseconds: 1500));
+
+      if (!mounted) return;
+
+      // Inicializar ApiService e carregar token salvo
+      await ApiService.instance.initialize();
+      await AuthService.instance.loadSavedToken();
+
+      // Verificar se está autenticado
+      final isAuthenticated = await AuthService.instance.isAuthenticated();
+
+      if (!mounted) return;
+
+      if (isAuthenticated) {
+        // Iniciar serviço de refresh periódico em background
+        TokenRefreshService.instance.startPeriodicRefresh();
+        debugPrint('🔄 [SPLASH] Serviço de refresh periódico iniciado');
+
+        // Garantir que uma empresa esteja selecionada (matrix ou primeira)
+        final companyService = CompanyService.instance;
+        await companyService.ensureCompanySelected();
+        debugPrint('✅ [SPLASH] Empresa garantida (se houver empresas disponíveis)');
+
+        // Inicializar ModuleAccessService
+        debugPrint('🔄 [SPLASH] Inicializando ModuleAccessService...');
+        await ModuleAccessService.instance.initialize();
+        debugPrint('✅ [SPLASH] ModuleAccessService inicializado');
+
+        // Verificar se há credenciais salvas e biometria disponível
+        final hasCredentials = await SecureStorageService.instance.hasSavedCredentials();
+        final biometricService = BiometricService.instance;
+        final hasBiometrics = await biometricService.hasBiometrics();
+        
+        debugPrint('🔍 [SPLASH] Verificando biometria - Credenciais: $hasCredentials, Biometria: $hasBiometrics');
+        
+        // Se há credenciais salvas e biometria disponível, solicitar biometria
+        if (hasCredentials && hasBiometrics) {
+          debugPrint('👆 [SPLASH] Solicitando autenticação biométrica...');
+          final biometricType = await biometricService.getBiometricTypeDescription();
+          final authenticated = await biometricService.authenticate(
+            reason: 'Use $biometricType para acessar o app',
+          );
+          
+          if (!authenticated) {
+            debugPrint('❌ [SPLASH] Autenticação biométrica cancelada ou falhou');
+            // Se biometria falhar, ir para login
+            if (mounted) {
+              TokenRefreshService.instance.stopPeriodicRefresh();
+              Navigator.of(context).pushReplacementNamed(AppRoutes.login);
+            }
+            return;
+          }
+          
+          debugPrint('✅ [SPLASH] Autenticação biométrica bem-sucedida');
+        }
+        
+        // Tentar validar o token fazendo uma requisição simples
+        // Se falhar, o refresh token será tentado automaticamente
+        debugPrint('✅ [SPLASH] Usuário autenticado, redirecionando para home...');
+        
+        // Navegar para home
+        if (mounted) {
+          Navigator.of(context).pushReplacementNamed(AppRoutes.home);
+        }
+      } else {
+        debugPrint('ℹ️ [SPLASH] Usuário não autenticado, redirecionando para login...');
+        // Navegar para login
         Navigator.of(context).pushReplacementNamed(AppRoutes.login);
       }
-    });
+    } catch (e, stackTrace) {
+      debugPrint('❌ [SPLASH] Erro ao verificar autenticação: $e');
+      debugPrint('📚 [SPLASH] StackTrace: $stackTrace');
+      
+      if (mounted) {
+        // Em caso de erro, ir para login
+        Navigator.of(context).pushReplacementNamed(AppRoutes.login);
+      }
+    }
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    // Não parar o refresh periódico aqui, pois ele deve continuar rodando
+    // mesmo após a splash desaparecer
     super.dispose();
   }
 

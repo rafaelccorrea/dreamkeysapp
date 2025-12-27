@@ -285,3 +285,6 @@ class CapitalizeInputFormatter extends TextInputFormatter {
     );
   }
 }
+
+
+

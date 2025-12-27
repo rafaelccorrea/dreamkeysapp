@@ -49,6 +49,12 @@ dependencies:
   
   # Lottie para animações
   lottie: ^3.1.0
+  
+  # Formatação de datas e números
+  intl: ^0.19.0
+  
+  # Armazenamento local de preferências
+  shared_preferences: ^2.3.0
 
 dev_dependencies:
   flutter_test:

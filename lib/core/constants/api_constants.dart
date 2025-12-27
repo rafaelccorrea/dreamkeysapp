@@ -18,6 +18,22 @@ class ApiConstants {
   static const String changePassword = '/auth/change-password';
   static const String avatar = '/auth/avatar';
 
+  // Endpoints de Dashboard
+  static const String dashboardUser = '/dashboard/user';
+
+  // Endpoints de Companies
+  static const String companies = '/companies';
+  static const String companyById = '/companies'; // /companies/:id
+
+  // Endpoints de Permissions
+  static const String myPermissions = '/permissions/my-permissions';
+
+  // Endpoints de Subscriptions
+  static const String checkSubscriptionAccess = '/subscriptions/check-access';
+
+  // Endpoints de Configurações
+  static const String settings = '/settings';
+
   // Headers
   static const String contentTypeHeader = 'Content-Type';
   static const String authorizationHeader = 'Authorization';

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../../shared/services/auth_service.dart';
 import '../../../../shared/services/biometric_service.dart';
 import '../../../../shared/services/secure_storage_service.dart';
+import '../../../../shared/services/login_flow_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../../../../shared/widgets/image_curve_clipper.dart';
@@ -37,8 +38,12 @@ class _LoginPageState extends State<LoginPage> {
 
   /// Inicializa verificação de biometria e credenciais salvas
   Future<void> _initializeBiometrics() async {
-    // Verificar biometria primeiro
+    // Verificar biometria primeiro e aguardar conclusão
     await _checkBiometricAvailability();
+
+    // Aguardar um pouco para garantir que o estado foi atualizado
+    await Future.delayed(const Duration(milliseconds: 100));
+
     // Depois verificar credenciais (precisa saber se biometria está disponível)
     await _checkSavedCredentials();
   }
@@ -98,38 +103,37 @@ class _LoginPageState extends State<LoginPage> {
       _isLoading = true;
     });
 
-    debugPrint('⏳ [LOGIN] Enviando requisição de login para a API...');
+    debugPrint('⏳ [LOGIN] Iniciando fluxo completo de login...');
 
     try {
-      final authService = AuthService.instance;
-      final loginRequest = LoginRequest(
+      final loginFlowService = LoginFlowService.instance;
+      final result = await loginFlowService.executeLoginFlow(
         email: email,
         password: _passwordController.text,
+        rememberMe: _saveCredentials,
+        context: context,
       );
 
-      debugPrint('📤 [LOGIN] Request: ${loginRequest.toJson()}');
-
-      final response = await authService.login(loginRequest);
-
-      debugPrint(
-        '📥 [LOGIN] Response recebida - Status: ${response.statusCode}, Success: ${response.success}',
-      );
-
-      if (response.success && response.data != null) {
-        debugPrint('✅ [LOGIN] Login bem-sucedido!');
-        debugPrint(
-          '👤 [LOGIN] Usuário: ${response.data?.user.name} (${response.data?.user.email})',
-        );
-        final token = response.data?.token ?? '';
-        if (token.isNotEmpty) {
-          final tokenPreview = token.length > 20
-              ? '${token.substring(0, 20)}...'
-              : token;
-          debugPrint('🎫 [LOGIN] Token: $tokenPreview');
-        } else {
-          debugPrint('⚠️ [LOGIN] Token está vazio');
+      if (result.requires2FA) {
+        debugPrint('🔐 [LOGIN] Navegando para tela de 2FA');
+        if (mounted) {
+          Navigator.of(context).pushNamed(
+            AppRoutes.twoFactor,
+            arguments: {
+              'email': result.email ?? email,
+              'password': result.password ?? _passwordController.text,
+              'tempToken': result.tempToken ?? '',
+              'rememberMe': result.rememberMe ?? _saveCredentials,
+            },
+          );
         }
-        // Login bem-sucedido - salvar credenciais se solicitado
+        return;
+      }
+
+      if (result.success && result.route != null) {
+        debugPrint('✅ [LOGIN] Login bem-sucedido!');
+
+        // Salvar credenciais se solicitado
         if (_saveCredentials && _biometricAvailable) {
           debugPrint('💾 [LOGIN] Salvando credenciais para biometria...');
           await SecureStorageService.instance.saveCredentials(
@@ -142,68 +146,44 @@ class _LoginPageState extends State<LoginPage> {
             });
           }
           debugPrint('✅ [LOGIN] Credenciais salvas com sucesso');
-        } else if (_biometricAvailable && !_saveCredentials) {
-          debugPrint(
-            'ℹ️ [LOGIN] Biometria disponível mas usuário não optou por salvar credenciais',
-          );
         }
 
         if (mounted) {
-          // Navegar para o dashboard
+          // Navegar para a rota retornada
           Navigator.of(
             context,
-          ).pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
+          ).pushNamedAndRemoveUntil(result.route!, (route) => false);
         }
       } else {
-        debugPrint('❌ [LOGIN] Login falhou');
-        debugPrint('📊 [LOGIN] Status Code: ${response.statusCode}');
-        debugPrint('📋 [LOGIN] Mensagem: ${response.message}');
-        debugPrint('🔍 [LOGIN] Error: ${response.error}');
-
-        // Verificar se requer 2FA
-        if (response.statusCode == 401 &&
-            response.error != null &&
-            response.error['errorCode'] == '2FA_REQUIRED') {
-          debugPrint('🔐 [LOGIN] Autenticação 2FA requerida');
-          // TODO: Navegar para tela de 2FA
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Autenticação de dois fatores requerida'),
-                backgroundColor: Color(0xFFF59E0B),
-              ),
-            );
-          }
-        } else {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Row(
-                  children: [
-                    Icon(Icons.error_outline, color: Colors.white, size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        response.message ??
-                            'Email ou senha incorretos. Tente novamente.',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                        ),
-                      ),
+        debugPrint('❌ [LOGIN] Login falhou: ${result.message}');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(
+                    Icons.error_outline,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      result.message,
+                      style: const TextStyle(color: Colors.white, fontSize: 14),
                     ),
-                  ],
-                ),
-                backgroundColor: AppColors.status.error,
-                behavior: SnackBarBehavior.floating,
-                margin: const EdgeInsets.all(16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                duration: const Duration(seconds: 4),
+                  ),
+                ],
               ),
-            );
-          }
+              backgroundColor: AppColors.status.error,
+              behavior: SnackBarBehavior.floating,
+              margin: const EdgeInsets.all(16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              duration: const Duration(seconds: 4),
+            ),
+          );
         }
       }
     } catch (e, stackTrace) {
@@ -259,18 +239,20 @@ class _LoginPageState extends State<LoginPage> {
     try {
       debugPrint('🔍 [BIOMETRIA] Verificando disponibilidade de biometria...');
       final biometricService = BiometricService.instance;
-      
+
       final isSupported = await biometricService.isDeviceSupported();
       debugPrint('📱 [BIOMETRIA] Dispositivo suporta: $isSupported');
-      
+
       final canCheck = await biometricService.canCheckBiometrics();
       debugPrint('✅ [BIOMETRIA] Pode verificar: $canCheck');
-      
-      final availableBiometrics = await biometricService.getAvailableBiometrics();
+
+      final availableBiometrics = await biometricService
+          .getAvailableBiometrics();
       debugPrint('👆 [BIOMETRIA] Biometrias disponíveis: $availableBiometrics');
-      
+
       final hasBiometrics = await biometricService.hasBiometrics();
-      final biometricType = await biometricService.getBiometricTypeDescription();
+      final biometricType = await biometricService
+          .getBiometricTypeDescription();
 
       debugPrint(
         '🔍 [BIOMETRIA] Disponível: $hasBiometrics, Tipo: $biometricType',
@@ -281,7 +263,9 @@ class _LoginPageState extends State<LoginPage> {
           _biometricAvailable = hasBiometrics;
           _biometricType = biometricType;
         });
-        debugPrint('🔄 [BIOMETRIA] Estado atualizado - Disponível: $_biometricAvailable');
+        debugPrint(
+          '🔄 [BIOMETRIA] Estado atualizado - Disponível: $_biometricAvailable',
+        );
       }
     } catch (e, stackTrace) {
       debugPrint('❌ [BIOMETRIA] Erro ao verificar biometria: $e');
@@ -307,14 +291,25 @@ class _LoginPageState extends State<LoginPage> {
           _hasSavedCredentials = hasCredentials;
         });
 
-        // Se há credenciais salvas, tentar login automático com biometria
-        if (hasCredentials && _biometricAvailable) {
+        // Se há credenciais salvas E biometria está disponível, tentar login automático
+        if (hasCredentials && _biometricAvailable && mounted) {
           debugPrint(
             '🚀 [BIOMETRIA] Iniciando login automático com biometria...',
           );
-          // Aguardar um pouco para a UI carregar
-          await Future.delayed(const Duration(milliseconds: 500));
-          _handleBiometricLogin();
+          debugPrint(
+            '🔍 [BIOMETRIA] Biometria: $_biometricAvailable, Credenciais: $hasCredentials',
+          );
+          // Aguardar um pouco para a UI carregar completamente
+          await Future.delayed(const Duration(milliseconds: 800));
+
+          // Verificar novamente se ainda está montado e as condições ainda são válidas
+          if (mounted && _biometricAvailable && _hasSavedCredentials) {
+            _handleBiometricLogin();
+          }
+        } else {
+          debugPrint(
+            'ℹ️ [BIOMETRIA] Login automático não iniciado - Biometria: $_biometricAvailable, Credenciais: $hasCredentials',
+          );
         }
       }
     } catch (e) {
@@ -633,50 +628,19 @@ class _LoginPageState extends State<LoginPage> {
                         ),
 
                         // Botão de Biometria (se disponível e há credenciais salvas)
-                        if (_biometricAvailable && _hasSavedCredentials) ...[
+                        if (_biometricAvailable &&
+                            _hasSavedCredentials &&
+                            !_isLoading) ...[
                           SizedBox(height: screenHeight * 0.02),
                           _buildBiometricButton(),
                         ],
 
                         // Checkbox para salvar credenciais (se biometria disponível e não há credenciais salvas)
-                        if (_biometricAvailable && !_hasSavedCredentials) ...[
+                        if (_biometricAvailable &&
+                            !_hasSavedCredentials &&
+                            !_isLoading) ...[
                           SizedBox(height: screenHeight * 0.02),
                           _buildSaveCredentialsCheckbox(),
-                        ],
-
-                        // Mensagem informativa se já tem credenciais salvas mas não mostra botão (edge case)
-                        if (_biometricAvailable && _hasSavedCredentials && false) ...[
-                          SizedBox(height: screenHeight * 0.02),
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: AppColors.primary.primary.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: AppColors.primary.primary.withOpacity(0.2),
-                                width: 1,
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.info_outline,
-                                  color: AppColors.primary.primary,
-                                  size: 20,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    'Credenciais salvas. Use $_biometricType para login rápido.',
-                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: AppColors.text.textSecondary,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
                         ],
 
                         SizedBox(height: screenHeight * 0.03),
@@ -811,7 +775,7 @@ class _LoginPageState extends State<LoginPage> {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
         color: _isLoading
-            ? AppColors.primary.primaryDark
+            ? AppColors.primary.primaryDarkMode
             : AppColors.primary.primary,
         boxShadow: _isLoading
             ? [
@@ -1011,10 +975,7 @@ class _LoginPageState extends State<LoginPage> {
           children: [
             TextButton(
               onPressed: () {
-                // TODO: Implementar recuperação de senha
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Funcionalidade em breve')),
-                );
+                Navigator.of(context).pushNamed(AppRoutes.forgotPassword);
               },
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(

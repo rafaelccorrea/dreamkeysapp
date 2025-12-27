@@ -93,15 +93,15 @@ class _CustomTextFieldState extends State<CustomTextField> {
           readOnly: widget.readOnly,
           textInputAction: widget.textInputAction,
           style: theme.textTheme.bodyLarge?.copyWith(
-            color: Colors.white,
+            color: theme.colorScheme.onSurface,
           ),
           decoration: InputDecoration(
             hintText: widget.hint,
             hintStyle: theme.textTheme.bodyLarge?.copyWith(
-              color: Colors.white.withOpacity(0.6),
+              color: theme.colorScheme.onSurface.withOpacity(0.6),
             ),
             labelStyle: theme.textTheme.labelLarge?.copyWith(
-              color: Colors.white.withOpacity(0.9),
+              color: theme.colorScheme.onSurface.withOpacity(0.9),
               fontWeight: FontWeight.w600,
             ),
             prefixIcon: widget.prefixIcon,

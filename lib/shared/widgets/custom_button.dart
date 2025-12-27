@@ -38,7 +38,7 @@ class CustomButton extends StatelessWidget {
               strokeWidth: 2,
               valueColor: AlwaysStoppedAnimation<Color>(
                 variant == ButtonVariant.primary
-                    ? Colors.white
+                    ? theme.colorScheme.onPrimary
                     : theme.colorScheme.primary,
               ),
             ),

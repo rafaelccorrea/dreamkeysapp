@@ -85,12 +85,12 @@ class AppTheme {
           width: 2,
         ),
       ),
-      labelStyle: const TextStyle(
-        color: Color(0xFF6B7280),
+      labelStyle: TextStyle(
+        color: AppColors.text.textSecondary,
         fontSize: 14,
       ),
-      hintStyle: const TextStyle(
-        color: Color(0xFF9CA3AF),
+      hintStyle: TextStyle(
+        color: AppColors.text.textLight,
         fontSize: 14,
       ),
       contentPadding: const EdgeInsets.symmetric(
@@ -162,7 +162,7 @@ class AppTheme {
       secondary: AppColors.secondary.secondary,
       error: AppColors.status.errorDarkMode,
       surface: AppColors.background.surfaceDarkMode,
-      onPrimary: const Color(0xFF111827),
+      onPrimary: Colors.white,
       onSecondary: Colors.white,
       onError: Colors.white,
       onSurface: AppColors.text.textDarkMode,
@@ -229,12 +229,12 @@ class AppTheme {
           width: 2,
         ),
       ),
-      labelStyle: const TextStyle(
-        color: Color(0xFF9CA3AF),
+      labelStyle: TextStyle(
+        color: AppColors.text.textSecondaryDarkMode,
         fontSize: 14,
       ),
-      hintStyle: const TextStyle(
-        color: Color(0xFF6B7280),
+      hintStyle: TextStyle(
+        color: AppColors.text.textLightDarkMode,
         fontSize: 14,
       ),
       contentPadding: const EdgeInsets.symmetric(
@@ -245,7 +245,7 @@ class AppTheme {
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
         backgroundColor: AppColors.primary.primaryDarkMode,
-        foregroundColor: const Color(0xFF111827),
+        foregroundColor: Colors.white,
         elevation: 0,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
         shape: RoundedRectangleBorder(
