@@ -30,45 +30,40 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutter_localizations:
-    sdk: flutter
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
-  
-  # HTTP client para chamadas de API
-  http: ^1.2.2
-  
-  # Google Fonts para Poppins
-  google_fonts: ^6.2.1
-  
-  # Autenticação biométrica
-  local_auth: ^2.3.0
-  
-  # Armazenamento seguro de credenciais
-  flutter_secure_storage: ^10.0.0
-  
-  # Lottie para animações
-  lottie: ^3.1.0
-  
-  # Formatação de datas e números
-  intl: ^0.20.2
-  
-  # Armazenamento local de preferências
-  shared_preferences: ^2.3.0
-  
-  # WebSocket para notificações em tempo real
-  web_socket_channel: ^3.0.1
-  
-  # Provider para gerenciamento de estado
-  provider: ^6.1.2
-  
-  # Calendário visual
-  table_calendar: ^3.1.2
-  
-  # Seleção de imagens
+
+  # State Management
+  provider: ^6.1.1
+
+  # HTTP Requests
+  http: ^1.2.0
+
+  # Internationalization
+  intl: ^0.19.0
+
+  # Secure Storage
+  flutter_secure_storage: ^9.0.0
+
+  # Shared Preferences
+  shared_preferences: ^2.2.2
+
+  # Local Authentication (Biometric)
+  local_auth: ^2.1.7
+
+  # Image Picker
   image_picker: ^1.1.2
+
+  # Google Fonts
+  google_fonts: ^6.1.0
+
+  # Table Calendar
+  table_calendar: ^3.0.9
+
+  # Lottie Animations
+  lottie: ^3.0.0
 
 dev_dependencies:
   flutter_test:
@@ -93,10 +88,9 @@ flutter:
   uses-material-design: true
 
   # To add assets to your application, add an assets section, like this:
-  assets:
-    - assets/images/logo.png
-    - assets/images/background.jpg
-    - assets/loading-home.json
+  # assets:
+  #   - images/a_dot_burr.jpeg
+  #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

@@ -174,6 +174,7 @@ enum AppointmentType {
   meeting('meeting', 'Reunião'),
   inspection('inspection', 'Vistoria'),
   documentation('documentation', 'Documentação'),
+  signature('signature', 'Assinatura'),
   maintenance('maintenance', 'Manutenção'),
   marketing('marketing', 'Marketing'),
   training('training', 'Treinamento'),

@@ -68,4 +68,12 @@ class ThemeHelpers {
         ? const Color(0xFF111827) // Texto escuro sobre fundo claro no dark mode
         : Colors.white; // Texto branco sobre fundo escuro no light mode
   }
+
+  /// Retorna a cor de fundo do AppBar baseada no tema
+  static Color appBarBackgroundColor(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
+    return brightness == Brightness.dark
+        ? AppColors.background.backgroundDarkMode
+        : AppColors.background.background;
+  }
 }

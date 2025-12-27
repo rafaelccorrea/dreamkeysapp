@@ -26,10 +26,13 @@ class AppointmentService {
       final params = <String, String>{};
       if (status != null && status.isNotEmpty) params['status'] = status;
       if (type != null && type.isNotEmpty) params['type'] = type;
-      if (startDate != null && startDate.isNotEmpty) params['startDate'] = startDate;
+      if (startDate != null && startDate.isNotEmpty)
+        params['startDate'] = startDate;
       if (endDate != null && endDate.isNotEmpty) params['endDate'] = endDate;
-      if (propertyId != null && propertyId.isNotEmpty) params['propertyId'] = propertyId;
-      if (clientId != null && clientId.isNotEmpty) params['clientId'] = clientId;
+      if (propertyId != null && propertyId.isNotEmpty)
+        params['propertyId'] = propertyId;
+      if (clientId != null && clientId.isNotEmpty)
+        params['clientId'] = clientId;
       if (page != null) params['page'] = page.toString();
       if (limit != null) params['limit'] = limit.toString();
       if (onlyMyData != null) params['onlyMyData'] = onlyMyData.toString();
@@ -42,14 +45,14 @@ class AppointmentService {
       if (response.success && response.data != null) {
         try {
           AppointmentListResponse listResponse;
-          
+
           // Verificar se a resposta é uma lista direta ou um objeto com paginação
           if (response.data is List) {
             // Se for uma lista direta, criar um objeto de resposta com paginação padrão
             final appointments = (response.data as List)
                 .map((e) => Appointment.fromJson(e as Map<String, dynamic>))
                 .toList();
-            
+
             listResponse = AppointmentListResponse(
               appointments: appointments,
               pagination: PaginationInfo(
@@ -61,11 +64,13 @@ class AppointmentService {
             );
           } else if (response.data is Map<String, dynamic>) {
             // Se for um objeto com paginação, fazer parse normal
-            listResponse = AppointmentListResponse.fromJson(response.data as Map<String, dynamic>);
+            listResponse = AppointmentListResponse.fromJson(
+              response.data as Map<String, dynamic>,
+            );
           } else {
             throw Exception('Formato de resposta não reconhecido');
           }
-          
+
           return ApiResponse.success(
             data: listResponse,
             statusCode: response.statusCode,
@@ -73,7 +78,9 @@ class AppointmentService {
         } catch (e, stackTrace) {
           debugPrint('❌ [APPOINTMENT_SERVICE] Erro ao fazer parse: $e');
           debugPrint('📚 [APPOINTMENT_SERVICE] StackTrace: $stackTrace');
-          debugPrint('📦 [APPOINTMENT_SERVICE] Tipo da resposta: ${response.data.runtimeType}');
+          debugPrint(
+            '📦 [APPOINTMENT_SERVICE] Tipo da resposta: ${response.data.runtimeType}',
+          );
           return ApiResponse.error(
             message: 'Erro ao processar resposta',
             statusCode: response.statusCode,
@@ -187,7 +194,7 @@ class AppointmentService {
   ) async {
     try {
       final response = await _apiService.patch<Map<String, dynamic>>(
-        ApiConstants.appointmentById(id),
+        ApiConstants.appointmentUpdate(id),
         body: data.toJson(),
       );
 
@@ -228,14 +235,11 @@ class AppointmentService {
   Future<ApiResponse<void>> deleteAppointment(String id) async {
     try {
       final response = await _apiService.delete(
-        ApiConstants.appointmentById(id),
+        ApiConstants.appointmentDelete(id),
       );
 
       if (response.success) {
-        return ApiResponse.success(
-          data: null,
-          statusCode: response.statusCode,
-        );
+        return ApiResponse.success(data: null, statusCode: response.statusCode);
       }
 
       return ApiResponse.error(
@@ -287,7 +291,9 @@ class AppointmentService {
         data: response.error,
       );
     } catch (e, stackTrace) {
-      debugPrint('❌ [APPOINTMENT_SERVICE] Exceção ao adicionar participante: $e');
+      debugPrint(
+        '❌ [APPOINTMENT_SERVICE] Exceção ao adicionar participante: $e',
+      );
       debugPrint('📚 [APPOINTMENT_SERVICE] StackTrace: $stackTrace');
       return ApiResponse.error(
         message: 'Erro ao adicionar participante: ${e.toString()}',
@@ -422,7 +428,9 @@ class AppointmentInviteService {
         data: response.error,
       );
     } catch (e, stackTrace) {
-      debugPrint('❌ [APPOINTMENT_INVITE_SERVICE] Exceção ao listar pendentes: $e');
+      debugPrint(
+        '❌ [APPOINTMENT_INVITE_SERVICE] Exceção ao listar pendentes: $e',
+      );
       debugPrint('📚 [APPOINTMENT_INVITE_SERVICE] StackTrace: $stackTrace');
       return ApiResponse.error(
         message: 'Erro ao listar convites pendentes: ${e.toString()}',
@@ -491,9 +499,7 @@ class AppointmentInviteService {
     String? responseMessage,
   }) async {
     try {
-      final body = <String, dynamic>{
-        'status': status.value,
-      };
+      final body = <String, dynamic>{'status': status.value};
       if (responseMessage != null && responseMessage.isNotEmpty) {
         body['responseMessage'] = responseMessage;
       }
@@ -544,10 +550,7 @@ class AppointmentInviteService {
       );
 
       if (response.success) {
-        return ApiResponse.success(
-          data: null,
-          statusCode: response.statusCode,
-        );
+        return ApiResponse.success(data: null, statusCode: response.statusCode);
       }
 
       return ApiResponse.error(
@@ -565,4 +568,3 @@ class AppointmentInviteService {
     }
   }
 }
-

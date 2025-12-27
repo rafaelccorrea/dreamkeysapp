@@ -85,7 +85,7 @@ class NotificationService {
       }
 
       final response = await _apiService.get<Map<String, dynamic>>(
-        ApiConstants.notificationsUnreadList,
+        ApiConstants.notificationsUnreadList(page, limit),
         queryParameters: params.isEmpty ? null : params,
       );
 
@@ -457,6 +457,7 @@ class NotificationService {
     }
   }
 }
+
 
 
 

@@ -124,7 +124,7 @@ class TagService {
           }
 
           if (dataToParse is List) {
-            final tags = (dataToParse as List)
+            final tags = dataToParse
                 .map((e) => Tag.fromJson(e as Map<String, dynamic>))
                 .toList();
             

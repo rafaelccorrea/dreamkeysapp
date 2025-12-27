@@ -34,55 +34,40 @@ class ApiConstants {
   // Endpoints de Configurações
   static const String settings = '/settings';
 
-  // Endpoints de Notificações
-  static const String notifications = '/notifications';
-  static const String notificationsUnreadList = '/notifications/unread/list';
-  static const String notificationsUnreadCount = '/notifications/unread-count';
-  static const String notificationsUnreadCountByCompany = '/notifications/unread-count-by-company';
-  static String notificationById(String id) => '/notifications/$id';
-  static String markNotificationRead(String id) => '/notifications/$id/read';
-  static String markNotificationUnread(String id) => '/notifications/$id/unread';
-  static const String markNotificationsReadBulk = '/notifications/read/bulk';
-  static const String markNotificationsReadAll = '/notifications/read/all';
-
-  // Endpoints de Agendamentos
+  // Endpoints de Appointments
   static const String appointments = '/appointments';
   static String appointmentById(String id) => '/appointments/$id';
-  static String appointmentParticipant(String appointmentId, String userId) => '/appointments/$appointmentId/participants/$userId';
-  
-  // Endpoints de Convites de Agendamento
-  static const String appointmentInvites = '/appointment-invites';
-  static const String appointmentInvitesMyInvites = '/appointment-invites/my-invites';
-  static const String appointmentInvitesPending = '/appointment-invites/pending';
-  static String appointmentInviteById(String id) => '/appointment-invites/$id';
-  static String appointmentInviteRespond(String id) => '/appointment-invites/$id/respond';
+  static String appointmentUpdate(String id) => '/appointments/$id';
+  static String appointmentDelete(String id) => '/appointments/$id';
+  static String appointmentParticipant(String appointmentId, String userId) =>
+      '/appointments/$appointmentId/participants/$userId';
+  static const String appointmentInvites = '/appointments/invites';
+  static const String appointmentInvitesMyInvites =
+      '/appointments/invites/my-invites';
+  static const String appointmentInvitesPending =
+      '/appointments/invites/pending';
+  static String appointmentInviteById(String id) => '/appointments/invites/$id';
+  static String appointmentInviteRespond(String id) =>
+      '/appointments/invites/$id/respond';
 
-  // WebSocket
-  static Uri getWebSocketUri({String? token}) {
-    // Parse da URL base
-    final baseUri = Uri.parse(baseUrl);
-    
-    // Determinar o scheme correto (wss para https, ws para http)
-    final scheme = baseUri.scheme == 'https' ? 'wss' : 'ws';
-    
-    // Construir URI do WebSocket
-    final uri = Uri(
-      scheme: scheme,
-      host: baseUri.host,
-      port: baseUri.port == 443 || baseUri.port == 80 ? null : baseUri.port,
-      path: '/notifications',
-      queryParameters: token != null && token.isNotEmpty 
-          ? {'token': token} 
-          : null,
-    );
-    
-    return uri;
+  // Endpoints de Notificações
+  static const String notifications = '/notifications';
+  static String notificationsUnreadList([int? page, int? limit]) {
+    final params = <String>[];
+    if (page != null) params.add('page=$page');
+    if (limit != null) params.add('limit=$limit');
+    return '/notifications/unread${params.isNotEmpty ? '?${params.join('&')}' : ''}';
   }
-  
-  // Método de compatibilidade que retorna String
-  static String getWebSocketUrl({String? token}) {
-    return getWebSocketUri(token: token).toString();
-  }
+
+  static const String notificationsUnreadCount = '/notifications/unread/count';
+  static const String notificationsUnreadCountByCompany =
+      '/notifications/unread/count/by-company';
+  static String notificationById(String id) => '/notifications/$id';
+  static String markNotificationRead(String id) => '/notifications/$id/read';
+  static String markNotificationUnread(String id) =>
+      '/notifications/$id/unread';
+  static const String markNotificationsReadBulk = '/notifications/read/bulk';
+  static const String markNotificationsReadAll = '/notifications/read/all';
 
   // Headers
   static const String contentTypeHeader = 'Content-Type';
