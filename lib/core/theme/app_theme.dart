@@ -148,6 +148,11 @@ class AppTheme {
       thickness: 1,
       space: 1,
     ),
+    progressIndicatorTheme: ProgressIndicatorThemeData(
+      color: AppColors.primary.primary,
+      linearTrackColor: AppColors.primary.primary.withOpacity(0.2),
+      circularTrackColor: AppColors.primary.primary.withOpacity(0.2),
+    ),
   );
 
   static ThemeData darkTheme = ThemeData(
@@ -291,6 +296,11 @@ class AppTheme {
       color: AppColors.border.borderDarkMode,
       thickness: 1,
       space: 1,
+    ),
+    progressIndicatorTheme: ProgressIndicatorThemeData(
+      color: AppColors.primary.primaryDarkMode,
+      linearTrackColor: AppColors.primary.primaryDarkMode.withOpacity(0.2),
+      circularTrackColor: AppColors.primary.primaryDarkMode.withOpacity(0.2),
     ),
   );
 }

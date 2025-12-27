@@ -28,6 +28,7 @@ class PropertiesPage extends StatefulWidget {
 class _PropertiesPageState extends State<PropertiesPage> {
   final PropertyService _propertyService = PropertyService.instance;
   bool _isLoading = true;
+  bool _isLoadingMore = false;
   List<Property> _properties = [];
   int _currentPage = 1;
   int _totalPages = 1;
@@ -36,23 +37,37 @@ class _PropertiesPageState extends State<PropertiesPage> {
   PropertyFilters? _filters;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
     _loadProperties();
+    _scrollController.addListener(_onScroll);
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+      // Carregar mais quando estiver a 200px do final
+      if (!_isLoadingMore && _currentPage < _totalPages) {
+        _loadMoreProperties();
+      }
+    }
   }
 
   Future<void> _loadProperties({bool refresh = false}) async {
     if (refresh) {
       setState(() {
         _currentPage = 1;
+        _properties.clear();
       });
     }
 
@@ -92,6 +107,48 @@ class _PropertiesPageState extends State<PropertiesPage> {
         setState(() {
           _errorMessage = 'Erro ao conectar com o servidor';
           _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadMoreProperties() async {
+    if (_isLoadingMore || _currentPage >= _totalPages) return;
+
+    setState(() {
+      _isLoadingMore = true;
+    });
+
+    try {
+      final nextPage = _currentPage + 1;
+      final filters = _filters?.copyWith(search: _searchQuery.trim().isEmpty ? null : _searchQuery.trim()) ?? 
+        (_searchQuery.trim().isNotEmpty ? PropertyFilters(search: _searchQuery.trim()) : null);
+      
+      final response = await _propertyService.getProperties(
+        page: nextPage,
+        limit: 50,
+        filters: filters,
+      );
+
+      if (mounted) {
+        if (response.success && response.data != null) {
+          setState(() {
+            _properties.addAll(response.data!.data);
+            _currentPage = nextPage;
+            _totalPages = response.data!.totalPages;
+            _isLoadingMore = false;
+          });
+        } else {
+          setState(() {
+            _isLoadingMore = false;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ [PROPERTIES_PAGE] Erro ao carregar mais: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingMore = false;
         });
       }
     }
@@ -978,9 +1035,19 @@ class _PropertiesPageState extends State<PropertiesPage> {
 
   Widget _buildListView(BuildContext context, ThemeData theme) {
     return ListView.builder(
+      controller: _scrollController,
       padding: const EdgeInsets.all(20),
-      itemCount: _properties.length,
+      itemCount: _properties.length + (_isLoadingMore ? 1 : 0),
       itemBuilder: (context, index) {
+        if (index == _properties.length) {
+          // Indicador de carregamento no final
+          return const Padding(
+            padding: EdgeInsets.all(20.0),
+            child: Center(
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
         final property = _properties[index];
         return _buildPropertyListCard(context, theme, property);
       },

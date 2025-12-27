@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../../shared/services/property_service.dart';
+import '../../../../shared/services/cep_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../../../../shared/widgets/custom_text_field.dart';
@@ -25,12 +27,18 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
   final _maxPriceController = TextEditingController();
   final _minAreaController = TextEditingController();
   final _maxAreaController = TextEditingController();
+  final _zipCodeController = TextEditingController();
   final _cityController = TextEditingController();
   final _neighborhoodController = TextEditingController();
+  final _stateController = TextEditingController();
 
   // Seleções
   PropertyType? _selectedType;
   PropertyStatus? _selectedStatus;
+
+  // Serviços
+  final CepService _cepService = CepService.instance;
+  bool _isSearchingCep = false;
 
   @override
   void initState() {
@@ -46,8 +54,10 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
     _maxPriceController.text = filters.maxPrice?.toString() ?? '';
     _minAreaController.text = filters.minArea?.toString() ?? '';
     _maxAreaController.text = filters.maxArea?.toString() ?? '';
+    _zipCodeController.text = '';
     _cityController.text = filters.city ?? '';
     _neighborhoodController.text = filters.neighborhood ?? '';
+    _stateController.text = '';
     _selectedType = filters.type;
     _selectedStatus = filters.status;
   }
@@ -58,9 +68,41 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
     _maxPriceController.dispose();
     _minAreaController.dispose();
     _maxAreaController.dispose();
+    _zipCodeController.dispose();
     _cityController.dispose();
     _neighborhoodController.dispose();
+    _stateController.dispose();
     super.dispose();
+  }
+
+  Future<void> _searchCep() async {
+    final cep = _zipCodeController.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (cep.length != 8) {
+      return;
+    }
+
+    setState(() {
+      _isSearchingCep = true;
+    });
+
+    try {
+      final address = await _cepService.searchCep(cep);
+      if (address != null && mounted) {
+        setState(() {
+          _cityController.text = address.city ?? '';
+          _neighborhoodController.text = address.neighborhood ?? '';
+          _stateController.text = address.state ?? '';
+        });
+      }
+    } catch (e) {
+      debugPrint('Erro ao buscar CEP: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSearchingCep = false;
+        });
+      }
+    }
   }
 
   void _applyFilters() {
@@ -95,10 +137,12 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
     setState(() {
       _minPriceController.clear();
       _maxPriceController.clear();
+      _zipCodeController.clear();
       _minAreaController.clear();
       _maxAreaController.clear();
       _cityController.clear();
       _neighborhoodController.clear();
+      _stateController.clear();
       _selectedType = null;
       _selectedStatus = null;
     });
@@ -125,10 +169,7 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
               padding: const EdgeInsets.all(20),
               child: Row(
                 children: [
-                  Icon(
-                    Icons.filter_list,
-                    color: AppColors.primary.primary,
-                  ),
+                  Icon(Icons.filter_list, color: AppColors.primary.primary),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
@@ -248,7 +289,9 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
                             controller: _minPriceController,
                             label: 'Mínimo',
                             hint: 'R\$ 0,00',
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -257,7 +300,9 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
                             controller: _maxPriceController,
                             label: 'Máximo',
                             hint: 'R\$ 0,00',
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
                           ),
                         ),
                       ],
@@ -279,7 +324,9 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
                             controller: _minAreaController,
                             label: 'Mínima',
                             hint: '0',
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -288,7 +335,9 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
                             controller: _maxAreaController,
                             label: 'Máxima',
                             hint: '0',
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
                           ),
                         ),
                       ],
@@ -303,10 +352,105 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    CustomTextField(
-                      controller: _cityController,
-                      label: 'Cidade',
-                      hint: 'Nome da cidade',
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'CEP',
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextFormField(
+                          controller: _zipCodeController,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(8),
+                            TextInputFormatter.withFunction((
+                              oldValue,
+                              newValue,
+                            ) {
+                              final text = newValue.text;
+                              if (text.length <= 5) {
+                                return newValue;
+                              }
+                              return TextEditingValue(
+                                text:
+                                    '${text.substring(0, 5)}-${text.substring(5)}',
+                                selection: TextSelection.collapsed(
+                                  offset: newValue.selection.end + 1,
+                                ),
+                              );
+                            }),
+                          ],
+                          onChanged: (value) {
+                            final cep = value.replaceAll(RegExp(r'[^0-9]'), '');
+                            if (cep.length == 8) {
+                              _searchCep();
+                            }
+                          },
+                          decoration: InputDecoration(
+                            hintText: '00000-000',
+                            border: const OutlineInputBorder(),
+                            suffixIcon: _isSearchingCep
+                                ? const Padding(
+                                    padding: EdgeInsets.all(12),
+                                    child: SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
+                                  )
+                                : IconButton(
+                                    icon: const Icon(Icons.search),
+                                    onPressed: _searchCep,
+                                    tooltip: 'Buscar CEP',
+                                  ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 2,
+                          child: CustomTextField(
+                            controller: _cityController,
+                            label: 'Cidade',
+                            hint: 'Nome da cidade',
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Estado',
+                                style: theme.textTheme.labelLarge?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              TextFormField(
+                                controller: _stateController,
+                                decoration: const InputDecoration(
+                                  hintText: 'UF',
+                                  border: OutlineInputBorder(),
+                                ),
+                                maxLength: 2,
+                                textCapitalization:
+                                    TextCapitalization.characters,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 16),
                     CustomTextField(
@@ -325,9 +469,7 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 border: Border(
-                  top: BorderSide(
-                    color: ThemeHelpers.borderColor(context),
-                  ),
+                  top: BorderSide(color: ThemeHelpers.borderColor(context)),
                 ),
               ),
               child: Column(
@@ -365,4 +507,3 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
     );
   }
 }
-

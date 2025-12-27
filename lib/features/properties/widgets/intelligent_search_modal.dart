@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../../shared/services/property_service.dart';
+import '../../../../shared/services/cep_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../../../../shared/widgets/custom_text_field.dart';
@@ -20,14 +22,18 @@ class IntelligentSearchModal extends StatefulWidget {
 
 class _IntelligentSearchModalState extends State<IntelligentSearchModal> {
   final PropertyService _propertyService = PropertyService.instance;
+  final CepService _cepService = CepService.instance;
   final _formKey = GlobalKey<FormState>();
   
   // Filtros
   PropertyType? _selectedType;
   String? _selectedOperation; // 'rent' | 'sale'
+  final _zipCodeController = TextEditingController();
   final _cityController = TextEditingController();
   final _stateController = TextEditingController();
   final _neighborhoodController = TextEditingController();
+  
+  bool _isSearchingCep = false;
   final _minValueController = TextEditingController();
   final _maxValueController = TextEditingController();
   final _minBedroomsController = TextEditingController();
@@ -45,6 +51,7 @@ class _IntelligentSearchModalState extends State<IntelligentSearchModal> {
 
   @override
   void dispose() {
+    _zipCodeController.dispose();
     _cityController.dispose();
     _stateController.dispose();
     _neighborhoodController.dispose();
@@ -56,6 +63,36 @@ class _IntelligentSearchModalState extends State<IntelligentSearchModal> {
     _minAreaController.dispose();
     _maxAreaController.dispose();
     super.dispose();
+  }
+
+  Future<void> _searchCep() async {
+    final cep = _zipCodeController.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (cep.length != 8) {
+      return;
+    }
+
+    setState(() {
+      _isSearchingCep = true;
+    });
+
+    try {
+      final address = await _cepService.searchCep(cep);
+      if (address != null && mounted) {
+        setState(() {
+          _cityController.text = address.city ?? '';
+          _neighborhoodController.text = address.neighborhood ?? '';
+          _stateController.text = address.state ?? '';
+        });
+      }
+    } catch (e) {
+      debugPrint('Erro ao buscar CEP: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSearchingCep = false;
+        });
+      }
+    }
   }
 
   Future<void> _performSearch() async {
@@ -276,9 +313,65 @@ class _IntelligentSearchModalState extends State<IntelligentSearchModal> {
                         ),
                       ),
                       const SizedBox(height: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'CEP',
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          TextFormField(
+                            controller: _zipCodeController,
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                              LengthLimitingTextInputFormatter(8),
+                              TextInputFormatter.withFunction((oldValue, newValue) {
+                                final text = newValue.text;
+                                if (text.length <= 5) {
+                                  return newValue;
+                                }
+                                return TextEditingValue(
+                                  text: '${text.substring(0, 5)}-${text.substring(5)}',
+                                  selection: TextSelection.collapsed(offset: newValue.selection.end + 1),
+                                );
+                              }),
+                            ],
+                            onChanged: (value) {
+                              final cep = value.replaceAll(RegExp(r'[^0-9]'), '');
+                              if (cep.length == 8) {
+                                _searchCep();
+                              }
+                            },
+                            decoration: InputDecoration(
+                              hintText: '00000-000',
+                              border: const OutlineInputBorder(),
+                              suffixIcon: _isSearchingCep
+                                  ? const Padding(
+                                      padding: EdgeInsets.all(12),
+                                      child: SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                      ),
+                                    )
+                                  : IconButton(
+                                      icon: const Icon(Icons.search),
+                                      onPressed: _searchCep,
+                                      tooltip: 'Buscar CEP',
+                                    ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
                       Row(
                         children: [
                           Expanded(
+                            flex: 2,
                             child: CustomTextField(
                               controller: _cityController,
                               label: 'Cidade',
@@ -295,6 +388,7 @@ class _IntelligentSearchModalState extends State<IntelligentSearchModal> {
                                 border: OutlineInputBorder(),
                               ),
                               maxLength: 2,
+                              textCapitalization: TextCapitalization.characters,
                             ),
                           ),
                         ],
