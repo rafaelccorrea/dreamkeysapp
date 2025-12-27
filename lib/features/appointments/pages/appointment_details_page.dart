@@ -120,45 +120,81 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
             );
           }
 
+          final appointmentColor = Color(int.parse(appointment.color.replaceFirst('#', '0xFF')));
+
           return SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Header com cor
+                // Header moderno com gradiente
                 Container(
-                  padding: const EdgeInsets.all(20),
+                  padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
-                    color: Color(int.parse(appointment.color.replaceFirst('#', '0xFF')))
-                        .withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
+                    gradient: LinearGradient(
+                      colors: [
+                        appointmentColor.withOpacity(0.15),
+                        appointmentColor.withOpacity(0.05),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(24),
                     border: Border.all(
-                      color: Color(int.parse(appointment.color.replaceFirst('#', '0xFF')))
-                          .withOpacity(0.3),
+                      color: appointmentColor.withOpacity(0.2),
+                      width: 1.5,
                     ),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: Text(
-                              appointment.title,
-                              style: theme.textTheme.headlineSmall?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
+                          Container(
+                            width: 4,
+                            height: 50,
+                            decoration: BoxDecoration(
+                              color: appointmentColor,
+                              borderRadius: BorderRadius.circular(2),
                             ),
                           ),
-                          _buildStatusChip(appointment.status, theme),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  appointment.title,
+                                  style: theme.textTheme.headlineSmall?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 24,
+                                    height: 1.2,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                _buildStatusChip(appointment.status, theme),
+                              ],
+                            ),
+                          ),
                         ],
                       ),
                       if (appointment.description != null &&
                           appointment.description!.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          appointment.description!,
-                          style: theme.textTheme.bodyLarge,
+                        const SizedBox(height: 20),
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: ThemeHelpers.cardBackgroundColor(context).withOpacity(0.6),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Text(
+                            appointment.description!,
+                            style: theme.textTheme.bodyLarge?.copyWith(
+                              height: 1.5,
+                              fontSize: 15,
+                            ),
+                          ),
                         ),
                       ],
                     ],
@@ -232,45 +268,112 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
                     theme,
                     'Observações',
                     [
-                      Padding(
-                        padding: const EdgeInsets.all(16),
+                      Container(
+                        padding: const EdgeInsets.all(20),
                         child: Text(
                           appointment.notes!,
-                          style: theme.textTheme.bodyMedium,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            height: 1.6,
+                            fontSize: 15,
+                          ),
                         ),
                       ),
                     ],
                   ),
                 ],
                 const SizedBox(height: 32),
-                // Ações
+                // Ações modernas
                 Row(
                   children: [
                     Expanded(
-                      child: CustomButton(
-                        text: 'Editar',
-                        icon: Icons.edit,
-                        variant: ButtonVariant.secondary,
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) =>
-                                  EditAppointmentPage(appointmentId: appointment.id),
+                      child: Container(
+                        height: 56,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              AppColors.primary.primary,
+                              AppColors.primary.primary.withOpacity(0.8),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.primary.primary.withOpacity(0.3),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
                             ),
-                          ).then((_) {
-                            controller.loadAppointmentById(widget.appointmentId);
-                          });
-                        },
+                          ],
+                        ),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      EditAppointmentPage(appointmentId: appointment.id),
+                                ),
+                              ).then((_) {
+                                controller.loadAppointmentById(widget.appointmentId);
+                              });
+                            },
+                            borderRadius: BorderRadius.circular(16),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.edit_rounded, color: Colors.white, size: 20),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Editar',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: CustomButton(
-                        text: 'Excluir',
-                        icon: Icons.delete,
-                        variant: ButtonVariant.secondary,
-                        onPressed: _deleteAppointment,
+                      child: Container(
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: AppColors.status.error.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: AppColors.status.error.withOpacity(0.3),
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: _deleteAppointment,
+                            borderRadius: BorderRadius.circular(16),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.delete_outline_rounded,
+                                  color: AppColors.status.error,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Excluir',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    color: AppColors.status.error,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -287,20 +390,33 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          title,
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.bold,
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 12),
+          child: Text(
+            title,
+            style: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w700,
+              fontSize: 18,
+            ),
           ),
         ),
-        const SizedBox(height: 12),
         Container(
           decoration: BoxDecoration(
             color: ThemeHelpers.cardBackgroundColor(context),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: ThemeHelpers.borderColor(context),
+              color: ThemeHelpers.borderColor(context).withOpacity(0.5),
+              width: 1,
             ),
+            boxShadow: [
+              BoxShadow(
+                color: theme.brightness == Brightness.dark
+                    ? Colors.black.withOpacity(0.3)
+                    : Colors.black.withOpacity(0.05),
+                blurRadius: 10,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
           child: Column(children: children),
         ),
@@ -310,11 +426,24 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
 
   Widget _buildInfoItem(ThemeData theme, IconData icon, String label, String value) {
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 20, color: theme.colorScheme.onSurface.withOpacity(0.6)),
-          const SizedBox(width: 12),
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: ThemeHelpers.borderColor(context).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(
+              icon,
+              size: 24,
+              color: AppColors.primary.primary,
+            ),
+          ),
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -322,14 +451,19 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
                 Text(
                   label,
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurface.withOpacity(0.6),
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 8),
                 Text(
                   value,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w500,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 16,
+                    height: 1.4,
                   ),
                 ),
               ],
@@ -362,17 +496,22 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withOpacity(0.3)),
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: color.withOpacity(0.3),
+          width: 1.5,
+        ),
       ),
       child: Text(
         status.label,
         style: theme.textTheme.bodySmall?.copyWith(
           color: color,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w700,
+          fontSize: 12,
+          letterSpacing: 0.3,
         ),
       ),
     );

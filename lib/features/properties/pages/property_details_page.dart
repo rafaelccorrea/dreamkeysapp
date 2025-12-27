@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../../../../shared/services/property_service.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
+import '../../../../shared/widgets/shimmer_image.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../widgets/property_public_toggle.dart';
@@ -18,10 +19,7 @@ final _currencyFormatter = NumberFormat.currency(
 class PropertyDetailsPage extends StatefulWidget {
   final String propertyId;
 
-  const PropertyDetailsPage({
-    super.key,
-    required this.propertyId,
-  });
+  const PropertyDetailsPage({super.key, required this.propertyId});
 
   @override
   State<PropertyDetailsPage> createState() => _PropertyDetailsPageState();
@@ -46,7 +44,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     });
 
     try {
-      final response = await _propertyService.getPropertyById(widget.propertyId);
+      final response = await _propertyService.getPropertyById(
+        widget.propertyId,
+      );
 
       if (mounted) {
         if (response.success && response.data != null) {
@@ -115,33 +115,35 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                Text('Tem certeza que deseja excluir "${_property!.title}"? Esta ação não pode ser desfeita.'),
-              const SizedBox(height: 24),
-              Column(
-                children: [
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () => Navigator.pop(context, true),
-                      icon: const Icon(Icons.delete),
-                      label: const Text('Excluir Propriedade'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.status.error,
-                        foregroundColor: Colors.white,
+                Text(
+                  'Tem certeza que deseja excluir "${_property!.title}"? Esta ação não pode ser desfeita.',
+                ),
+                const SizedBox(height: 24),
+                Column(
+                  children: [
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () => Navigator.pop(context, true),
+                        icon: const Icon(Icons.delete),
+                        label: const Text('Excluir Propriedade'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.status.error,
+                          foregroundColor: Colors.white,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: () => Navigator.pop(context, false),
-                      icon: const Icon(Icons.close),
-                      label: const Text('Cancelar'),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => Navigator.pop(context, false),
+                        icon: const Icon(Icons.close),
+                        label: const Text('Cancelar'),
+                      ),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -210,9 +212,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           onSelected: (value) {
             switch (value) {
               case 'edit':
-                Navigator.of(context).pushNamed(
-                  '/properties/${widget.propertyId}/edit',
-                );
+                Navigator.of(
+                  context,
+                ).pushNamed('/properties/${widget.propertyId}/edit');
                 break;
               case 'delete':
                 _deleteProperty();
@@ -276,37 +278,60 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Skeleton da imagem
-          SkeletonBox(
-            width: double.infinity,
-            height: 300,
-            borderRadius: 0,
-          ),
+          SkeletonBox(width: double.infinity, height: 300, borderRadius: 0),
           const SizedBox(height: 20),
           Padding(
             padding: const EdgeInsets.all(20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SkeletonText(width: 250, height: 24, margin: const EdgeInsets.only(bottom: 8)),
-                SkeletonText(width: 200, height: 16, margin: const EdgeInsets.only(bottom: 20)),
-                SkeletonText(width: double.infinity, height: 16, margin: const EdgeInsets.only(bottom: 8)),
-                SkeletonText(width: double.infinity, height: 16, margin: const EdgeInsets.only(bottom: 20)),
-                SkeletonText(width: 150, height: 20, margin: const EdgeInsets.only(bottom: 16)),
+                SkeletonText(
+                  width: 250,
+                  height: 24,
+                  margin: const EdgeInsets.only(bottom: 8),
+                ),
+                SkeletonText(
+                  width: 200,
+                  height: 16,
+                  margin: const EdgeInsets.only(bottom: 20),
+                ),
+                SkeletonText(
+                  width: double.infinity,
+                  height: 16,
+                  margin: const EdgeInsets.only(bottom: 8),
+                ),
+                SkeletonText(
+                  width: double.infinity,
+                  height: 16,
+                  margin: const EdgeInsets.only(bottom: 20),
+                ),
+                SkeletonText(
+                  width: 150,
+                  height: 20,
+                  margin: const EdgeInsets.only(bottom: 16),
+                ),
                 SkeletonCard(
                   height: 200,
                   child: Column(
-                    children: List.generate(4, (index) => Padding(
-                      padding: EdgeInsets.only(bottom: index < 3 ? 16 : 0),
-                      child: Row(
-                        children: [
-                          SkeletonBox(width: 24, height: 24, borderRadius: 12),
-                          const SizedBox(width: 12),
-                          SkeletonText(width: 100, height: 16),
-                          const Spacer(),
-                          SkeletonText(width: 80, height: 16),
-                        ],
+                    children: List.generate(
+                      4,
+                      (index) => Padding(
+                        padding: EdgeInsets.only(bottom: index < 3 ? 16 : 0),
+                        child: Row(
+                          children: [
+                            SkeletonBox(
+                              width: 24,
+                              height: 24,
+                              borderRadius: 12,
+                            ),
+                            const SizedBox(width: 12),
+                            SkeletonText(width: 100, height: 16),
+                            const Spacer(),
+                            SkeletonText(width: 80, height: 16),
+                          ],
+                        ),
                       ),
-                    )),
+                    ),
                   ),
                 ),
               ],
@@ -324,11 +349,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: AppColors.status.error,
-            ),
+            Icon(Icons.error_outline, size: 64, color: AppColors.status.error),
             const SizedBox(height: 16),
             Text(
               _errorMessage ?? 'Erro ao carregar propriedade',
@@ -349,14 +370,18 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  Widget _buildPropertyDetails(BuildContext context, ThemeData theme, Property property) {
+  Widget _buildPropertyDetails(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Galeria de imagens
           _buildImageGallery(context, property),
-          
+
           // Conteúdo principal
           Padding(
             padding: const EdgeInsets.all(20),
@@ -381,7 +406,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   ),
                 ],
                 const SizedBox(height: 8),
-                
+
                 // Endereço
                 Row(
                   children: [
@@ -404,14 +429,19 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                
+
                 // Status e preço
                 Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
                       decoration: BoxDecoration(
-                        color: _getStatusColor(property.status).withValues(alpha: 0.1),
+                        color: _getStatusColor(
+                          property.status,
+                        ).withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
@@ -442,13 +472,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   ],
                 ),
                 const SizedBox(height: 32),
-                
+
                 // Características principais
                 _buildSectionTitle(theme, 'Características'),
                 const SizedBox(height: 16),
                 _buildCharacteristicsCard(context, theme, property),
                 const SizedBox(height: 32),
-                
+
                 // Descrição
                 _buildSectionTitle(theme, 'Descrição'),
                 const SizedBox(height: 16),
@@ -460,21 +490,22 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   ),
                 ),
                 const SizedBox(height: 32),
-                
+
                 // Informações adicionais
-                if (property.condominiumFee != null || property.iptu != null) ...[
+                if (property.condominiumFee != null ||
+                    property.iptu != null) ...[
                   _buildSectionTitle(theme, 'Valores Adicionais'),
                   const SizedBox(height: 16),
                   _buildAdditionalValuesCard(context, theme, property),
                   const SizedBox(height: 32),
                 ],
-                
+
                 // Localização no mapa
                 _buildSectionTitle(theme, 'Localização'),
                 const SizedBox(height: 16),
                 _buildMapSection(context, theme, property),
                 const SizedBox(height: 32),
-                
+
                 // Recursos/Comodidades
                 if (property.features.isNotEmpty) ...[
                   _buildSectionTitle(theme, 'Recursos e Comodidades'),
@@ -482,7 +513,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   _buildFeaturesSection(context, theme, property.features),
                   const SizedBox(height: 32),
                 ],
-                
+
                 // Publicação no site
                 _buildSectionTitle(theme, 'Publicação'),
                 const SizedBox(height: 16),
@@ -491,7 +522,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   initialValue: property.isAvailableForSite ?? false,
                   propertyStatus: property.status,
                   isActive: property.isActive,
-                  imageCount: property.imageCount ?? property.images?.length ?? 0,
+                  imageCount:
+                      property.imageCount ?? property.images?.length ?? 0,
                   onSuccess: () {
                     _loadProperty(); // Recarregar dados
                   },
@@ -505,17 +537,20 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   },
                 ),
                 const SizedBox(height: 32),
-                
+
                 // Ofertas (se houver)
-                if (property.hasPendingOffers == true || property.totalOffersCount != null && property.totalOffersCount! > 0) ...[
+                if (property.hasPendingOffers == true ||
+                    property.totalOffersCount != null &&
+                        property.totalOffersCount! > 0) ...[
                   _buildSectionTitle(theme, 'Ofertas'),
                   const SizedBox(height: 16),
                   _buildOffersSection(context, theme, property),
                   const SizedBox(height: 32),
                 ],
-                
+
                 // Clientes associados (se houver)
-                if (property.clients != null && property.clients!.isNotEmpty) ...[
+                if (property.clients != null &&
+                    property.clients!.isNotEmpty) ...[
                   _buildSectionTitle(theme, 'Clientes Interessados'),
                   const SizedBox(height: 16),
                   _buildClientsSection(context, theme, property.clients!),
@@ -531,7 +566,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   Widget _buildImageGallery(BuildContext context, Property property) {
     final images = property.images ?? [];
-    
+
     if (images.isEmpty) {
       return Container(
         width: double.infinity,
@@ -553,19 +588,19 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         itemCount: images.length,
         itemBuilder: (context, index) {
           final image = images[index];
-          return Image.network(
-            image.url,
+          return ShimmerImage(
+            imageUrl: image.url,
+            width: double.infinity,
+            height: 300,
             fit: BoxFit.cover,
-            errorBuilder: (context, error, stackTrace) {
-              return Container(
-                color: AppColors.background.backgroundSecondary,
-                child: Icon(
-                  Icons.broken_image_outlined,
-                  size: 64,
-                  color: ThemeHelpers.textSecondaryColor(context),
-                ),
-              );
-            },
+            errorWidget: Container(
+              color: AppColors.background.backgroundSecondary,
+              child: Icon(
+                Icons.broken_image_outlined,
+                size: 64,
+                color: ThemeHelpers.textSecondaryColor(context),
+              ),
+            ),
           );
         },
       ),
@@ -582,7 +617,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  Widget _buildCharacteristicsCard(BuildContext context, ThemeData theme, Property property) {
+  Widget _buildCharacteristicsCard(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
     final isDark = theme.brightness == Brightness.dark;
 
     return Card(
@@ -598,33 +637,64 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            _buildCharacteristicRow(theme, Icons.home_outlined, 'Tipo', property.type.label),
+            _buildCharacteristicRow(
+              theme,
+              Icons.home_outlined,
+              'Tipo',
+              property.type.label,
+            ),
             if (property.totalArea > 0)
-              _buildCharacteristicRow(theme, Icons.square_foot, 'Área Total', '${property.totalArea.toInt()} m²'),
+              _buildCharacteristicRow(
+                theme,
+                Icons.square_foot,
+                'Área Total',
+                '${property.totalArea.toInt()} m²',
+              ),
             if (property.builtArea != null && property.builtArea! > 0)
-              _buildCharacteristicRow(theme, Icons.business, 'Área Construída', '${property.builtArea!.toInt()} m²'),
+              _buildCharacteristicRow(
+                theme,
+                Icons.business,
+                'Área Construída',
+                '${property.builtArea!.toInt()} m²',
+              ),
             if (property.bedrooms != null)
-              _buildCharacteristicRow(theme, Icons.bed, 'Quartos', '${property.bedrooms}'),
+              _buildCharacteristicRow(
+                theme,
+                Icons.bed,
+                'Quartos',
+                '${property.bedrooms}',
+              ),
             if (property.bathrooms != null)
-              _buildCharacteristicRow(theme, Icons.bathtub_outlined, 'Banheiros', '${property.bathrooms}'),
+              _buildCharacteristicRow(
+                theme,
+                Icons.bathtub_outlined,
+                'Banheiros',
+                '${property.bathrooms}',
+              ),
             if (property.parkingSpaces != null)
-              _buildCharacteristicRow(theme, Icons.local_parking, 'Vagas', '${property.parkingSpaces}'),
+              _buildCharacteristicRow(
+                theme,
+                Icons.local_parking,
+                'Vagas',
+                '${property.parkingSpaces}',
+              ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildCharacteristicRow(ThemeData theme, IconData icon, String label, String value) {
+  Widget _buildCharacteristicRow(
+    ThemeData theme,
+    IconData icon,
+    String label,
+    String value,
+  ) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Row(
         children: [
-          Icon(
-            icon,
-            size: 20,
-            color: AppColors.primary.primary,
-          ),
+          Icon(icon, size: 20, color: AppColors.primary.primary),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
@@ -646,7 +716,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  Widget _buildAdditionalValuesCard(BuildContext context, ThemeData theme, Property property) {
+  Widget _buildAdditionalValuesCard(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
     final isDark = theme.brightness == Brightness.dark;
 
     return Card(
@@ -663,16 +737,30 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         child: Column(
           children: [
             if (property.condominiumFee != null)
-              _buildCharacteristicRow(theme, Icons.apartment, 'Condomínio', _currencyFormatter.format(property.condominiumFee)),
+              _buildCharacteristicRow(
+                theme,
+                Icons.apartment,
+                'Condomínio',
+                _currencyFormatter.format(property.condominiumFee),
+              ),
             if (property.iptu != null)
-              _buildCharacteristicRow(theme, Icons.receipt, 'IPTU', _currencyFormatter.format(property.iptu)),
+              _buildCharacteristicRow(
+                theme,
+                Icons.receipt,
+                'IPTU',
+                _currencyFormatter.format(property.iptu),
+              ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildOffersSection(BuildContext context, ThemeData theme, Property property) {
+  Widget _buildOffersSection(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -704,11 +792,23 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             if (property.totalOffersCount != null) ...[
               _buildInfoRow(theme, 'Total', '${property.totalOffersCount}'),
               if (property.pendingOffersCount != null)
-                _buildInfoRow(theme, 'Pendentes', '${property.pendingOffersCount}'),
+                _buildInfoRow(
+                  theme,
+                  'Pendentes',
+                  '${property.pendingOffersCount}',
+                ),
               if (property.acceptedOffersCount != null)
-                _buildInfoRow(theme, 'Aceitas', '${property.acceptedOffersCount}'),
+                _buildInfoRow(
+                  theme,
+                  'Aceitas',
+                  '${property.acceptedOffersCount}',
+                ),
               if (property.rejectedOffersCount != null)
-                _buildInfoRow(theme, 'Rejeitadas', '${property.rejectedOffersCount}'),
+                _buildInfoRow(
+                  theme,
+                  'Rejeitadas',
+                  '${property.rejectedOffersCount}',
+                ),
             ],
           ],
         ),
@@ -740,15 +840,17 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  Widget _buildClientsSection(BuildContext context, ThemeData theme, List<PropertyClient> clients) {
+  Widget _buildClientsSection(
+    BuildContext context,
+    ThemeData theme,
+    List<PropertyClient> clients,
+  ) {
     return Column(
       children: clients.take(5).map((client) {
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
           child: ListTile(
-            leading: CircleAvatar(
-              child: Text(client.name[0].toUpperCase()),
-            ),
+            leading: CircleAvatar(child: Text(client.name[0].toUpperCase())),
             title: Text(client.name),
             subtitle: Text(client.email),
             trailing: Text(
@@ -763,7 +865,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  Widget _buildMapSection(BuildContext context, ThemeData theme, Property property) {
+  Widget _buildMapSection(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
     final isDark = theme.brightness == Brightness.dark;
     final address = property.address.isNotEmpty
         ? property.address
@@ -855,17 +961,18 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  Widget _buildFeaturesSection(BuildContext context, ThemeData theme, List<String> features) {
+  Widget _buildFeaturesSection(
+    BuildContext context,
+    ThemeData theme,
+    List<String> features,
+  ) {
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       children: features.map((feature) {
         return Chip(
           label: Text(feature),
-          avatar: Icon(
-            _getFeatureIcon(feature),
-            size: 18,
-          ),
+          avatar: Icon(_getFeatureIcon(feature), size: 18),
         );
       }).toList(),
     );
@@ -906,7 +1013,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       'Pronto para morar': Icons.home,
       'Novo': Icons.new_releases,
     };
-    
+
     return iconMap[feature] ?? Icons.check_circle_outline;
   }
 
@@ -925,4 +1032,3 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     }
   }
 }
-

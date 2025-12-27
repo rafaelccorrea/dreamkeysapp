@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../../../../shared/services/property_service.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
+import '../../../../shared/widgets/shimmer_image.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../widgets/property_filters_drawer.dart';
@@ -55,7 +56,8 @@ class _PropertiesPageState extends State<PropertiesPage> {
   }
 
   void _onScroll() {
-    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 200) {
       // Carregar mais quando estiver a 200px do final
       if (!_isLoadingMore && _currentPage < _totalPages) {
         _loadMoreProperties();
@@ -77,9 +79,14 @@ class _PropertiesPageState extends State<PropertiesPage> {
     });
 
     try {
-      final filters = _filters?.copyWith(search: _searchQuery.trim().isEmpty ? null : _searchQuery.trim()) ?? 
-        (_searchQuery.trim().isNotEmpty ? PropertyFilters(search: _searchQuery.trim()) : null);
-      
+      final filters =
+          _filters?.copyWith(
+            search: _searchQuery.trim().isEmpty ? null : _searchQuery.trim(),
+          ) ??
+          (_searchQuery.trim().isNotEmpty
+              ? PropertyFilters(search: _searchQuery.trim())
+              : null);
+
       final response = await _propertyService.getProperties(
         page: _currentPage,
         limit: 50,
@@ -121,9 +128,14 @@ class _PropertiesPageState extends State<PropertiesPage> {
 
     try {
       final nextPage = _currentPage + 1;
-      final filters = _filters?.copyWith(search: _searchQuery.trim().isEmpty ? null : _searchQuery.trim()) ?? 
-        (_searchQuery.trim().isNotEmpty ? PropertyFilters(search: _searchQuery.trim()) : null);
-      
+      final filters =
+          _filters?.copyWith(
+            search: _searchQuery.trim().isEmpty ? null : _searchQuery.trim(),
+          ) ??
+          (_searchQuery.trim().isNotEmpty
+              ? PropertyFilters(search: _searchQuery.trim())
+              : null);
+
       final response = await _propertyService.getProperties(
         page: nextPage,
         limit: 50,
@@ -176,7 +188,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
                   useSafeArea: true,
                   barrierColor: Colors.black54,
                   shape: const RoundedRectangleBorder(
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(20),
+                    ),
                   ),
                   clipBehavior: Clip.antiAlias,
                   builder: (context) => PropertyFiltersDrawer(
@@ -200,7 +214,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
                   useSafeArea: true,
                   barrierColor: Colors.black54,
                   shape: const RoundedRectangleBorder(
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(20),
+                    ),
                   ),
                   clipBehavior: Clip.antiAlias,
                   builder: (context) => const ExportImportDialog(),
@@ -278,7 +294,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
         children: [
           // Barra de ações com botões
           _buildActionBar(context),
-          
+
           // Lista de propriedades
           Expanded(
             child: _isLoading
@@ -321,11 +337,14 @@ class _PropertiesPageState extends State<PropertiesPage> {
               icon: const Icon(Icons.add, size: 20),
               label: const Text('Criar Propriedade'),
               style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
               ),
             ),
             const SizedBox(width: 12),
-            
+
             // Botão Busca Inteligente
             OutlinedButton.icon(
               onPressed: () {
@@ -335,7 +354,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
                   useSafeArea: true,
                   barrierColor: Colors.black54,
                   shape: const RoundedRectangleBorder(
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(20),
+                    ),
                   ),
                   clipBehavior: Clip.antiAlias,
                   builder: (context) => IntelligentSearchModal(
@@ -343,7 +364,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
                       Navigator.pop(context);
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text('${results.results.length} propriedades encontradas'),
+                          content: Text(
+                            '${results.results.length} propriedades encontradas',
+                          ),
                           action: SnackBarAction(
                             label: 'Ver Resultados',
                             onPressed: () {
@@ -359,11 +382,14 @@ class _PropertiesPageState extends State<PropertiesPage> {
               icon: const Icon(Icons.auto_awesome, size: 20),
               label: const Text('Busca Inteligente'),
               style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
               ),
             ),
             const SizedBox(width: 12),
-            
+
             // Botão Otimização
             OutlinedButton.icon(
               onPressed: () {
@@ -372,7 +398,10 @@ class _PropertiesPageState extends State<PropertiesPage> {
               icon: const Icon(Icons.trending_up, size: 20),
               label: const Text('Otimizar Portfólio'),
               style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
               ),
             ),
           ],
@@ -427,7 +456,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
                     ),
                     IconButton(
                       icon: const Icon(Icons.close),
-                      onPressed: isOptimizing ? null : () => Navigator.pop(context),
+                      onPressed: isOptimizing
+                          ? null
+                          : () => Navigator.pop(context),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                     ),
@@ -441,7 +472,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
                 const SizedBox(height: 16),
                 RadioListTile<String>(
                   title: const Text('Vendas Rápidas'),
-                  subtitle: const Text('Priorizar propriedades com maior potencial de venda rápida'),
+                  subtitle: const Text(
+                    'Priorizar propriedades com maior potencial de venda rápida',
+                  ),
                   value: 'sales_speed',
                   groupValue: selectedFocus,
                   onChanged: isOptimizing
@@ -454,7 +487,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
                 ),
                 RadioListTile<String>(
                   title: const Text('Maximizar Lucro'),
-                  subtitle: const Text('Priorizar propriedades com maior rentabilidade'),
+                  subtitle: const Text(
+                    'Priorizar propriedades com maior rentabilidade',
+                  ),
                   value: 'profitability',
                   groupValue: selectedFocus,
                   onChanged: isOptimizing
@@ -467,7 +502,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
                 ),
                 RadioListTile<String>(
                   title: const Text('Cobertura de Mercado'),
-                  subtitle: const Text('Otimizar para melhor cobertura de mercado'),
+                  subtitle: const Text(
+                    'Otimizar para melhor cobertura de mercado',
+                  ),
                   value: 'market_coverage',
                   groupValue: selectedFocus,
                   onChanged: isOptimizing
@@ -480,7 +517,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
                 ),
                 RadioListTile<String>(
                   title: const Text('Balanceado'),
-                  subtitle: const Text('Equilíbrio entre vendas rápidas e lucro'),
+                  subtitle: const Text(
+                    'Equilíbrio entre vendas rápidas e lucro',
+                  ),
                   value: 'balanced',
                   groupValue: selectedFocus,
                   onChanged: isOptimizing
@@ -506,21 +545,32 @@ class _PropertiesPageState extends State<PropertiesPage> {
 
                                 try {
                                   final aiService = AiService.instance;
-                                  final response = await aiService.optimizePortfolio(
-                                    PortfolioOptimizationRequest(focus: selectedFocus!),
-                                  );
+                                  final response = await aiService
+                                      .optimizePortfolio(
+                                        PortfolioOptimizationRequest(
+                                          focus: selectedFocus!,
+                                        ),
+                                      );
 
                                   if (context.mounted) {
                                     Navigator.pop(context);
-                                    if (response.success && response.data != null) {
-                                      _showOptimizationResults(context, response.data!);
+                                    if (response.success &&
+                                        response.data != null) {
+                                      _showOptimizationResults(
+                                        context,
+                                        response.data!,
+                                      );
                                     } else {
-                                      ScaffoldMessenger.of(context).showSnackBar(
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
                                         SnackBar(
                                           content: Text(
-                                            response.message ?? 'Erro ao otimizar portfólio',
+                                            response.message ??
+                                                'Erro ao otimizar portfólio',
                                           ),
-                                          backgroundColor: AppColors.status.error,
+                                          backgroundColor:
+                                              AppColors.status.error,
                                         ),
                                       );
                                     }
@@ -531,7 +581,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
                                     Navigator.pop(context);
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(
-                                        content: Text('Erro ao conectar com o servidor'),
+                                        content: Text(
+                                          'Erro ao conectar com o servidor',
+                                        ),
                                       ),
                                     );
                                   }
@@ -541,17 +593,23 @@ class _PropertiesPageState extends State<PropertiesPage> {
                             ? const SizedBox(
                                 width: 20,
                                 height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Icon(Icons.trending_up),
-                        label: Text(isOptimizing ? 'Otimizando...' : 'Otimizar'),
+                        label: Text(
+                          isOptimizing ? 'Otimizando...' : 'Otimizar',
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
-                        onPressed: isOptimizing ? null : () => Navigator.pop(context),
+                        onPressed: isOptimizing
+                            ? null
+                            : () => Navigator.pop(context),
                         icon: const Icon(Icons.close),
                         label: const Text('Cancelar'),
                       ),
@@ -568,7 +626,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
 
   void _showOptimizationResults(BuildContext context, dynamic results) {
     final theme = Theme.of(context);
-    
+
     if (results is List<PortfolioOptimizationResponse>) {
       // Múltiplas propriedades
       final resultsList = results;
@@ -613,44 +671,46 @@ class _PropertiesPageState extends State<PropertiesPage> {
                     ),
                   ],
                 ),
-              const SizedBox(height: 16),
-              Flexible(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: resultsList.length,
-                  itemBuilder: (context, index) {
-                    final result = resultsList[index];
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      child: ListTile(
-                        title: Text(result.propertyTitle),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Score: ${result.priorityScore.toStringAsFixed(1)}%'),
-                            if (result.recommendedActions.isNotEmpty)
+                const SizedBox(height: 16),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: resultsList.length,
+                    itemBuilder: (context, index) {
+                      final result = resultsList[index];
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        child: ListTile(
+                          title: Text(result.propertyTitle),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
                               Text(
-                                result.recommendedActions.first,
-                                style: theme.textTheme.bodySmall,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
+                                'Score: ${result.priorityScore.toStringAsFixed(1)}%',
                               ),
-                          ],
+                              if (result.recommendedActions.isNotEmpty)
+                                Text(
+                                  result.recommendedActions.first,
+                                  style: theme.textTheme.bodySmall,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                            ],
+                          ),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.arrow_forward),
+                            onPressed: () {
+                              Navigator.pop(context);
+                              Navigator.of(
+                                context,
+                              ).pushNamed('/properties/${result.propertyId}');
+                            },
+                          ),
                         ),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.arrow_forward),
-                          onPressed: () {
-                            Navigator.pop(context);
-                            Navigator.of(context).pushNamed(
-                              '/properties/${result.propertyId}',
-                            );
-                          },
-                        ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
-              ),
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
@@ -747,9 +807,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
                         child: ElevatedButton.icon(
                           onPressed: () {
                             Navigator.pop(context);
-                            Navigator.of(context).pushNamed(
-                              '/properties/${result.propertyId}',
-                            );
+                            Navigator.of(
+                              context,
+                            ).pushNamed('/properties/${result.propertyId}');
                           },
                           icon: const Icon(Icons.visibility),
                           label: const Text('Ver Propriedade'),
@@ -796,38 +856,53 @@ class _PropertiesPageState extends State<PropertiesPage> {
             ],
           ),
           // Skeleton dos cards
-          ...List.generate(3, (index) => Padding(
-            padding: const EdgeInsets.only(bottom: 16),
-            child: SkeletonCard(
-              height: 200,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SkeletonBox(width: 150, height: 150, borderRadius: 12),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SkeletonText(width: double.infinity, height: 20, margin: const EdgeInsets.only(bottom: 8)),
-                        SkeletonText(width: 150, height: 16, margin: const EdgeInsets.only(bottom: 8)),
-                        SkeletonText(width: 200, height: 16, margin: const EdgeInsets.only(bottom: 12)),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            SkeletonText(width: 50, height: 14),
-                            SkeletonText(width: 50, height: 14),
-                            SkeletonText(width: 50, height: 14),
-                          ],
-                        ),
-                      ],
+          ...List.generate(
+            3,
+            (index) => Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: SkeletonCard(
+                height: 200,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonBox(width: 150, height: 150, borderRadius: 12),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SkeletonText(
+                            width: double.infinity,
+                            height: 20,
+                            margin: const EdgeInsets.only(bottom: 8),
+                          ),
+                          SkeletonText(
+                            width: 150,
+                            height: 16,
+                            margin: const EdgeInsets.only(bottom: 8),
+                          ),
+                          SkeletonText(
+                            width: 200,
+                            height: 16,
+                            margin: const EdgeInsets.only(bottom: 12),
+                          ),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              SkeletonText(width: 50, height: 14),
+                              SkeletonText(width: 50, height: 14),
+                              SkeletonText(width: 50, height: 14),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          )),
+          ),
         ],
       ),
     );
@@ -841,11 +916,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: AppColors.status.error,
-            ),
+            Icon(Icons.error_outline, size: 64, color: AppColors.status.error),
             const SizedBox(height: 16),
             Text(
               _errorMessage ?? 'Erro ao carregar propriedades',
@@ -989,7 +1060,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
 
   Widget _buildPropertiesList(BuildContext context) {
     final theme = Theme.of(context);
-    
+
     if (_properties.isEmpty) {
       return Center(
         child: Padding(
@@ -1028,15 +1099,12 @@ class _PropertiesPageState extends State<PropertiesPage> {
       onRefresh: () => _loadProperties(refresh: true),
       child: Column(
         children: [
-          Expanded(
-            child: _buildListView(context, theme),
-          ),
+          Expanded(child: _buildListView(context, theme)),
           if (_totalPages > 1) _buildPagination(context),
         ],
       ),
     );
   }
-
 
   Widget _buildListView(BuildContext context, ThemeData theme) {
     return ListView.builder(
@@ -1048,9 +1116,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
           // Indicador de carregamento no final
           return const Padding(
             padding: EdgeInsets.all(20.0),
-            child: Center(
-              child: CircularProgressIndicator(),
-            ),
+            child: Center(child: CircularProgressIndicator()),
           );
         }
         final property = _properties[index];
@@ -1059,7 +1125,11 @@ class _PropertiesPageState extends State<PropertiesPage> {
     );
   }
 
-  Widget _buildPropertyListCard(BuildContext context, ThemeData theme, Property property) {
+  Widget _buildPropertyListCard(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
     final isDark = theme.brightness == Brightness.dark;
 
     return Card(
@@ -1076,9 +1146,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () {
-          Navigator.of(context).pushNamed(
-            '/properties/${property.id}',
-          );
+          Navigator.of(context).pushNamed('/properties/${property.id}');
         },
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1093,18 +1161,18 @@ class _PropertiesPageState extends State<PropertiesPage> {
                       ? AppColors.background.backgroundSecondaryDarkMode
                       : AppColors.background.backgroundSecondary,
                   child: property.mainImage != null
-                      ? Image.network(
-                          property.mainImage!.url,
+                      ? ShimmerImage(
+                          imageUrl: property.mainImage!.url,
+                          width: double.infinity,
+                          height: 200,
                           fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Center(
-                              child: Icon(
-                                Icons.home_outlined,
-                                size: 64,
-                                color: ThemeHelpers.textSecondaryColor(context),
-                              ),
-                            );
-                          },
+                          errorWidget: Center(
+                            child: Icon(
+                              Icons.home_outlined,
+                              size: 64,
+                              color: ThemeHelpers.textSecondaryColor(context),
+                            ),
+                          ),
                         )
                       : Center(
                           child: Icon(
@@ -1120,7 +1188,10 @@ class _PropertiesPageState extends State<PropertiesPage> {
                     bottom: 12,
                     right: 12,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.black54,
                         borderRadius: BorderRadius.circular(6),
@@ -1173,9 +1244,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
                       ),
                       onSelected: (value) async {
                         if (value == 'edit' && mounted) {
-                          Navigator.of(context).pushNamed(
-                            '/properties/${property.id}/edit',
-                          );
+                          Navigator.of(
+                            context,
+                          ).pushNamed('/properties/${property.id}/edit');
                         } else if (value == 'delete') {
                           final confirm = await showModalBottomSheet<bool>(
                             context: context,
@@ -1183,19 +1254,24 @@ class _PropertiesPageState extends State<PropertiesPage> {
                             useSafeArea: true,
                             barrierColor: Colors.black54,
                             shape: const RoundedRectangleBorder(
-                              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                              borderRadius: BorderRadius.vertical(
+                                top: Radius.circular(20),
+                              ),
                             ),
                             clipBehavior: Clip.antiAlias,
                             builder: (context) => Padding(
                               padding: EdgeInsets.only(
-                                bottom: MediaQuery.of(context).viewInsets.bottom,
+                                bottom: MediaQuery.of(
+                                  context,
+                                ).viewInsets.bottom,
                               ),
                               child: Container(
                                 padding: const EdgeInsets.all(20),
                                 child: SingleChildScrollView(
                                   child: Column(
                                     mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Row(
                                         children: [
@@ -1210,25 +1286,32 @@ class _PropertiesPageState extends State<PropertiesPage> {
                                           ),
                                           IconButton(
                                             icon: const Icon(Icons.close),
-                                            onPressed: () => Navigator.pop(context, false),
+                                            onPressed: () =>
+                                                Navigator.pop(context, false),
                                             padding: EdgeInsets.zero,
                                             constraints: const BoxConstraints(),
                                           ),
                                         ],
                                       ),
                                       const SizedBox(height: 16),
-                                      Text('Tem certeza que deseja excluir "${property.title}"? Esta ação não pode ser desfeita.'),
+                                      Text(
+                                        'Tem certeza que deseja excluir "${property.title}"? Esta ação não pode ser desfeita.',
+                                      ),
                                       const SizedBox(height: 24),
                                       Column(
                                         children: [
                                           SizedBox(
                                             width: double.infinity,
                                             child: ElevatedButton.icon(
-                                              onPressed: () => Navigator.pop(context, true),
+                                              onPressed: () =>
+                                                  Navigator.pop(context, true),
                                               icon: const Icon(Icons.delete),
-                                              label: const Text('Excluir Propriedade'),
+                                              label: const Text(
+                                                'Excluir Propriedade',
+                                              ),
                                               style: ElevatedButton.styleFrom(
-                                                backgroundColor: AppColors.status.error,
+                                                backgroundColor:
+                                                    AppColors.status.error,
                                                 foregroundColor: Colors.white,
                                               ),
                                             ),
@@ -1237,7 +1320,8 @@ class _PropertiesPageState extends State<PropertiesPage> {
                                           SizedBox(
                                             width: double.infinity,
                                             child: OutlinedButton.icon(
-                                              onPressed: () => Navigator.pop(context, false),
+                                              onPressed: () =>
+                                                  Navigator.pop(context, false),
                                               icon: const Icon(Icons.close),
                                               label: const Text('Cancelar'),
                                             ),
@@ -1253,18 +1337,26 @@ class _PropertiesPageState extends State<PropertiesPage> {
 
                           if (confirm == true && mounted) {
                             final messenger = ScaffoldMessenger.of(context);
-                            final response = await _propertyService.deleteProperty(property.id);
+                            final response = await _propertyService
+                                .deleteProperty(property.id);
                             if (!mounted) return;
-                            
+
                             if (response.success) {
                               messenger.showSnackBar(
-                                const SnackBar(content: Text('Propriedade excluída com sucesso')),
+                                const SnackBar(
+                                  content: Text(
+                                    'Propriedade excluída com sucesso',
+                                  ),
+                                ),
                               );
                               _loadProperties(refresh: true);
                             } else {
                               messenger.showSnackBar(
                                 SnackBar(
-                                  content: Text(response.message ?? 'Erro ao excluir propriedade'),
+                                  content: Text(
+                                    response.message ??
+                                        'Erro ao excluir propriedade',
+                                  ),
                                   backgroundColor: AppColors.status.error,
                                 ),
                               );
@@ -1317,7 +1409,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
                 ),
               ],
             ),
-            
+
             // Informações abaixo da imagem
             Padding(
               padding: const EdgeInsets.all(16),
@@ -1328,9 +1420,14 @@ class _PropertiesPageState extends State<PropertiesPage> {
                   Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
                         decoration: BoxDecoration(
-                          color: AppColors.primary.primary.withValues(alpha: 0.1),
+                          color: AppColors.primary.primary.withValues(
+                            alpha: 0.1,
+                          ),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
@@ -1344,9 +1441,14 @@ class _PropertiesPageState extends State<PropertiesPage> {
                       ),
                       const SizedBox(width: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
                         decoration: BoxDecoration(
-                          color: _getStatusColor(property.status).withValues(alpha: 0.1),
+                          color: _getStatusColor(
+                            property.status,
+                          ).withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
@@ -1361,9 +1463,14 @@ class _PropertiesPageState extends State<PropertiesPage> {
                       const Spacer(),
                       if (property.isAvailableForSite == true)
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
                           decoration: BoxDecoration(
-                            color: AppColors.status.success.withValues(alpha: 0.1),
+                            color: AppColors.status.success.withValues(
+                              alpha: 0.1,
+                            ),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Row(
@@ -1389,7 +1496,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  
+
                   // Título (destaque principal)
                   Text(
                     property.title,
@@ -1412,7 +1519,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
                     ),
                   ],
                   const SizedBox(height: 12),
-                  
+
                   // Localização
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1438,24 +1545,44 @@ class _PropertiesPageState extends State<PropertiesPage> {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  
+
                   // Características principais
                   Wrap(
                     spacing: 12,
                     runSpacing: 12,
                     children: [
                       if (property.bedrooms != null)
-                        _buildFeatureChip(context, theme, Icons.bed, '${property.bedrooms} quartos'),
+                        _buildFeatureChip(
+                          context,
+                          theme,
+                          Icons.bed,
+                          '${property.bedrooms} quartos',
+                        ),
                       if (property.bathrooms != null)
-                        _buildFeatureChip(context, theme, Icons.bathtub_outlined, '${property.bathrooms} banheiros'),
+                        _buildFeatureChip(
+                          context,
+                          theme,
+                          Icons.bathtub_outlined,
+                          '${property.bathrooms} banheiros',
+                        ),
                       if (property.parkingSpaces != null)
-                        _buildFeatureChip(context, theme, Icons.local_parking, '${property.parkingSpaces} vagas'),
+                        _buildFeatureChip(
+                          context,
+                          theme,
+                          Icons.local_parking,
+                          '${property.parkingSpaces} vagas',
+                        ),
                       if (property.totalArea > 0)
-                        _buildFeatureChip(context, theme, Icons.square_foot, '${property.totalArea.toInt()}m²'),
+                        _buildFeatureChip(
+                          context,
+                          theme,
+                          Icons.square_foot,
+                          '${property.totalArea.toInt()}m²',
+                        ),
                     ],
                   ),
                   const SizedBox(height: 16),
-                  
+
                   // Preço (destaque)
                   Container(
                     padding: const EdgeInsets.all(16),
@@ -1490,7 +1617,8 @@ class _PropertiesPageState extends State<PropertiesPage> {
                             ),
                           ),
                         // Valores adicionais
-                        if (property.condominiumFee != null || property.iptu != null) ...[
+                        if (property.condominiumFee != null ||
+                            property.iptu != null) ...[
                           const SizedBox(height: 8),
                           Wrap(
                             spacing: 16,
@@ -1503,14 +1631,20 @@ class _PropertiesPageState extends State<PropertiesPage> {
                                     Icon(
                                       Icons.apartment,
                                       size: 16,
-                                      color: ThemeHelpers.textSecondaryColor(context),
+                                      color: ThemeHelpers.textSecondaryColor(
+                                        context,
+                                      ),
                                     ),
                                     const SizedBox(width: 6),
                                     Text(
                                       'Condomínio: ${_currencyFormatter.format(property.condominiumFee)}',
-                                      style: theme.textTheme.bodyMedium?.copyWith(
-                                        color: ThemeHelpers.textSecondaryColor(context),
-                                      ),
+                                      style: theme.textTheme.bodyMedium
+                                          ?.copyWith(
+                                            color:
+                                                ThemeHelpers.textSecondaryColor(
+                                                  context,
+                                                ),
+                                          ),
                                     ),
                                   ],
                                 ),
@@ -1521,14 +1655,20 @@ class _PropertiesPageState extends State<PropertiesPage> {
                                     Icon(
                                       Icons.receipt,
                                       size: 16,
-                                      color: ThemeHelpers.textSecondaryColor(context),
+                                      color: ThemeHelpers.textSecondaryColor(
+                                        context,
+                                      ),
                                     ),
                                     const SizedBox(width: 6),
                                     Text(
                                       'IPTU: ${_currencyFormatter.format(property.iptu)}',
-                                      style: theme.textTheme.bodyMedium?.copyWith(
-                                        color: ThemeHelpers.textSecondaryColor(context),
-                                      ),
+                                      style: theme.textTheme.bodyMedium
+                                          ?.copyWith(
+                                            color:
+                                                ThemeHelpers.textSecondaryColor(
+                                                  context,
+                                                ),
+                                          ),
                                     ),
                                   ],
                                 ),
@@ -1547,7 +1687,12 @@ class _PropertiesPageState extends State<PropertiesPage> {
     );
   }
 
-  Widget _buildFeatureChip(BuildContext context, ThemeData theme, IconData icon, String label) {
+  Widget _buildFeatureChip(
+    BuildContext context,
+    ThemeData theme,
+    IconData icon,
+    String label,
+  ) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
@@ -1555,19 +1700,12 @@ class _PropertiesPageState extends State<PropertiesPage> {
             ? AppColors.background.backgroundSecondaryDarkMode
             : AppColors.background.backgroundSecondary,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context),
-          width: 1,
-        ),
+        border: Border.all(color: ThemeHelpers.borderColor(context), width: 1),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            size: 18,
-            color: AppColors.primary.primary,
-          ),
+          Icon(icon, size: 18, color: AppColors.primary.primary),
           const SizedBox(width: 8),
           Text(
             label,
@@ -1649,4 +1787,3 @@ class _PropertiesPageState extends State<PropertiesPage> {
     );
   }
 }
-

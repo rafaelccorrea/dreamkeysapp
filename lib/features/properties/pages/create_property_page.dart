@@ -10,6 +10,7 @@ import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/custom_text_field.dart';
 import '../../../../shared/widgets/custom_button.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
+import '../../../../shared/widgets/shimmer_image.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 
@@ -2100,11 +2101,12 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                     children: [
                       ClipRRect(
                         borderRadius: BorderRadius.circular(8),
-                        child: Image.network(
-                          image.url,
+                        child: ShimmerImage(
+                          imageUrl: image.url,
                           fit: BoxFit.cover,
                           width: double.infinity,
                           height: double.infinity,
+                          borderRadius: BorderRadius.circular(8),
                         ),
                       ),
                       if (image.isMain)
@@ -2776,27 +2778,17 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           decoration: BoxDecoration(
             color: ThemeHelpers.cardBackgroundColor(context),
             border: Border(
-              top: BorderSide(
-                color: ThemeHelpers.borderColor(context),
-              ),
+              top: BorderSide(color: ThemeHelpers.borderColor(context)),
             ),
           ),
           child: SafeArea(
             child: Row(
               children: [
-                Expanded(
-                  child: SkeletonBox(
-                    height: 48,
-                    borderRadius: 8,
-                  ),
-                ),
+                Expanded(child: SkeletonBox(height: 48, borderRadius: 8)),
                 const SizedBox(width: 12),
                 Expanded(
                   flex: 2,
-                  child: SkeletonBox(
-                    height: 48,
-                    borderRadius: 8,
-                  ),
+                  child: SkeletonBox(height: 48, borderRadius: 8),
                 ),
               ],
             ),
