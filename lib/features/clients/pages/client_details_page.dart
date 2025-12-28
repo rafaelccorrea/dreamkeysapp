@@ -546,6 +546,7 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
           icon: Icons.badge_outlined,
           label: 'CPF',
           value: _formatCpf(_client!.cpf),
+          showDivider: false,
         ),
         if (_client!.birthDate != null)
           _buildInfoItem(
@@ -562,6 +563,7 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
             icon: Icons.favorite_outline,
             label: 'Estado Civil',
             value: _client!.maritalStatus!.label,
+            showDivider: false,
           ),
       ],
     );
@@ -583,13 +585,6 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
         _buildInfoItem(
           context: context,
           theme: theme,
-          icon: Icons.location_city_outlined,
-          label: 'Cidade',
-          value: '${_client!.city} - ${_client!.state}',
-        ),
-        _buildInfoItem(
-          context: context,
-          theme: theme,
           icon: Icons.place_outlined,
           label: 'Bairro',
           value: _client!.neighborhood,
@@ -597,9 +592,17 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
         _buildInfoItem(
           context: context,
           theme: theme,
+          icon: Icons.location_city_outlined,
+          label: 'Cidade',
+          value: '${_client!.city} - ${_client!.state}',
+        ),
+        _buildInfoItem(
+          context: context,
+          theme: theme,
           icon: Icons.markunread_mailbox_outlined,
           label: 'CEP',
-          value: _client!.zipCode,
+          value: Masks.cep(_client!.zipCode),
+          showDivider: false,
         ),
       ],
     );
@@ -642,6 +645,7 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
             icon: Icons.work_off_outlined,
             label: 'Aposentado',
             value: 'Sim',
+            showDivider: false,
           ),
       ],
     );
@@ -689,6 +693,7 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
             icon: Icons.account_balance_outlined,
             label: 'Banco',
             value: _client!.bankName!,
+            showDivider: false,
           ),
       ],
     );
@@ -746,6 +751,7 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
             label: 'Área (m²)',
             value:
                 '${_client!.minArea!.toStringAsFixed(0)} - ${_client!.maxArea!.toStringAsFixed(0)}',
+            showDivider: false,
           ),
       ],
     );
@@ -789,6 +795,7 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
             icon: Icons.email_outlined,
             label: 'Email',
             value: spouse.email!,
+            showDivider: false,
           ),
       ],
     );
@@ -868,87 +875,115 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
     required IconData icon,
     required String label,
     required String value,
+    bool showDivider = true,
   }) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isSmallScreen = constraints.maxWidth < 400;
 
-        return Padding(
-          padding: EdgeInsets.only(bottom: isSmallScreen ? 12 : 16),
-          child: isSmallScreen
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+        return Column(
+          children: [
+            Padding(
+              padding: EdgeInsets.only(bottom: isSmallScreen ? 12 : 16),
+              child: isSmallScreen
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(
-                          icon,
-                          size: 18,
-                          color: ThemeHelpers.textSecondaryColor(context),
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary.primary.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(
+                                icon,
+                                size: 16,
+                                color: AppColors.primary.primary,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                label,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: ThemeHelpers.textSecondaryColor(context),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
+                        const SizedBox(height: 8),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 38),
                           child: Text(
-                            label,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: ThemeHelpers.textSecondaryColor(context),
-                              fontSize: 11,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Padding(
-                      padding: const EdgeInsets.only(left: 26),
-                      child: Text(
-                        value,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: ThemeHelpers.textColor(context),
-                          fontWeight: FontWeight.w500,
-                          fontSize: 14,
-                        ),
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                )
-              : Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      icon,
-                      size: 20,
-                      color: ThemeHelpers.textSecondaryColor(context),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            label,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: ThemeHelpers.textSecondaryColor(context),
-                              fontSize: 12,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
                             value,
                             style: theme.textTheme.bodyMedium?.copyWith(
                               color: ThemeHelpers.textColor(context),
                               fontWeight: FontWeight.w500,
+                              fontSize: 15,
                             ),
                             maxLines: 3,
                             overflow: TextOverflow.ellipsis,
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
+                    )
+                  : Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.primary.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            icon,
+                            size: 20,
+                            color: AppColors.primary.primary,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                label,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: ThemeHelpers.textSecondaryColor(context),
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                value,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: ThemeHelpers.textColor(context),
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 16,
+                                ),
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+            ),
+            if (showDivider)
+              Divider(
+                height: 1,
+                thickness: 1,
+                color: ThemeHelpers.borderLightColor(context).withOpacity(0.5),
+              ),
+          ],
         );
       },
     );

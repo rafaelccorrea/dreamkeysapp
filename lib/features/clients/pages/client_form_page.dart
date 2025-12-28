@@ -62,6 +62,17 @@ class _ClientFormPageState extends State<ClientFormPage> {
   final _maxValueController = TextEditingController();
   final _minAreaController = TextEditingController();
   final _maxAreaController = TextEditingController();
+  final _dependentsNotesController = TextEditingController();
+  final _contractTypeController = TextEditingController();
+  final _thirteenthSalaryController = TextEditingController();
+  final _vacationPayController = TextEditingController();
+  final _otherIncomeSourcesController = TextEditingController();
+  final _otherIncomeAmountController = TextEditingController();
+  final _referenceRelationshipController = TextEditingController();
+  final _professionalReferenceNameController = TextEditingController();
+  final _professionalReferencePhoneController = TextEditingController();
+  final _professionalReferencePositionController = TextEditingController();
+  final _mcmvCadunicoNumberController = TextEditingController();
   
   // Seleções adicionais
   MaritalStatus? _selectedMaritalStatus;
@@ -82,7 +93,6 @@ class _ClientFormPageState extends State<ClientFormPage> {
   String? _mcmvIncomeRange;
   
   DateTime? _birthDate;
-  DateTime? _anniversaryDate;
 
   Client? _client;
   ClientType _selectedType = ClientType.general;
@@ -135,6 +145,17 @@ class _ClientFormPageState extends State<ClientFormPage> {
     _maxValueController.dispose();
     _minAreaController.dispose();
     _maxAreaController.dispose();
+    _dependentsNotesController.dispose();
+    _contractTypeController.dispose();
+    _thirteenthSalaryController.dispose();
+    _vacationPayController.dispose();
+    _otherIncomeSourcesController.dispose();
+    _otherIncomeAmountController.dispose();
+    _referenceRelationshipController.dispose();
+    _professionalReferenceNameController.dispose();
+    _professionalReferencePhoneController.dispose();
+    _professionalReferencePositionController.dispose();
+    _mcmvCadunicoNumberController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -198,15 +219,25 @@ class _ClientFormPageState extends State<ClientFormPage> {
             _rgController.text = client.rg ?? '';
             _companyNameController.text = client.companyName ?? '';
             _jobPositionController.text = client.jobPosition ?? '';
+            _contractTypeController.text = client.contractType ?? '';
             _monthlyIncomeController.text = client.monthlyIncome?.toString() ?? '';
             _grossSalaryController.text = client.grossSalary?.toString() ?? '';
             _netSalaryController.text = client.netSalary?.toString() ?? '';
+            _thirteenthSalaryController.text = client.thirteenthSalary?.toString() ?? '';
+            _vacationPayController.text = client.vacationPay?.toString() ?? '';
+            _otherIncomeSourcesController.text = client.otherIncomeSources ?? '';
+            _otherIncomeAmountController.text = client.otherIncomeAmount?.toString() ?? '';
             _familyIncomeController.text = client.familyIncome?.toString() ?? '';
             _creditScoreController.text = client.creditScore?.toString() ?? '';
             _bankNameController.text = client.bankName ?? '';
             _bankAgencyController.text = client.bankAgency ?? '';
             _referenceNameController.text = client.referenceName ?? '';
             _referencePhoneController.text = client.referencePhone ?? '';
+            _referenceRelationshipController.text = client.referenceRelationship ?? '';
+            _professionalReferenceNameController.text = client.professionalReferenceName ?? '';
+            _professionalReferencePhoneController.text = client.professionalReferencePhone ?? '';
+            _professionalReferencePositionController.text = client.professionalReferencePosition ?? '';
+            _dependentsNotesController.text = client.dependentsNotes ?? '';
             _preferredCityController.text = client.preferredCity ?? '';
             _preferredNeighborhoodController.text = client.preferredNeighborhood ?? '';
             _minValueController.text = client.minValue?.toString() ?? '';
@@ -230,6 +261,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
             _mcmvInterested = client.mcmvInterested;
             _mcmvEligible = client.mcmvEligible;
             _mcmvIncomeRange = client.mcmvIncomeRange;
+            _mcmvCadunicoNumberController.text = client.mcmvCadunicoNumber ?? '';
             
             _isLoading = false;
           });
@@ -298,12 +330,18 @@ class _ClientFormPageState extends State<ClientFormPage> {
         maritalStatus: _selectedMaritalStatus,
         hasDependents: _hasDependents,
         numberOfDependents: _numberOfDependents,
+        dependentsNotes: _dependentsNotesController.text.trim().isNotEmpty
+            ? _dependentsNotesController.text.trim()
+            : null,
         employmentStatus: _selectedEmploymentStatus,
         companyName: _companyNameController.text.trim().isNotEmpty
             ? _companyNameController.text.trim()
             : null,
         jobPosition: _jobPositionController.text.trim().isNotEmpty
             ? _jobPositionController.text.trim()
+            : null,
+        contractType: _contractTypeController.text.trim().isNotEmpty
+            ? _contractTypeController.text.trim()
             : null,
         isRetired: _isRetired,
         monthlyIncome: _monthlyIncomeController.text.trim().isNotEmpty
@@ -314,6 +352,18 @@ class _ClientFormPageState extends State<ClientFormPage> {
             : null,
         netSalary: _netSalaryController.text.trim().isNotEmpty
             ? double.tryParse(_netSalaryController.text.trim().replaceAll(RegExp(r'[^\d,.]'), '').replaceAll(',', '.'))
+            : null,
+        thirteenthSalary: _thirteenthSalaryController.text.trim().isNotEmpty
+            ? double.tryParse(_thirteenthSalaryController.text.trim().replaceAll(RegExp(r'[^\d,.]'), '').replaceAll(',', '.'))
+            : null,
+        vacationPay: _vacationPayController.text.trim().isNotEmpty
+            ? double.tryParse(_vacationPayController.text.trim().replaceAll(RegExp(r'[^\d,.]'), '').replaceAll(',', '.'))
+            : null,
+        otherIncomeSources: _otherIncomeSourcesController.text.trim().isNotEmpty
+            ? _otherIncomeSourcesController.text.trim()
+            : null,
+        otherIncomeAmount: _otherIncomeAmountController.text.trim().isNotEmpty
+            ? double.tryParse(_otherIncomeAmountController.text.trim().replaceAll(RegExp(r'[^\d,.]'), '').replaceAll(',', '.'))
             : null,
         familyIncome: _familyIncomeController.text.trim().isNotEmpty
             ? double.tryParse(_familyIncomeController.text.trim().replaceAll(RegExp(r'[^\d,.]'), '').replaceAll(',', '.'))
@@ -335,6 +385,18 @@ class _ClientFormPageState extends State<ClientFormPage> {
             : null,
         referencePhone: _referencePhoneController.text.trim().isNotEmpty
             ? _referencePhoneController.text.trim()
+            : null,
+        referenceRelationship: _referenceRelationshipController.text.trim().isNotEmpty
+            ? _referenceRelationshipController.text.trim()
+            : null,
+        professionalReferenceName: _professionalReferenceNameController.text.trim().isNotEmpty
+            ? _professionalReferenceNameController.text.trim()
+            : null,
+        professionalReferencePhone: _professionalReferencePhoneController.text.trim().isNotEmpty
+            ? _professionalReferencePhoneController.text.trim()
+            : null,
+        professionalReferencePosition: _professionalReferencePositionController.text.trim().isNotEmpty
+            ? _professionalReferencePositionController.text.trim()
             : null,
         preferredCity: _preferredCityController.text.trim().isNotEmpty
             ? _preferredCityController.text.trim()
@@ -362,6 +424,9 @@ class _ClientFormPageState extends State<ClientFormPage> {
         mcmvInterested: _mcmvInterested,
         mcmvEligible: _mcmvEligible,
         mcmvIncomeRange: _mcmvIncomeRange,
+        mcmvCadunicoNumber: _mcmvCadunicoNumberController.text.trim().isNotEmpty
+            ? _mcmvCadunicoNumberController.text.trim()
+            : null,
         notes: _notesController.text.trim().isNotEmpty
             ? _notesController.text.trim()
             : null,
@@ -395,10 +460,15 @@ class _ClientFormPageState extends State<ClientFormPage> {
                 employmentStatus: dto.employmentStatus,
                 companyName: dto.companyName,
                 jobPosition: dto.jobPosition,
+                contractType: dto.contractType,
                 isRetired: dto.isRetired,
                 monthlyIncome: dto.monthlyIncome,
                 grossSalary: dto.grossSalary,
                 netSalary: dto.netSalary,
+                thirteenthSalary: dto.thirteenthSalary,
+                vacationPay: dto.vacationPay,
+                otherIncomeSources: dto.otherIncomeSources,
+                otherIncomeAmount: dto.otherIncomeAmount,
                 familyIncome: dto.familyIncome,
                 creditScore: dto.creditScore,
                 bankName: dto.bankName,
@@ -408,6 +478,10 @@ class _ClientFormPageState extends State<ClientFormPage> {
                 hasVehicle: dto.hasVehicle,
                 referenceName: dto.referenceName,
                 referencePhone: dto.referencePhone,
+                referenceRelationship: dto.referenceRelationship,
+                professionalReferenceName: dto.professionalReferenceName,
+                professionalReferencePhone: dto.professionalReferencePhone,
+                professionalReferencePosition: dto.professionalReferencePosition,
                 preferredCity: dto.preferredCity,
                 preferredNeighborhood: dto.preferredNeighborhood,
                 minValue: dto.minValue,
@@ -422,6 +496,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
                 mcmvInterested: dto.mcmvInterested,
                 mcmvEligible: dto.mcmvEligible,
                 mcmvIncomeRange: dto.mcmvIncomeRange,
+                mcmvCadunicoNumber: dto.mcmvCadunicoNumber,
                 notes: dto.notes,
               ),
             );
@@ -516,327 +591,1135 @@ class _ClientFormPageState extends State<ClientFormPage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // Informações Básicas
-                              _buildSectionTitle(context, theme, 'Informações Básicas'),
-                              const SizedBox(height: 16),
-                              CustomTextField(
-                                controller: _nameController,
-                                label: 'Nome Completo *',
-                                prefixIcon: const Icon(Icons.person_outline),
-                                validator: (value) {
-                                  if (value == null || value.trim().isEmpty) {
-                                    return 'Nome é obrigatório';
-                                  }
-                                  if (value.trim().length < 2) {
-                                    return 'Nome deve ter pelo menos 2 caracteres';
-                                  }
-                                  return null;
-                                },
-                              ),
-                              const SizedBox(height: 16),
-                              CustomTextField(
-                                controller: _emailController,
-                                label: 'Email *',
-                                prefixIcon: const Icon(Icons.email_outlined),
-                                keyboardType: TextInputType.emailAddress,
-                                validator: (value) {
-                                  if (value == null || value.trim().isEmpty) {
-                                    return 'Email é obrigatório';
-                                  }
-                                  if (!value.contains('@')) {
-                                    return 'Email inválido';
-                                  }
-                                  return null;
-                                },
-                              ),
-                              const SizedBox(height: 16),
-                              CustomTextField(
-                                controller: _cpfController,
-                                label: 'CPF *',
-                                prefixIcon: const Icon(Icons.badge_outlined),
-                                keyboardType: TextInputType.number,
-                                validator: (value) {
-                                  if (value == null || value.trim().isEmpty) {
-                                    return 'CPF é obrigatório';
-                                  }
-                                  final cpf = value.replaceAll(RegExp(r'[^\d]'), '');
-                                  if (cpf.length != 11) {
-                                    return 'CPF deve ter 11 dígitos';
-                                  }
-                                  return null;
-                                },
-                              ),
-                              const SizedBox(height: 16),
-                              CustomTextField(
-                                controller: _phoneController,
-                                label: 'Telefone *',
-                                prefixIcon: const Icon(Icons.phone_outlined),
-                                keyboardType: TextInputType.phone,
-                                validator: (value) {
-                                  if (value == null || value.trim().isEmpty) {
-                                    return 'Telefone é obrigatório';
-                                  }
-                                  return null;
-                                },
-                              ),
-                              const SizedBox(height: 16),
-                              CustomTextField(
-                                controller: _secondaryPhoneController,
-                                label: 'Telefone Secundário',
-                                prefixIcon: const Icon(Icons.phone_outlined),
-                                keyboardType: TextInputType.phone,
-                              ),
-                              const SizedBox(height: 16),
-                              CustomTextField(
-                                controller: _whatsappController,
-                                label: 'WhatsApp',
-                                prefixIcon: const Icon(Icons.chat_outlined),
-                                keyboardType: TextInputType.phone,
-                                inputFormatters: [PhoneInputFormatter()],
-                              ),
-                              const SizedBox(height: 16),
-                              TextFormField(
-                                controller: _birthDateController,
-                                decoration: InputDecoration(
-                                  labelText: 'Data de Nascimento',
-                                  prefixIcon: const Icon(Icons.cake_outlined),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  suffixIcon: IconButton(
-                                    icon: const Icon(Icons.calendar_today),
-                                    onPressed: () async {
-                                      final picked = await showDatePicker(
-                                        context: context,
-                                        initialDate: _birthDate ?? DateTime.now().subtract(const Duration(days: 365 * 25)),
-                                        firstDate: DateTime(1900),
-                                        lastDate: DateTime.now(),
-                                        locale: const Locale('pt', 'BR'),
-                                      );
-                                      if (picked != null) {
-                                        setState(() {
-                                          _birthDate = picked;
-                                          _birthDateController.text = DateFormat('dd/MM/yyyy').format(picked);
-                                        });
+                              // Informações Básicas - Sempre visível
+                              _buildExpansionSection(
+                                context,
+                                theme,
+                                title: 'Informações Básicas',
+                                icon: Icons.person_outline,
+                                isExpanded: true,
+                                children: [
+                                  CustomTextField(
+                                    controller: _nameController,
+                                    label: 'Nome Completo *',
+                                    prefixIcon: const Icon(Icons.person_outline),
+                                    validator: (value) {
+                                      if (value == null || value.trim().isEmpty) {
+                                        return 'Nome é obrigatório';
                                       }
+                                      if (value.trim().length < 2) {
+                                        return 'Nome deve ter pelo menos 2 caracteres';
+                                      }
+                                      return null;
                                     },
                                   ),
-                                ),
-                                readOnly: true,
-                                onTap: () async {
-                                  final picked = await showDatePicker(
-                                    context: context,
-                                    initialDate: _birthDate ?? DateTime.now().subtract(const Duration(days: 365 * 25)),
-                                    firstDate: DateTime(1900),
-                                    lastDate: DateTime.now(),
-                                    locale: const Locale('pt', 'BR'),
-                                  );
-                                  if (picked != null) {
-                                    setState(() {
-                                      _birthDate = picked;
-                                      _birthDateController.text = DateFormat('dd/MM/yyyy').format(picked);
-                                    });
-                                  }
-                                },
-                              ),
-                              const SizedBox(height: 16),
-                              CustomTextField(
-                                controller: _rgController,
-                                label: 'RG',
-                                prefixIcon: const Icon(Icons.badge_outlined),
-                                keyboardType: TextInputType.text,
-                              ),
-                              const SizedBox(height: 32),
-                              // Tipo e Status
-                              _buildSectionTitle(context, theme, 'Tipo e Status'),
-                              const SizedBox(height: 16),
-                              DropdownButtonFormField<ClientType>(
-                                value: _selectedType,
-                                decoration: InputDecoration(
-                                  labelText: 'Tipo de Cliente *',
-                                  prefixIcon: const Icon(Icons.category_outlined),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _emailController,
+                                    label: 'Email *',
+                                    prefixIcon: const Icon(Icons.email_outlined),
+                                    keyboardType: TextInputType.emailAddress,
+                                    validator: (value) {
+                                      if (value == null || value.trim().isEmpty) {
+                                        return 'Email é obrigatório';
+                                      }
+                                      if (!value.contains('@')) {
+                                        return 'Email inválido';
+                                      }
+                                      return null;
+                                    },
                                   ),
-                                ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _cpfController,
+                                    label: 'CPF *',
+                                    prefixIcon: const Icon(Icons.badge_outlined),
+                                    keyboardType: TextInputType.number,
+                                    inputFormatters: [CpfInputFormatter()],
+                                    validator: (value) {
+                                      if (value == null || value.trim().isEmpty) {
+                                        return 'CPF é obrigatório';
+                                      }
+                                      final cpf = value.replaceAll(RegExp(r'[^\d]'), '');
+                                      if (cpf.length != 11) {
+                                        return 'CPF deve ter 11 dígitos';
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _phoneController,
+                                    label: 'Telefone *',
+                                    prefixIcon: const Icon(Icons.phone_outlined),
+                                    keyboardType: TextInputType.phone,
+                                    inputFormatters: [PhoneInputFormatter()],
+                                    validator: (value) {
+                                      if (value == null || value.trim().isEmpty) {
+                                        return 'Telefone é obrigatório';
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _secondaryPhoneController,
+                                    label: 'Telefone Secundário',
+                                    prefixIcon: const Icon(Icons.phone_outlined),
+                                    keyboardType: TextInputType.phone,
+                                    inputFormatters: [PhoneInputFormatter()],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _whatsappController,
+                                    label: 'WhatsApp',
+                                    prefixIcon: const Icon(Icons.chat_outlined),
+                                    keyboardType: TextInputType.phone,
+                                    inputFormatters: [PhoneInputFormatter()],
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              // Informações Pessoais - Expansível
+                              _buildExpansionSection(
+                                context,
+                                theme,
+                                title: 'Informações Pessoais',
+                                icon: Icons.info_outline,
+                                isExpanded: false,
+                                children: [
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Data de Nascimento',
+                                        style: theme.textTheme.labelLarge?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      TextFormField(
+                                        controller: _birthDateController,
+                                        decoration: InputDecoration(
+                                          hintText: 'Selecione a data',
+                                          prefixIcon: const Icon(Icons.cake_outlined),
+                                          suffixIcon: IconButton(
+                                            icon: const Icon(Icons.calendar_today),
+                                            onPressed: () async {
+                                              final picked = await showDatePicker(
+                                                context: context,
+                                                initialDate: _birthDate ?? DateTime.now().subtract(const Duration(days: 365 * 25)),
+                                                firstDate: DateTime(1900),
+                                                lastDate: DateTime.now(),
+                                                locale: const Locale('pt', 'BR'),
+                                              );
+                                              if (picked != null) {
+                                                setState(() {
+                                                  _birthDate = picked;
+                                                  _birthDateController.text = DateFormat('dd/MM/yyyy').format(picked);
+                                                });
+                                              }
+                                            },
+                                          ),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                        ),
+                                        readOnly: true,
+                                        onTap: () async {
+                                          final picked = await showDatePicker(
+                                            context: context,
+                                            initialDate: _birthDate ?? DateTime.now().subtract(const Duration(days: 365 * 25)),
+                                            firstDate: DateTime(1900),
+                                            lastDate: DateTime.now(),
+                                            locale: const Locale('pt', 'BR'),
+                                          );
+                                          if (picked != null) {
+                                            setState(() {
+                                              _birthDate = picked;
+                                              _birthDateController.text = DateFormat('dd/MM/yyyy').format(picked);
+                                            });
+                                          }
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _rgController,
+                                    label: 'RG',
+                                    prefixIcon: const Icon(Icons.badge_outlined),
+                                    keyboardType: TextInputType.text,
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Estado Civil',
+                                        style: theme.textTheme.labelLarge?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      DropdownButtonFormField<MaritalStatus?>(
+                                        value: _selectedMaritalStatus,
+                                        decoration: InputDecoration(
+                                          hintText: 'Selecione o estado civil',
+                                          prefixIcon: const Icon(Icons.favorite_outline),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                        ),
+                                    items: [
+                                      const DropdownMenuItem<MaritalStatus?>(
+                                        value: null,
+                                        child: Text('Não informado'),
+                                      ),
+                                      ...MaritalStatus.values.map((status) {
+                                        return DropdownMenuItem<MaritalStatus?>(
+                                          value: status,
+                                          child: Text(status.label),
+                                        );
+                                      }).toList(),
+                                    ],
+                                        onChanged: (value) {
+                                          setState(() {
+                                            _selectedMaritalStatus = value;
+                                          });
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          'Possui dependentes?',
+                                          style: theme.textTheme.bodyMedium,
+                                        ),
+                                      ),
+                                      Switch(
+                                        value: _hasDependents ?? false,
+                                        onChanged: (value) {
+                                          setState(() {
+                                            _hasDependents = value;
+                                            if (!value) _numberOfDependents = null;
+                                          });
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                  if (_hasDependents == true) ...[
+                                    const SizedBox(height: 16),
+                                    CustomTextField(
+                                      controller: TextEditingController(
+                                        text: _numberOfDependents?.toString() ?? '',
+                                      ),
+                                      label: 'Número de Dependentes',
+                                      prefixIcon: const Icon(Icons.people_outline),
+                                      keyboardType: TextInputType.number,
+                                      onChanged: (value) {
+                                        _numberOfDependents = int.tryParse(value);
+                                      },
+                                    ),
+                                  ],
+                                  const SizedBox(height: 16),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Origem do Lead',
+                                        style: theme.textTheme.labelLarge?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      DropdownButtonFormField<ClientSource?>(
+                                        value: _leadSource,
+                                        decoration: InputDecoration(
+                                          hintText: 'Selecione a origem',
+                                          prefixIcon: const Icon(Icons.track_changes_outlined),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                        ),
+                                        items: [
+                                          const DropdownMenuItem<ClientSource?>(
+                                            value: null,
+                                            child: Text('Não informado'),
+                                          ),
+                                          ...ClientSource.values.map((source) {
+                                            return DropdownMenuItem<ClientSource?>(
+                                              value: source,
+                                              child: Text(source.label),
+                                            );
+                                          }).toList(),
+                                        ],
+                                        onChanged: (value) {
+                                          setState(() {
+                                            _leadSource = value;
+                                          });
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              // Tipo e Status
+                              _buildExpansionSection(
+                                context,
+                                theme,
+                                title: 'Tipo e Status',
+                                icon: Icons.category_outlined,
+                                isExpanded: true,
+                                children: [
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Tipo de Cliente *',
+                                        style: theme.textTheme.labelLarge?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      DropdownButtonFormField<ClientType>(
+                                        value: _selectedType,
+                                        decoration: InputDecoration(
+                                          hintText: 'Selecione o tipo',
+                                          prefixIcon: const Icon(Icons.category_outlined),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                        ),
                                 items: ClientType.values.map((type) {
                                   return DropdownMenuItem(
                                     value: type,
                                     child: Text(type.label),
                                   );
                                 }).toList(),
-                                onChanged: (value) {
-                                  if (value != null) {
-                                    setState(() {
-                                      _selectedType = value;
-                                    });
-                                  }
-                                },
-                                validator: (value) {
-                                  if (value == null) {
-                                    return 'Tipo é obrigatório';
-                                  }
-                                  return null;
-                                },
-                              ),
-                              const SizedBox(height: 16),
-                              DropdownButtonFormField<ClientStatus>(
-                                value: _selectedStatus,
-                                decoration: InputDecoration(
-                                  labelText: 'Status',
-                                  prefixIcon: const Icon(Icons.info_outline),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
+                                        onChanged: (value) {
+                                          if (value != null) {
+                                            setState(() {
+                                              _selectedType = value;
+                                            });
+                                          }
+                                        },
+                                        validator: (value) {
+                                          if (value == null) {
+                                            return 'Tipo é obrigatório';
+                                          }
+                                          return null;
+                                        },
+                                      ),
+                                    ],
                                   ),
-                                ),
+                                  const SizedBox(height: 16),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Status',
+                                        style: theme.textTheme.labelLarge?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      DropdownButtonFormField<ClientStatus>(
+                                        value: _selectedStatus,
+                                        decoration: InputDecoration(
+                                          hintText: 'Selecione o status',
+                                          prefixIcon: const Icon(Icons.info_outline),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                        ),
                                 items: ClientStatus.values.map((status) {
                                   return DropdownMenuItem(
                                     value: status,
                                     child: Text(status.label),
                                   );
                                 }).toList(),
-                                onChanged: (value) {
-                                  if (value != null) {
-                                    setState(() {
-                                      _selectedStatus = value;
-                                    });
-                                  }
-                                },
-                              ),
-                              const SizedBox(height: 32),
-                              // Endereço
-                              _buildSectionTitle(context, theme, 'Endereço'),
-                              const SizedBox(height: 16),
-                              CustomTextField(
-                                controller: _zipCodeController,
-                                label: 'CEP *',
-                                prefixIcon: const Icon(Icons.markunread_mailbox_outlined),
-                                keyboardType: TextInputType.number,
-                                validator: (value) {
-                                  if (value == null || value.trim().isEmpty) {
-                                    return 'CEP é obrigatório';
-                                  }
-                                  final cep = value.replaceAll(RegExp(r'[^\d]'), '');
-                                  if (cep.length != 8) {
-                                    return 'CEP deve ter 8 dígitos';
-                                  }
-                                  return null;
-                                },
-                              ),
-                              const SizedBox(height: 16),
-                              CustomTextField(
-                                controller: _addressController,
-                                label: 'Endereço *',
-                                prefixIcon: const Icon(Icons.location_on_outlined),
-                                validator: (value) {
-                                  if (value == null || value.trim().isEmpty) {
-                                    return 'Endereço é obrigatório';
-                                  }
-                                  return null;
-                                },
-                              ),
-                              const SizedBox(height: 16),
-                              Row(
-                                children: [
-                                    Expanded(
-                                    flex: 2,
-                                    child: CustomTextField(
-                                      controller: _cityController,
-                                      label: 'Cidade *',
-                                      prefixIcon: const Icon(Icons.location_city_outlined),
-                                      validator: (value) {
-                                        if (value == null || value.trim().isEmpty) {
-                                          return 'Cidade é obrigatória';
-                                        }
-                                        return null;
-                                      },
-                                    ),
-                                  ),
-                                  const SizedBox(width: 16),
-                                  Expanded(
-                                    child: TextFormField(
-                                      controller: _stateController,
-                                      decoration: InputDecoration(
-                                        labelText: 'UF *',
-                                        prefixIcon: const Icon(Icons.map_outlined),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(12),
-                                        ),
+                                        onChanged: (value) {
+                                          if (value != null) {
+                                            setState(() {
+                                              _selectedStatus = value;
+                                            });
+                                          }
+                                        },
                                       ),
-                                      maxLength: 2,
-                                      textCapitalization: TextCapitalization.characters,
-                                      validator: (value) {
-                                        if (value == null || value.trim().isEmpty) {
-                                          return 'UF é obrigatória';
-                                        }
-                                        if (value.trim().length != 2) {
-                                          return 'UF deve ter 2 caracteres';
-                                        }
-                                        return null;
-                                      },
-                                    ),
+                                    ],
                                   ),
                                 ],
                               ),
                               const SizedBox(height: 16),
-                              CustomTextField(
-                                controller: _neighborhoodController,
-                                label: 'Bairro *',
-                                prefixIcon: const Icon(Icons.place_outlined),
-                                validator: (value) {
-                                  if (value == null || value.trim().isEmpty) {
-                                    return 'Bairro é obrigatório';
-                                  }
-                                  return null;
-                                },
-                              ),
-                              const SizedBox(height: 32),
-                              // Observações
-                              _buildSectionTitle(context, theme, 'Observações'),
-                              const SizedBox(height: 16),
-                              CustomTextField(
-                                controller: _notesController,
-                                label: 'Notas e Observações',
-                                prefixIcon: const Icon(Icons.note_outlined),
-                                maxLines: 4,
-                              ),
-                              const SizedBox(height: 32),
-                              // Informações Adicionais (colapsável)
-                              ExpansionTile(
-                                title: Text(
-                                  'Informações Adicionais',
-                                  style: theme.textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    color: ThemeHelpers.textColor(context),
-                                  ),
-                                ),
-                                leading: const Icon(Icons.info_outline),
+                              // Endereço
+                              _buildExpansionSection(
+                                context,
+                                theme,
+                                title: 'Endereço',
+                                icon: Icons.location_on_outlined,
+                                isExpanded: true,
                                 children: [
-                                  Padding(
-                                    padding: const EdgeInsets.all(16),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          'Você pode adicionar informações adicionais como dados financeiros, preferências imobiliárias e informações profissionais após criar o cliente.',
-                                          style: theme.textTheme.bodyMedium?.copyWith(
-                                            color: ThemeHelpers.textSecondaryColor(context),
+                                  CustomTextField(
+                                    controller: _zipCodeController,
+                                    label: 'CEP *',
+                                    prefixIcon: const Icon(Icons.markunread_mailbox_outlined),
+                                    keyboardType: TextInputType.number,
+                                    inputFormatters: [CepInputFormatter()],
+                                    validator: (value) {
+                                      if (value == null || value.trim().isEmpty) {
+                                        return 'CEP é obrigatório';
+                                      }
+                                      final cep = value.replaceAll(RegExp(r'[^\d]'), '');
+                                      if (cep.length != 8) {
+                                        return 'CEP deve ter 8 dígitos';
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _addressController,
+                                    label: 'Endereço *',
+                                    prefixIcon: const Icon(Icons.location_on_outlined),
+                                    validator: (value) {
+                                      if (value == null || value.trim().isEmpty) {
+                                        return 'Endereço é obrigatório';
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        flex: 2,
+                                        child: CustomTextField(
+                                          controller: _cityController,
+                                          label: 'Cidade *',
+                                          prefixIcon: const Icon(Icons.location_city_outlined),
+                                          validator: (value) {
+                                            if (value == null || value.trim().isEmpty) {
+                                              return 'Cidade é obrigatória';
+                                            }
+                                            return null;
+                                          },
+                                        ),
+                                      ),
+                                      const SizedBox(width: 16),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'UF *',
+                                              style: theme.textTheme.labelLarge?.copyWith(
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            TextFormField(
+                                              controller: _stateController,
+                                              decoration: InputDecoration(
+                                                hintText: 'Ex: SP',
+                                                prefixIcon: const Icon(Icons.map_outlined),
+                                                border: OutlineInputBorder(
+                                                  borderRadius: BorderRadius.circular(12),
+                                                ),
+                                              ),
+                                              maxLength: 2,
+                                              textCapitalization: TextCapitalization.characters,
+                                              validator: (value) {
+                                                if (value == null || value.trim().isEmpty) {
+                                                  return 'UF é obrigatória';
+                                                }
+                                                if (value.trim().length != 2) {
+                                                  return 'UF deve ter 2 caracteres';
+                                                }
+                                                return null;
+                                              },
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _neighborhoodController,
+                                    label: 'Bairro *',
+                                    prefixIcon: const Icon(Icons.place_outlined),
+                                    validator: (value) {
+                                      if (value == null || value.trim().isEmpty) {
+                                        return 'Bairro é obrigatório';
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              // Informações Profissionais
+                              _buildExpansionSection(
+                                context,
+                                theme,
+                                title: 'Informações Profissionais',
+                                icon: Icons.work_outline,
+                                isExpanded: false,
+                                children: [
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Situação Profissional',
+                                        style: theme.textTheme.labelLarge?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      DropdownButtonFormField<EmploymentStatus?>(
+                                        value: _selectedEmploymentStatus,
+                                        decoration: InputDecoration(
+                                          hintText: 'Selecione a situação',
+                                          prefixIcon: const Icon(Icons.work_outline),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(12),
                                           ),
                                         ),
-                                        const SizedBox(height: 16),
-                                        Text(
-                                          'Essas informações podem ser editadas na página de detalhes do cliente.',
-                                          style: theme.textTheme.bodySmall?.copyWith(
-                                            color: ThemeHelpers.textSecondaryColor(context),
-                                            fontStyle: FontStyle.italic,
+                                        items: [
+                                          const DropdownMenuItem<EmploymentStatus?>(
+                                            value: null,
+                                            child: Text('Não informado'),
                                           ),
+                                          ...EmploymentStatus.values.map((status) {
+                                            return DropdownMenuItem<EmploymentStatus?>(
+                                              value: status,
+                                              child: Text(status.label),
+                                            );
+                                          }).toList(),
+                                        ],
+                                        onChanged: (value) {
+                                          setState(() {
+                                            _selectedEmploymentStatus = value;
+                                          });
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _companyNameController,
+                                    label: 'Empresa',
+                                    prefixIcon: const Icon(Icons.business_outlined),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _jobPositionController,
+                                    label: 'Cargo',
+                                    prefixIcon: const Icon(Icons.badge_outlined),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _contractTypeController,
+                                    label: 'Tipo de Contrato',
+                                    prefixIcon: const Icon(Icons.description_outlined),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          'Aposentado?',
+                                          style: theme.textTheme.bodyMedium,
+                                        ),
+                                      ),
+                                      Switch(
+                                        value: _isRetired ?? false,
+                                        onChanged: (value) {
+                                          setState(() {
+                                            _isRetired = value;
+                                          });
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              // Informações Financeiras
+                              _buildExpansionSection(
+                                context,
+                                theme,
+                                title: 'Informações Financeiras',
+                                icon: Icons.account_balance_wallet_outlined,
+                                isExpanded: false,
+                                children: [
+                                  CustomTextField(
+                                    controller: _monthlyIncomeController,
+                                    label: 'Renda Mensal',
+                                    prefixIcon: const Icon(Icons.attach_money_outlined),
+                                    keyboardType: TextInputType.number,
+                                    inputFormatters: [MoneyInputFormatter()],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _grossSalaryController,
+                                    label: 'Salário Bruto',
+                                    prefixIcon: const Icon(Icons.account_balance_wallet_outlined),
+                                    keyboardType: TextInputType.number,
+                                    inputFormatters: [MoneyInputFormatter()],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _netSalaryController,
+                                    label: 'Salário Líquido',
+                                    prefixIcon: const Icon(Icons.account_balance_wallet_outlined),
+                                    keyboardType: TextInputType.number,
+                                    inputFormatters: [MoneyInputFormatter()],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _familyIncomeController,
+                                    label: 'Renda Familiar',
+                                    prefixIcon: const Icon(Icons.family_restroom_outlined),
+                                    keyboardType: TextInputType.number,
+                                    inputFormatters: [MoneyInputFormatter()],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _thirteenthSalaryController,
+                                    label: '13º Salário',
+                                    prefixIcon: const Icon(Icons.attach_money_outlined),
+                                    keyboardType: TextInputType.number,
+                                    inputFormatters: [MoneyInputFormatter()],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _vacationPayController,
+                                    label: 'Férias',
+                                    prefixIcon: const Icon(Icons.attach_money_outlined),
+                                    keyboardType: TextInputType.number,
+                                    inputFormatters: [MoneyInputFormatter()],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _otherIncomeSourcesController,
+                                    label: 'Outras Fontes de Renda (Descrição)',
+                                    prefixIcon: const Icon(Icons.description_outlined),
+                                    maxLines: 2,
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _otherIncomeAmountController,
+                                    label: 'Valor de Outras Rendas',
+                                    prefixIcon: const Icon(Icons.attach_money_outlined),
+                                    keyboardType: TextInputType.number,
+                                    inputFormatters: [MoneyInputFormatter()],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _creditScoreController,
+                                    label: 'Score de Crédito (0-1000)',
+                                    prefixIcon: const Icon(Icons.credit_score_outlined),
+                                    keyboardType: TextInputType.number,
+                                    validator: (value) {
+                                      if (value != null && value.isNotEmpty) {
+                                        final score = int.tryParse(value);
+                                        if (score == null || score < 0 || score > 1000) {
+                                          return 'Score deve estar entre 0 e 1000';
+                                        }
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _bankNameController,
+                                    label: 'Banco',
+                                    prefixIcon: const Icon(Icons.account_balance_outlined),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _bankAgencyController,
+                                    label: 'Agência',
+                                    prefixIcon: const Icon(Icons.account_balance_outlined),
+                                    keyboardType: TextInputType.number,
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Tipo de Conta',
+                                        style: theme.textTheme.labelLarge?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      DropdownButtonFormField<String?>(
+                                        value: _accountType,
+                                        decoration: InputDecoration(
+                                          hintText: 'Selecione o tipo',
+                                          prefixIcon: const Icon(Icons.account_balance_outlined),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                        ),
+                                        items: [
+                                          const DropdownMenuItem<String?>(
+                                            value: null,
+                                            child: Text('Não informado'),
+                                          ),
+                                          const DropdownMenuItem<String?>(
+                                            value: 'checking',
+                                            child: Text('Conta Corrente'),
+                                          ),
+                                          const DropdownMenuItem<String?>(
+                                            value: 'savings',
+                                            child: Text('Conta Poupança'),
+                                          ),
+                                          const DropdownMenuItem<String?>(
+                                            value: 'salary',
+                                            child: Text('Conta Salário'),
+                                          ),
+                                        ],
+                                        onChanged: (value) {
+                                          setState(() {
+                                            _accountType = value;
+                                          });
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          'Possui imóvel?',
+                                          style: theme.textTheme.bodyMedium,
+                                        ),
+                                      ),
+                                      Switch(
+                                        value: _hasProperty ?? false,
+                                        onChanged: (value) {
+                                          setState(() {
+                                            _hasProperty = value;
+                                          });
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          'Possui veículo?',
+                                          style: theme.textTheme.bodyMedium,
+                                        ),
+                                      ),
+                                      Switch(
+                                        value: _hasVehicle ?? false,
+                                        onChanged: (value) {
+                                          setState(() {
+                                            _hasVehicle = value;
+                                          });
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              // Preferências Imobiliárias
+                              _buildExpansionSection(
+                                context,
+                                theme,
+                                title: 'Preferências Imobiliárias',
+                                icon: Icons.home_outlined,
+                                isExpanded: false,
+                                children: [
+                                  CustomTextField(
+                                    controller: _preferredCityController,
+                                    label: 'Cidade Preferida',
+                                    prefixIcon: const Icon(Icons.location_city_outlined),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _preferredNeighborhoodController,
+                                    label: 'Bairro Preferido',
+                                    prefixIcon: const Icon(Icons.place_outlined),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: CustomTextField(
+                                          controller: _minValueController,
+                                          label: 'Valor Mínimo',
+                                          prefixIcon: const Icon(Icons.attach_money_outlined),
+                                          keyboardType: TextInputType.number,
+                                          inputFormatters: [MoneyInputFormatter()],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 16),
+                                      Expanded(
+                                        child: CustomTextField(
+                                          controller: _maxValueController,
+                                          label: 'Valor Máximo',
+                                          prefixIcon: const Icon(Icons.attach_money_outlined),
+                                          keyboardType: TextInputType.number,
+                                          inputFormatters: [MoneyInputFormatter()],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: CustomTextField(
+                                          controller: _minAreaController,
+                                          label: 'Área Mínima (m²)',
+                                          prefixIcon: const Icon(Icons.square_foot_outlined),
+                                          keyboardType: TextInputType.number,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 16),
+                                      Expanded(
+                                        child: CustomTextField(
+                                          controller: _maxAreaController,
+                                          label: 'Área Máxima (m²)',
+                                          prefixIcon: const Icon(Icons.square_foot_outlined),
+                                          keyboardType: TextInputType.number,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Quartos Mín.',
+                                              style: theme.textTheme.labelLarge?.copyWith(
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            DropdownButtonFormField<int?>(
+                                              value: _minBedrooms,
+                                              decoration: InputDecoration(
+                                                hintText: 'Mín.',
+                                                prefixIcon: const Icon(Icons.bed_outlined),
+                                                border: OutlineInputBorder(
+                                                  borderRadius: BorderRadius.circular(12),
+                                                ),
+                                              ),
+                                              items: [
+                                                const DropdownMenuItem<int?>(
+                                                  value: null,
+                                                  child: Text('Não informado'),
+                                                ),
+                                                ...List.generate(10, (i) => i + 1).map((value) {
+                                                  return DropdownMenuItem<int?>(
+                                                    value: value,
+                                                    child: Text('$value'),
+                                                  );
+                                                }).toList(),
+                                              ],
+                                              onChanged: (value) {
+                                                setState(() {
+                                                  _minBedrooms = value;
+                                                });
+                                              },
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 16),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Quartos Máx.',
+                                              style: theme.textTheme.labelLarge?.copyWith(
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            DropdownButtonFormField<int?>(
+                                              value: _maxBedrooms,
+                                              decoration: InputDecoration(
+                                                hintText: 'Máx.',
+                                                prefixIcon: const Icon(Icons.bed_outlined),
+                                                border: OutlineInputBorder(
+                                                  borderRadius: BorderRadius.circular(12),
+                                                ),
+                                              ),
+                                              items: [
+                                                const DropdownMenuItem<int?>(
+                                                  value: null,
+                                                  child: Text('Não informado'),
+                                                ),
+                                                ...List.generate(10, (i) => i + 1).map((value) {
+                                                  return DropdownMenuItem<int?>(
+                                                    value: value,
+                                                    child: Text('$value'),
+                                                  );
+                                                }).toList(),
+                                              ],
+                                              onChanged: (value) {
+                                                setState(() {
+                                                  _maxBedrooms = value;
+                                                });
+                                              },
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Banheiros',
+                                        style: theme.textTheme.labelLarge?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      DropdownButtonFormField<int?>(
+                                        value: _minBathrooms,
+                                        decoration: InputDecoration(
+                                          hintText: 'Selecione',
+                                          prefixIcon: const Icon(Icons.bathroom_outlined),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                        ),
+                                        items: [
+                                          const DropdownMenuItem<int?>(
+                                            value: null,
+                                            child: Text('Não informado'),
+                                          ),
+                                          ...List.generate(10, (i) => i + 1).map((value) {
+                                            return DropdownMenuItem<int?>(
+                                              value: value,
+                                              child: Text('$value'),
+                                            );
+                                          }).toList(),
+                                        ],
+                                        onChanged: (value) {
+                                          setState(() {
+                                            _minBathrooms = value;
+                                          });
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              // Referências
+                              _buildExpansionSection(
+                                context,
+                                theme,
+                                title: 'Referências',
+                                icon: Icons.people_outline,
+                                isExpanded: false,
+                                children: [
+                                  Text(
+                                    'Referência Pessoal',
+                                    style: theme.textTheme.titleSmall?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _referenceNameController,
+                                    label: 'Nome da Referência',
+                                    prefixIcon: const Icon(Icons.person_outline),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _referencePhoneController,
+                                    label: 'Telefone da Referência',
+                                    prefixIcon: const Icon(Icons.phone_outlined),
+                                    keyboardType: TextInputType.phone,
+                                    inputFormatters: [PhoneInputFormatter()],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _referenceRelationshipController,
+                                    label: 'Relacionamento',
+                                    prefixIcon: const Icon(Icons.favorite_outline),
+                                  ),
+                                  const SizedBox(height: 24),
+                                  Text(
+                                    'Referência Profissional',
+                                    style: theme.textTheme.titleSmall?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _professionalReferenceNameController,
+                                    label: 'Nome da Referência Profissional',
+                                    prefixIcon: const Icon(Icons.business_center_outlined),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _professionalReferencePhoneController,
+                                    label: 'Telefone da Referência Profissional',
+                                    prefixIcon: const Icon(Icons.phone_outlined),
+                                    keyboardType: TextInputType.phone,
+                                    inputFormatters: [PhoneInputFormatter()],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  CustomTextField(
+                                    controller: _professionalReferencePositionController,
+                                    label: 'Cargo/Posição',
+                                    prefixIcon: const Icon(Icons.badge_outlined),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              // Dados MCMV
+                              _buildExpansionSection(
+                                context,
+                                theme,
+                                title: 'Dados MCMV',
+                                icon: Icons.home_work_outlined,
+                                isExpanded: false,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          'Interessado no MCMV?',
+                                          style: theme.textTheme.bodyMedium,
+                                        ),
+                                      ),
+                                      Switch(
+                                        value: _mcmvInterested ?? false,
+                                        onChanged: (value) {
+                                          setState(() {
+                                            _mcmvInterested = value;
+                                            if (!value) {
+                                              _mcmvEligible = null;
+                                              _mcmvIncomeRange = null;
+                                            }
+                                          });
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                  if (_mcmvInterested == true) ...[
+                                    const SizedBox(height: 16),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            'Elegível para MCMV?',
+                                            style: theme.textTheme.bodyMedium,
+                                          ),
+                                        ),
+                                        Switch(
+                                          value: _mcmvEligible ?? false,
+                                          onChanged: (value) {
+                                            setState(() {
+                                              _mcmvEligible = value;
+                                            });
+                                          },
                                         ),
                                       ],
                                     ),
+                                    const SizedBox(height: 16),
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Faixa de Renda MCMV',
+                                          style: theme.textTheme.labelLarge?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        DropdownButtonFormField<String?>(
+                                          value: _mcmvIncomeRange,
+                                          decoration: InputDecoration(
+                                            hintText: 'Selecione a faixa',
+                                            prefixIcon: const Icon(Icons.attach_money_outlined),
+                                            border: OutlineInputBorder(
+                                              borderRadius: BorderRadius.circular(12),
+                                            ),
+                                          ),
+                                          items: [
+                                            const DropdownMenuItem<String?>(
+                                              value: null,
+                                              child: Text('Não informado'),
+                                            ),
+                                            const DropdownMenuItem<String?>(
+                                              value: 'faixa1',
+                                              child: Text('Faixa 1'),
+                                            ),
+                                            const DropdownMenuItem<String?>(
+                                              value: 'faixa2',
+                                              child: Text('Faixa 2'),
+                                            ),
+                                            const DropdownMenuItem<String?>(
+                                              value: 'faixa3',
+                                              child: Text('Faixa 3'),
+                                            ),
+                                          ],
+                                          onChanged: (value) {
+                                            setState(() {
+                                              _mcmvIncomeRange = value;
+                                            });
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 16),
+                                    CustomTextField(
+                                      controller: _mcmvCadunicoNumberController,
+                                      label: 'Número CADÚnico',
+                                      prefixIcon: const Icon(Icons.badge_outlined),
+                                      keyboardType: TextInputType.number,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              // Observações
+                              _buildExpansionSection(
+                                context,
+                                theme,
+                                title: 'Observações',
+                                icon: Icons.note_outlined,
+                                isExpanded: false,
+                                children: [
+                                  CustomTextField(
+                                    controller: _notesController,
+                                    label: 'Notas e Observações',
+                                    prefixIcon: const Icon(Icons.note_outlined),
+                                    maxLines: 4,
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 32),
+                              const SizedBox(height: 16),
                             ],
                           ),
                         ),
@@ -886,13 +1769,34 @@ class _ClientFormPageState extends State<ClientFormPage> {
     );
   }
 
-  Widget _buildSectionTitle(BuildContext context, ThemeData theme, String title) {
-    return Text(
-      title,
-      style: theme.textTheme.titleLarge?.copyWith(
-        fontWeight: FontWeight.bold,
-        color: ThemeHelpers.textColor(context),
+
+  Widget _buildExpansionSection(
+    BuildContext context,
+    ThemeData theme, {
+    required String title,
+    required IconData icon,
+    required bool isExpanded,
+    required List<Widget> children,
+  }) {
+    return ExpansionTile(
+      initiallyExpanded: isExpanded,
+      title: Text(
+        title,
+        style: theme.textTheme.titleMedium?.copyWith(
+          fontWeight: FontWeight.w600,
+          color: ThemeHelpers.textColor(context),
+        ),
       ),
+      leading: Icon(icon, color: AppColors.primary.primary),
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(0, 8, 0, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: children,
+          ),
+        ),
+      ],
     );
   }
 }

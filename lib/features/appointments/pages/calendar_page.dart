@@ -293,13 +293,23 @@ class _CalendarPageState extends State<CalendarPage> {
                             outsideDaysVisible: false,
                             weekendTextStyle: TextStyle(
                               color: ThemeHelpers.textColor(context),
-                              fontSize: 18,
+                              fontSize: 16,
                               fontWeight: FontWeight.w500,
                             ),
                             defaultTextStyle: TextStyle(
                               color: ThemeHelpers.textColor(context),
-                              fontSize: 18,
+                              fontSize: 16,
                               fontWeight: FontWeight.w500,
+                            ),
+                            selectedTextStyle: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            todayTextStyle: TextStyle(
+                              color: ThemeHelpers.textColor(context),
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
                             ),
                             selectedDecoration: BoxDecoration(
                               color: AppColors.primary.primary,
@@ -316,10 +326,8 @@ class _CalendarPageState extends State<CalendarPage> {
                             markersMaxCount: 3,
                             markerSize: 6,
                             canMarkersOverflow: false,
-                            cellPadding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 10,
-                            ),
+                            cellPadding: const EdgeInsets.all(8),
+                            cellMargin: const EdgeInsets.all(2),
                           ),
                           calendarBuilders: CalendarBuilders(
                             markerBuilder: (context, date, events) {
