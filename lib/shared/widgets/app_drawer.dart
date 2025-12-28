@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../../main.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
@@ -7,6 +8,7 @@ import '../services/token_refresh_service.dart';
 import '../services/company_service.dart';
 import '../services/profile_service.dart';
 import '../services/dashboard_service.dart';
+import '../../features/notifications/controllers/notification_controller.dart';
 import 'package:dreamkeys_app/shared/widgets/permission_wrapper.dart';
 
 /// Drawer (menu lateral) do aplicativo
@@ -405,14 +407,18 @@ class _AppDrawerState extends State<AppDrawer> {
                 _buildDrawerItem(
                   context: context,
                   currentRoute: activeRoute,
-                  route: '/matches',
+                  route: AppRoutes.matches,
                   icon: Icons.favorite_outline,
                   activeIcon: Icons.favorite,
                   title: 'Matches',
                   onTap: () {
                     Navigator.pop(context);
-                    // TODO: Navegar para tela de matches
-                    _showComingSoon(context);
+                    // Se já está na tela de matches, não navega novamente
+                    if (activeRoute == AppRoutes.matches) return;
+                    Navigator.of(context).pushNamedAndRemoveUntil(
+                      AppRoutes.matches,
+                      (route) => false,
+                    );
                   },
                 ),
                 _buildDrawerItem(
@@ -517,6 +523,17 @@ class _AppDrawerState extends State<AppDrawer> {
 
     final iconToShow = active ? activeIcon : icon;
 
+    // Obter contador de notificações para esta rota
+    int notificationCount = 0;
+    if (route.isNotEmpty && !isDestructive) {
+      try {
+        final notificationController = context.watch<NotificationController>();
+        notificationCount = notificationController.getCountForRoute(route);
+      } catch (e) {
+        // Se não conseguir ler o controller, ignora
+      }
+    }
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
@@ -526,13 +543,72 @@ class _AppDrawerState extends State<AppDrawer> {
         borderRadius: BorderRadius.circular(12),
       ),
       child: ListTile(
-        leading: Icon(iconToShow, color: color),
-        title: Text(
-          title,
-          style: TextStyle(
-            color: color,
-            fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-          ),
+        leading: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Icon(iconToShow, color: color),
+            if (notificationCount > 0)
+              Positioned(
+                right: -6,
+                top: -4,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: active ? primaryColor : const Color(0xFFEF4444),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: theme.scaffoldBackgroundColor,
+                      width: 2,
+                    ),
+                  ),
+                  constraints: const BoxConstraints(
+                    minWidth: 16,
+                    minHeight: 16,
+                  ),
+                  child: Text(
+                    notificationCount > 99 ? '99+' : '$notificationCount',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      height: 1,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  color: color,
+                  fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+                ),
+              ),
+            ),
+            if (notificationCount > 0)
+              Container(
+                margin: const EdgeInsets.only(left: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: active ? primaryColor : const Color(0xFFEF4444),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  notificationCount > 99 ? '99+' : '$notificationCount',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    height: 1,
+                  ),
+                ),
+              ),
+          ],
         ),
         onTap: onTap,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

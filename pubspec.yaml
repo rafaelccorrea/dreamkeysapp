@@ -23,6 +23,7 @@ dependencies:
   google_fonts: ^6.1.0
   table_calendar: ^3.0.9
   lottie: ^3.0.0
+  socket_io_client: ^2.0.3+1
 
 dev_dependencies:
   flutter_test:

@@ -632,6 +632,7 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+
   Widget _buildSection({
     required BuildContext context,
     required ThemeData theme,

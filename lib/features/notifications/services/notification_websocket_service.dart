@@ -1,49 +1,266 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart';
+import 'package:socket_io_client/socket_io_client.dart' as IO;
+import '../../../core/constants/api_constants.dart';
+import '../../../shared/services/secure_storage_service.dart';
+import '../models/notification_model.dart';
+
 /// Serviço para conexão WebSocket de notificações em tempo real
-/// TODO: Implementar conexão WebSocket quando necessário
 class NotificationWebSocketService {
   NotificationWebSocketService._();
-  
-  static final NotificationWebSocketService _instance = NotificationWebSocketService._();
-  
+
+  static final NotificationWebSocketService _instance =
+      NotificationWebSocketService._();
+
   factory NotificationWebSocketService() => _instance;
-  
+
   static NotificationWebSocketService get instance => _instance;
 
+  IO.Socket? _socket;
   bool _isConnected = false;
-  Function(dynamic)? _onNotificationReceived;
+  String? _currentToken;
+  String? _currentUserId;
+  String? _currentCompanyId;
+
+  // Callbacks
+  Function(NotificationModel)? _onNotificationReceived;
   Function(int)? _onBadgeUpdate;
   Function(String)? _onNotificationRead;
   Function(bool)? _onConnectionStatusChanged;
   Function(String)? _onCompanySubscribed;
   Function(String)? _onCompanyUnsubscribed;
 
+  // Reconexão
+  int _reconnectAttempts = 0;
+  static const int _baseReconnectDelay = 1000; // 1 segundo
+  static const int _maxReconnectDelay = 30000; // 30 segundos
+  Timer? _reconnectTimer;
+
   bool get isConnected => _isConnected;
 
   /// Conecta ao WebSocket
   Future<void> connect([String? userId]) async {
-    // TODO: Implementar conexão WebSocket
-    _isConnected = false;
+    try {
+      // Obter token
+      final token = await SecureStorageService.instance.getAccessToken();
+      if (token == null || token.isEmpty) {
+        debugPrint('⚠️ [WS] Token não encontrado, não é possível conectar');
+        return;
+      }
+
+      _currentToken = token;
+      _currentUserId = userId;
+
+      // Se já está conectado, desconectar primeiro
+      if (_socket != null && _socket!.connected) {
+        await disconnect();
+      }
+
+      // Construir URL do WebSocket
+      final wsUrl = _getWebSocketUrl();
+      debugPrint('🔄 [WS] Conectando ao WebSocket: $wsUrl');
+
+      // Criar socket
+      _socket = IO.io(
+        wsUrl,
+        IO.OptionBuilder()
+            .setTransports(['websocket'])
+            .setAuth({'token': token})
+            .setTimeout(20000)
+            .build(),
+      );
+
+      // Configurar event handlers
+      _setupEventHandlers();
+
+      // Conectar manualmente (reconexão será gerenciada manualmente)
+      _socket!.connect();
+    } catch (e, stackTrace) {
+      debugPrint('❌ [WS] Erro ao conectar: $e');
+      debugPrint('📚 [WS] StackTrace: $stackTrace');
+      _handleReconnect();
+    }
+  }
+
+  /// Obtém URL do WebSocket
+  String _getWebSocketUrl() {
+    // Converter https:// para ws:// ou wss://
+    final baseUrl = ApiConstants.baseUrl;
+    if (baseUrl.startsWith('https://')) {
+      return baseUrl.replaceFirst('https://', 'wss://') + '/notifications';
+    } else if (baseUrl.startsWith('http://')) {
+      return baseUrl.replaceFirst('http://', 'ws://') + '/notifications';
+    }
+    return '$baseUrl/notifications';
+  }
+
+  /// Configura event handlers do WebSocket
+  void _setupEventHandlers() {
+    if (_socket == null) return;
+
+    // Conectado
+    _socket!.onConnect((_) {
+      debugPrint('✅ [WS] Conectado ao WebSocket de notificações');
+      _isConnected = true;
+      _reconnectAttempts = 0;
+      _onConnectionStatusChanged?.call(true);
+
+      // Emitir 'join' com userId
+      if (_currentUserId != null && _currentUserId!.isNotEmpty) {
+        _socket!.emit('join', _currentUserId);
+        debugPrint('📤 [WS] Enviado evento "join" com userId: $_currentUserId');
+      }
+
+      // Se tiver empresa selecionada, inscrever
+      if (_currentCompanyId != null && _currentCompanyId!.isNotEmpty) {
+        subscribeCompany(_currentCompanyId!);
+      }
+    });
+
+    // Confirmação de conexão do servidor
+    _socket!.on('notifications_connected', (data) {
+      debugPrint('✅ [WS] Confirmação de conexão recebida: $data');
+    });
+
+    // Nova notificação
+    _socket!.on('notification', (data) {
+      try {
+        debugPrint('📨 [WS] Nova notificação recebida');
+        final notification = NotificationModel.fromJson(
+          data as Map<String, dynamic>,
+        );
+        _onNotificationReceived?.call(notification);
+      } catch (e, stackTrace) {
+        debugPrint('❌ [WS] Erro ao processar notificação: $e');
+        debugPrint('📚 [WS] StackTrace: $stackTrace');
+      }
+    });
+
+    // Atualização de badge (contador total)
+    _socket!.on('badge_update', (data) {
+      try {
+        final unreadCount = (data as Map<String, dynamic>)['unreadCount'] as int? ?? 0;
+        debugPrint('🔔 [WS] Badge atualizado: $unreadCount');
+        _onBadgeUpdate?.call(unreadCount);
+      } catch (e, stackTrace) {
+        debugPrint('❌ [WS] Erro ao processar badge_update: $e');
+        debugPrint('📚 [WS] StackTrace: $stackTrace');
+      }
+    });
+
+    // Notificação marcada como lida
+    _socket!.on('notification_read', (data) {
+      try {
+        final notificationId = (data as Map<String, dynamic>)['notificationId'] as String?;
+        if (notificationId != null) {
+          debugPrint('✅ [WS] Notificação marcada como lida: $notificationId');
+          _onNotificationRead?.call(notificationId);
+        }
+      } catch (e, stackTrace) {
+        debugPrint('❌ [WS] Erro ao processar notification_read: $e');
+        debugPrint('📚 [WS] StackTrace: $stackTrace');
+      }
+    });
+
+    // Desconectado
+    _socket!.onDisconnect((reason) {
+      debugPrint('❌ [WS] Desconectado: $reason');
+      _isConnected = false;
+      _onConnectionStatusChanged?.call(false);
+      _handleReconnect();
+    });
+
+    // Erro de conexão
+    _socket!.onConnectError((error) {
+      debugPrint('❌ [WS] Erro de conexão: $error');
+      _isConnected = false;
+      _onConnectionStatusChanged?.call(false);
+      _handleReconnect();
+    });
+
+    // Erro geral
+    _socket!.onError((error) {
+      debugPrint('❌ [WS] Erro: $error');
+    });
+  }
+
+  /// Reconexão automática com exponential backoff
+  void _handleReconnect() {
+    if (_reconnectTimer != null && _reconnectTimer!.isActive) {
+      return; // Já está tentando reconectar
+    }
+
+    _reconnectAttempts++;
+
+    // Exponential backoff: 1s, 2s, 4s, 8s, ... até 30s
+    final exponentialDelay = _baseReconnectDelay * (1 << (_reconnectAttempts - 1));
+    final delay = exponentialDelay > _maxReconnectDelay
+        ? _maxReconnectDelay
+        : exponentialDelay;
+
+    debugPrint('🔄 [WS] Tentando reconectar em ${delay}ms (tentativa $_reconnectAttempts)');
+
+    _reconnectTimer = Timer(Duration(milliseconds: delay), () {
+      if (_currentToken != null) {
+        connect(_currentUserId);
+      }
+    });
   }
 
   /// Desconecta do WebSocket
   Future<void> disconnect() async {
-    // TODO: Implementar desconexão WebSocket
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+
+    if (_socket != null) {
+      _socket!.disconnect();
+      _socket!.dispose();
+      _socket = null;
+    }
+
     _isConnected = false;
+    _onConnectionStatusChanged?.call(false);
+    debugPrint('🔌 [WS] Desconectado');
   }
 
   /// Reconecta ao WebSocket
   Future<void> reconnect() async {
     await disconnect();
-    await connect();
+    await Future.delayed(const Duration(milliseconds: 500));
+    await connect(_currentUserId);
   }
 
-  /// Escuta mensagens do WebSocket
-  void listen(Function(dynamic) onMessage) {
-    // TODO: Implementar listener de mensagens
+  /// Inscreve-se em notificações de uma empresa
+  Future<void> subscribeCompany(String companyId) async {
+    if (_socket == null || !_socket!.connected) {
+      debugPrint('⚠️ [WS] Socket não conectado, aguardando conexão...');
+      _currentCompanyId = companyId;
+      return;
+    }
+
+    _currentCompanyId = companyId;
+    _socket!.emit('subscribe_company', {'companyId': companyId});
+    debugPrint('📤 [WS] Inscrito na empresa: $companyId');
+    _onCompanySubscribed?.call(companyId);
+  }
+
+  /// Desinscreve-se de notificações de uma empresa
+  Future<void> unsubscribeCompany(String companyId) async {
+    if (_socket == null || !_socket!.connected) {
+      return;
+    }
+
+    _socket!.emit('unsubscribe_company', {'companyId': companyId});
+    debugPrint('📤 [WS] Desinscrito da empresa: $companyId');
+    _onCompanyUnsubscribed?.call(companyId);
+
+    if (_currentCompanyId == companyId) {
+      _currentCompanyId = null;
+    }
   }
 
   /// Define callback para notificações recebidas
-  void setOnNotificationReceived(Function(dynamic) callback) {
+  void setOnNotificationReceived(Function(NotificationModel) callback) {
     _onNotificationReceived = callback;
   }
 
@@ -72,13 +289,13 @@ class NotificationWebSocketService {
     _onCompanyUnsubscribed = callback;
   }
 
-  /// Inscreve-se em notificações de uma empresa
-  Future<void> subscribeCompany(String companyId) async {
-    // TODO: Implementar inscrição
-  }
-
-  /// Desinscreve-se de notificações de uma empresa
-  Future<void> unsubscribeCompany(String companyId) async {
-    // TODO: Implementar desinscrição
+  /// Limpa callbacks
+  void clearCallbacks() {
+    _onNotificationReceived = null;
+    _onBadgeUpdate = null;
+    _onNotificationRead = null;
+    _onConnectionStatusChanged = null;
+    _onCompanySubscribed = null;
+    _onCompanyUnsubscribed = null;
   }
 }

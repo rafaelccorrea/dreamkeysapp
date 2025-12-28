@@ -83,6 +83,14 @@ class ApiConstants {
   static const String clientsExport = '/clients/export';
   static const String clientsExportBulk = '/clients/export-bulk';
 
+  // Endpoints de Matches
+  static const String matches = '/matches';
+  static String matchById(String id) => '/matches/$id';
+  static String matchAccept(String id) => '/matches/$id/accept';
+  static String matchIgnore(String id) => '/matches/$id/ignore';
+  static String matchView(String id) => '/matches/$id/view';
+  static String matchStatus(String id) => '/matches/$id/status';
+
   // Endpoints de Notificações
   static const String notifications = '/notifications';
   static String notificationsUnreadList([int? page, int? limit]) {

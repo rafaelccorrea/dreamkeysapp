@@ -22,6 +22,7 @@ import '../../features/profile/pages/edit_profile_page.dart';
 import '../../features/clients/pages/clients_page.dart';
 import '../../features/clients/pages/client_details_page.dart';
 import '../../features/clients/pages/client_form_page.dart';
+import '../../features/matches/pages/matches_page.dart';
 
 /// Rotas da aplicação com transições customizadas
 class AppRoutes {
@@ -51,6 +52,11 @@ class AppRoutes {
   static const String clientCreate = '/clients/new';
   static String clientEdit(String id) => '/clients/$id/edit';
   static String clientDetails(String id) => '/clients/$id';
+  
+  // Matches
+  static const String matches = '/matches';
+  static String matchesByProperty(String propertyId) => '/properties/$propertyId/matches';
+  static String matchesByClient(String clientId) => '/clients/$clientId/matches';
   
   static String propertyOfferDetails(String offerId) => '/properties/offers/$offerId';
   
@@ -188,6 +194,28 @@ class AppRoutes {
             settings,
           );
         }
+      }
+    } else if (routeName == AppRoutes.matches) {
+      return _buildRoute(const MatchesPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/properties/')) {
+      // Matches de propriedade: /properties/:propertyId/matches
+      final segments = routeName.split('/');
+      if (segments.length == 4 && segments[3] == 'matches') {
+        final propertyId = segments[2];
+        return _buildRoute(
+          MatchesPage(propertyId: propertyId),
+          settings,
+        );
+      }
+    } else if (routeName != null && routeName.startsWith('/clients/')) {
+      // Matches de cliente: /clients/:clientId/matches
+      final segments = routeName.split('/');
+      if (segments.length == 4 && segments[3] == 'matches') {
+        final clientId = segments[2];
+        return _buildRoute(
+          MatchesPage(clientId: clientId),
+          settings,
+        );
       }
     }
     

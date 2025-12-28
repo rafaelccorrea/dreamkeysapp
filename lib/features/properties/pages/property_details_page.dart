@@ -7,6 +7,8 @@ import '../../../../shared/widgets/shimmer_image.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../widgets/property_public_toggle.dart';
+import '../../matches/widgets/matches_badge.dart';
+import '../../../../core/routes/app_routes.dart';
 
 // Formatter de moeda
 final _currencyFormatter = NumberFormat.currency(
@@ -178,7 +180,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
     return AppScaffold(
       title: 'Detalhes do Imóvel',
-      showBottomNavigation: false,
+      currentBottomNavIndex: 1,
+      showBottomNavigation: true,
       actions: [
         if (_property != null && _property!.hasPendingOffers == true)
           Stack(
@@ -389,11 +392,20 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Título e código
-                Text(
-                  property.title,
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: ThemeHelpers.textColor(context),
+                MatchesBadge(
+                  propertyId: widget.propertyId,
+                  onClick: () {
+                    Navigator.pushNamed(
+                      context,
+                      AppRoutes.matchesByProperty(widget.propertyId),
+                    );
+                  },
+                  child: Text(
+                    property.title,
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: ThemeHelpers.textColor(context),
+                    ),
                   ),
                 ),
                 if (property.code != null) ...[

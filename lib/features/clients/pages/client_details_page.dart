@@ -11,6 +11,7 @@ import '../models/client_model.dart';
 import '../widgets/transfer_client_modal.dart';
 import '../widgets/client_interactions_panel.dart';
 import '../../../shared/utils/masks.dart';
+import '../../matches/widgets/matches_badge.dart';
 
 /// Página de detalhes do cliente
 class ClientDetailsPage extends StatefulWidget {
@@ -444,17 +445,26 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
             ),
           ),
           SizedBox(height: isSmallScreen ? 12 : 16),
-          // Nome
-          Text(
-            _client!.name,
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.bold,
-              color: ThemeHelpers.textColor(context),
-              fontSize: isSmallScreen ? 20 : 24,
+          // Nome com Badge de Matches
+          MatchesBadge(
+            clientId: _client!.id,
+            onClick: () {
+              Navigator.pushNamed(
+                context,
+                AppRoutes.matchesByClient(_client!.id),
+              );
+            },
+            child: Text(
+              _client!.name,
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: ThemeHelpers.textColor(context),
+                fontSize: isSmallScreen ? 20 : 24,
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 8),
           // Badges

@@ -10,6 +10,7 @@ import '../models/client_model.dart';
 import '../widgets/client_filters_drawer.dart';
 import '../widgets/transfer_client_modal.dart';
 import '../widgets/async_excel_import_modal.dart';
+import '../../matches/widgets/matches_badge.dart';
 
 /// Página de listagem de clientes
 class ClientsPage extends StatefulWidget {
@@ -924,15 +925,24 @@ class _ClientsPageState extends State<ClientsPage> {
                     Row(
                       children: [
                         Expanded(
-                          child: Text(
-                            client.name,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: ThemeHelpers.textColor(context),
-                              fontSize: 16,
+                          child: MatchesBadge(
+                            clientId: client.id,
+                            onClick: () {
+                              Navigator.pushNamed(
+                                context,
+                                AppRoutes.matchesByClient(client.id),
+                              );
+                            },
+                            child: Text(
+                              client.name,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: ThemeHelpers.textColor(context),
+                                fontSize: 16,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         const SizedBox(width: 8),

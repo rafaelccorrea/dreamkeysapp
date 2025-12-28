@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:io';
-// import 'package:image_picker/image_picker.dart'; // TODO: Adicionar ao pubspec.yaml
+import 'package:image_picker/image_picker.dart';
 import '../../../../shared/services/property_service.dart';
 import '../../../../shared/services/gallery_service.dart';
 import '../../../../shared/services/cep_service.dart';
@@ -13,6 +13,8 @@ import '../../../../shared/widgets/skeleton_box.dart';
 import '../../../../shared/widgets/shimmer_image.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
+import '../../../../shared/utils/input_formatters.dart';
+import '../../../../shared/utils/masks.dart';
 
 /// Página de criação/edição de propriedade com formulário multi-etapas
 class CreatePropertyPage extends StatefulWidget {
@@ -71,7 +73,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   // Etapa 5: Galeria
   final List<File> _selectedImages = [];
   final List<GalleryImage> _uploadedImages = [];
-  // final ImagePicker _imagePicker = ImagePicker(); // TODO: Adicionar ao pubspec.yaml
+  final ImagePicker _imagePicker = ImagePicker();
   bool _isUploadingImages = false;
 
   // Etapa 6: Clientes e Proprietário
@@ -114,6 +116,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     _cityController.addListener(_onFieldChanged);
     _stateController.addListener(_onFieldChanged);
     _zipCodeController.addListener(_onFieldChanged);
+    _zipCodeController.addListener(_onCepChanged);
     _totalAreaController.addListener(_onFieldChanged);
     _builtAreaController.addListener(_onFieldChanged);
     _ownerNameController.addListener(_onFieldChanged);
@@ -132,6 +135,21 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     }
   }
 
+  void _onCepChanged() {
+    // Buscar CEP automaticamente quando tiver 8 dígitos
+    final cep = _zipCodeController.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (cep.length == 8) {
+      // Aguardar um pouco para o usuário terminar de digitar
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted &&
+            _zipCodeController.text.replaceAll(RegExp(r'[^0-9]'), '').length ==
+                8) {
+          _searchCep();
+        }
+      });
+    }
+  }
+
   @override
   void dispose() {
     // Remover listeners
@@ -143,6 +161,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     _cityController.removeListener(_onFieldChanged);
     _stateController.removeListener(_onFieldChanged);
     _zipCodeController.removeListener(_onFieldChanged);
+    _zipCodeController.removeListener(_onCepChanged);
     _totalAreaController.removeListener(_onFieldChanged);
     _builtAreaController.removeListener(_onFieldChanged);
     _ownerNameController.removeListener(_onFieldChanged);
@@ -231,13 +250,25 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     _selectedFeatures.clear();
     _selectedFeatures.addAll(property.features);
 
-    _salePriceController.text = property.salePrice?.toString() ?? '';
-    _rentPriceController.text = property.rentPrice?.toString() ?? '';
-    _condominiumFeeController.text = property.condominiumFee?.toString() ?? '';
-    _iptuController.text = property.iptu?.toString() ?? '';
+    _salePriceController.text = property.salePrice != null
+        ? Masks.money((property.salePrice! * 100).toStringAsFixed(0))
+        : '';
+    _rentPriceController.text = property.rentPrice != null
+        ? Masks.money((property.rentPrice! * 100).toStringAsFixed(0))
+        : '';
+    _condominiumFeeController.text = property.condominiumFee != null
+        ? Masks.money((property.condominiumFee! * 100).toStringAsFixed(0))
+        : '';
+    _iptuController.text = property.iptu != null
+        ? Masks.money((property.iptu! * 100).toStringAsFixed(0))
+        : '';
     _acceptsNegotiation = property.acceptsNegotiation ?? false;
-    _minSalePriceController.text = property.minSalePrice?.toString() ?? '';
-    _minRentPriceController.text = property.minRentPrice?.toString() ?? '';
+    _minSalePriceController.text = property.minSalePrice != null
+        ? Masks.money((property.minSalePrice! * 100).toStringAsFixed(0))
+        : '';
+    _minRentPriceController.text = property.minRentPrice != null
+        ? Masks.money((property.minRentPrice! * 100).toStringAsFixed(0))
+        : '';
     _offerBelowMinSaleAction = property.offerBelowMinSaleAction;
     _offerBelowMinRentAction = property.offerBelowMinRentAction;
 
@@ -294,29 +325,82 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   }
 
   Future<void> _pickImages() async {
-    // TODO: Implementar seleção de imagens quando image_picker for adicionado
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Seleção de imagens será implementada. Adicione image_picker ao pubspec.yaml',
+    // Mostrar opções: tirar foto ou selecionar da galeria
+    final option = await showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 24),
+              decoration: BoxDecoration(
+                color: ThemeHelpers.borderLightColor(context),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt),
+              title: const Text('Tirar Foto'),
+              onTap: () => Navigator.pop(context, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Selecionar da Galeria'),
+              onTap: () => Navigator.pop(context, ImageSource.gallery),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+          ],
         ),
       ),
     );
-    // try {
-    //   final List<XFile> images = await _imagePicker.pickMultiImage();
-    //   if (images.isNotEmpty) {
-    //     setState(() {
-    //       _selectedImages.addAll(images.map((xFile) => File(xFile.path)));
-    //     });
-    //   }
-    // } catch (e) {
-    //   debugPrint('Erro ao selecionar imagens: $e');
-    //   if (mounted) {
-    //     ScaffoldMessenger.of(context).showSnackBar(
-    //       SnackBar(content: Text('Erro ao selecionar imagens: $e')),
-    //     );
-    //   }
-    // }
+
+    if (option == null) return;
+
+    try {
+      if (option == ImageSource.camera) {
+        // Tirar foto
+        final XFile? photo = await _imagePicker.pickImage(
+          source: ImageSource.camera,
+          imageQuality: 85,
+        );
+        if (photo != null) {
+          setState(() {
+            _selectedImages.add(File(photo.path));
+          });
+        }
+      } else {
+        // Selecionar múltiplas imagens da galeria
+        final List<XFile> images = await _imagePicker.pickMultiImage(
+          imageQuality: 85,
+        );
+        if (images.isNotEmpty) {
+          setState(() {
+            _selectedImages.addAll(images.map((xFile) => File(xFile.path)));
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Erro ao selecionar imagens: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao selecionar imagens: $e'),
+            backgroundColor: AppColors.status.error,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _uploadImages(String propertyId) async {
@@ -402,16 +486,16 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             : int.tryParse(_parkingSpacesController.text),
         salePrice: _salePriceController.text.trim().isEmpty
             ? null
-            : double.tryParse(_salePriceController.text),
+            : Masks.unmaskMoney(_salePriceController.text) / 100.0,
         rentPrice: _rentPriceController.text.trim().isEmpty
             ? null
-            : double.tryParse(_rentPriceController.text),
+            : Masks.unmaskMoney(_rentPriceController.text) / 100.0,
         condominiumFee: _condominiumFeeController.text.trim().isEmpty
             ? null
-            : double.tryParse(_condominiumFeeController.text),
+            : Masks.unmaskMoney(_condominiumFeeController.text) / 100.0,
         iptu: _iptuController.text.trim().isEmpty
             ? null
-            : double.tryParse(_iptuController.text),
+            : Masks.unmaskMoney(_iptuController.text) / 100.0,
         features: _selectedFeatures.isEmpty ? null : _selectedFeatures,
       );
 
@@ -501,10 +585,57 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         }
         return true;
 
-      case 3: // Etapa 4: Valores (opcional)
+      case 3: // Etapa 4: Valores
+        // Se aceita negociação, deve ter preço mínimo de venda OU aluguel
+        if (_acceptsNegotiation) {
+          final hasSalePrice = _salePriceController.text.trim().isNotEmpty;
+          final hasRentPrice = _rentPriceController.text.trim().isNotEmpty;
+          final hasMinSalePrice = _minSalePriceController.text
+              .trim()
+              .isNotEmpty;
+          final hasMinRentPrice = _minRentPriceController.text
+              .trim()
+              .isNotEmpty;
+
+          if (hasSalePrice && !hasMinSalePrice) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text(
+                  'Ao aceitar negociação, é obrigatório informar o preço mínimo de venda quando há preço de venda',
+                ),
+                backgroundColor: AppColors.status.error,
+              ),
+            );
+            return false;
+          }
+
+          if (hasRentPrice && !hasMinRentPrice) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text(
+                  'Ao aceitar negociação, é obrigatório informar o preço mínimo de aluguel quando há preço de aluguel',
+                ),
+                backgroundColor: AppColors.status.error,
+              ),
+            );
+            return false;
+          }
+        }
         return true;
 
-      case 4: // Etapa 5: Galeria (opcional)
+      case 4: // Etapa 5: Galeria
+        final totalImages = _selectedImages.length + _uploadedImages.length;
+        if (totalImages < 5) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'É necessário adicionar no mínimo 5 imagens. Você adicionou $totalImages de 5.',
+              ),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+          return false;
+        }
         return true;
 
       case 5: // Etapa 6: Clientes e Proprietário
@@ -677,10 +808,57 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         }
         return true;
 
-      case 3: // Etapa 4: Valores (opcional, pode avançar sem preencher)
+      case 3: // Etapa 4: Valores
+        // Se aceita negociação, deve ter preço mínimo de venda OU aluguel
+        if (_acceptsNegotiation) {
+          final hasSalePrice = _salePriceController.text.trim().isNotEmpty;
+          final hasRentPrice = _rentPriceController.text.trim().isNotEmpty;
+          final hasMinSalePrice = _minSalePriceController.text
+              .trim()
+              .isNotEmpty;
+          final hasMinRentPrice = _minRentPriceController.text
+              .trim()
+              .isNotEmpty;
+
+          if (hasSalePrice && !hasMinSalePrice) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text(
+                  'Ao aceitar negociação, é obrigatório informar o preço mínimo de venda quando há preço de venda',
+                ),
+                backgroundColor: AppColors.status.error,
+              ),
+            );
+            return false;
+          }
+
+          if (hasRentPrice && !hasMinRentPrice) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text(
+                  'Ao aceitar negociação, é obrigatório informar o preço mínimo de aluguel quando há preço de aluguel',
+                ),
+                backgroundColor: AppColors.status.error,
+              ),
+            );
+            return false;
+          }
+        }
         return true;
 
-      case 4: // Etapa 5: Galeria (opcional, pode avançar sem imagens)
+      case 4: // Etapa 5: Galeria
+        final totalImages = _selectedImages.length + _uploadedImages.length;
+        if (totalImages < 5) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'É necessário adicionar no mínimo 5 imagens. Você adicionou $totalImages de 5.',
+              ),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+          return false;
+        }
         return true;
 
       case 5: // Etapa 6: Clientes e Proprietário
@@ -859,16 +1037,16 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             : int.tryParse(_parkingSpacesController.text),
         salePrice: _salePriceController.text.trim().isEmpty
             ? null
-            : double.tryParse(_salePriceController.text),
+            : Masks.unmaskMoney(_salePriceController.text) / 100.0,
         rentPrice: _rentPriceController.text.trim().isEmpty
             ? null
-            : double.tryParse(_rentPriceController.text),
+            : Masks.unmaskMoney(_rentPriceController.text) / 100.0,
         condominiumFee: _condominiumFeeController.text.trim().isEmpty
             ? null
-            : double.tryParse(_condominiumFeeController.text),
+            : Masks.unmaskMoney(_condominiumFeeController.text) / 100.0,
         iptu: _iptuController.text.trim().isEmpty
             ? null
-            : double.tryParse(_iptuController.text),
+            : Masks.unmaskMoney(_iptuController.text) / 100.0,
         features: _selectedFeatures.isEmpty ? null : _selectedFeatures,
       );
 
@@ -949,19 +1127,22 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         if (_parkingSpacesController.text.trim().isNotEmpty)
           'parkingSpaces': int.tryParse(_parkingSpacesController.text),
         if (_salePriceController.text.trim().isNotEmpty)
-          'salePrice': double.tryParse(_salePriceController.text),
+          'salePrice': Masks.unmaskMoney(_salePriceController.text) / 100.0,
         if (_rentPriceController.text.trim().isNotEmpty)
-          'rentPrice': double.tryParse(_rentPriceController.text),
+          'rentPrice': Masks.unmaskMoney(_rentPriceController.text) / 100.0,
         if (_condominiumFeeController.text.trim().isNotEmpty)
-          'condominiumFee': double.tryParse(_condominiumFeeController.text),
+          'condominiumFee':
+              Masks.unmaskMoney(_condominiumFeeController.text) / 100.0,
         if (_iptuController.text.trim().isNotEmpty)
-          'iptu': double.tryParse(_iptuController.text),
+          'iptu': Masks.unmaskMoney(_iptuController.text) / 100.0,
         'features': _selectedFeatures,
         'acceptsNegotiation': _acceptsNegotiation,
         if (_minSalePriceController.text.trim().isNotEmpty)
-          'minSalePrice': double.tryParse(_minSalePriceController.text),
+          'minSalePrice':
+              Masks.unmaskMoney(_minSalePriceController.text) / 100.0,
         if (_minRentPriceController.text.trim().isNotEmpty)
-          'minRentPrice': double.tryParse(_minRentPriceController.text),
+          'minRentPrice':
+              Masks.unmaskMoney(_minRentPriceController.text) / 100.0,
         if (_offerBelowMinSaleAction != null)
           'offerBelowMinSaleAction': _offerBelowMinSaleAction,
         if (_offerBelowMinRentAction != null)
@@ -1295,6 +1476,61 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           ),
           const SizedBox(height: 24),
 
+          // CEP - Fullwidth com texto informativo
+          CustomTextField(
+            controller: _zipCodeController,
+            label: 'CEP *',
+            hint: '00000-000',
+            keyboardType: TextInputType.number,
+            inputFormatters: [CepInputFormatter()],
+            validator: (value) {
+              if (value == null || value.trim().isEmpty) {
+                return 'CEP é obrigatório';
+              }
+              final cep = value.replaceAll(RegExp(r'[^0-9]'), '');
+              if (cep.length != 8) {
+                return 'CEP deve ter 8 dígitos';
+              }
+              return null;
+            },
+            suffixIcon: IconButton(
+              icon: const Icon(Icons.search),
+              onPressed: _searchCep,
+              tooltip: 'Buscar CEP',
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.primary.primary.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: AppColors.primary.primary.withOpacity(0.3),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.info_outline,
+                  size: 18,
+                  color: AppColors.primary.primary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Ao preencher o CEP, os demais campos serão preenchidos automaticamente',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: AppColors.primary.primary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // Rua e Número
           Row(
             children: [
               Expanded(
@@ -1336,6 +1572,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           ),
           const SizedBox(height: 16),
 
+          // Complemento - Fullwidth
           CustomTextField(
             controller: _complementController,
             label: 'Complemento',
@@ -1343,6 +1580,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           ),
           const SizedBox(height: 16),
 
+          // Bairro - Fullwidth
           CustomTextField(
             controller: _neighborhoodController,
             label: 'Bairro *',
@@ -1362,6 +1600,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           ),
           const SizedBox(height: 16),
 
+          // Cidade e Estado
           Row(
             children: [
               Expanded(
@@ -1386,65 +1625,38 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: _buildFormField(
-                  theme,
-                  controller: _stateController,
-                  label: 'Estado *',
-                  hint: 'UF',
-                  maxLength: 2,
-                  textCapitalization: TextCapitalization.characters,
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Estado é obrigatório';
-                    }
-                    if (value.trim().length != 2) {
-                      return 'Digite 2 letras';
-                    }
-                    return null;
-                  },
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildFormField(
-                  theme,
-                  controller: _zipCodeController,
-                  label: 'CEP *',
-                  hint: '00000-000',
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'CEP é obrigatório';
-                    }
-                    final cep = value.replaceAll(RegExp(r'[^0-9]'), '');
-                    if (cep.length != 8) {
-                      return 'CEP deve ter 8 dígitos';
-                    }
-                    return null;
-                  },
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(8),
-                    TextInputFormatter.withFunction((oldValue, newValue) {
-                      final text = newValue.text;
-                      if (text.length <= 5) {
-                        return newValue;
-                      }
-                      return TextEditingValue(
-                        text: '${text.substring(0, 5)}-${text.substring(5)}',
-                        selection: TextSelection.collapsed(
-                          offset: newValue.selection.end + 1,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Estado *',
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      controller: _stateController,
+                      maxLength: 2,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: InputDecoration(
+                        hintText: 'UF',
+                        counterText: '', // Ocultar contador de caracteres
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                      );
-                    }),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Estado é obrigatório';
+                        }
+                        if (value.trim().length != 2) {
+                          return 'Digite 2 letras';
+                        }
+                        return null;
+                      },
+                    ),
                   ],
-                  suffix:
-                      IconButton(
-                            icon: const Icon(Icons.search),
-                            onPressed: _searchCep,
-                            tooltip: 'Buscar CEP',
-                          )
-                          as Widget?,
                 ),
               ),
             ],
@@ -1707,23 +1919,16 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                   theme,
                   controller: _salePriceController,
                   label: 'Preço de Venda',
-                  hint: '0.00',
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(
-                      RegExp(r'^\d+\.?\d{0,2}'),
-                    ),
-                  ],
-                  prefixText: 'R\$ ',
+                  hint: 'R\$ 0,00',
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [MoneyInputFormatter()],
                   validator: (value) {
                     if (value != null && value.trim().isNotEmpty) {
-                      final price = double.tryParse(value);
-                      if (price != null && price <= 0) {
+                      final price = Masks.unmaskMoney(value) / 100.0;
+                      if (price <= 0) {
                         return 'Preço de venda deve ser positivo';
                       }
-                      if (price != null && price >= 1000000000) {
+                      if (price >= 1000000000) {
                         return 'Preço de venda deve ser menor que R\$ 1 bilhão';
                       }
                     }
@@ -1737,23 +1942,16 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                   theme,
                   controller: _rentPriceController,
                   label: 'Preço de Aluguel',
-                  hint: '0.00',
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(
-                      RegExp(r'^\d+\.?\d{0,2}'),
-                    ),
-                  ],
-                  prefixText: 'R\$ ',
+                  hint: 'R\$ 0,00',
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [MoneyInputFormatter()],
                   validator: (value) {
                     if (value != null && value.trim().isNotEmpty) {
-                      final price = double.tryParse(value);
-                      if (price != null && price <= 0) {
+                      final price = Masks.unmaskMoney(value) / 100.0;
+                      if (price <= 0) {
                         return 'Preço de aluguel deve ser positivo';
                       }
-                      if (price != null && price >= 1000000) {
+                      if (price >= 1000000) {
                         return 'Preço de aluguel deve ser menor que R\$ 1 milhão';
                       }
                     }
@@ -1772,23 +1970,16 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                   theme,
                   controller: _condominiumFeeController,
                   label: 'Condomínio',
-                  hint: '0.00',
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(
-                      RegExp(r'^\d+\.?\d{0,2}'),
-                    ),
-                  ],
-                  prefixText: 'R\$ ',
+                  hint: 'R\$ 0,00',
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [MoneyInputFormatter()],
                   validator: (value) {
                     if (value != null && value.trim().isNotEmpty) {
-                      final fee = double.tryParse(value);
-                      if (fee != null && fee <= 0) {
+                      final fee = Masks.unmaskMoney(value) / 100.0;
+                      if (fee <= 0) {
                         return 'Valor do condomínio deve ser positivo';
                       }
-                      if (fee != null && fee >= 100000) {
+                      if (fee >= 100000) {
                         return 'Valor do condomínio deve ser menor que R\$ 100 mil';
                       }
                     }
@@ -1802,23 +1993,16 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                   theme,
                   controller: _iptuController,
                   label: 'IPTU',
-                  hint: '0.00',
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(
-                      RegExp(r'^\d+\.?\d{0,2}'),
-                    ),
-                  ],
-                  prefixText: 'R\$ ',
+                  hint: 'R\$ 0,00',
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [MoneyInputFormatter()],
                   validator: (value) {
                     if (value != null && value.trim().isNotEmpty) {
-                      final iptu = double.tryParse(value);
-                      if (iptu != null && iptu <= 0) {
+                      final iptu = Masks.unmaskMoney(value) / 100.0;
+                      if (iptu <= 0) {
                         return 'IPTU deve ser positivo';
                       }
-                      if (iptu != null && iptu >= 100000) {
+                      if (iptu >= 100000) {
                         return 'IPTU deve ser menor que R\$ 100 mil';
                       }
                     }
@@ -1849,31 +2033,31 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                     theme,
                     controller: _minSalePriceController,
                     label: 'Preço Mínimo de Venda',
-                    hint: '0.00',
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(
-                        RegExp(r'^\d+\.?\d{0,2}'),
-                      ),
-                    ],
-                    prefixText: 'R\$ ',
+                    hint: 'R\$ 0,00',
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [MoneyInputFormatter()],
                     validator: (value) {
-                      if (value != null && value.trim().isNotEmpty) {
-                        final minPrice = double.tryParse(value);
-                        if (minPrice == null) {
-                          return 'Preço inválido';
+                      // Se aceita negociação e tem preço de venda, o mínimo é obrigatório
+                      final salePriceText = _salePriceController.text.trim();
+                      if (salePriceText.isNotEmpty) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Preço mínimo de venda é obrigatório quando aceita negociação';
                         }
+                        final minPrice = Masks.unmaskMoney(value) / 100.0;
                         if (minPrice <= 0) {
                           return 'Preço mínimo deve ser positivo';
                         }
-                        final salePriceText = _salePriceController.text.trim();
-                        if (salePriceText.isNotEmpty) {
-                          final salePrice = double.tryParse(salePriceText);
-                          if (salePrice != null && minPrice >= salePrice) {
-                            return 'Preço mínimo deve ser menor que preço de venda';
-                          }
+                        final salePrice =
+                            Masks.unmaskMoney(salePriceText) / 100.0;
+                        if (minPrice >= salePrice) {
+                          return 'Preço mínimo deve ser menor que preço de venda';
+                        }
+                      }
+                      // Se preencheu, valida formato
+                      if (value != null && value.trim().isNotEmpty) {
+                        final minPrice = Masks.unmaskMoney(value) / 100.0;
+                        if (minPrice <= 0) {
+                          return 'Preço mínimo deve ser positivo';
                         }
                       }
                       return null;
@@ -1886,31 +2070,31 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                     theme,
                     controller: _minRentPriceController,
                     label: 'Preço Mínimo de Aluguel',
-                    hint: '0.00',
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(
-                        RegExp(r'^\d+\.?\d{0,2}'),
-                      ),
-                    ],
-                    prefixText: 'R\$ ',
+                    hint: 'R\$ 0,00',
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [MoneyInputFormatter()],
                     validator: (value) {
-                      if (value != null && value.trim().isNotEmpty) {
-                        final minPrice = double.tryParse(value);
-                        if (minPrice == null) {
-                          return 'Preço inválido';
+                      // Se aceita negociação e tem preço de aluguel, o mínimo é obrigatório
+                      final rentPriceText = _rentPriceController.text.trim();
+                      if (rentPriceText.isNotEmpty) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Preço mínimo de aluguel é obrigatório quando aceita negociação';
                         }
+                        final minPrice = Masks.unmaskMoney(value) / 100.0;
                         if (minPrice <= 0) {
                           return 'Preço mínimo deve ser positivo';
                         }
-                        final rentPriceText = _rentPriceController.text.trim();
-                        if (rentPriceText.isNotEmpty) {
-                          final rentPrice = double.tryParse(rentPriceText);
-                          if (rentPrice != null && minPrice >= rentPrice) {
-                            return 'Preço mínimo deve ser menor que preço de aluguel';
-                          }
+                        final rentPrice =
+                            Masks.unmaskMoney(rentPriceText) / 100.0;
+                        if (minPrice >= rentPrice) {
+                          return 'Preço mínimo deve ser menor que preço de aluguel';
+                        }
+                      }
+                      // Se preencheu, valida formato
+                      if (value != null && value.trim().isNotEmpty) {
+                        final minPrice = Masks.unmaskMoney(value) / 100.0;
+                        if (minPrice <= 0) {
+                          return 'Preço mínimo deve ser positivo';
                         }
                       }
                       return null;
@@ -2002,26 +2186,126 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Galeria de Imagens',
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Galeria de Imagens',
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: (_selectedImages.length + _uploadedImages.length) >= 5
+                      ? AppColors.status.success.withOpacity(0.1)
+                      : AppColors.status.warning.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color:
+                        (_selectedImages.length + _uploadedImages.length) >= 5
+                        ? AppColors.status.success
+                        : AppColors.status.warning,
+                    width: 1,
+                  ),
+                ),
+                child: Text(
+                  '${_selectedImages.length + _uploadedImages.length}/5 imagens',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color:
+                        (_selectedImages.length + _uploadedImages.length) >= 5
+                        ? AppColors.status.success
+                        : AppColors.status.warning,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
           ),
+          if ((_selectedImages.length + _uploadedImages.length) < 5) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.status.warning.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: AppColors.status.warning.withOpacity(0.3),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    size: 18,
+                    color: AppColors.status.warning,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'É necessário adicionar no mínimo 5 imagens para continuar',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: AppColors.status.warning,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 24),
 
-          OutlinedButton.icon(
-            onPressed: _isUploadingImages ? null : _pickImages,
-            icon: _isUploadingImages
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.add_photo_alternate),
-            label: Text(
-              _isUploadingImages ? 'Enviando...' : 'Adicionar Imagens',
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _isUploadingImages ? null : _pickImages,
+                  icon: _isUploadingImages
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.photo_library),
+                  label: Text(_isUploadingImages ? 'Enviando...' : 'Galeria'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _isUploadingImages
+                      ? null
+                      : () async {
+                          try {
+                            final XFile? photo = await _imagePicker.pickImage(
+                              source: ImageSource.camera,
+                              imageQuality: 85,
+                            );
+                            if (photo != null && mounted) {
+                              setState(() {
+                                _selectedImages.add(File(photo.path));
+                              });
+                            }
+                          } catch (e) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Erro ao tirar foto: $e'),
+                                  backgroundColor: AppColors.status.error,
+                                ),
+                              );
+                            }
+                          }
+                        },
+                  icon: const Icon(Icons.camera_alt),
+                  label: const Text('Tirar Foto'),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 16),
 
@@ -2558,6 +2842,8 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             ),
             prefixText: prefixText,
             suffixIcon: suffix,
+            counterText:
+                '', // Ocultar contador de caracteres para não desalinhar
           ),
         ),
       ],

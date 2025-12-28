@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../models/notification_model.dart';
 import '../services/notification_service.dart';
 import '../services/notification_websocket_service.dart';
+import '../services/notification_counts_service.dart';
 import '../../../shared/services/secure_storage_service.dart';
 
 /// Controller para gerenciar estado das notificações
@@ -14,6 +15,8 @@ class NotificationController extends ChangeNotifier {
   final NotificationService _notificationService = NotificationService.instance;
   final NotificationWebSocketService _wsService =
       NotificationWebSocketService.instance;
+  final NotificationCountsService _countsService =
+      NotificationCountsService.instance;
 
   // Estado
   List<NotificationModel> _notifications = [];
@@ -42,6 +45,16 @@ class NotificationController extends ChangeNotifier {
   bool get hasMore => _hasMore;
   bool get wsConnected => _wsConnected;
 
+  /// Obtém contador de notificações para uma rota específica
+  int getCountForRoute(String route) {
+    return _countsService.getCountForRoute(route, _notifications);
+  }
+
+  /// Obtém contadores por rota
+  Map<String, int> get countsByRoute {
+    return _countsService.calculateCountsByRoute(_notifications);
+  }
+
   /// Inicializa o controller
   Future<void> initialize() async {
     // Configurar callbacks do WebSocket
@@ -54,6 +67,21 @@ class NotificationController extends ChangeNotifier {
     final userId = await _getUserId();
     if (userId != null) {
       await _wsService.connect(userId);
+      
+      // Inscrever na empresa selecionada
+      await _subscribeToSelectedCompany();
+    }
+  }
+
+  /// Inscreve-se na empresa selecionada
+  Future<void> _subscribeToSelectedCompany() async {
+    try {
+      final companyId = await SecureStorageService.instance.getCompanyId();
+      if (companyId != null && companyId.isNotEmpty) {
+        _wsService.subscribeCompany(companyId);
+      }
+    } catch (e) {
+      debugPrint('⚠️ [NOTIFICATION_CTRL] Erro ao inscrever empresa: $e');
     }
   }
 
@@ -461,6 +489,22 @@ class NotificationController extends ChangeNotifier {
     _error = null;
     _currentPage = 1;
     _hasMore = true;
+    notifyListeners();
+  }
+
+  /// Adiciona notificações de teste (apenas para desenvolvimento)
+  void addTestNotifications(List<NotificationModel> notifications) {
+    _notifications.insertAll(0, notifications);
+    _unreadCount += notifications.where((n) => !n.read).length;
+    notifyListeners();
+  }
+
+  /// Remove notificações de teste (que começam com 'test-')
+  void removeTestNotifications() {
+    final testNotifications = _notifications.where((n) => n.id.startsWith('test-')).toList();
+    final removedUnread = testNotifications.where((n) => !n.read).length;
+    _notifications.removeWhere((n) => n.id.startsWith('test-'));
+    _unreadCount = (_unreadCount - removedUnread).clamp(0, double.infinity).toInt();
     notifyListeners();
   }
 

@@ -10,6 +10,8 @@ import '../widgets/property_filters_drawer.dart';
 import '../widgets/intelligent_search_modal.dart';
 import '../widgets/export_import_dialog.dart';
 import '../../../../shared/services/ai_service.dart';
+import '../../matches/widgets/matches_badge.dart';
+import '../../../../core/routes/app_routes.dart';
 
 // Formatter de moeda
 final _currencyFormatter = NumberFormat.currency(
@@ -1497,16 +1499,25 @@ class _PropertiesPageState extends State<PropertiesPage> {
                   ),
                   const SizedBox(height: 12),
 
-                  // Título (destaque principal)
-                  Text(
-                    property.title,
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: ThemeHelpers.textColor(context),
-                      fontSize: 18,
+                  // Título (destaque principal) com Badge de Matches
+                  MatchesBadge(
+                    propertyId: property.id,
+                    onClick: () {
+                      Navigator.pushNamed(
+                        context,
+                        AppRoutes.matchesByProperty(property.id),
+                      );
+                    },
+                    child: Text(
+                      property.title,
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: ThemeHelpers.textColor(context),
+                        fontSize: 18,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
                   ),
                   if (property.code != null) ...[
                     const SizedBox(height: 6),

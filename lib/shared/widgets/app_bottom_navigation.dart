@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/routes/app_routes.dart';
+import '../../features/notifications/controllers/notification_controller.dart';
 
 /// Bottom Navigation Bar do aplicativo
 class AppBottomNavigation extends StatelessWidget {
@@ -69,7 +71,9 @@ class AppBottomNavigation extends StatelessWidget {
                       label: 'Imóveis',
                       isSelected: currentIndex == 1,
                       color: currentIndex == 1 ? primaryColor : unselectedColor,
+                      backgroundColor: backgroundColor,
                       onTap: () => onTap(1),
+                      route: AppRoutes.properties,
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -82,7 +86,9 @@ class AppBottomNavigation extends StatelessWidget {
                     label: 'Agenda',
                     isSelected: currentIndex == 2,
                     color: currentIndex == 2 ? primaryColor : unselectedColor,
+                    backgroundColor: backgroundColor,
                     onTap: () => onTap(2),
+                    route: AppRoutes.calendar,
                   ),
                   // Espaço para o botão central (reduzido)
                   SizedBox(width: centerButtonSpace),
@@ -95,7 +101,9 @@ class AppBottomNavigation extends StatelessWidget {
                     label: 'Clientes',
                     isSelected: currentIndex == 3,
                     color: currentIndex == 3 ? primaryColor : unselectedColor,
+                    backgroundColor: backgroundColor,
                     onTap: () => onTap(3),
+                    route: AppRoutes.clients,
                   ),
                   const SizedBox(width: 16),
                   // Lado direito: Perfil
@@ -108,6 +116,7 @@ class AppBottomNavigation extends StatelessWidget {
                       label: 'Perfil',
                       isSelected: currentIndex == 4,
                       color: currentIndex == 4 ? primaryColor : unselectedColor,
+                      backgroundColor: backgroundColor,
                       onTap: () => onTap(4),
                     ),
                   ),
@@ -163,8 +172,21 @@ class AppBottomNavigation extends StatelessWidget {
     required String label,
     required bool isSelected,
     required Color color,
+    required Color backgroundColor,
     required VoidCallback onTap,
+    String? route,
   }) {
+    // Obter contador de notificações para esta rota
+    int notificationCount = 0;
+    if (route != null && route.isNotEmpty) {
+      try {
+        final notificationController = context.watch<NotificationController>();
+        notificationCount = notificationController.getCountForRoute(route);
+      } catch (e) {
+        // Se não conseguir ler o controller, ignora
+      }
+    }
+
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -172,7 +194,42 @@ class AppBottomNavigation extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: color, size: 24),
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Icon(icon, color: color, size: 24),
+              if (notificationCount > 0)
+                Positioned(
+                  right: -8,
+                  top: -4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: isSelected ? color : const Color(0xFFEF4444),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: backgroundColor,
+                        width: 2,
+                      ),
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 16,
+                      minHeight: 16,
+                    ),
+                    child: Text(
+                      notificationCount > 99 ? '99+' : '$notificationCount',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w600,
+                        height: 1,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
+          ),
           const SizedBox(height: 4),
           Text(
             label,
