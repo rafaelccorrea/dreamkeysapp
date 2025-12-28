@@ -7,7 +7,8 @@ class ApiConstants {
   static const String baseApiUrl = baseUrl;
 
   // Endpoints de Autenticação
-  static const String login = '/auth/login';
+  static const String login =
+      '/auth/broker/login'; // Login específico para corretores
   static const String logout = '/auth/logout';
   static const String refreshToken = '/auth/refresh';
   static const String forgotPassword = '/auth/forgot-password';

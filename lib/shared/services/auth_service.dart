@@ -125,10 +125,11 @@ class AuthService {
   static final AuthService instance = AuthService._();
   final ApiService _apiService = ApiService.instance;
 
-  /// Realiza o login
+  /// Realiza o login usando o endpoint específico para corretores (/auth/broker/login)
+  /// Este endpoint é exclusivo para usuários do tipo USER (corretor) associados a uma empresa
   Future<ApiResponse<LoginResponse>> login(LoginRequest request) async {
     final response = await _apiService.post<Map<String, dynamic>>(
-      ApiConstants.login,
+      ApiConstants.login, // /auth/broker/login
       body: request.toJson(),
     );
 

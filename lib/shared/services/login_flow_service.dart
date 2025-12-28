@@ -58,17 +58,57 @@ class LoginFlowService {
         final loginResponse = await authService.login(loginRequest);
 
         if (!loginResponse.success || loginResponse.data == null) {
-          // Verificar se retornou 2FA_REQUIRED com tempToken
-          if (loginResponse.statusCode == 401 &&
-              loginResponse.error != null &&
-              loginResponse.error['errorCode'] == '2FA_REQUIRED') {
-            final tempToken = loginResponse.error['tempToken']?.toString() ?? '';
-            if (tempToken.isNotEmpty) {
-              return LoginFlowResult.requires2FA(
-                tempToken: tempToken,
-                email: email,
-                password: password,
-                rememberMe: rememberMe,
+          // Verificar códigos de erro específicos do endpoint de broker
+          if (loginResponse.statusCode == 401 && loginResponse.error != null) {
+            final errorCode = loginResponse.error['errorCode']?.toString();
+            final details = loginResponse.error['details'];
+            
+            // 2FA_REQUIRED - Requer verificação de 2FA
+            if (errorCode == '2FA_REQUIRED') {
+              final tempToken = loginResponse.error['tempToken']?.toString() ?? '';
+              if (tempToken.isNotEmpty) {
+                return LoginFlowResult.requires2FA(
+                  tempToken: tempToken,
+                  email: email,
+                  password: password,
+                  rememberMe: rememberMe,
+                );
+              }
+            }
+            
+            // 2FA_SETUP_REQUIRED - 2FA obrigatório mas não configurado
+            if (errorCode == '2FA_SETUP_REQUIRED') {
+              final suggestion = details?['suggestion']?.toString() ?? 
+                  'Configure o 2FA através das configurações antes de fazer login';
+              return LoginFlowResult.error(
+                message: 'Autenticação de dois fatores é obrigatória para sua empresa. $suggestion',
+              );
+            }
+            
+            // INVALID_USER_ROLE - Usuário não é corretor
+            if (errorCode == 'INVALID_USER_ROLE') {
+              final suggestion = details?['suggestion']?.toString() ?? 
+                  'Use a rota de login padrão';
+              return LoginFlowResult.error(
+                message: 'Esta rota é exclusiva para corretores. $suggestion',
+              );
+            }
+            
+            // NO_COMPANY_ASSOCIATION - Usuário sem empresa associada
+            if (errorCode == 'NO_COMPANY_ASSOCIATION') {
+              final suggestion = details?['suggestion']?.toString() ?? 
+                  'Entre em contato com o administrador para associar seu usuário a uma empresa';
+              return LoginFlowResult.error(
+                message: 'Usuário não está associado a nenhuma empresa. $suggestion',
+              );
+            }
+            
+            // INVALID_CREDENTIALS - Credenciais inválidas
+            if (errorCode == 'INVALID_CREDENTIALS') {
+              final suggestion = details?['suggestion']?.toString() ?? 
+                  'Verifique suas credenciais e tente novamente';
+              return LoginFlowResult.error(
+                message: 'Email ou senha incorretos. $suggestion',
               );
             }
           }
@@ -92,23 +132,64 @@ class LoginFlowService {
       final loginResponse = await authService.login(loginRequest);
 
       if (!loginResponse.success || loginResponse.data == null) {
-        // Verificar se retornou 2FA_REQUIRED
-        if (loginResponse.statusCode == 401 &&
-            loginResponse.error != null &&
-            loginResponse.error['errorCode'] == '2FA_REQUIRED') {
-          final tempToken = loginResponse.error['tempToken']?.toString() ?? '';
-          if (tempToken.isNotEmpty) {
-            return LoginFlowResult.requires2FA(
-              tempToken: tempToken,
-              email: email,
-              password: password,
-              rememberMe: rememberMe,
+        // Verificar códigos de erro específicos do endpoint de broker
+        if (loginResponse.statusCode == 401 && loginResponse.error != null) {
+          final errorCode = loginResponse.error['errorCode']?.toString();
+          final details = loginResponse.error['details'];
+          
+          // 2FA_REQUIRED - Requer verificação de 2FA
+          if (errorCode == '2FA_REQUIRED') {
+            final tempToken = loginResponse.error['tempToken']?.toString() ?? '';
+            if (tempToken.isNotEmpty) {
+              return LoginFlowResult.requires2FA(
+                tempToken: tempToken,
+                email: email,
+                password: password,
+                rememberMe: rememberMe,
+              );
+            }
+          }
+          
+          // 2FA_SETUP_REQUIRED - 2FA obrigatório mas não configurado
+          if (errorCode == '2FA_SETUP_REQUIRED') {
+            final suggestion = details?['suggestion']?.toString() ?? 
+                'Configure o 2FA através das configurações antes de fazer login';
+            return LoginFlowResult.error(
+              message: 'Autenticação de dois fatores é obrigatória para sua empresa. $suggestion',
+            );
+          }
+          
+          // INVALID_USER_ROLE - Usuário não é corretor
+          if (errorCode == 'INVALID_USER_ROLE') {
+            final suggestion = details?['suggestion']?.toString() ?? 
+                'Use a rota de login padrão';
+            return LoginFlowResult.error(
+              message: 'Esta rota é exclusiva para corretores. $suggestion',
+            );
+          }
+          
+          // NO_COMPANY_ASSOCIATION - Usuário sem empresa associada
+          if (errorCode == 'NO_COMPANY_ASSOCIATION') {
+            final suggestion = details?['suggestion']?.toString() ?? 
+                'Entre em contato com o administrador para associar seu usuário a uma empresa';
+            return LoginFlowResult.error(
+              message: 'Usuário não está associado a nenhuma empresa. $suggestion',
+            );
+          }
+          
+          // INVALID_CREDENTIALS - Credenciais inválidas
+          if (errorCode == 'INVALID_CREDENTIALS') {
+            final suggestion = details?['suggestion']?.toString() ?? 
+                'Verifique suas credenciais e tente novamente';
+            return LoginFlowResult.error(
+              message: 'Email ou senha incorretos. $suggestion',
             );
           }
         }
 
+        // Erro genérico
         return LoginFlowResult.error(
-          message: loginResponse.message ?? 'Email ou senha incorretos',
+          message: loginResponse.message ?? 'Erro ao realizar login',
         );
       }
 

@@ -5,6 +5,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/custom_button.dart';
+import '../../../shared/widgets/skeleton_box.dart';
 import '../controllers/appointment_controller.dart';
 import '../models/appointment_model.dart';
 import 'edit_appointment_page.dart';
@@ -89,7 +90,7 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
       body: Consumer<AppointmentController>(
         builder: (context, controller, child) {
           if (controller.loading && controller.selectedAppointment == null) {
-            return const Center(child: CircularProgressIndicator());
+            return _buildSkeleton(context, theme);
           }
 
           final appointment = controller.selectedAppointment;
@@ -513,6 +514,142 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
           fontSize: 12,
           letterSpacing: 0.3,
         ),
+      ),
+    );
+  }
+
+  Widget _buildSkeleton(BuildContext context, ThemeData theme) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Skeleton do header
+          SkeletonCard(
+            height: 180,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonBox(width: 4, height: 50, borderRadius: 2),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SkeletonText(
+                            width: double.infinity,
+                            height: 28,
+                            margin: const EdgeInsets.only(bottom: 12),
+                          ),
+                          SkeletonText(width: 120, height: 32, borderRadius: 20),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                SkeletonText(
+                  width: double.infinity,
+                  height: 16,
+                  margin: const EdgeInsets.only(bottom: 8),
+                ),
+                SkeletonText(width: 250, height: 16),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          // Skeleton de Informações Gerais
+          SkeletonText(width: 180, height: 20, margin: const EdgeInsets.only(bottom: 16)),
+          SkeletonCard(
+            child: Column(
+              children: [
+                _buildSkeletonInfoItem(),
+                _buildSkeletonInfoItem(),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          // Skeleton de Data e Horário
+          SkeletonText(width: 150, height: 20, margin: const EdgeInsets.only(bottom: 16)),
+          SkeletonCard(
+            child: Column(
+              children: [
+                _buildSkeletonInfoItem(),
+                _buildSkeletonInfoItem(),
+                _buildSkeletonInfoItem(),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          // Skeleton de Localização
+          SkeletonText(width: 120, height: 20, margin: const EdgeInsets.only(bottom: 16)),
+          SkeletonCard(
+            child: _buildSkeletonInfoItem(),
+          ),
+          const SizedBox(height: 24),
+          // Skeleton de Observações
+          SkeletonText(width: 140, height: 20, margin: const EdgeInsets.only(bottom: 16)),
+          SkeletonCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SkeletonText(
+                  width: double.infinity,
+                  height: 16,
+                  margin: const EdgeInsets.only(bottom: 8),
+                ),
+                SkeletonText(
+                  width: double.infinity,
+                  height: 16,
+                  margin: const EdgeInsets.only(bottom: 8),
+                ),
+                SkeletonText(width: 200, height: 16),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          // Skeleton dos botões
+          Row(
+            children: [
+              Expanded(
+                child: SkeletonBox(height: 48, borderRadius: 12),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: SkeletonBox(height: 48, borderRadius: 12),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSkeletonInfoItem() {
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SkeletonBox(width: 48, height: 48, borderRadius: 14),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SkeletonText(
+                  width: 100,
+                  height: 14,
+                  margin: const EdgeInsets.only(bottom: 8),
+                ),
+                SkeletonText(width: double.infinity, height: 16),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
