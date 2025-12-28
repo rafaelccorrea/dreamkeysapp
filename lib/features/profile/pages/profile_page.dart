@@ -234,7 +234,8 @@ class _ProfilePageState extends State<ProfilePage> {
 
     return AppScaffold(
       title: 'Meu Perfil',
-      currentBottomNavIndex: -1,
+      currentBottomNavIndex: 4,
+      showBottomNavigation: true,
       userName: _profile?.name,
       userEmail: _profile?.email,
       userAvatar: _profile?.avatar,
@@ -253,7 +254,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   onRefresh: _loadProfile,
                   child: SingleChildScrollView(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -263,14 +264,15 @@ class _ProfilePageState extends State<ProfilePage> {
 
                         // Informações pessoais
                         _buildPersonalInfo(context, theme, isDark),
-                        const SizedBox(height: 32),
+                        const SizedBox(height: 24),
 
                         // Segurança
                         _buildSecuritySection(context, theme, isDark),
-                        const SizedBox(height: 32),
+                        const SizedBox(height: 24),
 
                         // Visibilidade pública
                         _buildPublicVisibilitySection(context, theme, isDark),
+                        const SizedBox(height: 24),
                       ],
                     ),
                   ),
@@ -413,31 +415,37 @@ class _ProfilePageState extends State<ProfilePage> {
               ],
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
           Text(
             _profile?.name ?? '',
             style: theme.textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.w700,
               color: ThemeHelpers.textColor(context),
+              fontSize: 24,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
           Text(
             _profile?.email ?? '',
             style: theme.textTheme.bodyMedium?.copyWith(
               color: ThemeHelpers.textSecondaryColor(context),
+              fontSize: 15,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 20),
           ElevatedButton.icon(
             onPressed: () {
               Navigator.pushNamed(context, AppRoutes.profileEdit);
             },
-            icon: const Icon(Icons.edit),
+            icon: const Icon(Icons.edit, size: 18),
             label: const Text('Editar Perfil'),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary.primary,
               foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
           ),
         ],
@@ -447,22 +455,39 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _buildPersonalInfo(BuildContext context, ThemeData theme, bool isDark) {
     return Card(
+      elevation: 0,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: ThemeHelpers.borderLightColor(context),
+          width: 1,
+        ),
       ),
+      color: ThemeHelpers.cardBackgroundColor(context),
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Informações Pessoais',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w700,
-                color: ThemeHelpers.textColor(context),
-              ),
+            Row(
+              children: [
+                Icon(
+                  Icons.person_outline,
+                  size: 24,
+                  color: AppColors.primary.primary,
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Informações Pessoais',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: ThemeHelpers.textColor(context),
+                    fontSize: 20,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 24),
             _buildInfoRow(
               theme,
               context,
@@ -470,7 +495,7 @@ class _ProfilePageState extends State<ProfilePage> {
               'Nome',
               _profile?.name ?? '',
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
             _buildInfoRow(
               theme,
               context,
@@ -479,7 +504,7 @@ class _ProfilePageState extends State<ProfilePage> {
               _profile?.email ?? '',
             ),
             if (_profile?.phone != null || _profile?.cellphone != null) ...[
-              const SizedBox(height: 16),
+              const SizedBox(height: 20),
               _buildInfoRow(
                 theme,
                 context,
@@ -488,7 +513,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 _profile?.phone ?? _profile?.cellphone ?? '',
               ),
             ],
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
             _buildInfoRow(
               theme,
               context,
@@ -496,7 +521,7 @@ class _ProfilePageState extends State<ProfilePage> {
               'Cargo',
               _getRoleLabel(_profile?.role ?? 'user'),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
             _buildInfoRow(
               theme,
               context,
@@ -512,67 +537,129 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _buildSecuritySection(BuildContext context, ThemeData theme, bool isDark) {
     return Card(
+      elevation: 0,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: ThemeHelpers.borderLightColor(context),
+          width: 1,
+        ),
       ),
+      color: ThemeHelpers.cardBackgroundColor(context),
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.symmetric(vertical: 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Segurança',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w700,
-                color: ThemeHelpers.textColor(context),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.security,
+                    size: 24,
+                    color: AppColors.primary.primary,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Segurança',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: ThemeHelpers.textColor(context),
+                      fontSize: 20,
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 20),
             ListTile(
-              leading: Icon(
-                Icons.devices_outlined,
-                color: AppColors.primary.primary,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.devices_outlined,
+                  color: AppColors.primary.primary,
+                  size: 22,
+                ),
               ),
               title: Text(
                 'Sessões Ativas',
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: ThemeHelpers.textColor(context),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 16,
                 ),
               ),
-              subtitle: Text(
-                'Gerencie suas sessões ativas',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Gerencie suas sessões ativas',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    fontSize: 14,
+                  ),
                 ),
               ),
-              trailing: const Icon(Icons.chevron_right),
+              trailing: Icon(
+                Icons.chevron_right,
+                color: ThemeHelpers.textSecondaryColor(context),
+              ),
               onTap: () {
                 SessionsModal.show(context: context);
               },
             ),
-            const Divider(),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Divider(
+                height: 1,
+                color: ThemeHelpers.borderLightColor(context),
+              ),
+            ),
             ListTile(
-              leading: Icon(
-                Icons.lock_outline,
-                color: AppColors.primary.primary,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.lock_outline,
+                  color: AppColors.primary.primary,
+                  size: 22,
+                ),
               ),
               title: Text(
                 'Alterar Senha',
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: ThemeHelpers.textColor(context),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 16,
                 ),
               ),
-              subtitle: Text(
-                'Altere sua senha de acesso',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Altere sua senha de acesso',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    fontSize: 14,
+                  ),
                 ),
               ),
-              trailing: const Icon(Icons.chevron_right),
+              trailing: Icon(
+                Icons.chevron_right,
+                color: ThemeHelpers.textSecondaryColor(context),
+              ),
               onTap: () {
                 ChangePasswordModal.show(context: context);
               },
             ),
+            const SizedBox(height: 8),
           ],
         ),
       ),
@@ -581,16 +668,30 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _buildPublicVisibilitySection(BuildContext context, ThemeData theme, bool isDark) {
     return Card(
+      elevation: 0,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: ThemeHelpers.borderLightColor(context),
+          width: 1,
+        ),
       ),
+      color: ThemeHelpers.cardBackgroundColor(context),
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(24),
         child: Row(
           children: [
-            Icon(
-              Icons.public_outlined,
-              color: AppColors.primary.primary,
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.primary.primary.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                Icons.public_outlined,
+                color: AppColors.primary.primary,
+                size: 24,
+              ),
             ),
             const SizedBox(width: 16),
             Expanded(
@@ -602,18 +703,21 @@ class _ProfilePageState extends State<ProfilePage> {
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w600,
                       color: ThemeHelpers.textColor(context),
+                      fontSize: 16,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 6),
                   Text(
                     'Aparecer na lista de corretores do site público',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: ThemeHelpers.textSecondaryColor(context),
+                      fontSize: 14,
                     ),
                   ),
                 ],
               ),
             ),
+            const SizedBox(width: 12),
             if (_isUpdatingVisibility)
               const SizedBox(
                 width: 24,
@@ -641,12 +745,19 @@ class _ProfilePageState extends State<ProfilePage> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(
-          icon,
-          size: 20,
-          color: ThemeHelpers.textSecondaryColor(context),
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: ThemeHelpers.borderLightColor(context).withOpacity(0.3),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            icon,
+            size: 18,
+            color: ThemeHelpers.textSecondaryColor(context),
+          ),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 16),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -655,15 +766,17 @@ class _ProfilePageState extends State<ProfilePage> {
                 label,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: ThemeHelpers.textSecondaryColor(context),
-                  fontSize: 12,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               Text(
                 value,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: ThemeHelpers.textColor(context),
-                  fontWeight: FontWeight.w500,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
                 ),
               ),
             ],

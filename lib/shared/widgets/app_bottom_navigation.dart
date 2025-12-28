@@ -86,13 +86,13 @@ class AppBottomNavigation extends StatelessWidget {
                   ),
                   // Espaço para o botão central (reduzido)
                   SizedBox(width: centerButtonSpace),
-                  // Chat (próximo ao centro)
+                  // Clientes (próximo ao centro)
                   _buildNavItem(
                     context: context,
                     icon: currentIndex == 3
-                        ? Icons.chat_bubble
-                        : Icons.chat_bubble_outline,
-                    label: 'Chat',
+                        ? Icons.people
+                        : Icons.people_outline,
+                    label: 'Clientes',
                     isSelected: currentIndex == 3,
                     color: currentIndex == 3 ? primaryColor : unselectedColor,
                     onTap: () => onTap(3),
@@ -200,7 +200,7 @@ class AppBottomNavigation extends StatelessWidget {
       return 2;
     if (routeName == AppRoutes.profile || routeName == AppRoutes.profileEdit)
       return 4;
-    // Chat ainda não implementado
+    // Clientes ainda não implementado
     return 0;
   }
 
@@ -234,10 +234,10 @@ class AppBottomNavigation extends StatelessWidget {
         );
         break;
       case 3:
-        // TODO: Navegar para chat
+        // TODO: Navegar para clientes
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('Tela de Chat em breve')));
+        ).showSnackBar(const SnackBar(content: Text('Tela de Clientes em breve')));
         break;
       case 4:
         // Se já está na tela de perfil, não navega novamente

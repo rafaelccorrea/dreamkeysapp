@@ -43,11 +43,23 @@ class ApiService {
   }
 
   /// Verifica se uma rota é exceção (não exige Company ID obrigatório)
+  /// Rotas de autenticação que NÃO requerem token (login, logout, etc)
   bool _isExceptionRoute(String? endpoint) {
     if (endpoint == null) return false;
 
-    // Rotas de autenticação - NÃO enviar Company ID
-    if (endpoint.startsWith('/auth/')) return true;
+    // Rotas de autenticação que NÃO requerem token
+    final authRoutesWithoutToken = [
+      '/auth/broker/login',
+      '/auth/login',
+      '/auth/logout',
+      '/auth/refresh',
+      '/auth/forgot-password',
+      '/auth/reset-password',
+      '/auth/check-2fa',
+      '/auth/verify-2fa',
+    ];
+    
+    if (authRoutesWithoutToken.contains(endpoint)) return true;
 
     // Rotas públicas - NÃO enviar Company ID
     if (endpoint.startsWith('/public/')) return true;
@@ -127,7 +139,13 @@ class ApiService {
     }
 
     // Gerenciar X-Company-ID conforme regras da documentação
-    if (!isAuthRoute) {
+    // Rotas de perfil (/auth/profile, etc) não requerem Company ID
+    final isProfileRoute = endpoint != null && 
+        (endpoint.startsWith('/auth/profile') || 
+         endpoint.startsWith('/auth/avatar') ||
+         endpoint.startsWith('/auth/change-password'));
+    
+    if (!isAuthRoute && !isProfileRoute) {
       String? companyId = await SecureStorageService.instance.getCompanyId();
 
       // Para rotas opcionais, enviar se tiver, mas não bloquear se não tiver
