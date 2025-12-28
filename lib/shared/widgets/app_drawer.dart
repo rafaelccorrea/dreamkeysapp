@@ -9,7 +9,6 @@ import '../services/company_service.dart';
 import '../services/profile_service.dart';
 import '../services/dashboard_service.dart';
 import '../../features/notifications/controllers/notification_controller.dart';
-import 'package:dreamkeys_app/shared/widgets/permission_wrapper.dart';
 
 /// Drawer (menu lateral) do aplicativo
 class AppDrawer extends StatefulWidget {
@@ -342,50 +341,42 @@ class _AppDrawerState extends State<AppDrawer> {
                     ).pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
                   },
                 ),
-                PermissionWrapper(
-                  moduleId: 'property_management',
-                  permission: 'property:view',
-                  child: _buildDrawerItem(
-                    context: context,
-                    currentRoute: activeRoute,
-                    route: AppRoutes.properties,
-                    icon: Icons.home_outlined,
-                    activeIcon: Icons.home,
-                    title: 'Imóveis',
-                    onTap: () {
-                      Navigator.pop(context);
-                      // Se já está na tela de propriedades, não navega novamente
-                      if (activeRoute == AppRoutes.properties) return;
-                      Navigator.of(context).pushNamedAndRemoveUntil(
-                        AppRoutes.properties,
-                        (route) => false,
-                      );
-                    },
-                  ),
+                _buildDrawerItem(
+                  context: context,
+                  currentRoute: activeRoute,
+                  route: AppRoutes.properties,
+                  icon: Icons.home_outlined,
+                  activeIcon: Icons.home,
+                  title: 'Imóveis',
+                  onTap: () {
+                    Navigator.pop(context);
+                    // Se já está na tela de propriedades, não navega novamente
+                    if (activeRoute == AppRoutes.properties) return;
+                    Navigator.of(context).pushNamedAndRemoveUntil(
+                      AppRoutes.properties,
+                      (route) => false,
+                    );
+                  },
                 ),
-                PermissionWrapper(
-                  moduleId: 'client_management',
-                  permission: 'client:view',
-                  child: _buildDrawerItem(
-                    context: context,
-                    currentRoute: activeRoute,
-                    route: AppRoutes.clients,
-                    icon: Icons.people_outlined,
-                    activeIcon: Icons.people,
-                    title: 'Clientes',
-                    onTap: () {
-                      Navigator.pop(context);
-                      // Se já está na tela de clientes, não navega novamente
-                      if (activeRoute == AppRoutes.clients || 
-                          activeRoute.startsWith('/clients')) {
-                        return;
-                      }
-                      Navigator.of(context).pushNamedAndRemoveUntil(
-                        AppRoutes.clients,
-                        (route) => false,
-                      );
-                    },
-                  ),
+                _buildDrawerItem(
+                  context: context,
+                  currentRoute: activeRoute,
+                  route: AppRoutes.clients,
+                  icon: Icons.people_outlined,
+                  activeIcon: Icons.people,
+                  title: 'Clientes',
+                  onTap: () {
+                    Navigator.pop(context);
+                    // Se já está na tela de clientes, não navega novamente
+                    if (activeRoute == AppRoutes.clients || 
+                        activeRoute.startsWith('/clients')) {
+                      return;
+                    }
+                    Navigator.of(context).pushNamedAndRemoveUntil(
+                      AppRoutes.clients,
+                      (route) => false,
+                    );
+                  },
                 ),
                 _buildDrawerItem(
                   context: context,
@@ -450,14 +441,17 @@ class _AppDrawerState extends State<AppDrawer> {
                 _buildDrawerItem(
                   context: context,
                   currentRoute: activeRoute,
-                  route: '/tasks',
+                  route: AppRoutes.kanban,
                   icon: Icons.assignment_outlined,
                   activeIcon: Icons.assignment,
                   title: 'Tarefas',
                   onTap: () {
                     Navigator.pop(context);
-                    // TODO: Navegar para tela de tarefas
-                    _showComingSoon(context);
+                    if (activeRoute == AppRoutes.kanban) return;
+                    Navigator.of(context).pushNamedAndRemoveUntil(
+                      AppRoutes.kanban,
+                      (route) => false,
+                    );
                   },
                 ),
                 const Divider(),

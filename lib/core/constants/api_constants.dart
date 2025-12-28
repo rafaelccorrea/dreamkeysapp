@@ -110,6 +110,19 @@ class ApiConstants {
   static const String markNotificationsReadBulk = '/notifications/read/bulk';
   static const String markNotificationsReadAll = '/notifications/read/all';
 
+  // Endpoints de Kanban
+  static String kanbanBoard(String teamId) => '/kanban/board/$teamId';
+  static const String kanbanColumns = '/kanban/columns';
+  static String kanbanColumnById(String id) => '/kanban/columns/$id';
+  static String kanbanColumnsReorder(String teamId) => '/kanban/columns/reorder/$teamId';
+  static const String kanbanTasks = '/kanban/tasks';
+  static String kanbanTaskById(String id) => '/kanban/tasks/$id';
+  static const String kanbanTasksMove = '/kanban/tasks/move';
+  static String kanbanTaskHistory(String id) => '/kanban/tasks/$id/history';
+  static String kanbanTaskComments(String taskId) => '/kanban/tasks/$taskId/comments';
+  static String kanbanTaskComment(String taskId, String commentId) => '/kanban/tasks/$taskId/comments/$commentId';
+  static String kanbanTags(String teamId) => '/kanban/tags/$teamId';
+
   // Headers
   static const String contentTypeHeader = 'Content-Type';
   static const String authorizationHeader = 'Authorization';

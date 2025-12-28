@@ -6,6 +6,7 @@ import 'core/routes/app_routes.dart';
 import 'shared/services/theme_service.dart';
 import 'features/notifications/controllers/notification_controller.dart';
 import 'features/appointments/controllers/appointment_controller.dart';
+import 'features/kanban/controllers/kanban_controller.dart';
 
 // GlobalKey para o Navigator - permite navegação sem contexto
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -59,6 +60,7 @@ class _MyAppState extends State<MyApp> {
           },
         ),
         ChangeNotifierProvider(create: (_) => AppointmentController.instance),
+        ChangeNotifierProvider(create: (_) => KanbanController.instance),
       ],
       child: MaterialApp(
         title: 'Dream Keys',

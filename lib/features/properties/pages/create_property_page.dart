@@ -543,12 +543,28 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         // Título e descrição só são obrigatórios se a IA estiver desativada
         if (!_autoGenerateOnReview) {
           if (_titleController.text.trim().isEmpty ||
-              _titleController.text.trim().length < 3) {
+              _titleController.text.trim().length < 3 ||
+              _titleController.text.trim().length > 255) {
             return false;
           }
           if (_descriptionController.text.trim().isEmpty ||
-              _descriptionController.text.trim().length < 10) {
+              _descriptionController.text.trim().length < 10 ||
+              _descriptionController.text.trim().length > 5000) {
             return false;
+          }
+        } else {
+          // Se IA ativada, valida apenas se preenchido manualmente
+          if (_titleController.text.trim().isNotEmpty) {
+            if (_titleController.text.trim().length < 3 ||
+                _titleController.text.trim().length > 255) {
+              return false;
+            }
+          }
+          if (_descriptionController.text.trim().isNotEmpty) {
+            if (_descriptionController.text.trim().length < 10 ||
+                _descriptionController.text.trim().length > 5000) {
+              return false;
+            }
           }
         }
         return true;
@@ -562,6 +578,20 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             _stateController.text.trim().length != 2) {
           return false;
         }
+        // Validar tamanhos mínimos e máximos
+        if (_cityController.text.trim().length < 2 ||
+            _cityController.text.trim().length > 100) {
+          return false;
+        }
+        if (_neighborhoodController.text.trim().length < 2 ||
+            _neighborhoodController.text.trim().length > 100) {
+          return false;
+        }
+        // Validar formato do estado (maiúsculas)
+        final state = _stateController.text.trim().toUpperCase();
+        if (!RegExp(r'^[A-Z]{2}$').hasMatch(state)) {
+          return false;
+        }
         final cep = _zipCodeController.text.replaceAll(RegExp(r'[^0-9]'), '');
         if (cep.isEmpty || cep.length != 8) {
           return false;
@@ -573,13 +603,37 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           return false;
         }
         final totalArea = double.tryParse(_totalAreaController.text);
-        if (totalArea == null || totalArea <= 0) {
+        if (totalArea == null || totalArea <= 0 || totalArea >= 1000000) {
           return false;
         }
         // Validar área construída se preenchida
         if (_builtAreaController.text.trim().isNotEmpty) {
           final builtArea = double.tryParse(_builtAreaController.text);
-          if (builtArea != null && builtArea > totalArea) {
+          if (builtArea != null) {
+            if (builtArea <= 0 || builtArea >= 1000000) {
+              return false;
+            }
+            if (builtArea > totalArea) {
+              return false;
+            }
+          }
+        }
+        // Validar quartos, banheiros e vagas (inteiros e limites)
+        if (_bedroomsController.text.trim().isNotEmpty) {
+          final bedrooms = int.tryParse(_bedroomsController.text);
+          if (bedrooms == null || bedrooms < 0 || bedrooms >= 50) {
+            return false;
+          }
+        }
+        if (_bathroomsController.text.trim().isNotEmpty) {
+          final bathrooms = int.tryParse(_bathroomsController.text);
+          if (bathrooms == null || bathrooms < 0 || bathrooms >= 20) {
+            return false;
+          }
+        }
+        if (_parkingSpacesController.text.trim().isNotEmpty) {
+          final parking = int.tryParse(_parkingSpacesController.text);
+          if (parking == null || parking < 0 || parking >= 20) {
             return false;
           }
         }
@@ -640,12 +694,33 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
 
       case 5: // Etapa 6: Clientes e Proprietário
         if (_ownerNameController.text.trim().isEmpty ||
-            _ownerEmailController.text.trim().isEmpty ||
-            !_ownerEmailController.text.contains('@') ||
-            !_ownerEmailController.text.contains('.') ||
-            _ownerPhoneController.text.trim().isEmpty ||
-            _ownerDocumentController.text.trim().isEmpty ||
-            _ownerAddressController.text.trim().isEmpty) {
+            _ownerNameController.text.trim().length < 3 ||
+            _ownerNameController.text.trim().length > 255) {
+          return false;
+        }
+        if (_ownerEmailController.text.trim().isEmpty ||
+            _ownerEmailController.text.trim().length > 255) {
+          return false;
+        }
+        // Validação de email mais robusta
+        final emailRegex = RegExp(
+          r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+        );
+        if (!emailRegex.hasMatch(_ownerEmailController.text.trim())) {
+          return false;
+        }
+        if (_ownerPhoneController.text.trim().isEmpty ||
+            _ownerPhoneController.text.trim().length < 10 ||
+            _ownerPhoneController.text.trim().length > 20) {
+          return false;
+        }
+        if (_ownerDocumentController.text.trim().isEmpty ||
+            _ownerDocumentController.text.trim().length < 11 ||
+            _ownerDocumentController.text.trim().length > 18) {
+          return false;
+        }
+        if (_ownerAddressController.text.trim().isEmpty ||
+            _ownerAddressController.text.trim().length < 10) {
           return false;
         }
         return true;
@@ -1354,6 +1429,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             controller: _titleController,
             label: _autoGenerateOnReview ? 'Título' : 'Título *',
             hint: 'Ex: Casa com 3 quartos em condomínio fechado',
+            maxLength: 255,
             validator: (value) {
               // Só valida se a IA estiver desativada
               if (!_autoGenerateOnReview) {
@@ -1387,6 +1463,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             label: _autoGenerateOnReview ? 'Descrição' : 'Descrição *',
             hint: 'Descreva o imóvel em detalhes...',
             maxLines: 6,
+            maxLength: 5000,
             validator: (value) {
               // Só valida se a IA estiver desativada
               if (!_autoGenerateOnReview) {
@@ -1650,8 +1727,21 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                         if (value == null || value.trim().isEmpty) {
                           return 'Estado é obrigatório';
                         }
-                        if (value.trim().length != 2) {
+                        final state = value.trim().toUpperCase();
+                        if (state.length != 2) {
                           return 'Digite 2 letras';
+                        }
+                        if (!RegExp(r'^[A-Z]{2}$').hasMatch(state)) {
+                          return 'Estado deve conter apenas letras maiúsculas';
+                        }
+                        // Atualizar o controller com valor em maiúsculas
+                        if (state != value) {
+                          _stateController.value = TextEditingValue(
+                            text: state,
+                            selection: TextSelection.collapsed(
+                              offset: state.length,
+                            ),
+                          );
                         }
                         return null;
                       },
@@ -1952,7 +2042,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                         return 'Preço de aluguel deve ser positivo';
                       }
                       if (price >= 1000000) {
-                        return 'Preço de aluguel deve ser menor que R\$ 1 milhão';
+                        return 'Preço de aluguel deve ser menor que R\$ 999.999,99';
                       }
                     }
                     return null;
@@ -1980,7 +2070,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                         return 'Valor do condomínio deve ser positivo';
                       }
                       if (fee >= 100000) {
-                        return 'Valor do condomínio deve ser menor que R\$ 100 mil';
+                        return 'Valor do condomínio deve ser menor que R\$ 99.999,99';
                       }
                     }
                     return null;
@@ -2003,7 +2093,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                         return 'IPTU deve ser positivo';
                       }
                       if (iptu >= 100000) {
-                        return 'IPTU deve ser menor que R\$ 100 mil';
+                        return 'IPTU deve ser menor que R\$ 99.999,99';
                       }
                     }
                     return null;
@@ -2484,12 +2574,16 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             controller: _ownerNameController,
             label: 'Nome do Proprietário *',
             hint: 'Nome completo',
+            maxLength: 255,
             validator: (value) {
               if (value == null || value.trim().isEmpty) {
                 return 'Nome do proprietário é obrigatório';
               }
               if (value.trim().length < 3) {
                 return 'Nome deve ter pelo menos 3 caracteres';
+              }
+              if (value.trim().length > 255) {
+                return 'Nome deve ter no máximo 255 caracteres';
               }
               return null;
             },
@@ -2501,11 +2595,19 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             label: 'Email do Proprietário *',
             hint: 'email@exemplo.com',
             keyboardType: TextInputType.emailAddress,
+            maxLength: 255,
             validator: (value) {
               if (value == null || value.trim().isEmpty) {
                 return 'Email do proprietário é obrigatório';
               }
-              if (!value.contains('@') || !value.contains('.')) {
+              if (value.trim().length > 255) {
+                return 'Email deve ter no máximo 255 caracteres';
+              }
+              // Validação de formato de email mais robusta
+              final emailRegex = RegExp(
+                r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
+              );
+              if (!emailRegex.hasMatch(value.trim())) {
                 return 'Email inválido';
               }
               return null;
@@ -2518,12 +2620,16 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             label: 'Telefone do Proprietário *',
             hint: '(00) 00000-0000',
             keyboardType: TextInputType.phone,
+            maxLength: 20,
             validator: (value) {
               if (value == null || value.trim().isEmpty) {
                 return 'Telefone do proprietário é obrigatório';
               }
               if (value.trim().length < 10) {
                 return 'Telefone deve ter pelo menos 10 caracteres';
+              }
+              if (value.trim().length > 20) {
+                return 'Telefone deve ter no máximo 20 caracteres';
               }
               return null;
             },
@@ -2534,12 +2640,16 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             controller: _ownerDocumentController,
             label: 'CPF/CNPJ do Proprietário *',
             hint: '000.000.000-00 ou 00.000.000/0000-00',
+            maxLength: 18,
             validator: (value) {
               if (value == null || value.trim().isEmpty) {
                 return 'CPF/CNPJ do proprietário é obrigatório';
               }
               if (value.trim().length < 11) {
                 return 'CPF/CNPJ deve ter pelo menos 11 caracteres';
+              }
+              if (value.trim().length > 18) {
+                return 'CPF/CNPJ deve ter no máximo 18 caracteres';
               }
               return null;
             },

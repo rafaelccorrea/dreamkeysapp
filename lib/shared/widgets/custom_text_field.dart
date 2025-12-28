@@ -21,6 +21,7 @@ class CustomTextField extends StatefulWidget {
   final String? errorText;
   final TextInputAction? textInputAction;
   final List<TextInputFormatter>? inputFormatters;
+  final int? maxLength;
 
   const CustomTextField({
     super.key,
@@ -41,6 +42,7 @@ class CustomTextField extends StatefulWidget {
     this.errorText,
     this.textInputAction,
     this.inputFormatters,
+    this.maxLength,
   });
 
   @override
@@ -96,6 +98,7 @@ class _CustomTextFieldState extends State<CustomTextField> {
           readOnly: widget.readOnly,
           textInputAction: widget.textInputAction,
           inputFormatters: widget.inputFormatters,
+          maxLength: widget.maxLength,
           style: theme.textTheme.bodyLarge?.copyWith(
             color: theme.colorScheme.onSurface,
           ),
@@ -127,6 +130,7 @@ class _CustomTextFieldState extends State<CustomTextField> {
                   )
                 : widget.suffixIcon,
             errorText: widget.errorText,
+            counterText: widget.maxLength != null ? '' : null, // Ocultar contador se maxLength definido
           ),
         ),
       ],
