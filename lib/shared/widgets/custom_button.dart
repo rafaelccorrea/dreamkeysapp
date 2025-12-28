@@ -26,7 +26,7 @@ class CustomButton extends StatelessWidget {
     final theme = Theme.of(context);
     final width = isFullWidth
         ? MediaQuery.of(context).size.width
-        : (this.width ?? double.infinity);
+        : (this.width ?? (isFullWidth ? double.infinity : null));
 
     final buttonStyle = _getButtonStyle(context, variant);
 
@@ -55,35 +55,31 @@ class CustomButton extends StatelessWidget {
             ],
           );
 
-    switch (variant) {
-      case ButtonVariant.primary:
-        return SizedBox(
-          width: width,
-          child: ElevatedButton(
-            onPressed: isLoading ? null : onPressed,
-            style: buttonStyle,
-            child: content,
-          ),
-        );
-      case ButtonVariant.secondary:
-        return SizedBox(
-          width: width,
-          child: OutlinedButton(
-            onPressed: isLoading ? null : onPressed,
-            style: buttonStyle,
-            child: content,
-          ),
-        );
-      case ButtonVariant.text:
-        return SizedBox(
-          width: width,
-          child: TextButton(
-            onPressed: isLoading ? null : onPressed,
-            style: buttonStyle,
-            child: content,
-          ),
-        );
+    final buttonWidget = switch (variant) {
+      ButtonVariant.primary => ElevatedButton(
+          onPressed: isLoading ? null : onPressed,
+          style: buttonStyle,
+          child: content,
+        ),
+      ButtonVariant.secondary => OutlinedButton(
+          onPressed: isLoading ? null : onPressed,
+          style: buttonStyle,
+          child: content,
+        ),
+      ButtonVariant.text => TextButton(
+          onPressed: isLoading ? null : onPressed,
+          style: buttonStyle,
+          child: content,
+        ),
+    };
+
+    if (width != null) {
+      return SizedBox(
+        width: width,
+        child: buttonWidget,
+      );
     }
+    return buttonWidget;
   }
 
   ButtonStyle? _getButtonStyle(BuildContext context, ButtonVariant variant) {

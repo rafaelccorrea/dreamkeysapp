@@ -51,6 +51,38 @@ class ApiConstants {
   static String appointmentInviteRespond(String id) =>
       '/appointments/invites/$id/respond';
 
+  // Endpoints de Clientes
+  static const String clients = '/clients';
+  static String clientById(String id) => '/clients/$id';
+  static String clientUpdate(String id) => '/clients/$id';
+  static String clientDelete(String id) => '/clients/$id';
+  static String clientDeletePermanent(String id) => '/clients/$id/permanent';
+  static const String clientsStatistics = '/clients/statistics';
+  static String clientTransfer(String clientId) =>
+      '/clients/$clientId/transfer';
+  static const String clientsUsersForTransfer = '/clients/users-for-transfer';
+  static String clientPropertyAssociate(String clientId, String propertyId) =>
+      '/clients/$clientId/properties/$propertyId';
+  static String clientPropertyDisassociate(
+    String clientId,
+    String propertyId,
+  ) => '/clients/$clientId/properties/$propertyId';
+  static String clientProperties(String clientId) =>
+      '/clients/$clientId/properties';
+  static String clientByProperty(String propertyId) =>
+      '/clients/properties/$propertyId';
+  static String clientInteractions(String clientId) =>
+      '/clients/$clientId/interactions';
+  static String clientInteraction(String clientId, String interactionId) =>
+      '/clients/$clientId/interactions/$interactionId';
+  static const String clientsBulkImport = '/clients/bulk-import';
+  static const String clientsImportJobs = '/clients/import-jobs';
+  static String clientsImportJob(String jobId) => '/clients/import-jobs/$jobId';
+  static String clientsImportJobErrors(String jobId) =>
+      '/clients/import-jobs/$jobId/errors';
+  static const String clientsExport = '/clients/export';
+  static const String clientsExportBulk = '/clients/export-bulk';
+
   // Endpoints de Notificações
   static const String notifications = '/notifications';
   static String notificationsUnreadList([int? page, int? limit]) {

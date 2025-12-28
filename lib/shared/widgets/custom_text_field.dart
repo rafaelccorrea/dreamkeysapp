@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../core/theme/app_colors.dart';
 
 /// Campo de texto customizado com design consistente
@@ -19,6 +20,7 @@ class CustomTextField extends StatefulWidget {
   final bool readOnly;
   final String? errorText;
   final TextInputAction? textInputAction;
+  final List<TextInputFormatter>? inputFormatters;
 
   const CustomTextField({
     super.key,
@@ -38,6 +40,7 @@ class CustomTextField extends StatefulWidget {
     this.readOnly = false,
     this.errorText,
     this.textInputAction,
+    this.inputFormatters,
   });
 
   @override
@@ -92,6 +95,7 @@ class _CustomTextFieldState extends State<CustomTextField> {
           focusNode: _focusNode,
           readOnly: widget.readOnly,
           textInputAction: widget.textInputAction,
+          inputFormatters: widget.inputFormatters,
           style: theme.textTheme.bodyLarge?.copyWith(
             color: theme.colorScheme.onSurface,
           ),

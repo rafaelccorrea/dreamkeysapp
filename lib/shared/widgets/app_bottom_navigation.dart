@@ -198,9 +198,10 @@ class AppBottomNavigation extends StatelessWidget {
     if (routeName == AppRoutes.properties) return 1;
     if (routeName == AppRoutes.calendar || routeName.startsWith('/calendar'))
       return 2;
+    if (routeName == AppRoutes.clients || routeName.startsWith('/clients'))
+      return 3;
     if (routeName == AppRoutes.profile || routeName == AppRoutes.profileEdit)
       return 4;
-    // Clientes ainda não implementado
     return 0;
   }
 
@@ -234,10 +235,12 @@ class AppBottomNavigation extends StatelessWidget {
         );
         break;
       case 3:
-        // TODO: Navegar para clientes
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Tela de Clientes em breve')));
+        // Navegar para clientes
+        if (currentRoute == AppRoutes.clients) return;
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          AppRoutes.clients,
+          (route) => route.settings.name == AppRoutes.clients,
+        );
         break;
       case 4:
         // Se já está na tela de perfil, não navega novamente

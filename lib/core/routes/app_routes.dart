@@ -19,6 +19,9 @@ import '../../features/appointments/pages/edit_appointment_page.dart';
 import '../../features/appointments/pages/appointment_details_page.dart';
 import '../../features/profile/pages/profile_page.dart';
 import '../../features/profile/pages/edit_profile_page.dart';
+import '../../features/clients/pages/clients_page.dart';
+import '../../features/clients/pages/client_details_page.dart';
+import '../../features/clients/pages/client_form_page.dart';
 
 /// Rotas da aplicação com transições customizadas
 class AppRoutes {
@@ -43,6 +46,11 @@ class AppRoutes {
   static const String calendarCreate = '/calendar/create';
   static String calendarEdit(String id) => '/calendar/edit/$id';
   static String calendarDetails(String id) => '/calendar/details/$id';
+  
+  static const String clients = '/clients';
+  static const String clientCreate = '/clients/new';
+  static String clientEdit(String id) => '/clients/$id/edit';
+  static String clientDetails(String id) => '/clients/$id';
   
   static String propertyOfferDetails(String offerId) => '/properties/offers/$offerId';
   
@@ -97,6 +105,13 @@ class AppRoutes {
       return _buildRoute(const CalendarPage(), settings);
     } else if (routeName == AppRoutes.calendarCreate) {
       return _buildRoute(const CreateAppointmentPage(), settings);
+    } else if (routeName == AppRoutes.clients) {
+      return _buildRoute(const ClientsPage(), settings);
+    } else if (routeName == AppRoutes.clientCreate) {
+      return _buildRoute(
+        const ClientFormPage(),
+        settings,
+      );
     } else if (routeName != null && routeName.startsWith('/calendar/')) {
       final segments = routeName.split('/');
       if (segments.length >= 3) {
@@ -155,6 +170,25 @@ class AppRoutes {
         const Scaffold(body: Center(child: Text('Página não encontrada'))),
         settings,
       );
+    } else if (routeName != null && routeName.startsWith('/clients/')) {
+      // Rotas de clientes
+      final segments = routeName.split('/');
+      if (segments.length >= 3) {
+        final id = segments[2];
+        if (segments.length == 3) {
+          // Detalhes: /clients/:id
+          return _buildRoute(
+            ClientDetailsPage(clientId: id),
+            settings,
+          );
+        } else if (segments.length == 4 && segments[3] == 'edit') {
+          // Edição: /clients/:id/edit
+          return _buildRoute(
+            ClientFormPage(clientId: id),
+            settings,
+          );
+        }
+      }
     }
     
     // Rota não encontrada

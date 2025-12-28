@@ -367,14 +367,21 @@ class _AppDrawerState extends State<AppDrawer> {
                   child: _buildDrawerItem(
                     context: context,
                     currentRoute: activeRoute,
-                    route: '/clients',
+                    route: AppRoutes.clients,
                     icon: Icons.people_outlined,
                     activeIcon: Icons.people,
                     title: 'Clientes',
                     onTap: () {
                       Navigator.pop(context);
-                      // TODO: Navegar para tela de clientes
-                      _showComingSoon(context);
+                      // Se já está na tela de clientes, não navega novamente
+                      if (activeRoute == AppRoutes.clients || 
+                          activeRoute.startsWith('/clients')) {
+                        return;
+                      }
+                      Navigator.of(context).pushNamedAndRemoveUntil(
+                        AppRoutes.clients,
+                        (route) => false,
+                      );
                     },
                   ),
                 ),
@@ -448,20 +455,6 @@ class _AppDrawerState extends State<AppDrawer> {
                   },
                 ),
                 const Divider(),
-                _buildDrawerItem(
-                  context: context,
-                  currentRoute: activeRoute,
-                  route: AppRoutes.profile,
-                  icon: Icons.person_outline,
-                  activeIcon: Icons.person,
-                  title: 'Perfil',
-                  onTap: () {
-                    Navigator.pop(context);
-                    // Se já está na tela de perfil, não navega novamente
-                    if (activeRoute == AppRoutes.profile) return;
-                    Navigator.of(context).pushNamed(AppRoutes.profile);
-                  },
-                ),
                 _buildDrawerItem(
                   context: context,
                   currentRoute: activeRoute,
