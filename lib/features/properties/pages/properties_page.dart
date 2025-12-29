@@ -1594,96 +1594,190 @@ class _PropertiesPageState extends State<PropertiesPage> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Preço (destaque)
+                  // Preço (destaque melhorado)
                   Container(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
-                      color: AppColors.primary.primary.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: AppColors.primary.primary.withValues(alpha: 0.2),
-                        width: 1,
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          AppColors.primary.primary.withValues(alpha: 0.15),
+                          AppColors.primary.primary.withValues(alpha: 0.08),
+                        ],
                       ),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: AppColors.primary.primary.withValues(alpha: 0.3),
+                        width: 2,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.primary.primary.withValues(alpha: 0.1),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Preço principal
-                        if (property.salePrice != null)
-                          Text(
-                            _currencyFormatter.format(property.salePrice),
-                            style: theme.textTheme.headlineSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
+                        // Label do tipo de operação
+                        Row(
+                          children: [
+                            Icon(
+                              property.salePrice != null
+                                  ? Icons.sell
+                                  : Icons.home,
+                              size: 18,
                               color: AppColors.primary.primary,
-                              fontSize: 24,
                             ),
+                            const SizedBox(width: 6),
+                            Text(
+                              property.salePrice != null ? 'VENDA' : 'ALUGUEL',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.primary.primary,
+                                fontSize: 11,
+                                letterSpacing: 1.2,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        // Preço principal (maior e mais destacado)
+                        if (property.salePrice != null)
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'R\$',
+                                style: theme.textTheme.titleLarge?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.primary.primary,
+                                  fontSize: 20,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  _currencyFormatter.format(property.salePrice).replaceAll('R\$', '').trim(),
+                                  style: theme.textTheme.headlineMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.primary.primary,
+                                    fontSize: 32,
+                                    height: 1.1,
+                                  ),
+                                ),
+                              ),
+                            ],
                           )
                         else if (property.rentPrice != null)
-                          Text(
-                            '${_currencyFormatter.format(property.rentPrice)}/mês',
-                            style: theme.textTheme.headlineSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.primary.primary,
-                              fontSize: 24,
-                            ),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'R\$',
+                                style: theme.textTheme.titleLarge?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.primary.primary,
+                                  fontSize: 20,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  _currencyFormatter.format(property.rentPrice).replaceAll('R\$', '').trim(),
+                                  style: theme.textTheme.headlineMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.primary.primary,
+                                    fontSize: 32,
+                                    height: 1.1,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text(
+                                  '/mês',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.primary.primary.withValues(alpha: 0.8),
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         // Valores adicionais
                         if (property.condominiumFee != null ||
                             property.iptu != null) ...[
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 16,
-                            runSpacing: 8,
-                            children: [
-                              if (property.condominiumFee != null)
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.apartment,
-                                      size: 16,
-                                      color: ThemeHelpers.textSecondaryColor(
-                                        context,
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? Colors.black.withValues(alpha: 0.2)
+                                  : Colors.white.withValues(alpha: 0.5),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Wrap(
+                              spacing: 16,
+                              runSpacing: 8,
+                              children: [
+                                if (property.condominiumFee != null)
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.apartment,
+                                        size: 16,
+                                        color: ThemeHelpers.textSecondaryColor(
+                                          context,
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      'Condomínio: ${_currencyFormatter.format(property.condominiumFee)}',
-                                      style: theme.textTheme.bodyMedium
-                                          ?.copyWith(
-                                            color:
-                                                ThemeHelpers.textSecondaryColor(
-                                                  context,
-                                                ),
-                                          ),
-                                    ),
-                                  ],
-                                ),
-                              if (property.iptu != null)
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.receipt,
-                                      size: 16,
-                                      color: ThemeHelpers.textSecondaryColor(
-                                        context,
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'Condomínio: ${_currencyFormatter.format(property.condominiumFee)}',
+                                        style: theme.textTheme.bodyMedium
+                                            ?.copyWith(
+                                              color:
+                                                  ThemeHelpers.textSecondaryColor(
+                                                    context,
+                                                  ),
+                                              fontWeight: FontWeight.w600,
+                                            ),
                                       ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      'IPTU: ${_currencyFormatter.format(property.iptu)}',
-                                      style: theme.textTheme.bodyMedium
-                                          ?.copyWith(
-                                            color:
-                                                ThemeHelpers.textSecondaryColor(
-                                                  context,
-                                                ),
-                                          ),
-                                    ),
-                                  ],
-                                ),
-                            ],
+                                    ],
+                                  ),
+                                if (property.iptu != null)
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.receipt,
+                                        size: 16,
+                                        color: ThemeHelpers.textSecondaryColor(
+                                          context,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'IPTU: ${_currencyFormatter.format(property.iptu)}',
+                                        style: theme.textTheme.bodyMedium
+                                            ?.copyWith(
+                                              color:
+                                                  ThemeHelpers.textSecondaryColor(
+                                                    context,
+                                                  ),
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                      ),
+                                    ],
+                                  ),
+                              ],
+                            ),
                           ),
                         ],
                       ],
