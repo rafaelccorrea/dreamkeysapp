@@ -73,7 +73,8 @@ class _ClientsPageState extends State<ClientsPage> {
     });
 
     try {
-      final filters = _filters?.copyWith(
+      final filters =
+          _filters?.copyWith(
             search: _searchQuery.trim().isEmpty ? null : _searchQuery.trim(),
             page: _currentPage,
             limit: 50,
@@ -252,47 +253,65 @@ class _ClientsPageState extends State<ClientsPage> {
         children: [
           // Barra de ações
           _buildActionBar(context, theme),
-          
+
           // Conteúdo principal
           Expanded(
             child: _isLoading && _clients.isEmpty
                 ? _buildSkeleton(context, theme)
                 : _errorMessage != null && _clients.isEmpty
-                    ? _buildErrorState(context, theme)
-                    : RefreshIndicator(
-                        onRefresh: () => _loadClients(refresh: true),
-                        child: Column(
-                          children: [
-                            // Estatísticas
-                            if (_statistics != null) _buildStatistics(context, theme),
-                            
-                            // Busca
-                            _buildSearchBar(context, theme),
-                            
-                            // Lista de clientes
-                            Expanded(
-                              child: _clients.isEmpty
-                                  ? _buildEmptyState(context, theme)
-                                  : ListView.builder(
-                                      controller: _scrollController,
-                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                      itemCount: _clients.length + (_isLoadingMore ? 1 : 0),
-                                      itemBuilder: (context, index) {
-                                        if (index >= _clients.length) {
-                                          return const Center(
-                                            child: Padding(
-                                              padding: EdgeInsets.all(16),
-                                              child: CircularProgressIndicator(),
-                                            ),
-                                          );
-                                        }
-                                        return _buildClientCard(context, theme, _clients[index]);
-                                      },
-                                    ),
-                            ),
-                          ],
+                ? _buildErrorState(context, theme)
+                : RefreshIndicator(
+                    onRefresh: () => _loadClients(refresh: true),
+                    child: CustomScrollView(
+                      controller: _scrollController,
+                      slivers: [
+                        // Estatísticas
+                        if (_statistics != null)
+                          SliverToBoxAdapter(
+                            child: _buildStatistics(context, theme),
+                          ),
+
+                        // Busca
+                        SliverToBoxAdapter(
+                          child: _buildSearchBar(context, theme),
                         ),
-                      ),
+
+                        // Lista de clientes
+                        _clients.isEmpty
+                            ? SliverFillRemaining(
+                                child: _buildEmptyState(context, theme),
+                              )
+                            : SliverPadding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 8,
+                                ),
+                                sliver: SliverList(
+                                  delegate: SliverChildBuilderDelegate(
+                                    (context, index) {
+                                      if (index >= _clients.length) {
+                                        return const Center(
+                                          child: Padding(
+                                            padding: EdgeInsets.all(16),
+                                            child: CircularProgressIndicator(),
+                                          ),
+                                        );
+                                      }
+                                      return _buildClientCard(
+                                        context,
+                                        theme,
+                                        _clients[index],
+                                      );
+                                    },
+                                    childCount:
+                                        _clients.length +
+                                        (_isLoadingMore ? 1 : 0),
+                                  ),
+                                ),
+                              ),
+                      ],
+                    ),
+                  ),
           ),
         ],
       ),
@@ -331,11 +350,7 @@ class _ClientsPageState extends State<ClientsPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: AppColors.status.error,
-            ),
+            Icon(Icons.error_outline, size: 64, color: AppColors.status.error),
             const SizedBox(height: 16),
             Text(
               'Erro ao carregar clientes',
@@ -412,89 +427,226 @@ class _ClientsPageState extends State<ClientsPage> {
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: ThemeHelpers.borderLightColor(context),
-          width: 1,
-        ),
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            'Estatísticas',
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-              color: ThemeHelpers.textColor(context),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.analytics_outlined,
+                  size: 20,
+                  color: ThemeHelpers.textColor(context),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Estatísticas',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: ThemeHelpers.textColor(context),
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 10),
+          // Primeira linha - Estatísticas principais
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildStatItem(
-                context,
-                theme,
-                'Total',
-                _statistics!.totalClients.toString(),
-                Icons.people,
+              Expanded(
+                child: _buildModernStatCard(
+                  context,
+                  theme,
+                  'Total',
+                  _statistics!.totalClients.toString(),
+                  Icons.people_outlined,
+                  const Color(0xFF6366F1),
+                ),
               ),
-              _buildStatItem(
-                context,
-                theme,
-                'Ativos',
-                _statistics!.activeClients.toString(),
-                Icons.check_circle,
-                AppColors.status.success,
-              ),
-              _buildStatItem(
-                context,
-                theme,
-                'Compradores',
-                _statistics!.buyers.toString(),
-                Icons.shopping_cart,
-                AppColors.primary.primary,
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildModernStatCard(
+                  context,
+                  theme,
+                  'Ativos',
+                  _statistics!.activeClients.toString(),
+                  Icons.check_circle_outline,
+                  const Color(0xFF10B981),
+                ),
               ),
             ],
           ),
+          const SizedBox(height: 10),
+          // Segunda linha - Tipos de clientes
+          Row(
+            children: [
+              Expanded(
+                child: _buildModernStatCard(
+                  context,
+                  theme,
+                  'Compradores',
+                  _statistics!.buyers.toString(),
+                  Icons.shopping_cart_outlined,
+                  const Color(0xFF3B82F6),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildModernStatCard(
+                  context,
+                  theme,
+                  'Vendedores',
+                  _statistics!.sellers.toString(),
+                  Icons.sell_outlined,
+                  const Color(0xFFF59E0B),
+                ),
+              ),
+            ],
+          ),
+          if (_statistics!.renters > 0 ||
+              _statistics!.lessors > 0 ||
+              _statistics!.investors > 0 ||
+              _statistics!.generalClients > 0) ...[
+            const SizedBox(height: 10),
+            // Terceira linha - Outros tipos (se houver)
+            Row(
+              children: [
+                if (_statistics!.renters > 0)
+                  Expanded(
+                    child: _buildModernStatCard(
+                      context,
+                      theme,
+                      'Locatários',
+                      _statistics!.renters.toString(),
+                      Icons.home_outlined,
+                      const Color(0xFF8B5CF6),
+                    ),
+                  ),
+                if (_statistics!.renters > 0 && _statistics!.lessors > 0)
+                  const SizedBox(width: 12),
+                if (_statistics!.lessors > 0)
+                  Expanded(
+                    child: _buildModernStatCard(
+                      context,
+                      theme,
+                      'Locadores',
+                      _statistics!.lessors.toString(),
+                      Icons.business_outlined,
+                      const Color(0xFFEC4899),
+                    ),
+                  ),
+              ],
+            ),
+            if (_statistics!.investors > 0 ||
+                _statistics!.generalClients > 0) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  if (_statistics!.investors > 0)
+                    Expanded(
+                      child: _buildModernStatCard(
+                        context,
+                        theme,
+                        'Investidores',
+                        _statistics!.investors.toString(),
+                        Icons.trending_up_outlined,
+                        const Color(0xFF14B8A6),
+                      ),
+                    ),
+                  if (_statistics!.investors > 0 &&
+                      _statistics!.generalClients > 0)
+                    const SizedBox(width: 12),
+                  if (_statistics!.generalClients > 0)
+                    Expanded(
+                      child: _buildModernStatCard(
+                        context,
+                        theme,
+                        'Gerais',
+                        _statistics!.generalClients.toString(),
+                        Icons.person_outline,
+                        const Color(0xFF64748B),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ],
         ],
       ),
     );
   }
 
-  Widget _buildStatItem(
+  Widget _buildModernStatCard(
     BuildContext context,
     ThemeData theme,
     String label,
     String value,
-    IconData icon, [
-    Color? color,
-  ]) {
-    final statColor = color ?? ThemeHelpers.textSecondaryColor(context);
-    
-    return Column(
-      children: [
-        Icon(icon, color: statColor, size: 24),
-        const SizedBox(height: 8),
-        Text(
-          value,
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.bold,
-            color: statColor,
-          ),
+    IconData icon,
+    Color color,
+  ) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            color.withOpacity(isDark ? 0.2 : 0.1),
+            color.withOpacity(isDark ? 0.15 : 0.05),
+          ],
         ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(context),
-            fontSize: 12,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withOpacity(0.3), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: color.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
-        ),
-      ],
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: color, size: 20),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: color,
+              fontSize: 22,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            label,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: ThemeHelpers.textSecondaryColor(context),
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
     );
   }
 
@@ -530,7 +682,10 @@ class _ClientsPageState extends State<ClientsPage> {
                 )
               : null,
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 14,
+          ),
         ),
         onChanged: (value) {
           _handleSearch(value);
@@ -578,7 +733,10 @@ class _ClientsPageState extends State<ClientsPage> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary.primary,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 14,
+                ),
               ),
             ),
           ],
@@ -682,12 +840,17 @@ class _ClientsPageState extends State<ClientsPage> {
     }
   }
 
-  Future<void> _showDeleteConfirmation(BuildContext context, Client client) async {
+  Future<void> _showDeleteConfirmation(
+    BuildContext context,
+    Client client,
+  ) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Confirmar Exclusão'),
-        content: Text('Tem certeza que deseja excluir o cliente "${client.name}"?'),
+        content: Text(
+          'Tem certeza que deseja excluir o cliente "${client.name}"?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -761,9 +924,9 @@ class _ClientsPageState extends State<ClientsPage> {
           children: [
             Text(
               'Exportar Clientes',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 20),
             ListTile(
@@ -855,9 +1018,13 @@ class _ClientsPageState extends State<ClientsPage> {
     }
   }
 
-  Widget _buildClientCard(BuildContext context, ThemeData theme, Client client) {
+  Widget _buildClientCard(
+    BuildContext context,
+    ThemeData theme,
+    Client client,
+  ) {
     final typeColor = _getTypeColor(client.type, context);
-    
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 0,
@@ -871,10 +1038,7 @@ class _ClientsPageState extends State<ClientsPage> {
       color: ThemeHelpers.cardBackgroundColor(context),
       child: InkWell(
         onTap: () {
-          Navigator.pushNamed(
-            context,
-            AppRoutes.clientDetails(client.id),
-          );
+          Navigator.pushNamed(context, AppRoutes.clientDetails(client.id));
         },
         onLongPress: () {
           _showClientActions(context, client);
@@ -947,7 +1111,10 @@ class _ClientsPageState extends State<ClientsPage> {
                         ),
                         const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
                           decoration: BoxDecoration(
                             color: typeColor.withOpacity(0.15),
                             borderRadius: BorderRadius.circular(12),
@@ -1001,7 +1168,9 @@ class _ClientsPageState extends State<ClientsPage> {
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          client.phone.isNotEmpty ? Masks.phone(client.phone) : 'Sem telefone',
+                          client.phone.isNotEmpty
+                              ? Masks.phone(client.phone)
+                              : 'Sem telefone',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: ThemeHelpers.textSecondaryColor(context),
                             fontSize: 13,
@@ -1112,4 +1281,3 @@ extension ClientSearchFiltersExtension on ClientSearchFilters {
     );
   }
 }
-
