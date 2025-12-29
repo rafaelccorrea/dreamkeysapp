@@ -144,9 +144,13 @@ class _KanbanFiltersState extends State<KanbanFilters> {
   }
 
   void _applyFilters(KanbanController controller) {
-    // Os filtros serão aplicados no controller
-    // Por enquanto, apenas notificamos que os filtros mudaram
-    // TODO: Implementar lógica de filtros no controller
+    controller.applyFilters(
+      searchQuery: _searchController.text.trim().isEmpty
+          ? null
+          : _searchController.text.trim(),
+      priority: _selectedPriority,
+      assigneeId: _selectedAssigneeId,
+    );
   }
 
   void _clearFilters(KanbanController controller) {
@@ -155,7 +159,7 @@ class _KanbanFiltersState extends State<KanbanFilters> {
       _selectedPriority = null;
       _selectedAssigneeId = null;
     });
-    _applyFilters(controller);
+    controller.clearFilters();
   }
 }
 

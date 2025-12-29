@@ -190,37 +190,6 @@ class _KanbanPageState extends State<KanbanPage> {
                     ],
                   ),
                 )
-              : controller.columns.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.dashboard_outlined,
-                        size: 64,
-                        color: ThemeHelpers.textSecondaryColor(context),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Nenhuma coluna encontrada',
-                        style: theme.textTheme.titleLarge,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Crie uma coluna para começar',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      ElevatedButton.icon(
-                        onPressed: () => _showCreateColumnModal(context),
-                        icon: const Icon(Icons.add),
-                        label: const Text('Criar Coluna'),
-                      ),
-                    ],
-                  ),
-                )
               : _buildKanbanBoard(controller),
         );
       },
@@ -504,14 +473,92 @@ class _KanbanPageState extends State<KanbanPage> {
                             padding: const EdgeInsets.all(8),
                             itemCount: tasks.length,
                             itemBuilder: (context, index) {
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: _buildDraggableTask(
-                                  context,
-                                  controller,
-                                  tasks[index],
-                                  column.id,
-                                ),
+                              final task = tasks[index];
+                              return DragTarget<KanbanTask>(
+                                onWillAccept: (data) {
+                                  // Aceitar se for uma tarefa diferente
+                                  // Pode ser da mesma coluna (reordenação) ou de outra coluna (movimento)
+                                  return data != null && data.id != task.id;
+                                },
+                                onAccept: (draggedTask) {
+                                  debugPrint(
+                                    '🎯 [KANBAN_PAGE] DragTarget onAccept:',
+                                  );
+                                  debugPrint(
+                                    '   - Tarefa arrastada: ${draggedTask.title}',
+                                  );
+                                  debugPrint(
+                                    '   - Coluna da tarefa: ${draggedTask.columnId}',
+                                  );
+                                  debugPrint('   - Coluna alvo: ${column.id}');
+                                  debugPrint('   - Índice alvo: $index');
+
+                                  // Se for da mesma coluna, reordenar
+                                  if (draggedTask.columnId == column.id) {
+                                    final oldIndex = tasks.indexWhere(
+                                      (t) => t.id == draggedTask.id,
+                                    );
+                                    debugPrint('   - Índice antigo: $oldIndex');
+                                    if (oldIndex != -1 && oldIndex != index) {
+                                      _handleTaskReorder(
+                                        context,
+                                        controller,
+                                        draggedTask,
+                                        column.id,
+                                        oldIndex,
+                                        index,
+                                      );
+                                    } else {
+                                      debugPrint(
+                                        '   - ⚠️ Não foi possível reordenar (oldIndex: $oldIndex, newIndex: $index)',
+                                      );
+                                    }
+                                  } else {
+                                    // Se for de outra coluna, mover para esta coluna
+                                    debugPrint(
+                                      '   - Movendo tarefa de outra coluna',
+                                    );
+                                    _handleTaskDrop(
+                                      context,
+                                      controller,
+                                      draggedTask,
+                                      column.id,
+                                    );
+                                  }
+                                },
+                                builder:
+                                    (context, candidateData, rejectedData) {
+                                      final isTargeting =
+                                          candidateData.isNotEmpty;
+                                      final isSameColumn =
+                                          candidateData.isNotEmpty &&
+                                          candidateData.first?.columnId ==
+                                              column.id;
+                                      return Container(
+                                        margin: EdgeInsets.only(
+                                          bottom: 8,
+                                          top: isTargeting ? 4 : 0,
+                                        ),
+                                        decoration: isTargeting
+                                            ? BoxDecoration(
+                                                border: Border.all(
+                                                  color: isSameColumn
+                                                      ? Colors.blue
+                                                      : Colors.green,
+                                                  width: 2,
+                                                ),
+                                                borderRadius:
+                                                    BorderRadius.circular(8),
+                                              )
+                                            : null,
+                                        child: _buildDraggableTaskForReorder(
+                                          context,
+                                          controller,
+                                          task,
+                                          column.id,
+                                        ),
+                                      );
+                                    },
                               );
                             },
                           ),
@@ -559,57 +606,75 @@ class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
-  Widget _buildDraggableTask(
+  Widget _buildDraggableTaskForReorder(
     BuildContext context,
     KanbanController controller,
     KanbanTask task,
     String currentColumnId,
   ) {
     if (!(controller.permissions?.canMoveTasks ?? false)) {
-      return GestureDetector(
-        onTap: () {
-          // Abrir modal de detalhes ao tocar na tarefa
-          showModalBottomSheet(
-            context: context,
-            isScrollControlled: true,
-            backgroundColor: Colors.transparent,
-            builder: (context) => TaskDetailsModal(task: task),
-          );
-        },
-        onLongPress: () {
-          _showTaskActions(context, task);
-        },
-        child: _buildTaskCard(task),
+      return Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        child: GestureDetector(
+          onDoubleTap: () {
+            showModalBottomSheet(
+              context: context,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              barrierColor: Colors.black54,
+              builder: (context) => TaskDetailsModal(task: task),
+            );
+          },
+          onLongPress: () {
+            _showTaskActions(context, task);
+          },
+          child: _buildTaskCard(task),
+        ),
       );
     }
 
-    return LongPressDraggable<KanbanTask>(
-      data: task,
-      delay: const Duration(
-        milliseconds: 100,
-      ), // Delay menor para iniciar drag mais rápido
-      onDragStarted: () {
-        setState(() {
-          _isDragging = true;
-        });
-        _startAutoScroll();
-      },
-      onDragEnd: (_) {
-        setState(() {
-          _isDragging = false;
-        });
-        _stopAutoScroll();
-      },
-      onDragUpdate: (details) {
-        _updateAutoScroll(details.globalPosition.dx);
-      },
-      feedback: Material(
-        elevation: 8,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(width: 280, child: _buildTaskCard(task)),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: LongPressDraggable<KanbanTask>(
+        data: task,
+        delay: const Duration(milliseconds: 100),
+        onDragStarted: () {
+          setState(() {
+            _isDragging = true;
+          });
+          _startAutoScroll();
+        },
+        onDragEnd: (_) {
+          setState(() {
+            _isDragging = false;
+          });
+          _stopAutoScroll();
+        },
+        onDragUpdate: (details) {
+          _updateAutoScroll(details.globalPosition.dx);
+        },
+        feedback: Material(
+          elevation: 8,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(width: 280, child: _buildTaskCard(task)),
+        ),
+        childWhenDragging: Opacity(opacity: 0.3, child: _buildTaskCard(task)),
+        child: GestureDetector(
+          onDoubleTap: () {
+            showModalBottomSheet(
+              context: context,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              barrierColor: Colors.black54,
+              builder: (context) => TaskDetailsModal(task: task),
+            );
+          },
+          onLongPress: () {
+            _showTaskActions(context, task);
+          },
+          child: _buildTaskCard(task),
+        ),
       ),
-      childWhenDragging: Opacity(opacity: 0.3, child: _buildTaskCard(task)),
-      child: _buildTaskCard(task),
     );
   }
 
@@ -628,6 +693,31 @@ class _KanbanPageState extends State<KanbanPage> {
       taskId: task.id,
       targetColumnId: targetColumnId,
       targetPosition: newPosition,
+    );
+  }
+
+  void _handleTaskReorder(
+    BuildContext context,
+    KanbanController controller,
+    KanbanTask task,
+    String columnId,
+    int oldIndex,
+    int newIndex,
+  ) {
+    // Se a posição não mudou, não fazer nada
+    if (oldIndex == newIndex) return;
+
+    debugPrint('🔄 [KANBAN_PAGE] Reordenando tarefa:');
+    debugPrint('   - Tarefa: ${task.title}');
+    debugPrint('   - Coluna: $columnId');
+    debugPrint('   - Posição antiga: $oldIndex');
+    debugPrint('   - Posição nova: $newIndex');
+
+    // Atualizar a posição da tarefa
+    controller.moveTask(
+      taskId: task.id,
+      targetColumnId: columnId,
+      targetPosition: newIndex,
     );
   }
 
@@ -650,9 +740,9 @@ class _KanbanPageState extends State<KanbanPage> {
       },
       child: Container(
         width: double.infinity,
-        height: 120, // Altura fixa para os cards
+        constraints: const BoxConstraints(minHeight: 140),
         margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
           color: ThemeHelpers.cardBackgroundColor(context),
           borderRadius: BorderRadius.circular(8),
@@ -773,7 +863,7 @@ class _KanbanPageState extends State<KanbanPage> {
               ],
             ),
             if (task.description != null && task.description!.isNotEmpty) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Text(
                 task.description!,
                 style: theme.textTheme.bodySmall?.copyWith(
@@ -786,25 +876,29 @@ class _KanbanPageState extends State<KanbanPage> {
             if (task.priority != null ||
                 task.assignedTo != null ||
                 task.dueDate != null) ...[
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   if (task.priority != null)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: priorityColor?.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        task.priority!.label,
-                        style: TextStyle(
-                          color: priorityColor,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
+                    Flexible(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: priorityColor?.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          task.priority!.label,
+                          style: TextStyle(
+                            color: priorityColor,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ),
@@ -831,7 +925,7 @@ class _KanbanPageState extends State<KanbanPage> {
                     ),
                   ],
                   if (task.dueDate != null) ...[
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 6),
                     Icon(
                       Icons.calendar_today,
                       size: 14,
@@ -842,7 +936,7 @@ class _KanbanPageState extends State<KanbanPage> {
                   ],
                   if (task.commentsCount != null &&
                       task.commentsCount! > 0) ...[
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 6),
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -863,28 +957,32 @@ class _KanbanPageState extends State<KanbanPage> {
                     ),
                   ],
                   if (task.tags != null && task.tags!.isNotEmpty) ...[
-                    const SizedBox(width: 8),
-                    Wrap(
-                      spacing: 4,
-                      children: task.tags!.take(2).map((tag) {
-                        return Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.primary.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            tag,
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: theme.colorScheme.primary,
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Wrap(
+                        spacing: 4,
+                        runSpacing: 4,
+                        children: task.tags!.take(2).map((tag) {
+                          return Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
                             ),
-                          ),
-                        );
-                      }).toList(),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.primary.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              tag,
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: theme.colorScheme.primary,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
+                        }).toList(),
+                      ),
                     ),
                   ],
                 ],

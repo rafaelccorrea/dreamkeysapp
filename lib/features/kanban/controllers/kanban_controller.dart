@@ -25,6 +25,11 @@ class KanbanController extends ChangeNotifier {
   bool _loadingTeams = false;
   KanbanTeam? _selectedTeam;
 
+  // Filtros
+  String? _searchQuery;
+  KanbanPriority? _filterPriority;
+  String? _filterAssigneeId;
+
   // Getters
   KanbanBoard? get board => _board;
   bool get loading => _loading;
@@ -49,8 +54,38 @@ class KanbanController extends ChangeNotifier {
   }
 
   List<KanbanTask> getTasksForColumn(String columnId) {
-    return tasks.where((task) => task.columnId == columnId).toList()
-      ..sort((a, b) => a.position.compareTo(b.position));
+    var filteredTasks = tasks
+        .where((task) => task.columnId == columnId)
+        .toList();
+
+    // Aplicar filtro de busca
+    if (_searchQuery != null && _searchQuery!.isNotEmpty) {
+      final query = _searchQuery!.toLowerCase();
+      filteredTasks = filteredTasks.where((task) {
+        final titleMatch = task.title.toLowerCase().contains(query);
+        final descriptionMatch =
+            task.description?.toLowerCase().contains(query) ?? false;
+        return titleMatch || descriptionMatch;
+      }).toList();
+    }
+
+    // Aplicar filtro de prioridade
+    if (_filterPriority != null) {
+      filteredTasks = filteredTasks
+          .where((task) => task.priority == _filterPriority)
+          .toList();
+    }
+
+    // Aplicar filtro de responsável
+    if (_filterAssigneeId != null && _filterAssigneeId!.isNotEmpty) {
+      filteredTasks = filteredTasks
+          .where((task) => task.assignedToId == _filterAssigneeId)
+          .toList();
+    }
+
+    // Ordenar por posição
+    filteredTasks.sort((a, b) => a.position.compareTo(b.position));
+    return filteredTasks;
   }
 
   KanbanPermissions? get permissions => _board?.permissions;
@@ -600,6 +635,18 @@ class KanbanController extends ChangeNotifier {
     required String targetColumnId,
     required int targetPosition,
   }) async {
+    // Salvar estado anterior para rollback
+    KanbanBoard? previousBoard;
+    if (_board != null) {
+      previousBoard = KanbanBoard(
+        columns: _board!.columns,
+        tasks: List<KanbanTask>.from(_board!.tasks),
+        projects: _board!.projects,
+        permissions: _board!.permissions,
+        team: _board!.team,
+      );
+    }
+
     try {
       // Optimistic update
       if (_board != null) {
@@ -635,19 +682,25 @@ class KanbanController extends ChangeNotifier {
       );
 
       if (response.success) {
-        // Recarregar para garantir sincronização
-        await loadBoard(teamId: _teamId, projectId: _projectId);
+        // Não recarregar - o estado já foi atualizado otimisticamente
+        // Apenas notificar que está tudo ok
         return true;
       } else {
         // Rollback em caso de erro
-        await loadBoard(teamId: _teamId, projectId: _projectId);
+        if (previousBoard != null) {
+          _board = previousBoard;
+          notifyListeners();
+        }
         _error = response.message ?? 'Erro ao mover tarefa';
         notifyListeners();
         return false;
       }
     } catch (e) {
       // Rollback em caso de exceção
-      await loadBoard(teamId: _teamId, projectId: _projectId);
+      if (previousBoard != null) {
+        _board = previousBoard;
+        notifyListeners();
+      }
       debugPrint('❌ [KANBAN_CTRL] Erro ao mover tarefa: $e');
       _error = 'Erro ao mover tarefa: ${e.toString()}';
       notifyListeners();
@@ -764,12 +817,27 @@ class KanbanController extends ChangeNotifier {
         }
       }
 
-      // Se houver teamId, também carregar projetos da equipe
-      if (teamId != null) {
+      // Carregar projetos de TODAS as equipes (não apenas do time selecionado)
+      // Primeiro, garantir que os times estão carregados
+      if (_teams.isEmpty) {
+        debugPrint('📋 [KANBAN_CTRL] Times não carregados, carregando...');
+        await loadTeams();
+      }
+
+      // Carregar projetos de cada equipe
+      for (final team in _teams) {
+        // Pular o time "Pessoal" pois já carregamos projetos pessoais
+        if (team.name.toLowerCase().contains('pessoal')) {
+          debugPrint(
+            '📋 [KANBAN_CTRL] Pulando time "Pessoal" (já carregado projetos pessoais)',
+          );
+          continue;
+        }
+
         debugPrint(
-          '🚀 [KANBAN_CTRL] Carregando projetos da equipe ($teamId)...',
+          '🚀 [KANBAN_CTRL] Carregando projetos da equipe: ${team.name} (${team.id})...',
         );
-        final response = await _kanbanService.getProjectsByTeam(teamId);
+        final response = await _kanbanService.getProjectsByTeam(team.id);
 
         debugPrint('🚀 [KANBAN_CTRL] Resposta getProjectsByTeam:');
         debugPrint('🚀 [KANBAN_CTRL]   - success: ${response.success}');
@@ -782,12 +850,12 @@ class KanbanController extends ChangeNotifier {
         if (response.success && response.data != null) {
           allProjects.addAll(response.data!);
           debugPrint(
-            '📋 [KANBAN_CTRL] ✅ ${response.data!.length} projetos da equipe carregados',
+            '📋 [KANBAN_CTRL] ✅ ${response.data!.length} projetos da equipe "${team.name}" carregados',
           );
           for (var i = 0; i < response.data!.length; i++) {
             final p = response.data![i];
             debugPrint(
-              '📋 [KANBAN_CTRL]   [Equipe $i] ${p.name} (${p.id}) - Status: ${p.status.name} - Tarefas: ${p.taskCount}',
+              '📋 [KANBAN_CTRL]   [${team.name} $i] ${p.name} (${p.id}) - Status: ${p.status.name} - Tarefas: ${p.taskCount}',
             );
           }
         }
@@ -838,10 +906,28 @@ class KanbanController extends ChangeNotifier {
 
     _projectId = projectId;
 
+    // Encontrar o projeto selecionado para obter o teamId correto
+    String? projectTeamId;
+    if (projectId != null) {
+      final selectedProject = _projects.firstWhere(
+        (p) => p.id == projectId,
+        orElse: () => _projects.first,
+      );
+      projectTeamId = selectedProject.teamId;
+      debugPrint(
+        '🚀 [KANBAN_CTRL] Projeto encontrado: ${selectedProject.name} (teamId: $projectTeamId)',
+      );
+    }
+
+    // Usar o teamId do projeto, ou o teamId atual como fallback
+    final teamIdToUse = projectTeamId ?? _teamId;
+
     // Recarregar o quadro com o projeto selecionado
-    if (_teamId != null) {
-      debugPrint('🚀 [KANBAN_CTRL] Recarregando quadro com novo projeto...');
-      await loadBoard(teamId: _teamId, projectId: _projectId);
+    if (teamIdToUse != null) {
+      debugPrint(
+        '🚀 [KANBAN_CTRL] Recarregando quadro com novo projeto (teamId: $teamIdToUse)...',
+      );
+      await loadBoard(teamId: teamIdToUse, projectId: _projectId);
     } else {
       debugPrint(
         '🚀 [KANBAN_CTRL] ⚠️ teamId é null, não é possível recarregar',
@@ -849,6 +935,26 @@ class KanbanController extends ChangeNotifier {
     }
 
     debugPrint('🚀 [KANBAN_CTRL] ========== FIM selectProject ==========');
+  }
+
+  /// Aplica filtros nas tarefas
+  void applyFilters({
+    String? searchQuery,
+    KanbanPriority? priority,
+    String? assigneeId,
+  }) {
+    _searchQuery = searchQuery;
+    _filterPriority = priority;
+    _filterAssigneeId = assigneeId;
+    notifyListeners();
+  }
+
+  /// Limpa todos os filtros
+  void clearFilters() {
+    _searchQuery = null;
+    _filterPriority = null;
+    _filterAssigneeId = null;
+    notifyListeners();
   }
 
   /// Atualiza estado interno

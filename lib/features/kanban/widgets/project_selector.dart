@@ -19,8 +19,18 @@ class ProjectSelector extends StatelessWidget {
         final isLoading = controller.loadingProjects;
 
         // Filtrar apenas projetos ativos
+        // Se o time selecionado for "Pessoal", não mostrar projetos pessoais
+        final isPersonalTeam = controller.team?.name.toLowerCase().contains('pessoal') ?? false;
         final activeProjects = projects
-            .where((p) => p.status == KanbanProjectStatus.active)
+            .where((p) {
+              // Filtrar por status ativo
+              if (p.status != KanbanProjectStatus.active) return false;
+              
+              // Se o time for "Pessoal", não mostrar projetos pessoais
+              if (isPersonalTeam && (p.isPersonal == true)) return false;
+              
+              return true;
+            })
             .toList();
 
         return Container(
