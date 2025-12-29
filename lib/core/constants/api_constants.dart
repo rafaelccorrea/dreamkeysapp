@@ -26,6 +26,10 @@ class ApiConstants {
   static const String companies = '/companies';
   static const String companyById = '/companies'; // /companies/:id
 
+  // Endpoints de Teams
+  static const String teams = '/teams';
+  static String teamById(String id) => '/teams/$id';
+
   // Endpoints de Permissions
   static const String myPermissions = '/permissions/my-permissions';
 
@@ -122,6 +126,16 @@ class ApiConstants {
   static String kanbanTaskComments(String taskId) => '/kanban/tasks/$taskId/comments';
   static String kanbanTaskComment(String taskId, String commentId) => '/kanban/tasks/$taskId/comments/$commentId';
   static String kanbanTags(String teamId) => '/kanban/tags/$teamId';
+  
+  // Endpoints de Projetos Kanban
+  static const String kanbanProjects = '/kanban/projects';
+  static String kanbanProjectById(String id) => '/kanban/projects/$id';
+  static String kanbanProjectsByTeam(String teamId) => '/kanban/projects/team/$teamId';
+  static const String kanbanProjectsPersonal = '/kanban/projects/team/personal';
+  static const String kanbanProjectsFiltered = '/kanban/projects/filtered';
+  static String kanbanProjectFinalize(String id) => '/kanban/projects/$id/finalize';
+  static String kanbanProjectsTeamHistory(String teamId) => '/kanban/projects/team/$teamId/history';
+  static String kanbanProjectHistory(String id) => '/kanban/projects/$id/history';
 
   // Headers
   static const String contentTypeHeader = 'Content-Type';

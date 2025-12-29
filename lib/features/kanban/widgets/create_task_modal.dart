@@ -1,6 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/services/secure_storage_service.dart';
+import '../../../shared/utils/jwt_utils.dart';
 import '../models/kanban_models.dart';
 import '../controllers/kanban_controller.dart';
 
@@ -23,15 +26,38 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
-  KanbanPriority? _selectedPriority;
+  KanbanPriority? _selectedPriority = KanbanPriority.medium; // Prioridade padrão: medium
   DateTime? _selectedDueDate;
   bool _isLoading = false;
+  String? _currentUserId;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentUserId();
+  }
 
   @override
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadCurrentUserId() async {
+    try {
+      final token = await SecureStorageService.instance.getAccessToken();
+      if (token != null) {
+        final payload = JwtUtils.decodeToken(token);
+        if (payload != null) {
+          setState(() {
+            _currentUserId = payload['sub']?.toString() ?? payload['userId']?.toString();
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ [CREATE_TASK_MODAL] Erro ao obter userId: $e');
+    }
   }
 
   Future<void> _selectDueDate() async {
@@ -57,6 +83,23 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
 
     final controller = context.read<KanbanController>();
 
+    // projectId será garantido pelo controller (obrigatório)
+    // assignedToId será preenchido automaticamente com o ID do usuário atual (criador)
+    if (_currentUserId == null || _currentUserId!.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Erro: Não foi possível obter o ID do usuário atual'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        setState(() {
+          _isLoading = false;
+        });
+      }
+      return;
+    }
+
     final success = await controller.createTask(
       CreateTaskDto(
         title: _titleController.text.trim(),
@@ -64,8 +107,10 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
             ? null
             : _descriptionController.text.trim(),
         columnId: widget.columnId,
-        priority: _selectedPriority,
+        priority: _selectedPriority ?? KanbanPriority.medium, // Garantir que sempre tenha prioridade (padrão: medium)
         dueDate: _selectedDueDate,
+        assignedToId: _currentUserId, // ID do usuário atual (obrigatório - vincula o usuário à tarefa)
+        projectId: controller.projectId, // Obrigatório - será garantido pelo controller
       ),
     );
 

@@ -34,7 +34,9 @@ class NotificationWebSocketService {
   int _reconnectAttempts = 0;
   static const int _baseReconnectDelay = 1000; // 1 segundo
   static const int _maxReconnectDelay = 30000; // 30 segundos
+  static const int _maxReconnectAttempts = 5; // Máximo de 5 tentativas
   Timer? _reconnectTimer;
+  bool _isReconnecting = false;
 
   bool get isConnected => _isConnected;
 
@@ -102,7 +104,8 @@ class NotificationWebSocketService {
     _socket!.onConnect((_) {
       debugPrint('✅ [WS] Conectado ao WebSocket de notificações');
       _isConnected = true;
-      _reconnectAttempts = 0;
+      _reconnectAttempts = 0; // Resetar tentativas ao conectar com sucesso
+      _isReconnecting = false;
       _onConnectionStatusChanged?.call(true);
 
       // Emitir 'join' com userId
@@ -167,7 +170,21 @@ class NotificationWebSocketService {
       debugPrint('❌ [WS] Desconectado: $reason');
       _isConnected = false;
       _onConnectionStatusChanged?.call(false);
-      _handleReconnect();
+      
+      // Se foi desconexão intencional do cliente (io client disconnect), não tentar reconectar
+      if (reason.toString().contains('io client disconnect')) {
+        debugPrint('ℹ️ [WS] Desconexão intencional do cliente, não tentando reconectar');
+        _reconnectAttempts = 0; // Resetar tentativas
+        return;
+      }
+      
+      // Tentar reconectar apenas se não excedeu o limite
+      if (_reconnectAttempts < _maxReconnectAttempts) {
+        _handleReconnect();
+      } else {
+        debugPrint('⚠️ [WS] Limite de tentativas de reconexão atingido ($_maxReconnectAttempts). Parando tentativas automáticas.');
+        _isReconnecting = false;
+      }
     });
 
     // Erro de conexão
@@ -175,7 +192,14 @@ class NotificationWebSocketService {
       debugPrint('❌ [WS] Erro de conexão: $error');
       _isConnected = false;
       _onConnectionStatusChanged?.call(false);
-      _handleReconnect();
+      
+      // Tentar reconectar apenas se não excedeu o limite
+      if (_reconnectAttempts < _maxReconnectAttempts) {
+        _handleReconnect();
+      } else {
+        debugPrint('⚠️ [WS] Limite de tentativas de reconexão atingido ($_maxReconnectAttempts). Parando tentativas automáticas.');
+        _isReconnecting = false;
+      }
     });
 
     // Erro geral
@@ -186,10 +210,23 @@ class NotificationWebSocketService {
 
   /// Reconexão automática com exponential backoff
   void _handleReconnect() {
+    // Verificar se já excedeu o limite de tentativas
+    if (_reconnectAttempts >= _maxReconnectAttempts) {
+      debugPrint('⚠️ [WS] Limite de tentativas de reconexão atingido. Parando tentativas automáticas.');
+      _isReconnecting = false;
+      return;
+    }
+
+    // Verificar se já está tentando reconectar
     if (_reconnectTimer != null && _reconnectTimer!.isActive) {
       return; // Já está tentando reconectar
     }
 
+    if (_isReconnecting) {
+      return; // Já está em processo de reconexão
+    }
+
+    _isReconnecting = true;
     _reconnectAttempts++;
 
     // Exponential backoff: 1s, 2s, 4s, 8s, ... até 30s
@@ -198,11 +235,15 @@ class NotificationWebSocketService {
         ? _maxReconnectDelay
         : exponentialDelay;
 
-    debugPrint('🔄 [WS] Tentando reconectar em ${delay}ms (tentativa $_reconnectAttempts)');
+    debugPrint('🔄 [WS] Tentando reconectar em ${delay}ms (tentativa $_reconnectAttempts/$_maxReconnectAttempts)');
 
     _reconnectTimer = Timer(Duration(milliseconds: delay), () {
-      if (_currentToken != null) {
+      _reconnectTimer = null;
+      if (_currentToken != null && _reconnectAttempts <= _maxReconnectAttempts) {
         connect(_currentUserId);
+      } else {
+        _isReconnecting = false;
+        debugPrint('⚠️ [WS] Não é possível reconectar: token ausente ou limite atingido');
       }
     });
   }
@@ -211,6 +252,8 @@ class NotificationWebSocketService {
   Future<void> disconnect() async {
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    _isReconnecting = false;
+    // Não resetar _reconnectAttempts aqui para manter o histórico de tentativas
 
     if (_socket != null) {
       _socket!.disconnect();
@@ -223,8 +266,13 @@ class NotificationWebSocketService {
     debugPrint('🔌 [WS] Desconectado');
   }
 
-  /// Reconecta ao WebSocket
+  /// Reconecta ao WebSocket (reconexão manual - reseta tentativas)
   Future<void> reconnect() async {
+    debugPrint('🔄 [WS] Reconexão manual solicitada');
+    _reconnectAttempts = 0; // Resetar tentativas ao reconectar manualmente
+    _isReconnecting = false;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     await disconnect();
     await Future.delayed(const Duration(milliseconds: 500));
     await connect(_currentUserId);

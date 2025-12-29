@@ -24,8 +24,6 @@ import '../../features/clients/pages/client_details_page.dart';
 import '../../features/clients/pages/client_form_page.dart';
 import '../../features/matches/pages/matches_page.dart';
 import '../../features/kanban/pages/kanban_page.dart';
-import '../../shared/widgets/module_route.dart';
-import '../../shared/widgets/permission_route.dart';
 
 /// Rotas da aplicação com transições customizadas
 class AppRoutes {
@@ -113,62 +111,17 @@ class AppRoutes {
     } else if (routeName == AppRoutes.profileEdit) {
       return _buildRoute(const EditProfilePage(), settings);
     } else if (routeName == AppRoutes.properties) {
-      return _buildRoute(
-        const ModuleRoute(
-          requiredModule: 'property_management',
-          child: PermissionRoute(
-            permission: 'property:view',
-            child: PropertiesPage(),
-          ),
-        ),
-        settings,
-      );
+      return _buildRoute(const PropertiesPage(), settings);
     } else if (routeName == AppRoutes.notifications) {
       return _buildRoute(const NotificationsPage(), settings);
     } else if (routeName == AppRoutes.calendar) {
-      return _buildRoute(
-        const ModuleRoute(
-          requiredModule: 'calendar_management',
-          child: PermissionRoute(
-            permission: 'calendar:view',
-            child: CalendarPage(),
-          ),
-        ),
-        settings,
-      );
+      return _buildRoute(const CalendarPage(), settings);
     } else if (routeName == AppRoutes.calendarCreate) {
-      return _buildRoute(
-        const ModuleRoute(
-          requiredModule: 'calendar_management',
-          child: PermissionRoute(
-            permission: 'calendar:create',
-            child: CreateAppointmentPage(),
-          ),
-        ),
-        settings,
-      );
+      return _buildRoute(const CreateAppointmentPage(), settings);
     } else if (routeName == AppRoutes.clients) {
-      return _buildRoute(
-        const ModuleRoute(
-          requiredModule: 'client_management',
-          child: PermissionRoute(
-            permission: 'client:view',
-            child: ClientsPage(),
-          ),
-        ),
-        settings,
-      );
+      return _buildRoute(const ClientsPage(), settings);
     } else if (routeName == AppRoutes.clientCreate) {
-      return _buildRoute(
-        const ModuleRoute(
-          requiredModule: 'client_management',
-          child: PermissionRoute(
-            permission: 'client:create',
-            child: ClientFormPage(),
-          ),
-        ),
-        settings,
-      );
+      return _buildRoute(const ClientFormPage(), settings);
     } else if (routeName != null && routeName.startsWith('/calendar/')) {
       final segments = routeName.split('/');
       if (segments.length >= 3) {
@@ -176,69 +129,27 @@ class AppRoutes {
         final id = segments.length > 3 ? segments[3] : null;
 
         if (action == 'edit' && id != null) {
-          return _buildRoute(
-            ModuleRoute(
-              requiredModule: 'calendar_management',
-              child: PermissionRoute(
-                permission: 'calendar:update',
-                child: EditAppointmentPage(appointmentId: id),
-              ),
-            ),
-            settings,
-          );
+          return _buildRoute(EditAppointmentPage(appointmentId: id), settings);
         } else if (action == 'details' && id != null) {
           return _buildRoute(
-            ModuleRoute(
-              requiredModule: 'calendar_management',
-              child: PermissionRoute(
-                permission: 'calendar:view',
-                child: AppointmentDetailsPage(appointmentId: id),
-              ),
-            ),
+            AppointmentDetailsPage(appointmentId: id),
             settings,
           );
         }
       }
     } else if (routeName == AppRoutes.propertyCreate) {
-      return _buildRoute(
-        const ModuleRoute(
-          requiredModule: 'property_management',
-          child: PermissionRoute(
-            permission: 'property:create',
-            child: CreatePropertyPage(),
-          ),
-        ),
-        settings,
-      );
+      return _buildRoute(const CreatePropertyPage(), settings);
     } else if (routeName == AppRoutes.propertyOffers) {
       // IMPORTANTE: Esta rota deve vir ANTES da verificação genérica de /properties/
       debugPrint('🛣️ [ROUTES] Navegando para PropertyOffersPage');
-      return _buildRoute(
-        const ModuleRoute(
-          requiredModule: 'property_management',
-          child: PermissionRoute(
-            permission: 'property:view',
-            child: PropertyOffersPage(),
-          ),
-        ),
-        settings,
-      );
+      return _buildRoute(const PropertyOffersPage(), settings);
     } else if (routeName != null &&
         routeName.startsWith('/properties/offers/')) {
       // Detalhes de oferta: /properties/offers/:offerId
       final segments = routeName.split('/');
       if (segments.length == 4) {
         final offerId = segments[3];
-        return _buildRoute(
-          ModuleRoute(
-            requiredModule: 'property_management',
-            child: PermissionRoute(
-              permission: 'property:view',
-              child: OfferDetailsPage(offerId: offerId),
-            ),
-          ),
-          settings,
-        );
+        return _buildRoute(OfferDetailsPage(offerId: offerId), settings);
       }
     } else if (routeName != null && routeName.startsWith('/properties/')) {
       // Detalhes ou edição de propriedade (deve vir DEPOIS das rotas de ofertas)
@@ -247,28 +158,10 @@ class AppRoutes {
         final id = segments[2];
         if (segments.length == 3) {
           // Detalhes: /properties/:id
-          return _buildRoute(
-            ModuleRoute(
-              requiredModule: 'property_management',
-              child: PermissionRoute(
-                permission: 'property:view',
-                child: PropertyDetailsPage(propertyId: id),
-              ),
-            ),
-            settings,
-          );
+          return _buildRoute(PropertyDetailsPage(propertyId: id), settings);
         } else if (segments.length == 4 && segments[3] == 'edit') {
           // Edição: /properties/:id/edit
-          return _buildRoute(
-            ModuleRoute(
-              requiredModule: 'property_management',
-              child: PermissionRoute(
-                permission: 'property:update',
-                child: CreatePropertyPage(propertyId: id),
-              ),
-            ),
-            settings,
-          );
+          return _buildRoute(CreatePropertyPage(propertyId: id), settings);
         }
       }
       // Se não correspondeu aos padrões acima, retornar página não encontrada
@@ -283,83 +176,29 @@ class AppRoutes {
         final id = segments[2];
         if (segments.length == 3) {
           // Detalhes: /clients/:id
-          return _buildRoute(
-            ModuleRoute(
-              requiredModule: 'client_management',
-              child: PermissionRoute(
-                permission: 'client:view',
-                child: ClientDetailsPage(clientId: id),
-              ),
-            ),
-            settings,
-          );
+          return _buildRoute(ClientDetailsPage(clientId: id), settings);
         } else if (segments.length == 4 && segments[3] == 'edit') {
           // Edição: /clients/:id/edit
-          return _buildRoute(
-            ModuleRoute(
-              requiredModule: 'client_management',
-              child: PermissionRoute(
-                permission: 'client:update',
-                child: ClientFormPage(clientId: id),
-              ),
-            ),
-            settings,
-          );
+          return _buildRoute(ClientFormPage(clientId: id), settings);
         }
       }
     } else if (routeName == AppRoutes.matches) {
-      return _buildRoute(
-        const ModuleRoute(
-          requiredModule: 'match_system',
-          child: PermissionRoute(
-            permission: 'match:view',
-            child: MatchesPage(),
-          ),
-        ),
-        settings,
-      );
+      return _buildRoute(const MatchesPage(), settings);
     } else if (routeName == AppRoutes.kanban) {
-      return _buildRoute(
-        const ModuleRoute(
-          requiredModule: 'kanban_management',
-          child: PermissionRoute(
-            permission: 'kanban:view',
-            child: KanbanPage(),
-          ),
-        ),
-        settings,
-      );
+      return _buildRoute(const KanbanPage(), settings);
     } else if (routeName != null && routeName.startsWith('/properties/')) {
       // Matches de propriedade: /properties/:propertyId/matches
       final segments = routeName.split('/');
       if (segments.length == 4 && segments[3] == 'matches') {
         final propertyId = segments[2];
-        return _buildRoute(
-          ModuleRoute(
-            requiredModule: 'match_system',
-            child: PermissionRoute(
-              permission: 'match:view',
-              child: MatchesPage(propertyId: propertyId),
-            ),
-          ),
-          settings,
-        );
+        return _buildRoute(MatchesPage(propertyId: propertyId), settings);
       }
     } else if (routeName != null && routeName.startsWith('/clients/')) {
       // Matches de cliente: /clients/:clientId/matches
       final segments = routeName.split('/');
       if (segments.length == 4 && segments[3] == 'matches') {
         final clientId = segments[2];
-        return _buildRoute(
-          ModuleRoute(
-            requiredModule: 'match_system',
-            child: PermissionRoute(
-              permission: 'match:view',
-              child: MatchesPage(clientId: clientId),
-            ),
-          ),
-          settings,
-        );
+        return _buildRoute(MatchesPage(clientId: clientId), settings);
       }
     }
 

@@ -405,6 +405,15 @@ class KanbanUser {
       avatar: json['avatar']?.toString(),
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'email': email,
+      if (avatar != null) 'avatar': avatar,
+    };
+  }
 }
 
 /// Permissões do Kanban
@@ -570,16 +579,49 @@ class CreateTaskDto {
   });
 
   Map<String, dynamic> toJson() {
-    return {
+    final json = <String, dynamic>{
       'title': title,
-      if (description != null) 'description': description,
       'columnId': columnId,
-      if (priority != null) 'priority': priority!.name,
-      if (assignedToId != null) 'assignedToId': assignedToId,
-      if (dueDate != null) 'dueDate': dueDate!.toIso8601String(),
-      if (projectId != null) 'projectId': projectId,
-      if (tags != null && tags!.isNotEmpty) 'tags': tags,
     };
+    
+    if (description != null && description!.isNotEmpty) {
+      json['description'] = description;
+    }
+    
+    if (priority != null) {
+      json['priority'] = priority!.name;
+    }
+    
+    if (assignedToId != null && assignedToId!.isNotEmpty) {
+      json['assignedToId'] = assignedToId;
+    }
+    
+    if (dueDate != null) {
+      // Formato ISO 8601: apenas data com hora 00:00:00 em UTC
+      // Exemplo: "2024-01-25T00:00:00Z"
+      final utcDate = DateTime.utc(
+        dueDate!.year,
+        dueDate!.month,
+        dueDate!.day,
+        0, // hora
+        0, // minuto
+        0, // segundo
+      );
+      json['dueDate'] = utcDate.toIso8601String();
+    }
+    
+    // IMPORTANTE: Não enviar projectId se for null ou vazio
+    // A API valida que projectId deve ser UUID válido se fornecido
+    // Se não fornecido, não deve estar no JSON
+    if (projectId != null && projectId!.isNotEmpty && projectId!.trim().isNotEmpty) {
+      json['projectId'] = projectId;
+    }
+    
+    if (tags != null && tags!.isNotEmpty) {
+      json['tags'] = tags;
+    }
+    
+    return json;
   }
 }
 
@@ -613,10 +655,20 @@ class UpdateTaskDto {
     if (columnId != null) map['columnId'] = columnId;
     if (position != null) map['position'] = position;
     if (priority != null) map['priority'] = priority;
-    if (assignedToId != null) map['assignedToId'] = assignedToId;
-    if (dueDate != null) map['dueDate'] = dueDate!.toIso8601String();
+    // assignedToId pode ser null para remover responsável - sempre enviar
+    map['assignedToId'] = assignedToId;
+    if (dueDate != null) {
+      // Formatar como YYYY-MM-DDTHH:MM:SS.000Z (meia-noite UTC)
+      final utcDate = DateTime.utc(
+        dueDate!.year,
+        dueDate!.month,
+        dueDate!.day,
+      );
+      map['dueDate'] = utcDate.toIso8601String();
+    }
     if (projectId != null) map['projectId'] = projectId;
-    if (tags != null) map['tags'] = tags;
+    // Tags: enviar array vazio se null, ou a lista se tiver valores
+    map['tags'] = tags ?? [];
     return map;
   }
 }
@@ -642,37 +694,86 @@ class MoveTaskDto {
 }
 
 /// Comentário de tarefa
+/// Anexo de comentário
+class Attachment {
+  final String id;
+  final String filename;
+  final String url;
+  final int size;
+  final String mimeType;
+  final DateTime uploadedAt;
+
+  Attachment({
+    required this.id,
+    required this.filename,
+    required this.url,
+    required this.size,
+    required this.mimeType,
+    required this.uploadedAt,
+  });
+
+  factory Attachment.fromJson(Map<String, dynamic> json) {
+    return Attachment(
+      id: json['id']?.toString() ?? '',
+      filename: json['filename']?.toString() ?? '',
+      url: json['url']?.toString() ?? '',
+      size: json['size'] as int? ?? 0,
+      mimeType: json['mimeType']?.toString() ?? '',
+      uploadedAt: DateTime.parse(json['uploadedAt'].toString()),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'filename': filename,
+      'url': url,
+      'size': size,
+      'mimeType': mimeType,
+      'uploadedAt': uploadedAt.toIso8601String(),
+    };
+  }
+}
+
+/// Comentário de tarefa
 class KanbanTaskComment {
   final String id;
   final String taskId;
-  final String content;
-  final String createdById;
+  final String userId;
+  final String message;
+  final List<Attachment> attachments;
   final DateTime createdAt;
   final DateTime updatedAt;
 
   // Relacionamentos populados
-  final KanbanUser? createdBy;
+  final KanbanUser? user;
 
   KanbanTaskComment({
     required this.id,
     required this.taskId,
-    required this.content,
-    required this.createdById,
+    required this.userId,
+    required this.message,
+    required this.attachments,
     required this.createdAt,
     required this.updatedAt,
-    this.createdBy,
+    this.user,
   });
 
   factory KanbanTaskComment.fromJson(Map<String, dynamic> json) {
     return KanbanTaskComment(
       id: json['id']?.toString() ?? '',
       taskId: json['taskId']?.toString() ?? '',
-      content: json['content']?.toString() ?? '',
-      createdById: json['createdById']?.toString() ?? '',
+      userId: json['userId']?.toString() ?? '',
+      message: json['message']?.toString() ?? '',
+      attachments: json['attachments'] != null
+          ? (json['attachments'] as List)
+              .map((e) => Attachment.fromJson(e as Map<String, dynamic>))
+              .toList()
+          : [],
       createdAt: DateTime.parse(json['createdAt'].toString()),
       updatedAt: DateTime.parse(json['updatedAt'].toString()),
-      createdBy: json['createdBy'] != null
-          ? KanbanUser.fromJson(json['createdBy'] as Map<String, dynamic>)
+      user: json['user'] != null
+          ? KanbanUser.fromJson(json['user'] as Map<String, dynamic>)
           : null,
     );
   }
@@ -681,24 +782,165 @@ class KanbanTaskComment {
     return {
       'id': id,
       'taskId': taskId,
-      'content': content,
-      'createdById': createdById,
+      'userId': userId,
+      'message': message,
+      'attachments': attachments.map((a) => a.toJson()).toList(),
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
     };
   }
 }
 
-/// DTO para criar comentário
-class CreateCommentDto {
-  final String content;
+/// Entrada de histórico
+class HistoryEntry {
+  final String id;
+  final String action;
+  final KanbanUser? user;
+  final HistoryColumn? fromColumn;
+  final HistoryColumn? toColumn;
+  final String? oldValue;
+  final String? newValue;
+  final String? description;
+  final String? field;
+  final String? fieldLabel;
+  final DateTime createdAt;
 
-  CreateCommentDto({required this.content});
+  HistoryEntry({
+    required this.id,
+    required this.action,
+    this.user,
+    this.fromColumn,
+    this.toColumn,
+    this.oldValue,
+    this.newValue,
+    this.description,
+    this.field,
+    this.fieldLabel,
+    required this.createdAt,
+  });
+
+  factory HistoryEntry.fromJson(Map<String, dynamic> json) {
+    return HistoryEntry(
+      id: json['id']?.toString() ?? '',
+      action: json['action']?.toString() ?? '',
+      user: json['user'] != null
+          ? KanbanUser.fromJson(json['user'] as Map<String, dynamic>)
+          : null,
+      fromColumn: json['fromColumn'] != null
+          ? HistoryColumn.fromJson(json['fromColumn'] as Map<String, dynamic>)
+          : null,
+      toColumn: json['toColumn'] != null
+          ? HistoryColumn.fromJson(json['toColumn'] as Map<String, dynamic>)
+          : null,
+      oldValue: json['oldValue']?.toString(),
+      newValue: json['newValue']?.toString(),
+      description: json['description']?.toString(),
+      field: json['field']?.toString(),
+      fieldLabel: json['fieldLabel']?.toString(),
+      createdAt: DateTime.parse(json['createdAt'].toString()),
+    );
+  }
 
   Map<String, dynamic> toJson() {
     return {
-      'content': content,
+      'id': id,
+      'action': action,
+      'user': user?.toJson(),
+      'fromColumn': fromColumn?.toJson(),
+      'toColumn': toColumn?.toJson(),
+      'oldValue': oldValue,
+      'newValue': newValue,
+      'description': description,
+      'field': field,
+      'fieldLabel': fieldLabel,
+      'createdAt': createdAt.toIso8601String(),
     };
+  }
+}
+
+/// Coluna para histórico (versão simplificada)
+class HistoryColumn {
+  final String id;
+  final String title;
+  final String color;
+
+  HistoryColumn({
+    required this.id,
+    required this.title,
+    required this.color,
+  });
+
+  factory HistoryColumn.fromJson(Map<String, dynamic> json) {
+    return HistoryColumn(
+      id: json['id']?.toString() ?? '',
+      title: json['title']?.toString() ?? '',
+      color: json['color']?.toString() ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'color': color,
+    };
+  }
+}
+
+/// DTO para criar comentário (não usado - usa FormData diretamente)
+/// O comentário é criado via FormData com 'message' e 'files'
+
+/// DTO para criar projeto Kanban
+class CreateKanbanProjectDto {
+  final String name;
+  final String? description;
+  final String teamId;
+  final String? startDate;
+  final String? dueDate;
+
+  CreateKanbanProjectDto({
+    required this.name,
+    this.description,
+    required this.teamId,
+    this.startDate,
+    this.dueDate,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      if (description != null) 'description': description,
+      'teamId': teamId,
+      if (startDate != null) 'startDate': startDate,
+      if (dueDate != null) 'dueDate': dueDate,
+    };
+  }
+}
+
+/// DTO para atualizar projeto Kanban
+class UpdateKanbanProjectDto {
+  final String? name;
+  final String? description;
+  final String? status;
+  final String? startDate;
+  final String? dueDate;
+
+  UpdateKanbanProjectDto({
+    this.name,
+    this.description,
+    this.status,
+    this.startDate,
+    this.dueDate,
+  });
+
+  Map<String, dynamic> toJson() {
+    final map = <String, dynamic>{};
+    if (name != null) map['name'] = name;
+    if (description != null) map['description'] = description;
+    if (status != null) map['status'] = status;
+    if (startDate != null) map['startDate'] = startDate;
+    if (dueDate != null) map['dueDate'] = dueDate;
+    return map;
   }
 }
 

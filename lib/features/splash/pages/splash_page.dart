@@ -5,8 +5,6 @@ import '../../../../core/routes/app_routes.dart';
 import '../../../../core/constants/app_assets.dart';
 import '../../../../shared/services/auth_service.dart';
 import '../../../../shared/services/api_service.dart';
-import '../../../../shared/services/biometric_service.dart';
-import '../../../../shared/services/secure_storage_service.dart';
 import '../../../../shared/services/token_refresh_service.dart';
 import '../../../../shared/services/company_service.dart';
 import '../../../../shared/services/module_access_service.dart';
@@ -107,33 +105,9 @@ class _SplashPageState extends State<SplashPage>
         await ModuleAccessService.instance.initialize();
         debugPrint('✅ [SPLASH] ModuleAccessService inicializado');
 
-        // Verificar se há credenciais salvas e biometria disponível
-        final hasCredentials = await SecureStorageService.instance.hasSavedCredentials();
-        final biometricService = BiometricService.instance;
-        final hasBiometrics = await biometricService.hasBiometrics();
-        
-        debugPrint('🔍 [SPLASH] Verificando biometria - Credenciais: $hasCredentials, Biometria: $hasBiometrics');
-        
-        // Se há credenciais salvas e biometria disponível, solicitar biometria
-        if (hasCredentials && hasBiometrics) {
-          debugPrint('👆 [SPLASH] Solicitando autenticação biométrica...');
-          final biometricType = await biometricService.getBiometricTypeDescription();
-          final authenticated = await biometricService.authenticate(
-            reason: 'Use $biometricType para acessar o app',
-          );
-          
-          if (!authenticated) {
-            debugPrint('❌ [SPLASH] Autenticação biométrica cancelada ou falhou');
-            // Se biometria falhar, ir para login
-            if (mounted) {
-              TokenRefreshService.instance.stopPeriodicRefresh();
-              Navigator.of(context).pushReplacementNamed(AppRoutes.login);
-            }
-            return;
-          }
-          
-          debugPrint('✅ [SPLASH] Autenticação biométrica bem-sucedida');
-        }
+        // NOTA: Biometria não é solicitada aqui porque o usuário já está autenticado.
+        // A biometria deve ser usada apenas no login, não toda vez que o app abre.
+        // Se o token for válido, o usuário pode acessar o app diretamente.
         
         // Tentar validar o token fazendo uma requisição simples
         // Se falhar, o refresh token será tentado automaticamente
