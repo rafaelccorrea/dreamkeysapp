@@ -818,12 +818,10 @@ class _DocumentsPageState extends State<DocumentsPage>
     try {
       final url = Uri.parse(document.fileUrl);
       
-      if (await canLaunchUrl(url)) {
-        await launchUrl(
-          url,
-          mode: LaunchMode.externalApplication,
-        );
-      } else {
+      // Verifica se a URL pode ser lançada
+      final canLaunch = await canLaunchUrl(url);
+      
+      if (!canLaunch) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -832,13 +830,29 @@ class _DocumentsPageState extends State<DocumentsPage>
             ),
           );
         }
+        return;
+      }
+
+      // Tenta abrir no navegador/externo
+      final launched = await launchUrl(
+        url,
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!launched && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Não foi possível abrir o documento: ${document.originalName}'),
+            backgroundColor: AppColors.status.error,
+          ),
+        );
       }
     } catch (e) {
       debugPrint('❌ [DOCUMENTS_PAGE] Erro ao baixar documento: $e');
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro ao baixar documento: ${e.toString()}'),
+            content: Text('Erro ao abrir documento: ${e.toString()}'),
             backgroundColor: AppColors.status.error,
           ),
         );
