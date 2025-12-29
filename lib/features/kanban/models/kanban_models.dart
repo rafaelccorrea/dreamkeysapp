@@ -655,8 +655,10 @@ class UpdateTaskDto {
     if (columnId != null) map['columnId'] = columnId;
     if (position != null) map['position'] = position;
     if (priority != null) map['priority'] = priority;
-    // assignedToId pode ser null para remover responsável - sempre enviar
-    map['assignedToId'] = assignedToId;
+    // assignedToId é obrigatório - sempre enviar (não pode ser null)
+    if (assignedToId != null && assignedToId!.isNotEmpty) {
+      map['assignedToId'] = assignedToId;
+    }
     if (dueDate != null) {
       // Formatar como YYYY-MM-DDTHH:MM:SS.000Z (meia-noite UTC)
       final utcDate = DateTime.utc(

@@ -385,16 +385,27 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
     final theme = Theme.of(context);
     final task = widget.task;
 
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.9,
-      decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
+    return Material(
+      color: ThemeHelpers.cardBackgroundColor(context),
+      borderRadius: const BorderRadius.only(
+        topLeft: Radius.circular(20),
+        topRight: Radius.circular(20),
+      ),
+      child: ClipRRect(
         borderRadius: const BorderRadius.only(
           topLeft: Radius.circular(20),
           topRight: Radius.circular(20),
         ),
-      ),
-      child: Column(
+        child: Container(
+          height: MediaQuery.of(context).size.height * 0.9,
+          decoration: BoxDecoration(
+            color: ThemeHelpers.cardBackgroundColor(context),
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(20),
+              topRight: Radius.circular(20),
+            ),
+          ),
+        child: Column(
         children: [
           // Handle
           Container(
@@ -454,6 +465,8 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
             ),
           ),
         ],
+        ),
+        ),
       ),
     );
   }
@@ -794,7 +807,54 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
                       controller: _commentController,
                       decoration: InputDecoration(
                         hintText: 'Escreva um comentário...',
-                        border: OutlineInputBorder(),
+                        filled: true,
+                        fillColor: ThemeHelpers.cardBackgroundColor(context),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                            color: ThemeHelpers.borderColor(context),
+                            width: 1,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                            color: ThemeHelpers.borderColor(context),
+                            width: 1,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                            color: theme.colorScheme.primary,
+                            width: 2,
+                          ),
+                        ),
+                        disabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                            color: ThemeHelpers.borderColor(context).withOpacity(0.5),
+                            width: 1,
+                          ),
+                        ),
+                        errorBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                            color: theme.colorScheme.error,
+                            width: 1,
+                          ),
+                        ),
+                        focusedErrorBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                            color: theme.colorScheme.error,
+                            width: 2,
+                          ),
+                        ),
                         suffixIcon: IconButton(
                           icon: const Icon(Icons.attach_file),
                           onPressed: _selectFiles,
@@ -1034,6 +1094,7 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: ThemeHelpers.borderColor(context),
+          width: 1,
         ),
       ),
       child: Row(
@@ -1121,6 +1182,12 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
                             entry.fromColumn!.color.replaceFirst('#', '0xFF'),
                           )).withOpacity(0.2),
                           borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: Color(int.parse(
+                              entry.fromColumn!.color.replaceFirst('#', '0xFF'),
+                            )).withOpacity(0.3),
+                            width: 1,
+                          ),
                         ),
                         child: Text(
                           entry.fromColumn!.title,
@@ -1149,6 +1216,12 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
                             entry.toColumn!.color.replaceFirst('#', '0xFF'),
                           )).withOpacity(0.2),
                           borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: Color(int.parse(
+                              entry.toColumn!.color.replaceFirst('#', '0xFF'),
+                            )).withOpacity(0.3),
+                            width: 1,
+                          ),
                         ),
                         child: Text(
                           entry.toColumn!.title,

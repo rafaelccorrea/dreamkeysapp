@@ -111,10 +111,6 @@ class KanbanSkeleton extends StatelessWidget {
     return Container(
       width: 300,
       margin: const EdgeInsets.only(right: 16),
-      constraints: const BoxConstraints(
-        minHeight: 200,
-        maxHeight: 600,
-      ),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: ThemeHelpers.cardBackgroundColor(context),
@@ -147,9 +143,9 @@ class KanbanSkeleton extends StatelessWidget {
             borderRadius: 4,
           ),
           const SizedBox(height: 16),
-          // Tarefas skeleton (limitado a 2 para evitar overflow)
+          // Tarefas skeleton (limitado a 1 para evitar overflow)
           ...List.generate(
-            2,
+            1,
             (index) => Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: _buildTaskSkeleton(context),

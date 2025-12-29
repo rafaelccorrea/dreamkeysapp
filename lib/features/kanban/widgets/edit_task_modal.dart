@@ -9,10 +9,7 @@ import '../services/kanban_service.dart';
 class EditTaskModal extends StatefulWidget {
   final KanbanTask task;
 
-  const EditTaskModal({
-    super.key,
-    required this.task,
-  });
+  const EditTaskModal({super.key, required this.task});
 
   @override
   State<EditTaskModal> createState() => _EditTaskModalState();
@@ -79,7 +76,7 @@ class _EditTaskModalState extends State<EditTaskModal> {
 
     // Extrair usuários únicos das tarefas (assignedTo e createdBy)
     final usersMap = <String, KanbanUser>{};
-    
+
     for (final task in board.tasks) {
       if (task.assignedTo != null) {
         usersMap[task.assignedTo!.id] = task.assignedTo!;
@@ -136,7 +133,9 @@ class _EditTaskModalState extends State<EditTaskModal> {
             : _descriptionController.text.trim(),
         priority: _selectedPriority?.name,
         dueDate: _selectedDueDate,
-        assignedToId: _selectedAssignedToId,
+        assignedToId:
+            _selectedAssignedToId ??
+            widget.task.assignedToId, // Sempre deve ter um responsável
         tags: _selectedTags.isNotEmpty ? _selectedTags : null,
       ),
     );
@@ -195,10 +194,7 @@ class _EditTaskModalState extends State<EditTaskModal> {
             padding: const EdgeInsets.all(20),
             child: Row(
               children: [
-                Icon(
-                  Icons.edit,
-                  color: theme.colorScheme.primary,
-                ),
+                Icon(Icons.edit, color: theme.colorScheme.primary),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
@@ -254,51 +250,74 @@ class _EditTaskModalState extends State<EditTaskModal> {
                     ),
                     const SizedBox(height: 16),
                     // Responsável
-                    DropdownButtonFormField<String>(
-                      value: _selectedAssignedToId,
-                      decoration: const InputDecoration(
-                        labelText: 'Responsável',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: [
-                        const DropdownMenuItem<String>(
-                          value: null,
-                          child: Text('Sem responsável'),
-                        ),
-                        ..._getAvailableUsers().map((user) {
-                          return DropdownMenuItem<String>(
-                            value: user.id,
-                            child: Row(
-                              children: [
-                                if (user.avatar != null)
-                                  CircleAvatar(
-                                    radius: 12,
-                                    backgroundImage: NetworkImage(user.avatar!),
-                                  )
-                                else
-                                  CircleAvatar(
-                                    radius: 12,
-                                    child: Text(
-                                      user.name[0].toUpperCase(),
-                                      style: const TextStyle(fontSize: 12),
-                                    ),
+                    Builder(
+                      builder: (context) {
+                        final isPersonalProject =
+                            widget.task.project?.isPersonal == true;
+                        return IgnorePointer(
+                          ignoring: isPersonalProject,
+                          child: Opacity(
+                            opacity: isPersonalProject ? 0.6 : 1.0,
+                            child: DropdownButtonFormField<String>(
+                              value: _selectedAssignedToId,
+                              decoration: InputDecoration(
+                                labelText: 'Responsável *',
+                                border: const OutlineInputBorder(),
+                                helperText: isPersonalProject
+                                    ? 'Não é possível alterar o responsável em projetos pessoais'
+                                    : null,
+                              ),
+                              items: _getAvailableUsers().map((user) {
+                                return DropdownMenuItem<String>(
+                                  value: user.id,
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (user.avatar != null)
+                                        CircleAvatar(
+                                          radius: 12,
+                                          backgroundImage: NetworkImage(
+                                            user.avatar!,
+                                          ),
+                                        )
+                                      else
+                                        CircleAvatar(
+                                          radius: 12,
+                                          child: Text(
+                                            user.name[0].toUpperCase(),
+                                            style: const TextStyle(
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ),
+                                      const SizedBox(width: 8),
+                                      Flexible(
+                                        child: Text(
+                                          user.name,
+                                          overflow: TextOverflow.ellipsis,
+                                          maxLines: 1,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    user.name,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
+                                );
+                              }).toList(),
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Responsável é obrigatório';
+                                }
+                                return null;
+                              },
+                              onChanged: isPersonalProject
+                                  ? null
+                                  : (value) {
+                                      setState(() {
+                                        _selectedAssignedToId = value;
+                                      });
+                                    },
                             ),
-                          );
-                        }),
-                      ],
-                      onChanged: (value) {
-                        setState(() {
-                          _selectedAssignedToId = value;
-                        });
+                          ),
+                        );
                       },
                     ),
                     const SizedBox(height: 16),
@@ -323,9 +342,14 @@ class _EditTaskModalState extends State<EditTaskModal> {
                                   width: 12,
                                   height: 12,
                                   decoration: BoxDecoration(
-                                    color: Color(int.parse(
-                                      priority.color.replaceFirst('#', '0xFF'),
-                                    )),
+                                    color: Color(
+                                      int.parse(
+                                        priority.color.replaceFirst(
+                                          '#',
+                                          '0xFF',
+                                        ),
+                                      ),
+                                    ),
                                     shape: BoxShape.circle,
                                   ),
                                 ),
@@ -362,7 +386,9 @@ class _EditTaskModalState extends State<EditTaskModal> {
                                 style: TextStyle(
                                   color: _selectedDueDate != null
                                       ? ThemeHelpers.textColor(context)
-                                      : ThemeHelpers.textSecondaryColor(context),
+                                      : ThemeHelpers.textSecondaryColor(
+                                          context,
+                                        ),
                                 ),
                               ),
                             ),
@@ -444,9 +470,7 @@ class _EditTaskModalState extends State<EditTaskModal> {
             decoration: BoxDecoration(
               color: ThemeHelpers.cardBackgroundColor(context),
               border: Border(
-                top: BorderSide(
-                  color: ThemeHelpers.borderColor(context),
-                ),
+                top: BorderSide(color: ThemeHelpers.borderColor(context)),
               ),
             ),
             child: Row(
@@ -477,5 +501,3 @@ class _EditTaskModalState extends State<EditTaskModal> {
     );
   }
 }
-
-

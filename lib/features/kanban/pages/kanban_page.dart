@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -44,6 +45,11 @@ class KanbanPage extends StatefulWidget {
 }
 
 class _KanbanPageState extends State<KanbanPage> {
+  final ScrollController _horizontalScrollController = ScrollController();
+  Timer? _autoScrollTimer;
+  bool _isDragging = false;
+  double _scrollSpeed = 0;
+
   @override
   void initState() {
     super.initState();
@@ -54,6 +60,100 @@ class _KanbanPageState extends State<KanbanPage> {
         controller.loadBoard();
       });
     });
+  }
+
+  @override
+  void dispose() {
+    _stopAutoScroll();
+    _horizontalScrollController.dispose();
+    super.dispose();
+  }
+
+  void _startAutoScroll() {
+    _autoScrollTimer?.cancel();
+    _autoScrollTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
+      if (!_isDragging || !_horizontalScrollController.hasClients) {
+        _stopAutoScroll();
+        return;
+      }
+      _performAutoScroll();
+    });
+  }
+
+  void _stopAutoScroll() {
+    _autoScrollTimer?.cancel();
+    _autoScrollTimer = null;
+  }
+
+  void _updateAutoScroll(double dragX) {
+    if (!_horizontalScrollController.hasClients) return;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final scrollPosition = _horizontalScrollController.position;
+    final scrollOffset = scrollPosition.pixels;
+    final scrollMax = scrollPosition.maxScrollExtent;
+
+    // Zona de ativação do auto-scroll (100px das bordas para detectar melhor)
+    const scrollZone = 100.0;
+    double newScrollSpeed = 0;
+
+    // Verificar se está próximo da borda esquerda ou parcialmente fora
+    if (dragX < scrollZone) {
+      if (scrollOffset > 0) {
+        // Scroll para a esquerda (valores negativos)
+        // Se está fora da tela (dragX < 0), usar velocidade máxima
+        if (dragX < 0) {
+          newScrollSpeed = -20; // Velocidade máxima quando fora da tela
+        } else {
+          // Velocidade proporcional à proximidade da borda
+          newScrollSpeed = -((scrollZone - dragX) / scrollZone) * 20;
+        }
+      }
+    }
+    // Verificar se está próximo da borda direita ou parcialmente fora
+    else if (dragX > screenWidth - scrollZone) {
+      if (scrollOffset < scrollMax) {
+        // Scroll para a direita (valores positivos)
+        // Se está fora da tela (dragX > screenWidth), usar velocidade máxima
+        if (dragX > screenWidth) {
+          newScrollSpeed = 20; // Velocidade máxima quando fora da tela
+        } else {
+          // Velocidade proporcional à proximidade da borda
+          newScrollSpeed =
+              ((dragX - (screenWidth - scrollZone)) / scrollZone) * 20;
+        }
+      }
+    }
+
+    _scrollSpeed = newScrollSpeed;
+
+    if (newScrollSpeed != 0 && _autoScrollTimer == null) {
+      _startAutoScroll();
+    } else if (newScrollSpeed == 0) {
+      _stopAutoScroll();
+    }
+  }
+
+  void _performAutoScroll() {
+    if (!_horizontalScrollController.hasClients || _scrollSpeed == 0) {
+      _stopAutoScroll();
+      return;
+    }
+
+    final scrollPosition = _horizontalScrollController.position;
+    final scrollOffset = scrollPosition.pixels;
+    final scrollMax = scrollPosition.maxScrollExtent;
+
+    double newOffset = scrollOffset + _scrollSpeed;
+
+    // Limitar o scroll aos limites
+    newOffset = newOffset.clamp(0.0, scrollMax);
+
+    if (newOffset != scrollOffset) {
+      _horizontalScrollController.jumpTo(newOffset);
+    } else {
+      // Se chegou ao limite, parar o scroll
+      _stopAutoScroll();
+    }
   }
 
   @override
@@ -138,9 +238,7 @@ class _KanbanPageState extends State<KanbanPage> {
 
   Widget _buildKanbanBoard(KanbanController controller) {
     return ScrollConfiguration(
-      behavior: ScrollConfiguration.of(context).copyWith(
-        scrollbars: false, // Oculta scrollbars
-      ),
+      behavior: NoScrollbarScrollBehavior(),
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         child: Column(
@@ -182,18 +280,24 @@ class _KanbanPageState extends State<KanbanPage> {
             const ProjectSelector(),
             // Filtros
             const KanbanFilters(),
+            // Espaço entre filtros e colunas
+            const SizedBox(height: 16),
             // Quadro com colunas - scroll horizontal
-            SizedBox(
-              height: MediaQuery.of(context).size.height * 0.7,
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final totalWidth =
-                      (controller.columns.length * 300.0) +
-                      ((controller.columns.length - 1) *
-                          16.0); // largura das colunas + margens
-                  return ScrollConfiguration(
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final screenHeight = MediaQuery.of(context).size.height;
+                final availableHeight = screenHeight * 0.6;
+
+                final totalWidth =
+                    (controller.columns.length * 300.0) +
+                    ((controller.columns.length - 1) *
+                        16.0); // largura das colunas + margens
+                return SizedBox(
+                  height: availableHeight,
+                  child: ScrollConfiguration(
                     behavior: NoScrollbarScrollBehavior(),
                     child: SingleChildScrollView(
+                      controller: _horizontalScrollController,
                       scrollDirection: Axis.horizontal,
                       physics: const AlwaysScrollableScrollPhysics(),
                       child: ConstrainedBox(
@@ -203,7 +307,7 @@ class _KanbanPageState extends State<KanbanPage> {
                               : totalWidth,
                         ),
                         child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: controller.columns.map((column) {
                             final columnTasks = controller.getTasksForColumn(
                               column.id,
@@ -218,9 +322,9 @@ class _KanbanPageState extends State<KanbanPage> {
                         ),
                       ),
                     ),
-                  );
-                },
-              ),
+                  ),
+                );
+              },
             ),
           ],
         ),
@@ -239,14 +343,10 @@ class _KanbanPageState extends State<KanbanPage> {
         ? Color(int.parse(column.color!.replaceFirst('#', '0xFF')))
         : Theme.of(context).colorScheme.primary;
 
-    // Calcular altura disponível para a lista de tarefas
-    final screenHeight = MediaQuery.of(context).size.height;
-    final columnHeight = screenHeight * 0.7; // Altura fixa da coluna
-
     return Container(
       width: 300,
-      height: columnHeight,
       margin: const EdgeInsets.only(right: 16),
+      constraints: const BoxConstraints(minHeight: 400),
       decoration: BoxDecoration(
         color: ThemeHelpers.cardBackgroundColor(context),
         borderRadius: BorderRadius.circular(12),
@@ -399,6 +499,8 @@ class _KanbanPageState extends State<KanbanPage> {
                         child: ScrollConfiguration(
                           behavior: NoScrollbarScrollBehavior(),
                           child: ListView.builder(
+                            shrinkWrap: false,
+                            physics: const AlwaysScrollableScrollPhysics(),
                             padding: const EdgeInsets.all(8),
                             itemCount: tasks.length,
                             itemBuilder: (context, index) {
@@ -421,7 +523,7 @@ class _KanbanPageState extends State<KanbanPage> {
           // Botão para adicionar tarefa
           if (controller.permissions?.canCreateTasks ?? true)
             Padding(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               child: SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
@@ -443,6 +545,12 @@ class _KanbanPageState extends State<KanbanPage> {
                   },
                   icon: const Icon(Icons.add, size: 18),
                   label: const Text('Adicionar Tarefa'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -480,6 +588,21 @@ class _KanbanPageState extends State<KanbanPage> {
       delay: const Duration(
         milliseconds: 100,
       ), // Delay menor para iniciar drag mais rápido
+      onDragStarted: () {
+        setState(() {
+          _isDragging = true;
+        });
+        _startAutoScroll();
+      },
+      onDragEnd: (_) {
+        setState(() {
+          _isDragging = false;
+        });
+        _stopAutoScroll();
+      },
+      onDragUpdate: (details) {
+        _updateAutoScroll(details.globalPosition.dx);
+      },
       feedback: Material(
         elevation: 8,
         borderRadius: BorderRadius.circular(8),
@@ -521,6 +644,7 @@ class _KanbanPageState extends State<KanbanPage> {
           context: context,
           isScrollControlled: true,
           backgroundColor: Colors.transparent,
+          barrierColor: Colors.black54,
           builder: (context) => TaskDetailsModal(task: task),
         );
       },
