@@ -355,6 +355,14 @@ class PermissionModuleMapping {
     'match:update': 'match_system',
     'match:delete': 'match_system',
     
+    // Document permissions
+    'document:view': 'document_management',
+    'document:read': 'document_management',
+    'document:create': 'document_management',
+    'document:update': 'document_management',
+    'document:delete': 'document_management',
+    'document:approve': 'document_management',
+    
     // Team permissions
     'team:view': 'team_management',
     'team:create': 'team_management',
@@ -398,6 +406,7 @@ class PermissionModuleMapping {
     '/calendar': 'calendar_management',
     '/commissions': 'commission_management',
     '/matches': 'match_system',
+    '/documents': 'document_management',
     '/teams': 'team_management',
     '/financial': 'financial_management',
     '/marketing': 'marketing_tools',
@@ -416,6 +425,7 @@ class PermissionModuleMapping {
     'calendar_management': ['calendar:view'],
     'commission_management': ['commission:view'],
     'match_system': ['match:view'],
+    'document_management': ['document:read'],
     'team_management': ['team:view'],
     'financial_management': ['financial:view'],
     'marketing_tools': ['marketing:view'],

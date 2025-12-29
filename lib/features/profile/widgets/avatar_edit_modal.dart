@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
+import '../../../../shared/utils/image_crop_helper.dart';
 
 /// Modal para edição de avatar
 class AvatarEditModal {
@@ -70,9 +71,46 @@ class _AvatarEditModalContentState extends State<_AvatarEditModalContent> {
           return;
         }
 
-        setState(() {
-          _selectedImage = file;
-        });
+        // Abrir crop de imagem (formato circular para avatar)
+        if (mounted) {
+          try {
+            debugPrint('Iniciando crop de imagem: ${file.path}');
+            final croppedFile = await ImageCropHelper.cropImageCircle(
+              imagePath: file.path,
+              compressQuality: 85,
+            );
+
+            if (croppedFile != null && mounted) {
+              debugPrint('Crop concluído com sucesso');
+              setState(() {
+                _selectedImage = croppedFile;
+              });
+            } else {
+              debugPrint('Crop cancelado ou não disponível - usando imagem original');
+              // Se o crop foi cancelado ou não está disponível, usa a imagem original
+              if (mounted) {
+                setState(() {
+                  _selectedImage = file;
+                });
+              }
+            }
+          } catch (cropError) {
+            if (mounted) {
+              debugPrint('Erro ao abrir crop: $cropError');
+              // Em caso de erro, usa a imagem original como fallback
+              setState(() {
+                _selectedImage = file;
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: const Text('Recorte não disponível. Usando imagem original.'),
+                  backgroundColor: AppColors.status.warning,
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            }
+          }
+        }
       }
     } catch (e) {
       if (mounted) {

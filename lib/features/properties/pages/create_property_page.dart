@@ -15,6 +15,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../../../../shared/utils/input_formatters.dart';
 import '../../../../shared/utils/masks.dart';
+import '../../../../shared/utils/image_crop_helper.dart';
 
 /// Página de criação/edição de propriedade com formulário multi-etapas
 class CreatePropertyPage extends StatefulWidget {
@@ -374,20 +375,51 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           source: ImageSource.camera,
           imageQuality: 85,
         );
-        if (photo != null) {
-          setState(() {
-            _selectedImages.add(File(photo.path));
-          });
+        if (photo != null && mounted) {
+          // Abrir crop de imagem (formato retangular livre para imagens de imóvel)
+          final croppedFile = await ImageCropHelper.cropImageRect(
+            imagePath: photo.path,
+            compressQuality: 85,
+          );
+          
+          if (croppedFile != null && mounted) {
+            setState(() {
+              _selectedImages.add(croppedFile);
+            });
+          } else if (croppedFile == null && mounted) {
+            // Usuário cancelou o crop, mas mantém a imagem original
+            setState(() {
+              _selectedImages.add(File(photo.path));
+            });
+          }
         }
       } else {
         // Selecionar múltiplas imagens da galeria
         final List<XFile> images = await _imagePicker.pickMultiImage(
           imageQuality: 85,
         );
-        if (images.isNotEmpty) {
-          setState(() {
-            _selectedImages.addAll(images.map((xFile) => File(xFile.path)));
-          });
+        if (images.isNotEmpty && mounted) {
+          // Processar cada imagem com crop individualmente
+          for (final xFile in images) {
+            if (!mounted) break;
+            
+            // Abrir crop de imagem (formato retangular livre para imagens de imóvel)
+            final croppedFile = await ImageCropHelper.cropImageRect(
+              imagePath: xFile.path,
+              compressQuality: 85,
+            );
+            
+            if (croppedFile != null && mounted) {
+              setState(() {
+                _selectedImages.add(croppedFile);
+              });
+            } else if (croppedFile == null && mounted) {
+              // Usuário cancelou o crop, mas mantém a imagem original
+              setState(() {
+                _selectedImages.add(File(xFile.path));
+              });
+            }
+          }
         }
       }
     } catch (e) {
@@ -2376,9 +2408,22 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                               imageQuality: 85,
                             );
                             if (photo != null && mounted) {
-                              setState(() {
-                                _selectedImages.add(File(photo.path));
-                              });
+                              // Abrir crop de imagem (formato retangular livre para imagens de imóvel)
+                              final croppedFile = await ImageCropHelper.cropImageRect(
+                                imagePath: photo.path,
+                                compressQuality: 85,
+                              );
+                              
+                              if (croppedFile != null && mounted) {
+                                setState(() {
+                                  _selectedImages.add(croppedFile);
+                                });
+                              } else if (croppedFile == null && mounted) {
+                                // Usuário cancelou o crop, mas mantém a imagem original
+                                setState(() {
+                                  _selectedImages.add(File(photo.path));
+                                });
+                              }
                             }
                           } catch (e) {
                             if (mounted) {

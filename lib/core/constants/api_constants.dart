@@ -137,6 +137,43 @@ class ApiConstants {
   static String kanbanProjectsTeamHistory(String teamId) => '/kanban/projects/team/$teamId/history';
   static String kanbanProjectHistory(String id) => '/kanban/projects/$id/history';
 
+  // Endpoints de Documentos
+  static const String documents = '/documents';
+  static String documentById(String id) => '/documents/$id';
+  static String documentUpdate(String id) => '/documents/$id';
+  static const String documentsUpload = '/documents/upload';
+  static String documentApprove(String id) => '/documents/$id/approve';
+  static String documentsByClient(String clientId) => '/documents/client/$clientId';
+  static String documentsByProperty(String propertyId) => '/documents/property/$propertyId';
+  static String documentsExpiring(int days) => '/documents/expiring/$days';
+  
+  // Endpoints de Assinaturas
+  static String documentSignatures(String documentId) => '/documents/$documentId/signatures';
+  static String documentSignaturesBatch(String documentId) => '/documents/$documentId/signatures/batch';
+  static String documentSignaturesStats(String documentId) => '/documents/$documentId/signatures/stats';
+  static String documentSignatureById(String documentId, String signatureId) => '/documents/$documentId/signatures/$signatureId';
+  static String documentSignatureSendEmail(String documentId, String signatureId) => '/documents/$documentId/signatures/$signatureId/send-email';
+  static String documentSignatureResendEmail(String documentId, String signatureId) => '/documents/$documentId/signatures/$signatureId/resend-email';
+  static String documentSignatureViewed(String documentId, String signatureId) => '/documents/$documentId/signatures/$signatureId/viewed';
+  static String documentSignatureSigned(String documentId, String signatureId) => '/documents/$documentId/signatures/$signatureId/signed';
+  static String documentSignatureRejected(String documentId, String signatureId) => '/documents/$documentId/signatures/$signatureId/rejected';
+  static String signaturesByClient(String clientId) => '/signatures/client/$clientId';
+  static const String signaturesPending = '/signatures/pending';
+  static const String signatures = '/signatures';
+  static const String publicSignature = '/public/signatures';
+  static String publicSignatureById(String signatureId) => '/public/signatures/$signatureId';
+  
+  // Endpoints de Upload Tokens
+  static const String uploadTokens = '/documents/upload-tokens';
+  static String uploadTokenById(String tokenId) => '/documents/upload-tokens/$tokenId';
+  static String uploadTokenSendEmail(String tokenId) => '/documents/upload-tokens/$tokenId/send-email';
+  static String uploadTokenRevoke(String tokenId) => '/documents/upload-tokens/$tokenId/revoke';
+  static const String publicUploadDocuments = '/public/upload-documents';
+  static String publicUploadDocumentsInfo(String token) => '/public/upload-documents/$token/info';
+  static String publicUploadDocumentsValidate(String token) => '/public/upload-documents/$token/validate';
+  static String publicUploadDocumentsUpload(String token) => '/public/upload-documents/$token/upload';
+  static String publicUploadDocumentsUploadMultiple(String token) => '/public/upload-documents/$token/upload-multiple';
+
   // Headers
   static const String contentTypeHeader = 'Content-Type';
   static const String authorizationHeader = 'Authorization';

@@ -415,6 +415,45 @@ class _AppDrawerState extends State<AppDrawer> {
                 _buildDrawerItem(
                   context: context,
                   currentRoute: activeRoute,
+                  route: AppRoutes.documents,
+                  icon: Icons.description_outlined,
+                  activeIcon: Icons.description,
+                  title: 'Documentos',
+                  onTap: () {
+                    Navigator.pop(context);
+                    // Se já está na tela de documentos, não navega novamente
+                    if (activeRoute == AppRoutes.documents || 
+                        activeRoute.startsWith('/documents')) {
+                      return;
+                    }
+                    Navigator.of(context).pushNamedAndRemoveUntil(
+                      AppRoutes.documents,
+                      (route) => false,
+                    );
+                  },
+                ),
+                _buildDrawerItem(
+                  context: context,
+                  currentRoute: activeRoute,
+                  route: AppRoutes.signatures,
+                  icon: Icons.draw_outlined,
+                  activeIcon: Icons.draw,
+                  title: 'Assinaturas',
+                  onTap: () {
+                    Navigator.pop(context);
+                    // Se já está na tela de assinaturas, não navega novamente
+                    if (activeRoute == AppRoutes.signatures) {
+                      return;
+                    }
+                    Navigator.of(context).pushNamedAndRemoveUntil(
+                      AppRoutes.signatures,
+                      (route) => false,
+                    );
+                  },
+                ),
+                _buildDrawerItem(
+                  context: context,
+                  currentRoute: activeRoute,
                   route: '/commissions',
                   icon: Icons.attach_money_outlined,
                   activeIcon: Icons.attach_money,

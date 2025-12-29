@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/theme_helpers.dart';
+import '../../core/routes/app_routes.dart';
 import 'app_drawer.dart';
 import 'app_bottom_navigation.dart';
 
@@ -14,6 +15,7 @@ class AppScaffold extends StatelessWidget {
   final List<Widget>? actions;
   final bool showBottomNavigation;
   final bool showDrawer;
+  final PreferredSizeWidget? bottom;
 
   const AppScaffold({
     super.key,
@@ -26,11 +28,14 @@ class AppScaffold extends StatelessWidget {
     this.actions,
     this.showBottomNavigation = true,
     this.showDrawer = true,
+    this.bottom,
   });
 
   @override
   Widget build(BuildContext context) {
     final currentRoute = ModalRoute.of(context)?.settings.name;
+    // Usar o índice baseado na rota se não foi especificado explicitamente
+    final navIndex = AppBottomNavigation.getIndexForRoute(currentRoute);
 
     return Scaffold(
       backgroundColor: ThemeHelpers.backgroundColor(context),
@@ -52,6 +57,7 @@ class AppScaffold extends StatelessWidget {
                 onPressed: () => Navigator.of(context).pop(),
               ),
         actions: actions,
+        bottom: bottom,
       ),
       drawer: showDrawer
           ? AppDrawer(
@@ -62,9 +68,9 @@ class AppScaffold extends StatelessWidget {
             )
           : null,
       body: body,
-      bottomNavigationBar: showBottomNavigation && currentBottomNavIndex >= 0
+      bottomNavigationBar: showBottomNavigation
           ? AppBottomNavigation(
-              currentIndex: currentBottomNavIndex,
+              currentIndex: navIndex,
               onTap: (index) {
                 AppBottomNavigation.navigateToIndex(context, index);
               },

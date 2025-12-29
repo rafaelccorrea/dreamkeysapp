@@ -252,13 +252,19 @@ class AppBottomNavigation extends StatelessWidget {
     if (routeName == null) return 0;
 
     if (routeName == AppRoutes.home) return 0;
-    if (routeName == AppRoutes.properties) return 1;
+    if (routeName == AppRoutes.properties || routeName.startsWith('/properties'))
+      return 1;
     if (routeName == AppRoutes.calendar || routeName.startsWith('/calendar'))
       return 2;
     if (routeName == AppRoutes.clients || routeName.startsWith('/clients'))
       return 3;
-    if (routeName == AppRoutes.profile || routeName == AppRoutes.profileEdit)
-      return 4;
+    if (routeName == AppRoutes.profile || 
+        routeName == AppRoutes.profileEdit ||
+        routeName == AppRoutes.documents ||
+        routeName == AppRoutes.signatures ||
+        routeName.startsWith('/documents') ||
+        routeName.startsWith('/signatures'))
+      return 4; // Documentos e assinaturas ficam no mesmo grupo do perfil
     return 0;
   }
 

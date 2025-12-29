@@ -24,6 +24,10 @@ import '../../features/clients/pages/client_details_page.dart';
 import '../../features/clients/pages/client_form_page.dart';
 import '../../features/matches/pages/matches_page.dart';
 import '../../features/kanban/pages/kanban_page.dart';
+import '../../features/documents/pages/documents_page.dart';
+import '../../features/documents/pages/create_document_page.dart';
+import '../../features/documents/pages/document_details_page.dart';
+import '../../features/documents/pages/signatures_page.dart';
 
 /// Rotas da aplicação com transições customizadas
 class AppRoutes {
@@ -63,6 +67,13 @@ class AppRoutes {
 
   // Kanban (Tarefas)
   static const String kanban = '/kanban';
+
+  // Documentos
+  static const String documents = '/documents';
+  static const String documentCreate = '/documents/create';
+  static String documentDetails(String id) => '/documents/$id';
+  static String documentEdit(String id) => '/documents/$id/edit';
+  static const String signatures = '/signatures';
 
   static String propertyOfferDetails(String offerId) =>
       '/properties/offers/$offerId';
@@ -186,6 +197,24 @@ class AppRoutes {
       return _buildRoute(const MatchesPage(), settings);
     } else if (routeName == AppRoutes.kanban) {
       return _buildRoute(const KanbanPage(), settings);
+    } else if (routeName == AppRoutes.documents) {
+      return _buildRoute(const DocumentsPage(), settings);
+    } else if (routeName == AppRoutes.signatures) {
+      return _buildRoute(const SignaturesPage(), settings);
+    } else if (routeName == AppRoutes.documentCreate) {
+      return _buildRoute(const CreateDocumentPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/documents/')) {
+      final segments = routeName.split('/');
+      if (segments.length >= 3) {
+        final id = segments[2];
+        if (segments.length == 3) {
+          // Detalhes: /documents/:id
+          return _buildRoute(DocumentDetailsPage(documentId: id), settings);
+        } else if (segments.length == 4 && segments[3] == 'edit') {
+          // Edição: /documents/:id/edit
+          return _buildRoute(CreateDocumentPage(documentId: id), settings);
+        }
+      }
     } else if (routeName != null && routeName.startsWith('/properties/')) {
       // Matches de propriedade: /properties/:propertyId/matches
       final segments = routeName.split('/');
