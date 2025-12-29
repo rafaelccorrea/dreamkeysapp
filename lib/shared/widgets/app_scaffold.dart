@@ -31,51 +31,82 @@ class AppScaffold extends StatelessWidget {
     this.bottom,
   });
 
+  /// Verifica se a rota é uma tela principal
+  static bool _isMainScreen(String? routeName) {
+    if (routeName == null) return false;
+
+    return routeName == AppRoutes.home ||
+        routeName == AppRoutes.properties ||
+        routeName == AppRoutes.calendar ||
+        routeName == AppRoutes.clients ||
+        routeName == AppRoutes.profile ||
+        routeName == AppRoutes.documents ||
+        routeName == AppRoutes.signatures;
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentRoute = ModalRoute.of(context)?.settings.name;
     // Usar o índice baseado na rota se não foi especificado explicitamente
     final navIndex = AppBottomNavigation.getIndexForRoute(currentRoute);
+    final isMainScreen = _isMainScreen(currentRoute);
 
-    return Scaffold(
-      backgroundColor: ThemeHelpers.backgroundColor(context),
-      appBar: AppBar(
-        title: Text(title),
-        backgroundColor: ThemeHelpers.appBarBackgroundColor(context),
-        foregroundColor: ThemeHelpers.textColor(context),
-        elevation: 0,
-        scrolledUnderElevation: 1,
-        leading: showDrawer
-            ? Builder(
-                builder: (context) => IconButton(
-                  icon: const Icon(Icons.menu),
-                  onPressed: () => Scaffold.of(context).openDrawer(),
+    return PopScope(
+      canPop: !isMainScreen, // Só permite voltar se não for tela principal
+      onPopInvoked: (didPop) {
+        // Se o pop não aconteceu e é uma tela principal, redireciona para o dashboard
+        if (!didPop && isMainScreen) {
+          // Se já estiver no home, não faz nada (mas também não permite sair)
+          if (currentRoute == AppRoutes.home) {
+            return;
+          }
+          // Redireciona para o dashboard
+          Navigator.of(context).pushNamedAndRemoveUntil(
+            AppRoutes.home,
+            (route) => route.settings.name == AppRoutes.home,
+          );
+        }
+      },
+      child: Scaffold(
+        backgroundColor: ThemeHelpers.backgroundColor(context),
+        appBar: AppBar(
+          title: Text(title),
+          backgroundColor: ThemeHelpers.appBarBackgroundColor(context),
+          foregroundColor: ThemeHelpers.textColor(context),
+          elevation: 0,
+          scrolledUnderElevation: 1,
+          leading: showDrawer
+              ? Builder(
+                  builder: (context) => IconButton(
+                    icon: const Icon(Icons.menu),
+                    onPressed: () => Scaffold.of(context).openDrawer(),
+                  ),
+                )
+              : IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed: () => Navigator.of(context).pop(),
                 ),
+          actions: actions,
+          bottom: bottom,
+        ),
+        drawer: showDrawer
+            ? AppDrawer(
+                userName: userName,
+                userEmail: userEmail,
+                userAvatar: userAvatar,
+                currentRoute: currentRoute,
               )
-            : IconButton(
-                icon: const Icon(Icons.arrow_back),
-                onPressed: () => Navigator.of(context).pop(),
-              ),
-        actions: actions,
-        bottom: bottom,
+            : null,
+        body: body,
+        bottomNavigationBar: showBottomNavigation
+            ? AppBottomNavigation(
+                currentIndex: navIndex,
+                onTap: (index) {
+                  AppBottomNavigation.navigateToIndex(context, index);
+                },
+              )
+            : null,
       ),
-      drawer: showDrawer
-          ? AppDrawer(
-              userName: userName,
-              userEmail: userEmail,
-              userAvatar: userAvatar,
-              currentRoute: currentRoute,
-            )
-          : null,
-      body: body,
-      bottomNavigationBar: showBottomNavigation
-          ? AppBottomNavigation(
-              currentIndex: navIndex,
-              onTap: (index) {
-                AppBottomNavigation.navigateToIndex(context, index);
-              },
-            )
-          : null,
     );
   }
 }
