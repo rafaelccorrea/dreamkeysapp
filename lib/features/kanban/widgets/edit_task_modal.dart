@@ -27,6 +27,8 @@ class _EditTaskModalState extends State<EditTaskModal> {
   List<String> _availableTags = [];
   bool _isLoading = false;
   bool _loadingTags = false;
+  List<KanbanUser> _projectMembers = [];
+  bool _loadingMembers = false;
 
   @override
   void initState() {
@@ -40,6 +42,7 @@ class _EditTaskModalState extends State<EditTaskModal> {
     _selectedAssignedToId = widget.task.assignedToId;
     _selectedTags = List<String>.from(widget.task.tags ?? []);
     _loadTags();
+    _loadProjectMembers();
   }
 
   Future<void> _loadTags() async {
@@ -69,9 +72,184 @@ class _EditTaskModalState extends State<EditTaskModal> {
     }
   }
 
-  List<KanbanUser> _getAvailableUsers() {
+  Future<void> _loadProjectMembers() async {
+    debugPrint('👥 [EDIT_TASK_MODAL] _loadProjectMembers - Iniciando');
+    
     final controller = context.read<KanbanController>();
     final board = controller.board;
+    
+    // Tentar obter projeto do objeto task primeiro
+    KanbanProject? project = widget.task.project;
+    String? projectId = widget.task.projectId;
+    
+    debugPrint('👥 [EDIT_TASK_MODAL] Estado inicial:');
+    debugPrint('   - task.project: ${project != null ? "existe" : "null"}');
+    debugPrint('   - task.projectId: ${projectId ?? "null"}');
+    debugPrint('   - controller.projectId: ${controller.projectId ?? "null"}');
+    
+    // Se o projeto não está populado na tarefa, usar o projectId do controller (projeto selecionado)
+    if (project == null && projectId == null) {
+      projectId = controller.projectId;
+      debugPrint('👥 [EDIT_TASK_MODAL] Usando projectId do controller: $projectId');
+    }
+    
+    // Se ainda não temos projeto, tentar buscar da lista de projetos do board
+    if (project == null && projectId != null && projectId.isNotEmpty) {
+      debugPrint('👥 [EDIT_TASK_MODAL] Projeto não está populado, buscando do board...');
+      
+      if (board != null && board.projects != null) {
+        debugPrint('👥 [EDIT_TASK_MODAL] Board tem ${board.projects!.length} projetos');
+        try {
+          project = board.projects!.firstWhere(
+            (p) => p.id == projectId,
+          );
+          debugPrint('👥 [EDIT_TASK_MODAL] ✅ Projeto encontrado no board: ${project.name}');
+        } catch (e) {
+          debugPrint('👥 [EDIT_TASK_MODAL] ❌ Projeto não encontrado no board: $e');
+        }
+      } else {
+        debugPrint('👥 [EDIT_TASK_MODAL] ⚠️ Board ou lista de projetos é null');
+      }
+    }
+    
+    debugPrint('👥 [EDIT_TASK_MODAL] Projeto final:');
+    debugPrint('   - project: ${project != null ? "existe" : "null"}');
+    debugPrint('   - projectId: ${projectId ?? "null"}');
+    if (project != null) {
+      debugPrint('   - project.id: ${project.id}');
+      debugPrint('   - project.name: ${project.name}');
+      debugPrint('   - project.isPersonal: ${project.isPersonal}');
+    }
+    
+    // Se não há projeto, não carregar membros
+    if (project == null) {
+      if (projectId != null && projectId.isNotEmpty) {
+        debugPrint('👥 [EDIT_TASK_MODAL] ⚠️ Temos projectId mas projeto não foi encontrado');
+        debugPrint('👥 [EDIT_TASK_MODAL] Tentando carregar membros diretamente com projectId: $projectId');
+        // Mesmo sem o objeto projeto, podemos tentar carregar membros se temos o ID
+        // Mas precisamos verificar se é pessoal primeiro - vamos assumir que não é pessoal se não encontramos o objeto
+      } else {
+        debugPrint('👥 [EDIT_TASK_MODAL] ⚠️ Projeto é null e projectId também, não carregando membros');
+        return;
+      }
+    } else {
+      // Se temos o objeto projeto, verificar se é pessoal
+      if (project.isPersonal == true) {
+        debugPrint('👥 [EDIT_TASK_MODAL] ⚠️ Projeto é pessoal, não carregando membros');
+        return;
+      }
+    }
+
+    // Se chegamos aqui, temos um projectId válido (mesmo sem o objeto projeto)
+    final finalProjectId = project?.id ?? projectId;
+    if (finalProjectId == null || finalProjectId.isEmpty) {
+      debugPrint('👥 [EDIT_TASK_MODAL] ❌ Não temos projectId válido para carregar membros');
+      return;
+    }
+
+    debugPrint('👥 [EDIT_TASK_MODAL] ✅ Carregando membros do projeto...');
+    debugPrint('   - projectId: $finalProjectId');
+
+    setState(() {
+      _loadingMembers = true;
+    });
+
+    try {
+      debugPrint('👥 [EDIT_TASK_MODAL] Chamando _kanbanService.getProjectMembers($finalProjectId)');
+      final response = await _kanbanService.getProjectMembers(finalProjectId);
+      
+      debugPrint('👥 [EDIT_TASK_MODAL] Resposta recebida:');
+      debugPrint('   - success: ${response.success}');
+      debugPrint('   - statusCode: ${response.statusCode}');
+      debugPrint('   - message: ${response.message}');
+      debugPrint('   - data: ${response.data != null ? "${response.data!.length} membros" : "null"}');
+      
+      if (response.success && response.data != null) {
+        debugPrint('👥 [EDIT_TASK_MODAL] ✅ ${response.data!.length} membros carregados');
+        setState(() {
+          // Converter ProjectMember para KanbanUser
+          _projectMembers = response.data!
+              .map((member) {
+                debugPrint('   - Membro: ${member.user.name} (${member.user.id}) - Role: ${member.role}');
+                return member.user;
+              })
+              .toList();
+          _loadingMembers = false;
+        });
+        debugPrint('👥 [EDIT_TASK_MODAL] ✅ _projectMembers atualizado com ${_projectMembers.length} usuários');
+      } else {
+        debugPrint('👥 [EDIT_TASK_MODAL] ❌ Erro ao carregar membros: ${response.message}');
+        setState(() {
+          _loadingMembers = false;
+        });
+      }
+    } catch (e, stackTrace) {
+      debugPrint('👥 [EDIT_TASK_MODAL] ❌ Exceção ao carregar membros: $e');
+      debugPrint('👥 [EDIT_TASK_MODAL] StackTrace: $stackTrace');
+      setState(() {
+        _loadingMembers = false;
+      });
+    }
+  }
+
+  List<KanbanUser> _getAvailableUsers() {
+    debugPrint('👥 [EDIT_TASK_MODAL] _getAvailableUsers - Iniciando');
+    
+    final controller = context.read<KanbanController>();
+    final board = controller.board;
+    
+    // Tentar obter projeto do objeto task primeiro
+    KanbanProject? project = widget.task.project;
+    String? projectId = widget.task.projectId;
+    
+    // Se o projeto não está populado na tarefa, usar o projectId do controller
+    if (project == null && projectId == null) {
+      projectId = controller.projectId;
+      debugPrint('👥 [EDIT_TASK_MODAL] Usando projectId do controller: $projectId');
+    }
+    
+    // Se o projeto não está populado, tentar buscar da lista de projetos do board
+    if (project == null && projectId != null && projectId.isNotEmpty) {
+      if (board != null && board.projects != null) {
+        try {
+          project = board.projects!.firstWhere(
+            (p) => p.id == projectId,
+          );
+          debugPrint('👥 [EDIT_TASK_MODAL] ✅ Projeto encontrado no board: ${project.name}');
+        } catch (e) {
+          debugPrint('👥 [EDIT_TASK_MODAL] ⚠️ Projeto não encontrado no board: $e');
+        }
+      }
+    }
+    
+    debugPrint('👥 [EDIT_TASK_MODAL] Estado atual:');
+    debugPrint('   - project: ${project != null ? "existe" : "null"}');
+    debugPrint('   - project.isPersonal: ${project?.isPersonal}');
+    debugPrint('   - projectId: ${projectId ?? "null"}');
+    debugPrint('   - _projectMembers.length: ${_projectMembers.length}');
+    
+    // Se é projeto de equipe (ou temos membros carregados), usar membros do projeto
+    // Verificamos se não é pessoal OU se temos membros carregados (mesmo sem objeto projeto)
+    final isTeamProject = project == null || project.isPersonal != true;
+    if (isTeamProject && _projectMembers.isNotEmpty) {
+      debugPrint('👥 [EDIT_TASK_MODAL] ✅ Usando membros do projeto (${_projectMembers.length} membros)');
+      // Garantir que o responsável atual está na lista
+      final usersMap = <String, KanbanUser>{};
+      for (final user in _projectMembers) {
+        usersMap[user.id] = user;
+      }
+      if (widget.task.assignedTo != null) {
+        debugPrint('👥 [EDIT_TASK_MODAL] Adicionando responsável atual: ${widget.task.assignedTo!.name}');
+        usersMap[widget.task.assignedTo!.id] = widget.task.assignedTo!;
+      }
+      final users = usersMap.values.toList();
+      debugPrint('👥 [EDIT_TASK_MODAL] Retornando ${users.length} usuários');
+      return users;
+    }
+    
+    debugPrint('👥 [EDIT_TASK_MODAL] ⚠️ Usando lógica antiga (extrair das tarefas)');
+
+    // Para projetos pessoais ou quando não há membros, usar lógica antiga
     if (board == null) return [];
 
     // Extrair usuários únicos das tarefas (assignedTo e createdBy)

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../models/chat_models.dart';
@@ -125,16 +126,23 @@ class ChatMessageBubble extends StatelessWidget {
                         ),
                       ),
                     ),
-                  // Conteúdo da mensagem
-                  SelectableText(
-                    message.content,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: isOwnMessage
-                          ? Colors.white
-                          : ThemeHelpers.textColor(context),
-                      height: 1.4,
+                  // Anexo (se houver)
+                  if (message.hasAttachment) ...[
+                    const SizedBox(height: 8),
+                    _buildAttachment(context, theme, isOwnMessage),
+                    if (message.content.isNotEmpty) const SizedBox(height: 8),
+                  ],
+                  // Conteúdo da mensagem (se houver)
+                  if (message.content.isNotEmpty)
+                    SelectableText(
+                      message.content,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: isOwnMessage
+                            ? Colors.white
+                            : ThemeHelpers.textColor(context),
+                        height: 1.4,
+                      ),
                     ),
-                  ),
                   // Status e hora
                   if (showTime)
                     Padding(
@@ -185,6 +193,126 @@ class ChatMessageBubble extends StatelessWidget {
             const SizedBox(width: 32),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildAttachment(BuildContext context, ThemeData theme, bool isOwnMessage) {
+    final attachmentUrl = message.attachmentUrl;
+    final attachmentName = message.attachmentName ?? 'Arquivo';
+    final isImage = message.imageUrl != null;
+
+    if (isImage && attachmentUrl != null) {
+      // Preview de imagem
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.network(
+          attachmentUrl,
+          width: 200,
+          height: 200,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            return Container(
+              width: 200,
+              height: 200,
+              color: ThemeHelpers.backgroundColor(context),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.broken_image,
+                    size: 48,
+                    color: ThemeHelpers.textSecondaryColor(context),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Erro ao carregar imagem',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: ThemeHelpers.textSecondaryColor(context),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      );
+    }
+
+    // Preview de arquivo/documento
+    return InkWell(
+      onTap: () async {
+        // Abrir arquivo em navegador ou app externo
+        if (attachmentUrl != null) {
+          try {
+            final uri = Uri.parse(attachmentUrl);
+            if (await canLaunchUrl(uri)) {
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+            }
+          } catch (e) {
+            debugPrint('❌ [CHAT_MESSAGE] Erro ao abrir arquivo: $e');
+          }
+        }
+      },
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isOwnMessage
+              ? Colors.white.withOpacity(0.2)
+              : ThemeHelpers.backgroundColor(context),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isOwnMessage
+                ? Colors.white.withOpacity(0.3)
+                : ThemeHelpers.borderLightColor(context),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.insert_drive_file,
+              color: isOwnMessage ? Colors.white : AppColors.primary.primary,
+              size: 32,
+            ),
+            const SizedBox(width: 12),
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    attachmentName,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: isOwnMessage
+                          ? Colors.white
+                          : ThemeHelpers.textColor(context),
+                      fontWeight: FontWeight.w600,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (message.fileType != null || message.documentMimeType != null)
+                    Text(
+                      message.fileType ?? message.documentMimeType ?? '',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: isOwnMessage
+                            ? Colors.white70
+                            : ThemeHelpers.textSecondaryColor(context),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(
+              Icons.download,
+              color: isOwnMessage ? Colors.white70 : ThemeHelpers.textSecondaryColor(context),
+              size: 20,
+            ),
+          ],
+        ),
       ),
     );
   }

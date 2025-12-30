@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../shared/widgets/app_scaffold.dart';
@@ -116,6 +117,87 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     }
   }
   
+  Future<void> _showDeleteChatDialog(BuildContext context, ChatRoom room) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Deletar conversa'),
+        content: Text(
+          'Tem certeza que deseja deletar esta conversa? Esta ação não pode ser desfeita.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('Deletar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _deleteRoom(room);
+    }
+  }
+
+  Future<void> _deleteRoom(ChatRoom room) async {
+    try {
+      // Usar leaveRoom para sair/deletar a conversa (deixa a sala)
+      final response = await _chatApi.leaveRoom(room.id);
+
+      if (response.success) {
+        // Remover da lista
+        setState(() {
+          _allRooms.removeWhere((r) => r.id == room.id);
+          _archivedRooms.removeWhere((r) => r.id == room.id);
+          
+          // Se a sala deletada estava selecionada, limpar seleção
+          if (_selectedRoom?.id == room.id) {
+            _selectedRoom = null;
+            _messages = [];
+          }
+        });
+
+        // Atualizar controller de não lidas
+        ChatUnreadController.instance.updateFromRooms(_allRooms);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Conversa deletada com sucesso'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(response.message ?? 'Erro ao deletar conversa'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ [CHAT] Erro ao deletar conversa: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao deletar conversa: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _startConversationWithUser(CompanyUser user) async {
     try {
       // Criar ou obter sala de conversa direta com o usuário
@@ -448,8 +530,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     }
   }
 
-  Future<void> _handleSendMessage(String content, {String? filePath}) async {
-    if (_selectedRoom == null || content.trim().isEmpty) return;
+  Future<void> _handleSendMessage(String content, {File? file}) async {
+    if (_selectedRoom == null || (content.trim().isEmpty && file == null)) return;
 
     // Criar mensagem temporária para feedback imediato
     final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
@@ -458,7 +540,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       roomId: _selectedRoom!.id,
       senderId: _currentUserId ?? '',
       senderName: 'Você',
-      content: content.trim(),
+      content: content.trim().isEmpty ? (file != null ? '📎 ${file.path.split('/').last}' : '') : content.trim(),
       status: ChatMessageStatus.sending,
       isEdited: false,
       isDeleted: false,
@@ -473,10 +555,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       _scrollToBottom();
     });
 
-    // TODO: Implementar envio com arquivo
+    // Enviar mensagem com ou sem arquivo
     final response = await _chatApi.sendMessage(
       roomId: _selectedRoom!.id,
       content: content.trim(),
+      file: file,
     );
 
     if (response.success && response.data != null) {
@@ -738,6 +821,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
                           user.name,
@@ -759,6 +843,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                       ],
                     ),
                   ),
+                  const SizedBox(width: 8),
                   // Ícone de chat
                   Icon(
                     Icons.chat_bubble_outline,
@@ -841,6 +926,27 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+              ),
+              // Menu de opções
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert),
+                onSelected: (value) {
+                  if (value == 'delete') {
+                    _showDeleteChatDialog(context, _selectedRoom!);
+                  }
+                },
+                itemBuilder: (BuildContext context) => [
+                  const PopupMenuItem<String>(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                        SizedBox(width: 8),
+                        Text('Deletar conversa'),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

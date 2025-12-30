@@ -118,24 +118,33 @@ class ApiConstants {
   static String kanbanBoard(String teamId) => '/kanban/board/$teamId';
   static const String kanbanColumns = '/kanban/columns';
   static String kanbanColumnById(String id) => '/kanban/columns/$id';
-  static String kanbanColumnsReorder(String teamId) => '/kanban/columns/reorder/$teamId';
+  static String kanbanColumnsReorder(String teamId) =>
+      '/kanban/columns/reorder/$teamId';
   static const String kanbanTasks = '/kanban/tasks';
   static String kanbanTaskById(String id) => '/kanban/tasks/$id';
   static const String kanbanTasksMove = '/kanban/tasks/move';
   static String kanbanTaskHistory(String id) => '/kanban/tasks/$id/history';
-  static String kanbanTaskComments(String taskId) => '/kanban/tasks/$taskId/comments';
-  static String kanbanTaskComment(String taskId, String commentId) => '/kanban/tasks/$taskId/comments/$commentId';
+  static String kanbanTaskComments(String taskId) =>
+      '/kanban/tasks/$taskId/comments';
+  static String kanbanTaskComment(String taskId, String commentId) =>
+      '/kanban/tasks/$taskId/comments/$commentId';
   static String kanbanTags(String teamId) => '/kanban/tags/$teamId';
-  
+
   // Endpoints de Projetos Kanban
   static const String kanbanProjects = '/kanban/projects';
   static String kanbanProjectById(String id) => '/kanban/projects/$id';
-  static String kanbanProjectsByTeam(String teamId) => '/kanban/projects/team/$teamId';
+  static String kanbanProjectsByTeam(String teamId) =>
+      '/kanban/projects/team/$teamId';
   static const String kanbanProjectsPersonal = '/kanban/projects/team/personal';
   static const String kanbanProjectsFiltered = '/kanban/projects/filtered';
-  static String kanbanProjectFinalize(String id) => '/kanban/projects/$id/finalize';
-  static String kanbanProjectsTeamHistory(String teamId) => '/kanban/projects/team/$teamId/history';
-  static String kanbanProjectHistory(String id) => '/kanban/projects/$id/history';
+  static String kanbanProjectFinalize(String id) =>
+      '/kanban/projects/$id/finalize';
+  static String kanbanProjectsTeamHistory(String teamId) =>
+      '/kanban/projects/team/$teamId/history';
+  static String kanbanProjectHistory(String id) =>
+      '/kanban/projects/$id/history';
+  static String kanbanProjectMembers(String projectId) =>
+      '/kanban/projects/$projectId/members';
 
   // Endpoints de Documentos
   static const String documents = '/documents';
@@ -143,45 +152,80 @@ class ApiConstants {
   static String documentUpdate(String id) => '/documents/$id';
   static const String documentsUpload = '/documents/upload';
   static String documentApprove(String id) => '/documents/$id/approve';
-  static String documentsByClient(String clientId) => '/documents/client/$clientId';
-  static String documentsByProperty(String propertyId) => '/documents/property/$propertyId';
+  static String documentsByClient(String clientId) =>
+      '/documents/client/$clientId';
+  static String documentsByProperty(String propertyId) =>
+      '/documents/property/$propertyId';
   static String documentsExpiring(int days) => '/documents/expiring/$days';
-  
+
   // Endpoints de Assinaturas
-  static String documentSignatures(String documentId) => '/documents/$documentId/signatures';
-  static String documentSignaturesBatch(String documentId) => '/documents/$documentId/signatures/batch';
-  static String documentSignaturesStats(String documentId) => '/documents/$documentId/signatures/stats';
-  static String documentSignatureById(String documentId, String signatureId) => '/documents/$documentId/signatures/$signatureId';
-  static String documentSignatureSendEmail(String documentId, String signatureId) => '/documents/$documentId/signatures/$signatureId/send-email';
-  static String documentSignatureResendEmail(String documentId, String signatureId) => '/documents/$documentId/signatures/$signatureId/resend-email';
-  static String documentSignatureViewed(String documentId, String signatureId) => '/documents/$documentId/signatures/$signatureId/viewed';
-  static String documentSignatureSigned(String documentId, String signatureId) => '/documents/$documentId/signatures/$signatureId/signed';
-  static String documentSignatureRejected(String documentId, String signatureId) => '/documents/$documentId/signatures/$signatureId/rejected';
-  static String signaturesByClient(String clientId) => '/signatures/client/$clientId';
+  static String documentSignatures(String documentId) =>
+      '/documents/$documentId/signatures';
+  static String documentSignaturesBatch(String documentId) =>
+      '/documents/$documentId/signatures/batch';
+  static String documentSignaturesStats(String documentId) =>
+      '/documents/$documentId/signatures/stats';
+  static String documentSignatureById(String documentId, String signatureId) =>
+      '/documents/$documentId/signatures/$signatureId';
+  static String documentSignatureSendEmail(
+    String documentId,
+    String signatureId,
+  ) => '/documents/$documentId/signatures/$signatureId/send-email';
+  static String documentSignatureResendEmail(
+    String documentId,
+    String signatureId,
+  ) => '/documents/$documentId/signatures/$signatureId/resend-email';
+  static String documentSignatureViewed(
+    String documentId,
+    String signatureId,
+  ) => '/documents/$documentId/signatures/$signatureId/viewed';
+  static String documentSignatureSigned(
+    String documentId,
+    String signatureId,
+  ) => '/documents/$documentId/signatures/$signatureId/signed';
+  static String documentSignatureRejected(
+    String documentId,
+    String signatureId,
+  ) => '/documents/$documentId/signatures/$signatureId/rejected';
+  static String signaturesByClient(String clientId) =>
+      '/signatures/client/$clientId';
   static const String signaturesPending = '/signatures/pending';
   static const String signatures = '/signatures';
   static const String publicSignature = '/public/signatures';
-  static String publicSignatureById(String signatureId) => '/public/signatures/$signatureId';
-  
+  static String publicSignatureById(String signatureId) =>
+      '/public/signatures/$signatureId';
+
   // Endpoints de Upload Tokens
   static const String uploadTokens = '/documents/upload-tokens';
-  static String uploadTokenById(String tokenId) => '/documents/upload-tokens/$tokenId';
-  static String uploadTokenSendEmail(String tokenId) => '/documents/upload-tokens/$tokenId/send-email';
-  static String uploadTokenRevoke(String tokenId) => '/documents/upload-tokens/$tokenId/revoke';
+  static String uploadTokenById(String tokenId) =>
+      '/documents/upload-tokens/$tokenId';
+  static String uploadTokenSendEmail(String tokenId) =>
+      '/documents/upload-tokens/$tokenId/send-email';
+  static String uploadTokenRevoke(String tokenId) =>
+      '/documents/upload-tokens/$tokenId/revoke';
   static const String publicUploadDocuments = '/public/upload-documents';
-  static String publicUploadDocumentsInfo(String token) => '/public/upload-documents/$token/info';
-  static String publicUploadDocumentsValidate(String token) => '/public/upload-documents/$token/validate';
-  static String publicUploadDocumentsUpload(String token) => '/public/upload-documents/$token/upload';
-  static String publicUploadDocumentsUploadMultiple(String token) => '/public/upload-documents/$token/upload-multiple';
+  static String publicUploadDocumentsInfo(String token) =>
+      '/public/upload-documents/$token/info';
+  static String publicUploadDocumentsValidate(String token) =>
+      '/public/upload-documents/$token/validate';
+  static String publicUploadDocumentsUpload(String token) =>
+      '/public/upload-documents/$token/upload';
+  static String publicUploadDocumentsUploadMultiple(String token) =>
+      '/public/upload-documents/$token/upload-multiple';
 
   // Endpoints de Chat
   static const String chatRooms = '/chat/rooms';
   static String chatRoomById(String id) => '/chat/rooms/$id';
-  static String chatRoomUploadImage(String id) => '/chat/rooms/$id/upload-image';
-  static String chatRoomParticipants(String id) => '/chat/rooms/$id/participants';
-  static String chatRoomParticipantsRemove(String id) => '/chat/rooms/$id/participants/remove';
-  static String chatRoomPromoteAdmin(String id) => '/chat/rooms/$id/promote-admin';
-  static String chatRoomRemoveAdmin(String id) => '/chat/rooms/$id/remove-admin';
+  static String chatRoomUploadImage(String id) =>
+      '/chat/rooms/$id/upload-image';
+  static String chatRoomParticipants(String id) =>
+      '/chat/rooms/$id/participants';
+  static String chatRoomParticipantsRemove(String id) =>
+      '/chat/rooms/$id/participants/remove';
+  static String chatRoomPromoteAdmin(String id) =>
+      '/chat/rooms/$id/promote-admin';
+  static String chatRoomRemoveAdmin(String id) =>
+      '/chat/rooms/$id/remove-admin';
   static String chatRoomArchive(String id) => '/chat/rooms/$id/archive';
   static String chatRoomUnarchive(String id) => '/chat/rooms/$id/unarchive';
   static String chatRoomLeave(String id) => '/chat/rooms/$id/leave';
@@ -192,6 +236,7 @@ class ApiConstants {
     if (offset != null) params.add('offset=$offset');
     return '/chat/rooms/$id/messages${params.isNotEmpty ? '?${params.join('&')}' : ''}';
   }
+
   static String chatRoomHistory(String id) => '/chat/rooms/$id/history';
   static const String chatMessages = '/chat/messages';
   static const String chatMessagesEdit = '/chat/messages/edit';

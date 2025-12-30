@@ -737,6 +737,45 @@ class Attachment {
   }
 }
 
+/// Membro de Projeto (Team Member)
+class ProjectMember {
+  final String id;
+  final String role; // 'member' | 'leader'
+  final bool isActive;
+  final DateTime createdAt;
+  final KanbanUser user;
+
+  ProjectMember({
+    required this.id,
+    required this.role,
+    required this.isActive,
+    required this.createdAt,
+    required this.user,
+  });
+
+  factory ProjectMember.fromJson(Map<String, dynamic> json) {
+    return ProjectMember(
+      id: json['id']?.toString() ?? '',
+      role: json['role']?.toString() ?? 'member',
+      isActive: json['isActive'] == true,
+      createdAt: DateTime.parse(json['createdAt'].toString()),
+      user: KanbanUser.fromJson(json['user'] as Map<String, dynamic>),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'role': role,
+      'isActive': isActive,
+      'createdAt': createdAt.toIso8601String(),
+      'user': user.toJson(),
+    };
+  }
+
+  bool get isLeader => role == 'leader';
+}
+
 /// Comentário de tarefa
 class KanbanTaskComment {
   final String id;
