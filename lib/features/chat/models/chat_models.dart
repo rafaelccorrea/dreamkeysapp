@@ -172,10 +172,11 @@ class ChatRoom {
       lastMessageAt:
           json['lastMessageAt'] != null || json['last_message_at'] != null
           ? DateTime.parse(
-              json['lastMessageAt']?.toString() ??
-                  json['last_message_at']?.toString() ??
-                  '',
-            )
+                  json['lastMessageAt']?.toString() ??
+                      json['last_message_at']?.toString() ??
+                      '',
+                )
+                .toLocal() // Converter UTC para local
           : null,
       participants: participantsList
           .map((p) => ChatParticipant.fromJson(p as Map<String, dynamic>))

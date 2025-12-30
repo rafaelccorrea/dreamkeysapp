@@ -21,8 +21,10 @@ class ChatRoomListItem extends StatelessWidget {
   String _formatDateTime(DateTime? dateTime) {
     if (dateTime == null) return '';
 
-    // Converter para timezone local antes de formatar
-    final localTime = dateTime.toLocal();
+    // A data vem do backend em UTC, precisamos converter para local
+    // Se a data já está em UTC (isUtc = true), usar toLocal()
+    // Caso contrário, assumir que já está em local
+    final localTime = dateTime.isUtc ? dateTime.toLocal() : dateTime;
     final now = DateTime.now();
     final difference = now.difference(localTime);
 

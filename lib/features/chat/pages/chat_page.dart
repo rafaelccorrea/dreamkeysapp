@@ -29,10 +29,11 @@ class ChatPage extends StatefulWidget {
   State<ChatPage> createState() => _ChatPageState();
 }
 
-class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin {
+class _ChatPageState extends State<ChatPage>
+    with SingleTickerProviderStateMixin {
   final ChatApiService _chatApi = ChatApiService.instance;
   final ChatSocketService _chatSocket = ChatSocketService.instance;
-  
+
   List<ChatRoom> _allRooms = [];
   List<ChatRoom> _archivedRooms = [];
   ChatRoom? _selectedRoom;
@@ -43,7 +44,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   bool _isLoadingMessages = false;
   bool _isLoadingUsers = false;
   String? _errorMessage;
-  
+
   int _messageOffset = 0;
   static const int _messagesLimit = 50;
   final ScrollController _messagesScrollController = ScrollController();
@@ -65,7 +66,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     rooms.sort((a, b) {
       final aDate = a.lastMessageAt ?? a.createdAt;
       final bDate = b.lastMessageAt ?? b.createdAt;
-      return bDate.compareTo(aDate); // Ordem decrescente (mais recente primeiro)
+      return bDate.compareTo(
+        aDate,
+      ); // Ordem decrescente (mais recente primeiro)
     });
     return rooms;
   }
@@ -73,33 +76,38 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this); // Adicionada tab de Colaboradores
+    _tabController = TabController(
+      length: 3,
+      vsync: this,
+    ); // Adicionada tab de Colaboradores
     _tabController.addListener(_onTabChanged);
     _initialize();
   }
 
   void _onTabChanged() {
     if (_tabController.indexIsChanging) return;
-    
+
     // Se mudou para a tab de colaboradores, carregar lista de usuários
     if (_tabController.index == 2 && _companyUsers.isEmpty) {
       _loadCompanyUsers();
     }
-    
+
     setState(() {}); // Atualizar lista baseado na tab
   }
-  
+
   Future<void> _loadCompanyUsers() async {
     setState(() {
       _isLoadingUsers = true;
     });
-    
+
     try {
       final response = await _chatApi.getCompanyUsers();
       if (response.success && response.data != null) {
         setState(() {
           // Filtrar o usuário atual da lista
-          _companyUsers = response.data!.where((u) => u.id != _currentUserId).toList();
+          _companyUsers = response.data!
+              .where((u) => u.id != _currentUserId)
+              .toList();
           // Ordenar por nome
           _companyUsers.sort((a, b) => a.name.compareTo(b.name));
           _isLoadingUsers = false;
@@ -116,8 +124,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       debugPrint('❌ [CHAT] Erro ao carregar colaboradores: $e');
     }
   }
-  
-  Future<void> _showDeleteChatDialog(BuildContext context, ChatRoom room) async {
+
+  Future<void> _showDeleteChatDialog(
+    BuildContext context,
+    ChatRoom room,
+  ) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -156,7 +167,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         setState(() {
           _allRooms.removeWhere((r) => r.id == room.id);
           _archivedRooms.removeWhere((r) => r.id == room.id);
-          
+
           // Se a sala deletada estava selecionada, limpar seleção
           if (_selectedRoom?.id == room.id) {
             _selectedRoom = null;
@@ -205,19 +216,21 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         type: ChatRoomType.direct,
         userId: user.id,
       );
-      
+
       if (response.success && response.data != null) {
         // Selecionar a sala criada/obtida
         await _selectRoom(response.data!);
-        
+
         // Se não estava na lista, adicionar
         if (!_allRooms.any((r) => r.id == response.data!.id)) {
           setState(() {
             _allRooms.insert(0, response.data!);
-            _archivedRooms = _allRooms.where((r) => r.isArchived == true).toList();
+            _archivedRooms = _allRooms
+                .where((r) => r.isArchived == true)
+                .toList();
           });
         }
-        
+
         // Voltar para a tab "Todas" para ver a conversa
         _tabController.animateTo(0);
       } else {
@@ -248,12 +261,12 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
     await _loadCompanyId();
     await _loadRooms();
     _setupWebSocket();
-    
+
     // Carregar colaboradores se estiver na tab de colaboradores
     if (_tabController.index == 2) {
       await _loadCompanyUsers();
     }
-    
+
     // Se roomId foi fornecido, selecionar automaticamente
     if (widget.roomId != null && mounted) {
       _selectRoomById(widget.roomId!);
@@ -273,7 +286,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         if (token != null) {
           final payload = JwtUtils.decodeToken(token);
           if (payload != null) {
-            final userId = payload['sub']?.toString() ?? payload['userId']?.toString();
+            final userId =
+                payload['sub']?.toString() ?? payload['userId']?.toString();
             setState(() {
               _currentUserId = userId;
             });
@@ -288,7 +302,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   Future<void> _loadCompanyId() async {
     try {
       final companyId = await SecureStorageService.instance.getCompanyId();
-      
+
       // Conectar WebSocket se tiver companyId
       if (companyId != null) {
         _chatSocket.connect(companyId);
@@ -312,12 +326,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         sortedRooms.sort((a, b) {
           final aDate = a.lastMessageAt ?? a.createdAt;
           final bDate = b.lastMessageAt ?? b.createdAt;
-          return bDate.compareTo(aDate); // Ordem decrescente (mais recente primeiro)
+          return bDate.compareTo(
+            aDate,
+          ); // Ordem decrescente (mais recente primeiro)
         });
 
         setState(() {
           _allRooms = sortedRooms;
-          _archivedRooms = _allRooms.where((r) => r.isArchived == true).toList();
+          _archivedRooms = _allRooms
+              .where((r) => r.isArchived == true)
+              .toList();
           _isLoadingRooms = false;
         });
         // Atualizar controller de não lidas
@@ -339,13 +357,13 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   void _setupWebSocket() {
     // Notificar o controller sobre a sala atualmente aberta
     ChatUnreadController.instance.setCurrentlyOpenRoom(_selectedRoom?.id);
-    
+
     // Quando o ChatPage chama setOnMessageReceived, ele substitui o callback do controller
     // Por isso, precisamos também chamar o método do controller aqui
     _chatSocket.setOnMessageReceived((message) {
       // Notificar o controller sobre a mensagem (ele decide se incrementa baseado na sala aberta)
       ChatUnreadController.instance.onMessageReceived(message);
-      
+
       // Se a sala está aberta, atualizar UI e marcar como lida
       if (mounted && message.roomId == _selectedRoom?.id) {
         setState(() {
@@ -383,7 +401,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
               isArchived: _allRooms[index].isArchived,
               unreadCount: _allRooms[index].unreadCount,
             );
-            _archivedRooms = _allRooms.where((r) => r.isArchived == true).toList();
+            _archivedRooms = _allRooms
+                .where((r) => r.isArchived == true)
+                .toList();
           }
         });
       }
@@ -392,7 +412,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
 
   void _updateRoomLastMessage(ChatMessage message) {
     if (!mounted) return; // Verificar se o widget ainda está montado
-    
+
     setState(() {
       final index = _allRooms.indexWhere((r) => r.id == message.roomId);
       if (index != -1) {
@@ -415,7 +435,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         _allRooms.sort((a, b) {
           final aDate = a.lastMessageAt ?? a.createdAt;
           final bDate = b.lastMessageAt ?? b.createdAt;
-          return bDate.compareTo(aDate); // Ordem decrescente (mais recente primeiro)
+          return bDate.compareTo(
+            aDate,
+          ); // Ordem decrescente (mais recente primeiro)
         });
         _archivedRooms = _allRooms.where((r) => r.isArchived == true).toList();
       }
@@ -473,7 +495,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   Future<void> _selectRoomById(String roomId) async {
     final room = _allRooms.firstWhere(
       (r) => r.id == roomId,
-      orElse: () => _allRooms.isNotEmpty ? _allRooms.first : throw Exception('Room not found'),
+      orElse: () => _allRooms.isNotEmpty
+          ? _allRooms.first
+          : throw Exception('Room not found'),
     );
     await _selectRoom(room);
   }
@@ -496,10 +520,13 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       if (response.success && response.data != null) {
         setState(() {
           if (loadMore) {
-            _messages.insertAll(0, response.data!.reversed);
+            // Para carregar mais mensagens antigas, inserir no início
+            // A API retorna em ordem crescente (mais antigas primeiro)
+            _messages.insertAll(0, response.data!);
             _messageOffset += response.data!.length;
           } else {
-            _messages = response.data!.reversed.toList();
+            // Mensagens em ordem crescente (mais antigas primeiro, mais novas por último)
+            _messages = response.data!;
             _messageOffset = response.data!.length;
           }
           _isLoadingMessages = false;
@@ -531,7 +558,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   }
 
   Future<void> _handleSendMessage(String content, {File? file}) async {
-    if (_selectedRoom == null || (content.trim().isEmpty && file == null)) return;
+    if (_selectedRoom == null || (content.trim().isEmpty && file == null))
+      return;
 
     // Criar mensagem temporária para feedback imediato
     final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
@@ -540,7 +568,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       roomId: _selectedRoom!.id,
       senderId: _currentUserId ?? '',
       senderName: 'Você',
-      content: content.trim().isEmpty ? (file != null ? '📎 ${file.path.split('/').last}' : '') : content.trim(),
+      content: content.trim().isEmpty
+          ? (file != null ? '📎 ${file.path.split('/').last}' : '')
+          : content.trim(),
       status: ChatMessageStatus.sending,
       isEdited: false,
       isDeleted: false,
@@ -631,9 +661,18 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             dividerColor: Colors.transparent,
             overlayColor: WidgetStateProperty.all(Colors.transparent),
             tabs: const [
-              Tab(icon: Icon(Icons.chat_bubble_outline, size: 20), text: 'Todas'),
-              Tab(icon: Icon(Icons.archive_outlined, size: 20), text: 'Arquivadas'),
-              Tab(icon: Icon(Icons.people_outline, size: 20), text: 'Colaboradores'),
+              Tab(
+                icon: Icon(Icons.chat_bubble_outline, size: 20),
+                text: 'Todas',
+              ),
+              Tab(
+                icon: Icon(Icons.archive_outlined, size: 20),
+                text: 'Arquivadas',
+              ),
+              Tab(
+                icon: Icon(Icons.people_outline, size: 20),
+                text: 'Colaboradores',
+              ),
             ],
           ),
         ),
@@ -701,7 +740,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       ],
     );
   }
-  
+
   Widget _buildUsersList(BuildContext context, ThemeData theme) {
     if (_isLoadingUsers) {
       return ListView.builder(
@@ -720,7 +759,11 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        SkeletonText(width: double.infinity, height: 16, margin: const EdgeInsets.only(bottom: 8)),
+                        SkeletonText(
+                          width: double.infinity,
+                          height: 16,
+                          margin: const EdgeInsets.only(bottom: 8),
+                        ),
                         SkeletonText(width: 150, height: 14),
                       ],
                     ),
@@ -732,7 +775,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         },
       );
     }
-    
+
     if (_companyUsers.isEmpty) {
       return Center(
         child: Column(
@@ -754,7 +797,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
         ),
       );
     }
-    
+
     return ListView.builder(
       padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: _companyUsers.length,
@@ -782,11 +825,17 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                     children: [
                       CircleAvatar(
                         radius: 24,
-                        backgroundImage: user.avatar != null ? NetworkImage(user.avatar!) : null,
+                        backgroundImage: user.avatar != null
+                            ? NetworkImage(user.avatar!)
+                            : null,
                         child: user.avatar == null
                             ? Text(
-                                user.name.isNotEmpty ? user.name[0].toUpperCase() : '?',
-                                style: const TextStyle(fontWeight: FontWeight.bold),
+                                user.name.isNotEmpty
+                                    ? user.name[0].toUpperCase()
+                                    : '?',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
                               )
                             : null,
                       ),
@@ -909,12 +958,17 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                   },
                 ),
               CircleAvatar(
-                backgroundImage: _selectedRoom!.getDisplayImage(_currentUserId) != null
-                    ? NetworkImage(_selectedRoom!.getDisplayImage(_currentUserId)!)
+                backgroundImage:
+                    _selectedRoom!.getDisplayImage(_currentUserId) != null
+                    ? NetworkImage(
+                        _selectedRoom!.getDisplayImage(_currentUserId)!,
+                      )
                     : null,
                 child: _selectedRoom!.getDisplayImage(_currentUserId) == null
                     ? Text(
-                        _selectedRoom!.getDisplayName(_currentUserId)[0].toUpperCase(),
+                        _selectedRoom!
+                            .getDisplayName(_currentUserId)[0]
+                            .toUpperCase(),
                       )
                     : null,
               ),
@@ -967,9 +1021,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                 ),
         ),
         // Input de mensagem
-        ChatInput(
-          onSend: _handleSendMessage,
-        ),
+        ChatInput(onSend: _handleSendMessage),
       ],
     );
   }
@@ -995,11 +1047,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             child: Row(
               children: [
                 // Avatar skeleton
-                SkeletonBox(
-                  width: 48,
-                  height: 48,
-                  borderRadius: 24,
-                ),
+                SkeletonBox(width: 48, height: 48, borderRadius: 24),
                 const SizedBox(width: 12),
                 // Conteúdo skeleton
                 Expanded(
@@ -1013,17 +1061,8 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
                       ),
                       Row(
                         children: [
-                          Expanded(
-                            child: SkeletonText(
-                              width: 150,
-                              height: 14,
-                            ),
-                          ),
-                          SkeletonBox(
-                            width: 40,
-                            height: 20,
-                            borderRadius: 10,
-                          ),
+                          Expanded(child: SkeletonText(width: 150, height: 14)),
+                          SkeletonBox(width: 40, height: 20, borderRadius: 10),
                         ],
                       ),
                     ],
@@ -1042,8 +1081,9 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       padding: const EdgeInsets.all(16),
       itemCount: 10,
       itemBuilder: (context, index) {
-        final isOwnMessage = index % 3 == 0; // Alternar entre mensagens próprias e outras
-        
+        final isOwnMessage =
+            index % 3 == 0; // Alternar entre mensagens próprias e outras
+
         return Padding(
           padding: const EdgeInsets.only(bottom: 16),
           child: Row(
@@ -1053,16 +1093,15 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (!isOwnMessage) ...[
-                SkeletonBox(
-                  width: 32,
-                  height: 32,
-                  borderRadius: 16,
-                ),
+                SkeletonBox(width: 32, height: 32, borderRadius: 16),
                 const SizedBox(width: 8),
               ],
               Flexible(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
                   decoration: BoxDecoration(
                     color: isOwnMessage
                         ? AppColors.primary.primary.withOpacity(0.1)
@@ -1104,11 +1143,7 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
               ),
               if (isOwnMessage) ...[
                 const SizedBox(width: 8),
-                SkeletonBox(
-                  width: 32,
-                  height: 32,
-                  borderRadius: 16,
-                ),
+                SkeletonBox(width: 32, height: 32, borderRadius: 16),
               ],
             ],
           ),
@@ -1121,16 +1156,16 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
   void dispose() {
     // Limpar sala aberta quando a página é destruída
     ChatUnreadController.instance.setCurrentlyOpenRoom(null);
-    
+
     // Restaurar callback do controller (ele precisa do callback para atualizar contadores)
     // O controller tem seu próprio método onMessageReceived que será chamado
     _chatSocket.setOnMessageReceived((message) {
       ChatUnreadController.instance.onMessageReceived(message);
     });
-    
+
     // Limpar callback de atualização de sala (não é crítico para o controller)
     _chatSocket.setOnRoomUpdated((_, __, ___) {});
-    
+
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _messagesScrollController.dispose();
@@ -1151,11 +1186,19 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
       canPop: false,
       onPopInvoked: (didPop) {
         if (didPop) return;
-        // Sempre redirecionar para o dashboard ao pressionar voltar
-        Navigator.of(context).pushNamedAndRemoveUntil(
-          AppRoutes.home,
-          (route) => route.settings.name == AppRoutes.home,
-        );
+
+        // Se há uma sala selecionada, apenas deselecionar (voltar para lista)
+        if (_selectedRoom != null) {
+          setState(() {
+            _selectedRoom = null;
+          });
+        } else {
+          // Se não há sala selecionada, voltar para o dashboard
+          Navigator.of(context).pushNamedAndRemoveUntil(
+            AppRoutes.home,
+            (route) => route.settings.name == AppRoutes.home,
+          );
+        }
       },
       child: AppScaffold(
         title: _selectedRoom != null
@@ -1169,46 +1212,50 @@ class _ChatPageState extends State<ChatPage> with SingleTickerProviderStateMixin
             : isSmallScreen && _selectedRoom == null
             ? _buildRoomsList(context, theme)
             : Row(
-              children: [
-                // Lista de conversas (sidebar)
-                Container(
-                  width: 350,
-                  decoration: BoxDecoration(
-                    border: Border(
-                      right: BorderSide(
-                        color: ThemeHelpers.borderColor(context),
-                        width: 1,
+                children: [
+                  // Lista de conversas (sidebar)
+                  Container(
+                    width: 350,
+                    decoration: BoxDecoration(
+                      border: Border(
+                        right: BorderSide(
+                          color: ThemeHelpers.borderColor(context),
+                          width: 1,
+                        ),
                       ),
                     ),
+                    child: _buildRoomsList(context, theme),
                   ),
-                  child: _buildRoomsList(context, theme),
-                ),
-                // Área de mensagens (apenas em telas grandes ou quando há sala selecionada)
-                Expanded(
-                  child: _selectedRoom == null
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.chat_bubble_outline,
-                                size: 64,
-                                color: ThemeHelpers.textSecondaryColor(context),
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                'Selecione uma conversa',
-                                style: theme.textTheme.bodyLarge?.copyWith(
-                                  color: ThemeHelpers.textSecondaryColor(context),
+                  // Área de mensagens (apenas em telas grandes ou quando há sala selecionada)
+                  Expanded(
+                    child: _selectedRoom == null
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.chat_bubble_outline,
+                                  size: 64,
+                                  color: ThemeHelpers.textSecondaryColor(
+                                    context,
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ),
-                        )
-                      : _buildMessagesArea(context, theme),
-                ),
-              ],
-            ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  'Selecione uma conversa',
+                                  style: theme.textTheme.bodyLarge?.copyWith(
+                                    color: ThemeHelpers.textSecondaryColor(
+                                      context,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        : _buildMessagesArea(context, theme),
+                  ),
+                ],
+              ),
       ),
     );
   }
