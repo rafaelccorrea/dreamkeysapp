@@ -32,11 +32,19 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   bool _isLoading = true;
   Property? _property;
   String? _errorMessage;
+  final PageController _imagePageController = PageController();
+  int _currentImageIndex = 0;
 
   @override
   void initState() {
     super.initState();
     _loadProperty();
+  }
+
+  @override
+  void dispose() {
+    _imagePageController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadProperty() async {
@@ -686,12 +694,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   Widget _buildImageGallery(BuildContext context, Property property) {
     final images = property.images ?? [];
+    final theme = Theme.of(context);
 
     if (images.isEmpty) {
       return Container(
         width: double.infinity,
         height: 300,
-        color: Theme.of(context).brightness == Brightness.dark
+        color: theme.brightness == Brightness.dark
             ? AppColors.background.backgroundSecondaryDarkMode
             : AppColors.background.backgroundSecondary,
         child: Icon(
@@ -704,25 +713,95 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
     return SizedBox(
       height: 300,
-      child: PageView.builder(
-        itemCount: images.length,
-        itemBuilder: (context, index) {
-          final image = images[index];
-          return ShimmerImage(
-            imageUrl: image.url,
-            width: double.infinity,
-            height: 300,
-            fit: BoxFit.cover,
-            errorWidget: Container(
-              color: AppColors.background.backgroundSecondary,
-              child: Icon(
-                Icons.broken_image_outlined,
-                size: 64,
-                color: ThemeHelpers.textSecondaryColor(context),
+      child: Stack(
+        children: [
+          PageView.builder(
+            controller: _imagePageController,
+            itemCount: images.length,
+            onPageChanged: (index) {
+              setState(() {
+                _currentImageIndex = index;
+              });
+            },
+            itemBuilder: (context, index) {
+              final image = images[index];
+              return ShimmerImage(
+                imageUrl: image.url,
+                width: double.infinity,
+                height: 300,
+                fit: BoxFit.cover,
+                errorWidget: Container(
+                  color: AppColors.background.backgroundSecondary,
+                  child: Icon(
+                    Icons.broken_image_outlined,
+                    size: 64,
+                    color: ThemeHelpers.textSecondaryColor(context),
+                  ),
+                ),
+              );
+            },
+          ),
+          // Seta esquerda (anterior)
+          if (images.length > 1 && _currentImageIndex > 0)
+            Positioned(
+              left: 12,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: GestureDetector(
+                  onTap: () {
+                    _imagePageController.previousPage(
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeInOut,
+                    );
+                  },
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.3),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.chevron_left,
+                      color: AppColors.primary.primary,
+                      size: 24,
+                    ),
+                  ),
+                ),
               ),
             ),
-          );
-        },
+          // Seta direita (próxima)
+          if (images.length > 1 && _currentImageIndex < images.length - 1)
+            Positioned(
+              right: 12,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: GestureDetector(
+                  onTap: () {
+                    _imagePageController.nextPage(
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeInOut,
+                    );
+                  },
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.3),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.chevron_right,
+                      color: AppColors.primary.primary,
+                      size: 24,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
