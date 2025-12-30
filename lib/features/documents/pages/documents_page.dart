@@ -8,6 +8,7 @@ import '../../../core/routes/app_routes.dart';
 import '../services/document_service.dart';
 import '../models/document_model.dart';
 import '../widgets/document_filters_drawer.dart';
+import '../widgets/upload_tokens_modal.dart';
 
 /// Página de listagem de documentos
 class DocumentsPage extends StatefulWidget {
@@ -366,6 +367,19 @@ class _DocumentsPageState extends State<DocumentsPage>
         ),
       ),
       actions: [
+        IconButton(
+          icon: const Icon(Icons.link),
+          onPressed: () {
+            showModalBottomSheet(
+              context: context,
+              isScrollControlled: true,
+              useSafeArea: true,
+              backgroundColor: Colors.transparent,
+              builder: (context) => const UploadTokensModal(),
+            );
+          },
+          tooltip: 'Links Públicos',
+        ),
         IconButton(
           icon: Stack(
             children: [

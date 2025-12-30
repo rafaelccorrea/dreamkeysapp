@@ -9,6 +9,7 @@ import '../services/company_service.dart';
 import '../services/profile_service.dart';
 import '../services/dashboard_service.dart';
 import '../../features/notifications/controllers/notification_controller.dart';
+import '../../features/chat/controllers/chat_unread_controller.dart';
 
 /// Drawer (menu lateral) do aplicativo
 class AppDrawer extends StatefulWidget {
@@ -467,14 +468,21 @@ class _AppDrawerState extends State<AppDrawer> {
                 _buildDrawerItem(
                   context: context,
                   currentRoute: activeRoute,
-                  route: '/chat',
+                  route: AppRoutes.chat,
                   icon: Icons.chat_bubble_outline,
                   activeIcon: Icons.chat_bubble,
                   title: 'Mensagens',
                   onTap: () {
                     Navigator.pop(context);
-                    // TODO: Navegar para tela de chat
-                    _showComingSoon(context);
+                    // Se já está na tela de chat, não navega novamente
+                    if (activeRoute == AppRoutes.chat || 
+                        activeRoute.startsWith('/chat')) {
+                      return;
+                    }
+                    Navigator.of(context).pushNamedAndRemoveUntil(
+                      AppRoutes.chat,
+                      (route) => false,
+                    );
                   },
                 ),
                 _buildDrawerItem(
@@ -541,7 +549,9 @@ class _AppDrawerState extends State<AppDrawer> {
     bool isActive = false,
   }) {
     final theme = Theme.of(context);
-    final active = isActive || (currentRoute == route && route.isNotEmpty);
+    final active = isActive || 
+        (currentRoute == route && route.isNotEmpty) ||
+        (route == AppRoutes.chat && currentRoute.startsWith('/chat'));
 
     final isDark = theme.brightness == Brightness.dark;
     final primaryColor = isDark 
@@ -560,8 +570,14 @@ class _AppDrawerState extends State<AppDrawer> {
     int notificationCount = 0;
     if (route.isNotEmpty && !isDestructive) {
       try {
-        final notificationController = context.watch<NotificationController>();
-        notificationCount = notificationController.getCountForRoute(route);
+        // Para chat, usar ChatUnreadController
+        if (route == AppRoutes.chat || route.startsWith('/chat')) {
+          final chatController = context.watch<ChatUnreadController>();
+          notificationCount = chatController.totalUnreadCount;
+        } else {
+          final notificationController = context.watch<NotificationController>();
+          notificationCount = notificationController.getCountForRoute(route);
+        }
       } catch (e) {
         // Se não conseguir ler o controller, ignora
       }

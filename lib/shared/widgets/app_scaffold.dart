@@ -3,6 +3,7 @@ import '../../core/theme/theme_helpers.dart';
 import '../../core/routes/app_routes.dart';
 import 'app_drawer.dart';
 import 'app_bottom_navigation.dart';
+import '../../features/chat/widgets/chat_floating_button.dart';
 
 /// Scaffold customizado do aplicativo com AppBar, Drawer e Bottom Navigation
 class AppScaffold extends StatelessWidget {
@@ -97,7 +98,16 @@ class AppScaffold extends StatelessWidget {
                 currentRoute: currentRoute,
               )
             : null,
-        body: body,
+        body: Stack(
+          children: [
+            body,
+            // Botão flutuante de chat (só aparece se não estiver na tela de chat)
+            if (currentRoute != AppRoutes.chat &&
+                currentRoute != null &&
+                !currentRoute.startsWith('/chat'))
+              const ChatFloatingButton(),
+          ],
+        ),
         bottomNavigationBar: showBottomNavigation
             ? AppBottomNavigation(
                 currentIndex: navIndex,

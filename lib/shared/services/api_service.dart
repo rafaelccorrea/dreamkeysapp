@@ -469,12 +469,27 @@ class ApiService {
   /// Trata a resposta da API
   ApiResponse<T> _handleResponse<T>(http.Response response) {
     final statusCode = response.statusCode;
-    final body = response.body.isNotEmpty ? jsonDecode(response.body) : null;
+    final rawBody = response.body;
+    
+    debugPrint('📥 [API_SERVICE] _handleResponse');
+    debugPrint('   - statusCode: $statusCode');
+    debugPrint('   - rawBody length: ${rawBody.length}');
+    debugPrint('   - rawBody: $rawBody');
+    
+    final body = rawBody.isNotEmpty ? jsonDecode(rawBody) : null;
+    
+    debugPrint('   - parsed body type: ${body?.runtimeType}');
+    if (body is Map) {
+      debugPrint('   - parsed body keys: ${body.keys.toList()}');
+    }
 
     if (statusCode >= 200 && statusCode < 300) {
-      return ApiResponse.success(data: body as T?, statusCode: statusCode);
+      debugPrint('✅ [API_SERVICE] Status code OK, retornando success');
+      return ApiResponse.success(data: body is T ? body : null, statusCode: statusCode);
     } else {
+      debugPrint('❌ [API_SERVICE] Status code de erro');
       final errorMessage = _extractErrorMessage(body);
+      debugPrint('   - errorMessage: $errorMessage');
       return ApiResponse.error(
         message: errorMessage,
         statusCode: statusCode,

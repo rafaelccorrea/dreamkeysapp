@@ -262,9 +262,11 @@ class AppBottomNavigation extends StatelessWidget {
         routeName == AppRoutes.profileEdit ||
         routeName == AppRoutes.documents ||
         routeName == AppRoutes.signatures ||
+        routeName == AppRoutes.chat ||
         routeName.startsWith('/documents') ||
-        routeName.startsWith('/signatures'))
-      return 4; // Documentos e assinaturas ficam no mesmo grupo do perfil
+        routeName.startsWith('/signatures') ||
+        routeName.startsWith('/chat'))
+      return 4; // Documentos, assinaturas e chat ficam no mesmo grupo do perfil
     return 0;
   }
 

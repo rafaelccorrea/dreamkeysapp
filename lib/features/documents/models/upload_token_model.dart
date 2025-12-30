@@ -13,6 +13,7 @@ class UploadToken {
   final int documentsUploaded;
   final String? notes;
   final DateTime createdAt;
+  final bool? isReused;
 
   UploadToken({
     required this.id,
@@ -26,6 +27,7 @@ class UploadToken {
     required this.documentsUploaded,
     this.notes,
     required this.createdAt,
+    this.isReused,
   });
 
   factory UploadToken.fromJson(Map<String, dynamic> json) {
@@ -43,6 +45,7 @@ class UploadToken {
       documentsUploaded: json['documentsUploaded'] ?? 0,
       notes: json['notes']?.toString(),
       createdAt: DateTime.parse(json['createdAt']),
+      isReused: json['isReused'] == true,
     );
   }
 
@@ -59,6 +62,7 @@ class UploadToken {
       'documentsUploaded': documentsUploaded,
       'notes': notes,
       'createdAt': createdAt.toIso8601String(),
+      if (isReused != null) 'isReused': isReused,
     };
   }
 

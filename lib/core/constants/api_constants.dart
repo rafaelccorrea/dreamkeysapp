@@ -174,6 +174,30 @@ class ApiConstants {
   static String publicUploadDocumentsUpload(String token) => '/public/upload-documents/$token/upload';
   static String publicUploadDocumentsUploadMultiple(String token) => '/public/upload-documents/$token/upload-multiple';
 
+  // Endpoints de Chat
+  static const String chatRooms = '/chat/rooms';
+  static String chatRoomById(String id) => '/chat/rooms/$id';
+  static String chatRoomUploadImage(String id) => '/chat/rooms/$id/upload-image';
+  static String chatRoomParticipants(String id) => '/chat/rooms/$id/participants';
+  static String chatRoomParticipantsRemove(String id) => '/chat/rooms/$id/participants/remove';
+  static String chatRoomPromoteAdmin(String id) => '/chat/rooms/$id/promote-admin';
+  static String chatRoomRemoveAdmin(String id) => '/chat/rooms/$id/remove-admin';
+  static String chatRoomArchive(String id) => '/chat/rooms/$id/archive';
+  static String chatRoomUnarchive(String id) => '/chat/rooms/$id/unarchive';
+  static String chatRoomLeave(String id) => '/chat/rooms/$id/leave';
+  static String chatRoomRead(String id) => '/chat/rooms/$id/read';
+  static String chatRoomMessages(String id, {int? limit, int? offset}) {
+    final params = <String>[];
+    if (limit != null) params.add('limit=$limit');
+    if (offset != null) params.add('offset=$offset');
+    return '/chat/rooms/$id/messages${params.isNotEmpty ? '?${params.join('&')}' : ''}';
+  }
+  static String chatRoomHistory(String id) => '/chat/rooms/$id/history';
+  static const String chatMessages = '/chat/messages';
+  static const String chatMessagesEdit = '/chat/messages/edit';
+  static const String chatMessagesDelete = '/chat/messages/delete';
+  static const String chatCompanyUsers = '/chat/company/users';
+
   // Headers
   static const String contentTypeHeader = 'Content-Type';
   static const String authorizationHeader = 'Authorization';

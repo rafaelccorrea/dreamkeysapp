@@ -28,6 +28,8 @@ import '../../features/documents/pages/documents_page.dart';
 import '../../features/documents/pages/create_document_page.dart';
 import '../../features/documents/pages/document_details_page.dart';
 import '../../features/documents/pages/signatures_page.dart';
+import '../../features/chat/pages/chat_page.dart';
+import '../../features/chat/pages/edit_group_chat_page.dart';
 
 /// Rotas da aplicação com transições customizadas
 class AppRoutes {
@@ -74,6 +76,11 @@ class AppRoutes {
   static String documentDetails(String id) => '/documents/$id';
   static String documentEdit(String id) => '/documents/$id/edit';
   static const String signatures = '/signatures';
+
+  // Chat
+  static const String chat = '/chat';
+  static String chatRoom(String roomId) => '/chat/$roomId';
+  static String chatEditGroup(String roomId) => '/chat/edit-group/$roomId';
 
   static String propertyOfferDetails(String offerId) =>
       '/properties/offers/$offerId';
@@ -203,6 +210,20 @@ class AppRoutes {
       return _buildRoute(const SignaturesPage(), settings);
     } else if (routeName == AppRoutes.documentCreate) {
       return _buildRoute(const CreateDocumentPage(), settings);
+    } else if (routeName == AppRoutes.chat) {
+      return _buildRoute(const ChatPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/chat/edit-group/')) {
+      final segments = routeName.split('/');
+      if (segments.length == 4) {
+        final roomId = segments[3];
+        return _buildRoute(EditGroupChatPage(roomId: roomId), settings);
+      }
+    } else if (routeName != null && routeName.startsWith('/chat/')) {
+      final segments = routeName.split('/');
+      if (segments.length == 3) {
+        final roomId = segments[2];
+        return _buildRoute(ChatPage(roomId: roomId), settings);
+      }
     } else if (routeName != null && routeName.startsWith('/documents/')) {
       final segments = routeName.split('/');
       if (segments.length >= 3) {

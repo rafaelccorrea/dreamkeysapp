@@ -7,6 +7,7 @@ import '../../../shared/services/api_service.dart';
 import '../../../shared/services/secure_storage_service.dart';
 import '../models/document_model.dart';
 import '../models/document_signature_model.dart';
+import '../models/upload_token_model.dart';
 
 /// Serviço para gerenciar documentos
 class DocumentService {
@@ -869,6 +870,231 @@ class DocumentPagination {
       totalItems: total,
       itemsPerPage: limit,
     );
+  }
+}
+
+/// Métodos para Upload Tokens (Links Públicos)
+extension UploadTokenMethods on DocumentService {
+  /// Cria um token de upload
+  Future<ApiResponse<UploadToken>> createUploadToken({
+    required String clientId,
+    int expirationDays = 3,
+    String? notes,
+  }) async {
+    try {
+      // Validar clientId
+      if (clientId.isEmpty || clientId.trim().isEmpty) {
+        debugPrint('❌ [DOCUMENT_SERVICE] clientId está vazio');
+        return ApiResponse.error(
+          message: 'ID do cliente é obrigatório',
+          statusCode: 400,
+        );
+      }
+
+      debugPrint('🔗 [DOCUMENT_SERVICE] Criando token de upload...');
+      debugPrint('   - clientId: $clientId');
+      debugPrint('   - expirationDays: $expirationDays');
+
+      final body = {
+        'clientId': clientId.trim(),
+        'expirationDays': expirationDays,
+        if (notes != null && notes.isNotEmpty) 'notes': notes,
+      };
+
+      debugPrint('🔗 [DOCUMENT_SERVICE] Enviando requisição POST para: ${ApiConstants.uploadTokens}');
+      debugPrint('🔗 [DOCUMENT_SERVICE] Body enviado: $body');
+      
+      final response = await _apiService.post<dynamic>(
+        ApiConstants.uploadTokens,
+        body: body,
+      );
+
+      debugPrint('🔗 [DOCUMENT_SERVICE] ════════════════════════════════════');
+      debugPrint('🔗 [DOCUMENT_SERVICE] RESPOSTA DA API - createUploadToken');
+      debugPrint('🔗 [DOCUMENT_SERVICE] ════════════════════════════════════');
+      debugPrint('   - success: ${response.success}');
+      debugPrint('   - statusCode: ${response.statusCode}');
+      debugPrint('   - message: ${response.message}');
+      debugPrint('   - data type: ${response.data?.runtimeType}');
+      debugPrint('   - data: ${response.data}');
+      
+      if (response.data != null) {
+        if (response.data is Map) {
+          final dataMap = response.data as Map<String, dynamic>;
+          debugPrint('   - data keys: ${dataMap.keys.toList()}');
+          if (dataMap.containsKey('clientId')) {
+            debugPrint('   - clientId no response: ${dataMap['clientId']}');
+            debugPrint('   - clientId type: ${dataMap['clientId']?.runtimeType}');
+          }
+        }
+      }
+      debugPrint('🔗 [DOCUMENT_SERVICE] ════════════════════════════════════');
+
+      if (response.success && response.data != null) {
+        try {
+          debugPrint('🔗 [DOCUMENT_SERVICE] Tentando parsear token...');
+          final token = UploadToken.fromJson(response.data as Map<String, dynamic>);
+          debugPrint('✅ [DOCUMENT_SERVICE] Token criado com sucesso:');
+          debugPrint('   - token.id: ${token.id}');
+          debugPrint('   - token.clientId: ${token.clientId}');
+          debugPrint('   - token.token: ${token.token}');
+          return ApiResponse.success(
+            data: token,
+            statusCode: response.statusCode,
+          );
+        } catch (e, stackTrace) {
+          debugPrint('❌ [DOCUMENT_SERVICE] Erro ao parsear token: $e');
+          debugPrint('❌ [DOCUMENT_SERVICE] StackTrace: $stackTrace');
+          return ApiResponse.error(
+            message: 'Erro ao processar resposta do servidor: ${e.toString()}',
+            statusCode: response.statusCode,
+          );
+        }
+      }
+
+      debugPrint('❌ [DOCUMENT_SERVICE] Resposta não foi bem-sucedida');
+      debugPrint('   - response.success: ${response.success}');
+      debugPrint('   - response.data: ${response.data}');
+      debugPrint('   - response.message: ${response.message}');
+      
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao criar token de upload',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [DOCUMENT_SERVICE] Erro ao criar token: $e');
+      return ApiResponse.error(
+        message: 'Erro ao criar token de upload: ${e.toString()}',
+        statusCode: 500,
+      );
+    }
+  }
+
+  /// Lista tokens de upload
+  Future<ApiResponse<List<UploadToken>>> getUploadTokens({
+    String? clientId,
+  }) async {
+    try {
+      debugPrint('🔗 [DOCUMENT_SERVICE] Buscando tokens de upload...');
+      if (clientId != null) {
+        debugPrint('   - Filtrando por clientId: $clientId');
+      }
+
+      final body = <String, dynamic>{};
+      if (clientId != null) {
+        body['clientId'] = clientId;
+      }
+
+      final response = await _apiService.post<dynamic>(
+        ApiConstants.uploadTokens,
+        body: body.isNotEmpty ? body : null,
+      );
+
+      debugPrint('🔗 [DOCUMENT_SERVICE] Resposta getUploadTokens:');
+      debugPrint('   - success: ${response.success}');
+      debugPrint('   - statusCode: ${response.statusCode}');
+      debugPrint('   - message: ${response.message}');
+      debugPrint('   - data type: ${response.data?.runtimeType}');
+      debugPrint('   - data: ${response.data}');
+
+      if (response.success && response.data != null) {
+        try {
+          List<UploadToken> tokens = [];
+          
+          if (response.data is List) {
+            final dataList = response.data as List<dynamic>;
+            tokens = dataList
+                .map((e) => UploadToken.fromJson(e as Map<String, dynamic>))
+                .toList();
+          } else if (response.data is Map<String, dynamic>) {
+            final dataMap = response.data as Map<String, dynamic>;
+            if (dataMap['data'] is List) {
+              final dataList = dataMap['data'] as List<dynamic>;
+              tokens = dataList
+                  .map((e) => UploadToken.fromJson(e as Map<String, dynamic>))
+                  .toList();
+            }
+          }
+
+          debugPrint('✅ [DOCUMENT_SERVICE] ${tokens.length} tokens encontrados');
+          return ApiResponse.success(
+            data: tokens,
+            statusCode: response.statusCode,
+          );
+        } catch (e) {
+          debugPrint('❌ [DOCUMENT_SERVICE] Erro ao parsear tokens: $e');
+          return ApiResponse.error(
+            message: 'Erro ao processar resposta do servidor',
+            statusCode: response.statusCode,
+          );
+        }
+      }
+
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao buscar tokens',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [DOCUMENT_SERVICE] Erro ao buscar tokens: $e');
+      return ApiResponse.error(
+        message: 'Erro ao buscar tokens: ${e.toString()}',
+        statusCode: 500,
+      );
+    }
+  }
+
+  /// Envia link por email
+  Future<ApiResponse<void>> sendUploadTokenEmail(String tokenId) async {
+    try {
+      debugPrint('📧 [DOCUMENT_SERVICE] Enviando email do token $tokenId...');
+
+      final response = await _apiService.post<dynamic>(
+        ApiConstants.uploadTokenSendEmail(tokenId),
+      );
+
+      if (response.success) {
+        debugPrint('✅ [DOCUMENT_SERVICE] Email enviado com sucesso');
+        return ApiResponse.success(statusCode: response.statusCode);
+      }
+
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao enviar email',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [DOCUMENT_SERVICE] Erro ao enviar email: $e');
+      return ApiResponse.error(
+        message: 'Erro ao enviar email: ${e.toString()}',
+        statusCode: 500,
+      );
+    }
+  }
+
+  /// Revoga um token
+  Future<ApiResponse<void>> revokeUploadToken(String tokenId) async {
+    try {
+      debugPrint('🔒 [DOCUMENT_SERVICE] Revogando token $tokenId...');
+
+      final response = await _apiService.put<dynamic>(
+        ApiConstants.uploadTokenRevoke(tokenId),
+      );
+
+      if (response.success) {
+        debugPrint('✅ [DOCUMENT_SERVICE] Token revogado com sucesso');
+        return ApiResponse.success(statusCode: response.statusCode);
+      }
+
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao revogar token',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [DOCUMENT_SERVICE] Erro ao revogar token: $e');
+      return ApiResponse.error(
+        message: 'Erro ao revogar token: ${e.toString()}',
+        statusCode: 500,
+      );
+    }
   }
 }
 

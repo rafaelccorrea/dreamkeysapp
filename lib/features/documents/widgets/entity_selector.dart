@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../clients/services/client_service.dart';
@@ -203,10 +204,13 @@ class _EntitySelectorState extends State<EntitySelector> {
   }
 
   Future<void> _showClientSelector() async {
+    debugPrint('🔍 [ENTITY_SELECTOR] _showClientSelector - Abrindo modal de seleção de clientes');
     // Resetar busca ao abrir
     _searchController.clear();
     // Carregar clientes ao abrir o modal
+    debugPrint('🔍 [ENTITY_SELECTOR] Carregando clientes...');
     await _loadClients(reset: true);
+    debugPrint('🔍 [ENTITY_SELECTOR] Clientes carregados: ${_clients.length}');
 
     final selected = await showModalBottomSheet<Client>(
       context: context,
@@ -306,6 +310,10 @@ class _EntitySelectorState extends State<EntitySelector> {
                               selected: isSelected,
                               selectedTileColor: AppColors.primary.primary.withValues(alpha: 0.1),
                               onTap: () {
+                                debugPrint('🔍 [ENTITY_SELECTOR] Cliente clicado:');
+                                debugPrint('   - ID: ${client.id}');
+                                debugPrint('   - Name: ${client.name}');
+                                debugPrint('   - ID length: ${client.id.length}');
                                 Navigator.pop(context, client);
                               },
                             );
@@ -318,7 +326,13 @@ class _EntitySelectorState extends State<EntitySelector> {
     );
 
     if (selected != null) {
-      widget.onSelected(selected.id, selected.name);
+      debugPrint('🔍 [ENTITY_SELECTOR] Cliente selecionado:');
+      debugPrint('   - ID: ${selected.id}');
+      debugPrint('   - Name: ${selected.name}');
+      if (selected.id.isEmpty || selected.id.trim().isEmpty) {
+        debugPrint('❌ [ENTITY_SELECTOR] ID do cliente está vazio!');
+      }
+      widget.onSelected(selected.id.trim(), selected.name);
     }
   }
 
@@ -441,9 +455,15 @@ class _EntitySelectorState extends State<EntitySelector> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    debugPrint('🔍 [ENTITY_SELECTOR] build - type: ${widget.type}');
+    debugPrint('   - selectedId: ${widget.selectedId}');
+    debugPrint('   - selectedName: ${widget.selectedName}');
     
     return InkWell(
-      onTap: _selectEntity,
+      onTap: () {
+        debugPrint('🔍 [ENTITY_SELECTOR] InkWell onTap - Abrindo seletor');
+        _selectEntity();
+      },
       child: InputDecorator(
         decoration: InputDecoration(
           labelText: widget.type == 'client' ? 'Cliente *' : 'Propriedade *',

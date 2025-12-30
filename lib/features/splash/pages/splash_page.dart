@@ -10,6 +10,7 @@ import '../../../../shared/services/api_service.dart';
 import '../../../../shared/services/token_refresh_service.dart';
 import '../../../../shared/services/company_service.dart';
 import '../../../../shared/services/module_access_service.dart';
+import '../../chat/controllers/chat_unread_controller.dart';
 
 class SplashPage extends StatefulWidget {
   const SplashPage({super.key});
@@ -124,6 +125,11 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
         debugPrint('🔄 [SPLASH] Inicializando ModuleAccessService...');
         await ModuleAccessService.instance.initialize();
         debugPrint('✅ [SPLASH] ModuleAccessService inicializado');
+
+        // Inicializar ChatUnreadController
+        debugPrint('🔄 [SPLASH] Inicializando ChatUnreadController...');
+        await ChatUnreadController.instance.initialize();
+        debugPrint('✅ [SPLASH] ChatUnreadController inicializado');
 
         // NOTA: Biometria não é solicitada aqui porque o usuário já está autenticado.
         // A biometria deve ser usada apenas no login, não toda vez que o app abre.
