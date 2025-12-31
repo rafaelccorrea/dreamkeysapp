@@ -422,9 +422,10 @@ class _CreateInspectionPageState extends State<CreateInspectionPage> {
               ),
             ),
             const SizedBox(height: 8),
-            Row(
+            Column(
               children: [
-                Expanded(
+                SizedBox(
+                  width: double.infinity,
                   child: OutlinedButton.icon(
                     onPressed: _selectScheduledDate,
                     icon: const Icon(Icons.calendar_today),
@@ -435,8 +436,9 @@ class _CreateInspectionPageState extends State<CreateInspectionPage> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
                   child: OutlinedButton.icon(
                     onPressed: _selectScheduledTime,
                     icon: const Icon(Icons.access_time),

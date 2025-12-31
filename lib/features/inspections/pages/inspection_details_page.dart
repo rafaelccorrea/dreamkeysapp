@@ -7,6 +7,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/custom_button.dart';
+import '../../../shared/widgets/skeleton_box.dart';
 import '../models/inspection_model.dart';
 import '../services/inspection_service.dart';
 
@@ -187,7 +188,17 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Confirmar Remoção'),
+        title: Row(
+          children: [
+            Icon(
+              Icons.warning_amber_rounded,
+              color: AppColors.status.error,
+              size: 20,
+            ),
+            const SizedBox(width: 12),
+            const Expanded(child: Text('Confirmar Remoção')),
+          ],
+        ),
         content: const Text('Tem certeza que deseja remover esta foto?'),
         actions: [
           TextButton(
@@ -246,36 +257,111 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
   }
 
   Future<void> _changeStatus(InspectionStatus newStatus) async {
+    String title = '';
     String message = '';
+    IconData icon = Icons.info;
+    Color? iconColor;
+
     switch (newStatus) {
       case InspectionStatus.inProgress:
+        title = 'Iniciar Vistoria';
         message = 'Tem certeza que deseja iniciar esta vistoria?';
+        icon = Icons.play_arrow;
+        iconColor = Colors.orange;
         break;
       case InspectionStatus.completed:
+        title = 'Concluir Vistoria';
         message = 'Tem certeza que deseja marcar esta vistoria como concluída?';
+        icon = Icons.check_circle;
+        iconColor = Colors.green;
         break;
       case InspectionStatus.cancelled:
+        title = 'Cancelar Vistoria';
         message = 'Tem certeza que deseja cancelar esta vistoria?';
+        icon = Icons.cancel;
+        iconColor = Colors.red;
         break;
       default:
+        title = 'Alterar Status';
         message = 'Tem certeza que deseja alterar o status desta vistoria?';
+        icon = Icons.info;
     }
 
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showModalBottomSheet<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirmar Alteração'),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Confirmar'),
-          ),
-        ],
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: ThemeHelpers.cardBackgroundColor(context),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Handle
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 20),
+              decoration: BoxDecoration(
+                color: ThemeHelpers.textSecondaryColor(context),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            // Icon
+            Icon(icon, size: 48, color: iconColor ?? AppColors.primary.primary),
+            const SizedBox(height: 16),
+            // Title
+            Text(
+              title,
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            // Message
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 24),
+            // Buttons
+            Column(
+              children: [
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () => Navigator.pop(context, true),
+                    icon: Icon(icon),
+                    label: const Text('Confirmar'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: iconColor ?? AppColors.primary.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () => Navigator.pop(context, false),
+                    icon: const Icon(Icons.close),
+                    label: const Text('Cancelar'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: MediaQuery.of(context).viewInsets.bottom),
+          ],
+        ),
       ),
     );
 
@@ -334,58 +420,32 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
   }
 
   Future<void> _deleteInspection() async {
-    final confirmed = await showModalBottomSheet<bool>(
+    final confirmed = await showDialog<bool>(
       context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+      builder: (context) => AlertDialog(
+        title: Row(
           children: [
-            Icon(
-              Icons.warning_amber_rounded,
-              size: 48,
-              color: AppColors.status.error,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Confirmar Exclusão',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Tem certeza que deseja excluir esta vistoria? Esta ação não pode ser desfeita.',
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.pop(context, false),
-                    child: const Text('Cancelar'),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.pop(context, true),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.status.error,
-                      foregroundColor: Colors.white,
-                    ),
-                    child: const Text('Excluir'),
-                  ),
-                ),
-              ],
-            ),
+            Icon(Icons.warning_amber_rounded, color: AppColors.status.error),
+            const SizedBox(width: 12),
+            const Expanded(child: Text('Confirmar Exclusão')),
           ],
         ),
+        content: const Text(
+          'Tem certeza que deseja excluir esta vistoria? Esta ação não pode ser desfeita.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.status.error,
+            ),
+            child: const Text('Excluir'),
+          ),
+        ],
       ),
     );
 
@@ -496,34 +556,122 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
 
   Future<void> _addHistoryEntry() async {
     final descriptionController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
 
-    final result = await showDialog<bool>(
+    final result = await showModalBottomSheet<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Adicionar ao Histórico'),
-        content: TextField(
-          controller: descriptionController,
-          decoration: const InputDecoration(
-            labelText: 'Descrição',
-            hintText: 'Descreva o evento ou alteração',
-          ),
-          maxLines: 3,
-          maxLength: 500,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        padding: EdgeInsets.only(
+          left: 20,
+          right: 20,
+          top: 20,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 20,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar'),
+        decoration: BoxDecoration(
+          color: ThemeHelpers.cardBackgroundColor(context),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Form(
+          key: formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Handle
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 20),
+                    decoration: BoxDecoration(
+                      color: ThemeHelpers.textSecondaryColor(context),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                // Header
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Adicionar ao Histórico',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () {
+                        descriptionController.dispose();
+                        Navigator.pop(context, false);
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                // Text Field
+                TextFormField(
+                  controller: descriptionController,
+                  decoration: const InputDecoration(
+                    labelText: 'Descrição',
+                    hintText: 'Descreva o evento ou alteração',
+                    border: OutlineInputBorder(),
+                  ),
+                  maxLines: 4,
+                  maxLength: 500,
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Campo obrigatório';
+                    }
+                    return null;
+                  },
+                  autofocus: true,
+                ),
+                const SizedBox(height: 24),
+                // Buttons
+                Column(
+                  children: [
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          if (formKey.currentState!.validate()) {
+                            Navigator.pop(context, true);
+                          }
+                        },
+                        icon: const Icon(Icons.add),
+                        label: const Text('Adicionar'),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          descriptionController.dispose();
+                          Navigator.pop(context, false);
+                        },
+                        icon: const Icon(Icons.close),
+                        label: const Text('Cancelar'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-          TextButton(
-            onPressed: () {
-              if (descriptionController.text.trim().isNotEmpty) {
-                Navigator.pop(context, true);
-              }
-            },
-            child: const Text('Adicionar'),
-          ),
-        ],
+        ),
       ),
     );
 
@@ -656,7 +804,7 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
           ),
       ],
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? _buildSkeleton(context)
           : _errorMessage != null
           ? Center(
               child: Padding(
@@ -1351,6 +1499,178 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
                 ),
               ),
             ),
+    );
+  }
+
+  Widget _buildSkeleton(BuildContext context) {
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header skeleton
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: ThemeHelpers.cardBackgroundColor(context),
+              border: Border(
+                bottom: BorderSide(
+                  color: ThemeHelpers.borderLightColor(context),
+                ),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SkeletonText(width: 250, height: 24),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    SkeletonText(width: 100, height: 20, borderRadius: 8),
+                    const SizedBox(width: 8),
+                    SkeletonText(width: 100, height: 20, borderRadius: 8),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          // Content skeleton
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Info sections
+                SkeletonText(
+                  width: 150,
+                  height: 20,
+                  margin: const EdgeInsets.only(bottom: 16),
+                ),
+                ...List.generate(
+                  3,
+                  (index) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      children: [
+                        SkeletonBox(width: 20, height: 20, borderRadius: 4),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SkeletonText(
+                                width: 100,
+                                height: 14,
+                                margin: const EdgeInsets.only(bottom: 4),
+                              ),
+                              SkeletonText(width: double.infinity, height: 16),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                // Property card skeleton
+                SkeletonText(
+                  width: 150,
+                  height: 20,
+                  margin: const EdgeInsets.only(bottom: 12),
+                ),
+                SkeletonCard(
+                  height: 80,
+                  child: Row(
+                    children: [
+                      SkeletonBox(width: 48, height: 48, borderRadius: 8),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SkeletonText(
+                              width: double.infinity,
+                              height: 18,
+                              margin: const EdgeInsets.only(bottom: 4),
+                            ),
+                            SkeletonText(width: 200, height: 14),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
+                // Photos skeleton
+                SkeletonText(
+                  width: 100,
+                  height: 20,
+                  margin: const EdgeInsets.only(bottom: 12),
+                ),
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    crossAxisSpacing: 8,
+                    mainAxisSpacing: 8,
+                  ),
+                  itemCount: 6,
+                  itemBuilder: (context, index) {
+                    return SkeletonBox(
+                      width: double.infinity,
+                      height: 100,
+                      borderRadius: 8,
+                    );
+                  },
+                ),
+                const SizedBox(height: 24),
+                // History skeleton
+                SkeletonText(
+                  width: 100,
+                  height: 20,
+                  margin: const EdgeInsets.only(bottom: 12),
+                ),
+                ...List.generate(
+                  3,
+                  (index) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: SkeletonCard(
+                      child: Row(
+                        children: [
+                          SkeletonBox(width: 32, height: 32, borderRadius: 16),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                SkeletonText(
+                                  width: 120,
+                                  height: 14,
+                                  margin: const EdgeInsets.only(bottom: 4),
+                                ),
+                                SkeletonText(
+                                  width: 80,
+                                  height: 12,
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                ),
+                                SkeletonText(
+                                  width: double.infinity,
+                                  height: 16,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
