@@ -15,6 +15,8 @@ import '../../clients/services/client_service.dart';
 import '../../documents/widgets/entity_selector.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../shared/services/api_service.dart';
+import '../../keys/services/key_service.dart';
+import '../../keys/models/key_model.dart' as key_models;
 import 'package:flutter/foundation.dart';
 
 // Formatter de moeda
@@ -39,50 +41,50 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   final DocumentService _documentService = DocumentService.instance;
   final ClientService _clientService = ClientService.instance;
   final ApiService _apiService = ApiService.instance;
+  final KeyService _keyService = KeyService.instance;
   bool _isLoading = true;
   Property? _property;
   String? _errorMessage;
   final PageController _imagePageController = PageController();
   int _currentImageIndex = 0;
-  
+
   // Documentos
   List<Document> _documents = [];
   bool _isLoadingDocuments = false;
-  
+
   // Checklists
   List<dynamic> _checklists = [];
   bool _isLoadingChecklists = false;
-  
+
   // Despesas
   List<dynamic> _expenses = [];
   bool _isLoadingExpenses = false;
   Map<String, dynamic>? _expensesSummary;
-  
+
   // Chaves
-  List<dynamic> _keys = [];
+  List<key_models.Key> _keys = [];
   bool _isLoadingKeys = false;
-  Map<String, dynamic>? _keyStatus;
 
   @override
   void initState() {
     super.initState();
     _loadProperty();
   }
-  
+
   Future<void> _loadDocuments() async {
     if (widget.propertyId.isEmpty) return;
-    
+
     setState(() {
       _isLoadingDocuments = true;
     });
-    
+
     try {
       final response = await _documentService.getDocuments(
         filters: DocumentFilters(propertyId: widget.propertyId),
         page: 1,
         limit: 10,
       );
-      
+
       if (mounted) {
         setState(() {
           _isLoadingDocuments = false;
@@ -103,16 +105,16 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   Future<void> _loadChecklists() async {
     if (widget.propertyId.isEmpty) return;
-    
+
     setState(() {
       _isLoadingChecklists = true;
     });
-    
+
     try {
       final response = await _apiService.get<dynamic>(
         ApiConstants.saleChecklistsByProperty(widget.propertyId),
       );
-      
+
       if (mounted) {
         setState(() {
           _isLoadingChecklists = false;
@@ -121,8 +123,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               _checklists = response.data as List<dynamic>;
             } else if (response.data is Map<String, dynamic>) {
               final data = response.data as Map<String, dynamic>;
-              _checklists = data['checklists'] as List<dynamic>? ?? 
-                           data['data'] as List<dynamic>? ?? [];
+              _checklists =
+                  data['checklists'] as List<dynamic>? ??
+                  data['data'] as List<dynamic>? ??
+                  [];
             }
           }
         });
@@ -139,22 +143,22 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   Future<void> _loadExpenses() async {
     if (widget.propertyId.isEmpty) return;
-    
+
     setState(() {
       _isLoadingExpenses = true;
     });
-    
+
     try {
       // Carregar lista de despesas
       final expensesResponse = await _apiService.get<dynamic>(
         ApiConstants.propertyExpenses(widget.propertyId),
       );
-      
+
       // Carregar resumo de despesas
       final summaryResponse = await _apiService.get<dynamic>(
         ApiConstants.propertyExpensesSummary(widget.propertyId),
       );
-      
+
       if (mounted) {
         setState(() {
           _isLoadingExpenses = false;
@@ -163,8 +167,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               _expenses = expensesResponse.data as List<dynamic>;
             } else if (expensesResponse.data is Map<String, dynamic>) {
               final data = expensesResponse.data as Map<String, dynamic>;
-              _expenses = data['data'] as List<dynamic>? ?? 
-                         data['expenses'] as List<dynamic>? ?? [];
+              _expenses =
+                  data['data'] as List<dynamic>? ??
+                  data['expenses'] as List<dynamic>? ??
+                  [];
             }
           }
           if (summaryResponse.success && summaryResponse.data != null) {
@@ -184,36 +190,22 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   Future<void> _loadKeys() async {
     if (widget.propertyId.isEmpty) return;
-    
+
     setState(() {
       _isLoadingKeys = true;
     });
-    
+
     try {
-      // Carregar lista de chaves
-      final keysResponse = await _apiService.get<dynamic>(
-        ApiConstants.keysByProperty(widget.propertyId),
+      // Carregar lista de chaves usando KeyService
+      final keysResponse = await _keyService.getKeys(
+        filters: key_models.KeyFilters(propertyId: widget.propertyId),
       );
-      
-      // Carregar status da chave
-      final statusResponse = await _apiService.get<dynamic>(
-        ApiConstants.keyStatus(widget.propertyId),
-      );
-      
+
       if (mounted) {
         setState(() {
           _isLoadingKeys = false;
           if (keysResponse.success && keysResponse.data != null) {
-            if (keysResponse.data is List) {
-              _keys = keysResponse.data as List<dynamic>;
-            } else if (keysResponse.data is Map<String, dynamic>) {
-              final data = keysResponse.data as Map<String, dynamic>;
-              _keys = data['data'] as List<dynamic>? ?? 
-                     data['keys'] as List<dynamic>? ?? [];
-            }
-          }
-          if (statusResponse.success && statusResponse.data != null) {
-            _keyStatus = statusResponse.data as Map<String, dynamic>;
+            _keys = keysResponse.data!;
           }
         });
       }
@@ -662,7 +654,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   ),
                 ),
                 const SizedBox(height: 20),
-                
+
                 // Preço (destaque melhorado)
                 Container(
                   padding: const EdgeInsets.all(24),
@@ -682,7 +674,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: AppColors.primary.primary.withValues(alpha: 0.15),
+                        color: AppColors.primary.primary.withValues(
+                          alpha: 0.15,
+                        ),
                         blurRadius: 12,
                         offset: const Offset(0, 4),
                       ),
@@ -733,7 +727,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                             const SizedBox(width: 6),
                             Flexible(
                               child: Text(
-                                _currencyFormatter.format(property.salePrice).replaceAll('R\$', '').trim(),
+                                _currencyFormatter
+                                    .format(property.salePrice)
+                                    .replaceAll('R\$', '')
+                                    .trim(),
                                 style: theme.textTheme.headlineLarge?.copyWith(
                                   fontWeight: FontWeight.bold,
                                   color: AppColors.primary.primary,
@@ -763,7 +760,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                             const SizedBox(width: 6),
                             Flexible(
                               child: Text(
-                                _currencyFormatter.format(property.rentPrice).replaceAll('R\$', '').trim(),
+                                _currencyFormatter
+                                    .format(property.rentPrice)
+                                    .replaceAll('R\$', '')
+                                    .trim(),
                                 style: theme.textTheme.headlineLarge?.copyWith(
                                   fontWeight: FontWeight.bold,
                                   color: AppColors.primary.primary,
@@ -780,7 +780,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                                 '/mês',
                                 style: theme.textTheme.titleLarge?.copyWith(
                                   fontWeight: FontWeight.w600,
-                                  color: AppColors.primary.primary.withValues(alpha: 0.8),
+                                  color: AppColors.primary.primary.withValues(
+                                    alpha: 0.8,
+                                  ),
                                   fontSize: 18,
                                 ),
                               ),
@@ -1274,11 +1276,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           children: [
             Row(
               children: [
-                Icon(
-                  Icons.vpn_key,
-                  color: AppColors.primary.primary,
-                  size: 24,
-                ),
+                Icon(Icons.vpn_key, color: AppColors.primary.primary, size: 24),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -1351,12 +1349,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               Column(
                 children: [
                   ...(_keys.map((key) {
-                    final k = key as Map<String, dynamic>;
-                    final keyId = k['id']?.toString() ?? '';
-                    final name = k['name']?.toString() ?? 'Chave';
-                    final status = k['status']?.toString() ?? 'available';
-                    final location = k['location']?.toString();
-                    
+                    final statusColor =
+                        key.status == key_models.KeyStatus.available
+                        ? AppColors.status.success
+                        : key.status == key_models.KeyStatus.inUse
+                        ? AppColors.status.warning
+                        : AppColors.status.error;
+
                     return Container(
                       margin: const EdgeInsets.only(bottom: 12),
                       padding: const EdgeInsets.all(12),
@@ -1371,30 +1370,38 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                       ),
                       child: Row(
                         children: [
-                          Icon(
-                            Icons.vpn_key,
-                            color: status == 'available' 
-                                ? AppColors.status.success
-                                : AppColors.status.warning,
-                            size: 24,
-                          ),
+                          Icon(Icons.vpn_key, color: statusColor, size: 24),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  name,
+                                  key.name,
                                   style: theme.textTheme.bodyLarge?.copyWith(
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
-                                if (location != null && location.isNotEmpty) ...[
+                                if (key.location != null &&
+                                    key.location!.isNotEmpty) ...[
                                   const SizedBox(height: 4),
                                   Text(
-                                    'Localização: $location',
+                                    'Localização: ${key.location}',
                                     style: theme.textTheme.bodySmall?.copyWith(
-                                      color: ThemeHelpers.textSecondaryColor(context),
+                                      color: ThemeHelpers.textSecondaryColor(
+                                        context,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                                ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Tipo: ${key.type.label}',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: ThemeHelpers.textSecondaryColor(
+                                        context,
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -1402,19 +1409,18 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                             ),
                           ),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
                             decoration: BoxDecoration(
-                              color: status == 'available'
-                                  ? AppColors.status.success.withValues(alpha: 0.1)
-                                  : AppColors.status.warning.withValues(alpha: 0.1),
+                              color: statusColor.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
-                              status == 'available' ? 'Disponível' : 'Em Uso',
+                              key.status.label,
                               style: theme.textTheme.bodySmall?.copyWith(
-                                color: status == 'available'
-                                    ? AppColors.status.success
-                                    : AppColors.status.warning,
+                                color: statusColor,
                                 fontWeight: FontWeight.w600,
                                 fontSize: 11,
                               ),
@@ -1426,7 +1432,12 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                               if (value == 'edit') {
                                 _showEditKeyModal(context, property, key);
                               } else if (value == 'delete') {
-                                _deleteKey(context, property.id, keyId, name);
+                                _deleteKey(
+                                  context,
+                                  property.id,
+                                  key.id,
+                                  key.name,
+                                );
                               }
                             },
                             itemBuilder: (context) => [
@@ -1444,9 +1455,16 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                                 value: 'delete',
                                 child: Row(
                                   children: [
-                                    Icon(Icons.delete, size: 18, color: Colors.red),
+                                    Icon(
+                                      Icons.delete,
+                                      size: 18,
+                                      color: Colors.red,
+                                    ),
                                     SizedBox(width: 8),
-                                    Text('Excluir', style: TextStyle(color: Colors.red)),
+                                    Text(
+                                      'Excluir',
+                                      style: TextStyle(color: Colors.red),
+                                    ),
                                   ],
                                 ),
                               ),
@@ -1529,7 +1547,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                             vertical: 4,
                           ),
                           decoration: BoxDecoration(
-                            color: AppColors.primary.primary.withValues(alpha: 0.1),
+                            color: AppColors.primary.primary.withValues(
+                              alpha: 0.1,
+                            ),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
@@ -1593,9 +1613,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   ),
                   child: InkWell(
                     onTap: () {
-                      Navigator.of(context).pushNamed(
-                        AppRoutes.clientDetails(client.id),
-                      );
+                      Navigator.of(
+                        context,
+                      ).pushNamed(AppRoutes.clientDetails(client.id));
                     },
                     child: Row(
                       children: [
@@ -1622,7 +1642,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                                 Text(
                                   client.email,
                                   style: theme.textTheme.bodySmall?.copyWith(
-                                    color: ThemeHelpers.textSecondaryColor(context),
+                                    color: ThemeHelpers.textSecondaryColor(
+                                      context,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -1631,7 +1653,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                                 Text(
                                   client.phone,
                                   style: theme.textTheme.bodySmall?.copyWith(
-                                    color: ThemeHelpers.textSecondaryColor(context),
+                                    color: ThemeHelpers.textSecondaryColor(
+                                      context,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -1647,7 +1671,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                                 vertical: 4,
                               ),
                               decoration: BoxDecoration(
-                                color: AppColors.primary.primary.withValues(alpha: 0.1),
+                                color: AppColors.primary.primary.withValues(
+                                  alpha: 0.1,
+                                ),
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
@@ -1798,7 +1824,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                                 Text(
                                   'Pendentes',
                                   style: theme.textTheme.bodySmall?.copyWith(
-                                    color: ThemeHelpers.textSecondaryColor(context),
+                                    color: ThemeHelpers.textSecondaryColor(
+                                      context,
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(height: 4),
@@ -1818,7 +1846,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                                 Text(
                                   'Vencidas',
                                   style: theme.textTheme.bodySmall?.copyWith(
-                                    color: ThemeHelpers.textSecondaryColor(context),
+                                    color: ThemeHelpers.textSecondaryColor(
+                                      context,
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(height: 4),
@@ -1839,7 +1869,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                                 Text(
                                   'Pagas',
                                   style: theme.textTheme.bodySmall?.copyWith(
-                                    color: ThemeHelpers.textSecondaryColor(context),
+                                    color: ThemeHelpers.textSecondaryColor(
+                                      context,
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(height: 4),
@@ -1860,13 +1892,18 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                                 Text(
                                   'Total Pendente',
                                   style: theme.textTheme.bodySmall?.copyWith(
-                                    color: ThemeHelpers.textSecondaryColor(context),
+                                    color: ThemeHelpers.textSecondaryColor(
+                                      context,
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
                                   _currencyFormatter.format(
-                                    ((_expensesSummary!['totalPendingAmount'] ?? 0) as num).toDouble(),
+                                    ((_expensesSummary!['totalPendingAmount'] ??
+                                                0)
+                                            as num)
+                                        .toDouble(),
                                   ),
                                   style: theme.textTheme.titleSmall?.copyWith(
                                     fontWeight: FontWeight.bold,
@@ -1889,7 +1926,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                 final amount = exp['amount']?.toString() ?? '0';
                 final status = exp['status']?.toString() ?? 'pending';
                 final dueDate = exp['dueDate']?.toString();
-                
+
                 return Container(
                   margin: const EdgeInsets.only(bottom: 12),
                   padding: const EdgeInsets.all(12),
@@ -1916,7 +1953,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              _currencyFormatter.format(double.tryParse(amount) ?? 0),
+                              _currencyFormatter.format(
+                                double.tryParse(amount) ?? 0,
+                              ),
                               style: theme.textTheme.bodyMedium?.copyWith(
                                 color: AppColors.primary.primary,
                                 fontWeight: FontWeight.w600,
@@ -1927,7 +1966,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                               Text(
                                 'Vence: ${DateFormat('dd/MM/yyyy').format(DateTime.parse(dueDate))}',
                                 style: theme.textTheme.bodySmall?.copyWith(
-                                  color: ThemeHelpers.textSecondaryColor(context),
+                                  color: ThemeHelpers.textSecondaryColor(
+                                    context,
+                                  ),
                                 ),
                               ),
                             ],
@@ -1935,23 +1976,30 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                         ),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
-                          color: status == 'paid' 
+                          color: status == 'paid'
                               ? AppColors.status.success.withValues(alpha: 0.1)
                               : status == 'overdue'
-                                  ? AppColors.status.error.withValues(alpha: 0.1)
-                                  : AppColors.status.warning.withValues(alpha: 0.1),
+                              ? AppColors.status.error.withValues(alpha: 0.1)
+                              : AppColors.status.warning.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
-                          status == 'paid' ? 'Paga' : status == 'overdue' ? 'Vencida' : 'Pendente',
+                          status == 'paid'
+                              ? 'Paga'
+                              : status == 'overdue'
+                              ? 'Vencida'
+                              : 'Pendente',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: status == 'paid'
                                 ? AppColors.status.success
                                 : status == 'overdue'
-                                    ? AppColors.status.error
-                                    : AppColors.status.warning,
+                                ? AppColors.status.error
+                                : AppColors.status.warning,
                             fontWeight: FontWeight.w600,
                             fontSize: 11,
                           ),
@@ -1965,7 +2013,12 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                           } else if (value == 'edit') {
                             _showEditExpenseModal(context, property, expense);
                           } else if (value == 'delete') {
-                            _deleteExpense(context, property.id, expenseId, title);
+                            _deleteExpense(
+                              context,
+                              property.id,
+                              expenseId,
+                              title,
+                            );
                           }
                         },
                         itemBuilder: (context) => [
@@ -1996,7 +2049,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                               children: [
                                 Icon(Icons.delete, size: 18, color: Colors.red),
                                 SizedBox(width: 8),
-                                Text('Excluir', style: TextStyle(color: Colors.red)),
+                                Text(
+                                  'Excluir',
+                                  style: TextStyle(color: Colors.red),
+                                ),
                               ],
                             ),
                           ),
@@ -2106,10 +2162,12 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                 final type = chk['type']?.toString() ?? 'sale';
                 final status = chk['status']?.toString() ?? 'pending';
                 final stats = chk['statistics'] as Map<String, dynamic>?;
-                final completionPercentage = stats?['completionPercentage']?.toDouble() ?? 0.0;
+                final completionPercentage =
+                    stats?['completionPercentage']?.toDouble() ?? 0.0;
                 final client = chk['client'] as Map<String, dynamic>?;
-                final clientName = client?['name']?.toString() ?? 'Cliente não informado';
-                
+                final clientName =
+                    client?['name']?.toString() ?? 'Cliente não informado';
+
                 return InkWell(
                   onTap: () {
                     // TODO: Navegar para detalhes do checklist quando a página existir
@@ -2151,30 +2209,45 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                                   Text(
                                     'Cliente: $clientName',
                                     style: theme.textTheme.bodySmall?.copyWith(
-                                      color: ThemeHelpers.textSecondaryColor(context),
+                                      color: ThemeHelpers.textSecondaryColor(
+                                        context,
+                                      ),
                                     ),
                                   ),
                                 ],
                               ),
                             ),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
                               decoration: BoxDecoration(
                                 color: status == 'completed'
-                                    ? AppColors.status.success.withValues(alpha: 0.1)
+                                    ? AppColors.status.success.withValues(
+                                        alpha: 0.1,
+                                      )
                                     : status == 'in_progress'
-                                        ? AppColors.status.warning.withValues(alpha: 0.1)
-                                        : AppColors.background.backgroundSecondary,
+                                    ? AppColors.status.warning.withValues(
+                                        alpha: 0.1,
+                                      )
+                                    : AppColors.background.backgroundSecondary,
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
-                                status == 'completed' ? 'Concluído' : status == 'in_progress' ? 'Em Andamento' : 'Pendente',
+                                status == 'completed'
+                                    ? 'Concluído'
+                                    : status == 'in_progress'
+                                    ? 'Em Andamento'
+                                    : 'Pendente',
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   color: status == 'completed'
                                       ? AppColors.status.success
                                       : status == 'in_progress'
-                                          ? AppColors.status.warning
-                                          : ThemeHelpers.textSecondaryColor(context),
+                                      ? AppColors.status.warning
+                                      : ThemeHelpers.textSecondaryColor(
+                                          context,
+                                        ),
                                   fontWeight: FontWeight.w600,
                                   fontSize: 11,
                                 ),
@@ -2194,7 +2267,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                             Expanded(
                               child: LinearProgressIndicator(
                                 value: completionPercentage / 100,
-                                backgroundColor: ThemeHelpers.borderLightColor(context),
+                                backgroundColor: ThemeHelpers.borderLightColor(
+                                  context,
+                                ),
                                 valueColor: AlwaysStoppedAnimation<Color>(
                                   AppColors.primary.primary,
                                 ),
@@ -2268,9 +2343,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                 const SizedBox(width: 8),
                 TextButton.icon(
                   onPressed: () {
-                    Navigator.of(context).pushNamed(
-                      AppRoutes.documentCreate,
-                    ).then((_) {
+                    Navigator.of(
+                      context,
+                    ).pushNamed(AppRoutes.documentCreate).then((_) {
                       _loadDocuments();
                     });
                   },
@@ -2288,132 +2363,142 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                     ),
                   )
                 : _documents.isEmpty
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Column(
-                            children: [
-                              Icon(
-                                Icons.description_outlined,
-                                size: 48,
-                                color: ThemeHelpers.textSecondaryColor(context),
-                              ),
-                              const SizedBox(height: 12),
-                              Text(
-                                'Nenhum documento vinculado',
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: ThemeHelpers.textSecondaryColor(context),
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Adicione contratos, IPTU, matrícula e outros documentos relacionados a esta propriedade',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: ThemeHelpers.textSecondaryColor(context),
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                              const SizedBox(height: 16),
-                              OutlinedButton.icon(
-                                onPressed: () {
-                                  Navigator.of(context).pushNamed(
-                                    AppRoutes.documentCreate,
-                                  ).then((_) {
-                                    _loadDocuments();
-                                  });
-                                },
-                                icon: const Icon(Icons.add),
-                                label: const Text('Adicionar Documento'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      )
-                    : Column(
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
                         children: [
-                          ..._documents.take(5).map((document) {
-                            return Container(
-                              margin: const EdgeInsets.only(bottom: 12),
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: isDark
-                                    ? AppColors.background.backgroundSecondaryDarkMode
-                                    : AppColors.background.backgroundSecondary,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: ThemeHelpers.borderLightColor(context),
-                                ),
-                              ),
-                              child: InkWell(
-                                onTap: () {
-                                  Navigator.of(context).pushNamed(
-                                    AppRoutes.documentDetails(document.id),
-                                  );
-                                },
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.description,
-                                      color: AppColors.primary.primary,
-                                      size: 24,
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            document.title ?? document.originalName,
-                                            style: theme.textTheme.bodyLarge?.copyWith(
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                          if (document.description != null &&
-                                              document.description!.isNotEmpty) ...[
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              document.description!,
-                                              style: theme.textTheme.bodySmall?.copyWith(
-                                                color: ThemeHelpers.textSecondaryColor(context),
-                                              ),
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ],
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Icon(
-                                      Icons.arrow_forward_ios,
-                                      size: 16,
-                                      color: ThemeHelpers.textSecondaryColor(context),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          }),
-                          if (_documents.length > 5) ...[
-                            const SizedBox(height: 8),
-                            OutlinedButton.icon(
-                              onPressed: () {
-                                Navigator.of(context).pushNamed(
-                                  AppRoutes.documents,
-                                );
-                              },
-                              icon: const Icon(Icons.visibility),
-                              label: Text('Ver Todos (${_documents.length})'),
-                              style: OutlinedButton.styleFrom(
-                                minimumSize: const Size(double.infinity, 40),
-                              ),
+                          Icon(
+                            Icons.description_outlined,
+                            size: 48,
+                            color: ThemeHelpers.textSecondaryColor(context),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Nenhum documento vinculado',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: ThemeHelpers.textSecondaryColor(context),
                             ),
-                          ],
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Adicione contratos, IPTU, matrícula e outros documentos relacionados a esta propriedade',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: ThemeHelpers.textSecondaryColor(context),
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 16),
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              Navigator.of(
+                                context,
+                              ).pushNamed(AppRoutes.documentCreate).then((_) {
+                                _loadDocuments();
+                              });
+                            },
+                            icon: const Icon(Icons.add),
+                            label: const Text('Adicionar Documento'),
+                          ),
                         ],
                       ),
+                    ),
+                  )
+                : Column(
+                    children: [
+                      ..._documents.take(5).map((document) {
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? AppColors
+                                      .background
+                                      .backgroundSecondaryDarkMode
+                                : AppColors.background.backgroundSecondary,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: ThemeHelpers.borderLightColor(context),
+                            ),
+                          ),
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.of(context).pushNamed(
+                                AppRoutes.documentDetails(document.id),
+                              );
+                            },
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.description,
+                                  color: AppColors.primary.primary,
+                                  size: 24,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        document.title ?? document.originalName,
+                                        style: theme.textTheme.bodyLarge
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      if (document.description != null &&
+                                          document.description!.isNotEmpty) ...[
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          document.description!,
+                                          style: theme.textTheme.bodySmall
+                                              ?.copyWith(
+                                                color:
+                                                    ThemeHelpers.textSecondaryColor(
+                                                      context,
+                                                    ),
+                                              ),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Icon(
+                                  Icons.arrow_forward_ios,
+                                  size: 16,
+                                  color: ThemeHelpers.textSecondaryColor(
+                                    context,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }),
+                      if (_documents.length > 5) ...[
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.of(
+                              context,
+                            ).pushNamed(AppRoutes.documents);
+                          },
+                          icon: const Icon(Icons.visibility),
+                          label: Text('Ver Todos (${_documents.length})'),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(double.infinity, 40),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
           ],
         ),
       ),
@@ -2641,9 +2726,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                       Expanded(
                         child: Text(
                           'Vincular Cliente',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.bold),
                         ),
                       ),
                       IconButton(
@@ -2701,7 +2785,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                     controller: notesController,
                     decoration: const InputDecoration(
                       labelText: 'Observações (opcional)',
-                      hintText: 'Adicione observações sobre o interesse do cliente',
+                      hintText:
+                          'Adicione observações sobre o interesse do cliente',
                       border: OutlineInputBorder(),
                     ),
                     maxLines: 3,
@@ -2775,7 +2860,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
     // Usar try-finally para garantir que o controller seja sempre descartado
     try {
-      if (result != true || selectedClientIdRef[0] == null || selectedInterestTypeRef[0] == null) {
+      if (result != true ||
+          selectedClientIdRef[0] == null ||
+          selectedInterestTypeRef[0] == null) {
         return;
       }
 
@@ -2806,9 +2893,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(
-                response.message ?? 'Erro ao vincular cliente',
-              ),
+              content: Text(response.message ?? 'Erro ao vincular cliente'),
               backgroundColor: AppColors.status.error,
             ),
           );
@@ -2837,7 +2922,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final descriptionController = TextEditingController();
     final locationController = TextEditingController();
     final formKey = GlobalKey<FormState>();
-    
+
     final keyTypeRef = <String>['main'];
     final keyTypes = [
       {'value': 'main', 'label': 'Principal'},
@@ -2888,9 +2973,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                       Expanded(
                         child: Text(
                           'Criar Chave',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.bold),
                         ),
                       ),
                       IconButton(
@@ -3005,19 +3089,20 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         return;
       }
 
-      final response = await _apiService.post<Map<String, dynamic>>(
-        ApiConstants.keys,
-        body: {
-          'name': nameController.text.trim(),
-          'propertyId': property.id,
-          'type': keyTypeRef[0],
-          'status': 'available',
-          if (locationController.text.trim().isNotEmpty)
-            'location': locationController.text.trim(),
-          if (descriptionController.text.trim().isNotEmpty)
-            'description': descriptionController.text.trim(),
-        },
+      final dto = key_models.CreateKeyDto(
+        name: nameController.text.trim(),
+        propertyId: property.id,
+        type: keyTypeRef[0],
+        status: 'available',
+        location: locationController.text.trim().isNotEmpty
+            ? locationController.text.trim()
+            : null,
+        description: descriptionController.text.trim().isNotEmpty
+            ? descriptionController.text.trim()
+            : null,
       );
+
+      final response = await _keyService.createKey(dto);
 
       if (mounted) {
         if (response.success) {
@@ -3062,7 +3147,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final dueDateController = TextEditingController();
     final descriptionController = TextEditingController();
     final formKey = GlobalKey<FormState>();
-    
+
     final expenseTypeRef = <String>['other'];
     final expenseTypes = [
       {'value': 'iptu', 'label': 'IPTU'},
@@ -3115,9 +3200,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                       Expanded(
                         child: Text(
                           'Adicionar Despesa',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.bold),
                         ),
                       ),
                       IconButton(
@@ -3174,12 +3258,16 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                       border: OutlineInputBorder(),
                       prefixText: 'R\$ ',
                     ),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
                         return 'Valor é obrigatório';
                       }
-                      final amount = double.tryParse(value.replaceAll(',', '.'));
+                      final amount = double.tryParse(
+                        value.replaceAll(',', '.'),
+                      );
                       if (amount == null || amount <= 0) {
                         return 'Valor inválido';
                       }
@@ -3201,12 +3289,16 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                         context: context,
                         initialDate: DateTime.now(),
                         firstDate: DateTime.now(),
-                        lastDate: DateTime.now().add(const Duration(days: 3650)),
+                        lastDate: DateTime.now().add(
+                          const Duration(days: 3650),
+                        ),
                       );
                       if (date != null) {
                         setModalState(() {
                           selectedDueDate = date;
-                          dueDateController.text = DateFormat('dd/MM/yyyy').format(date);
+                          dueDateController.text = DateFormat(
+                            'dd/MM/yyyy',
+                          ).format(date);
                         });
                       }
                     },
@@ -3332,7 +3424,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   ) async {
     final clientIdController = TextEditingController();
     final formKey = GlobalKey<FormState>();
-    
+
     final checklistTypeRef = <String>['sale'];
     final checklistTypes = [
       {'value': 'sale', 'label': 'Venda'},
@@ -3382,9 +3474,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                       Expanded(
                         child: Text(
                           'Criar Checklist',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.bold),
                         ),
                       ),
                       IconButton(
@@ -3446,7 +3537,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                             if (selectedClientIdRef[0] == null) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: const Text('Por favor, selecione um cliente'),
+                                  content: const Text(
+                                    'Por favor, selecione um cliente',
+                                  ),
                                   backgroundColor: AppColors.status.error,
                                 ),
                               );
@@ -3539,9 +3632,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     try {
       final response = await _apiService.put<Map<String, dynamic>>(
         ApiConstants.propertyExpenseMarkAsPaid(propertyId, expenseId),
-        body: {
-          'paidDate': DateTime.now().toIso8601String(),
-        },
+        body: {'paidDate': DateTime.now().toIso8601String()},
       );
 
       if (mounted) {
@@ -3556,7 +3647,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(response.message ?? 'Erro ao marcar despesa como paga'),
+              content: Text(
+                response.message ?? 'Erro ao marcar despesa como paga',
+              ),
               backgroundColor: AppColors.status.error,
             ),
           );
@@ -3664,16 +3757,277 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   Future<void> _showEditKeyModal(
     BuildContext context,
     Property property,
-    Map<String, dynamic> key,
+    key_models.Key key,
   ) async {
-    // Por enquanto, apenas mostra mensagem
-    // TODO: Implementar modal de edição completo
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Edição de chave será implementada em breve'),
-        backgroundColor: AppColors.status.info,
+    final nameController = TextEditingController(text: key.name);
+    final descriptionController = TextEditingController(
+      text: key.description ?? '',
+    );
+    final locationController = TextEditingController(text: key.location ?? '');
+    final notesController = TextEditingController(text: key.notes ?? '');
+    final formKey = GlobalKey<FormState>();
+
+    final keyTypeRef = <String>[key.type.value];
+    final keyStatusRef = <String>[key.status.value];
+
+    final keyTypes = [
+      {'value': 'main', 'label': 'Principal'},
+      {'value': 'backup', 'label': 'Reserva'},
+      {'value': 'emergency', 'label': 'Emergência'},
+      {'value': 'garage', 'label': 'Garagem'},
+      {'value': 'mailbox', 'label': 'Caixa de Correio'},
+      {'value': 'other', 'label': 'Outra'},
+    ];
+
+    final keyStatuses = [
+      {'value': 'available', 'label': 'Disponível'},
+      {'value': 'in_use', 'label': 'Em Uso'},
+      {'value': 'lost', 'label': 'Perdida'},
+      {'value': 'damaged', 'label': 'Danificada'},
+      {'value': 'maintenance', 'label': 'Manutenção'},
+    ];
+
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Container(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+          ),
+          decoration: BoxDecoration(
+            color: ThemeHelpers.cardBackgroundColor(context),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: SingleChildScrollView(
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 20),
+                      decoration: BoxDecoration(
+                        color: ThemeHelpers.textSecondaryColor(context),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Editar Chave',
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context, false),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  TextFormField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nome da Chave *',
+                      hintText: 'Ex: Chave Principal',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Nome é obrigatório';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Tipo *',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: keyTypes.map((type) {
+                      final isSelected = keyTypeRef[0] == type['value'];
+                      return ChoiceChip(
+                        label: Text(type['label']!),
+                        selected: isSelected,
+                        onSelected: (selected) {
+                          setModalState(() {
+                            keyTypeRef[0] = type['value']!;
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Status *',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: keyStatuses.map((status) {
+                      final isSelected = keyStatusRef[0] == status['value'];
+                      return ChoiceChip(
+                        label: Text(status['label']!),
+                        selected: isSelected,
+                        onSelected: (selected) {
+                          setModalState(() {
+                            keyStatusRef[0] = status['value']!;
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: locationController,
+                    decoration: const InputDecoration(
+                      labelText: 'Localização',
+                      hintText: 'Ex: Escritório',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: descriptionController,
+                    decoration: const InputDecoration(
+                      labelText: 'Descrição',
+                      hintText: 'Informações adicionais sobre a chave',
+                      border: OutlineInputBorder(),
+                    ),
+                    maxLines: 3,
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: notesController,
+                    decoration: const InputDecoration(
+                      labelText: 'Observações',
+                      hintText: 'Notas adicionais',
+                      border: OutlineInputBorder(),
+                    ),
+                    maxLines: 2,
+                  ),
+                  const SizedBox(height: 24),
+                  Column(
+                    children: [
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            if (formKey.currentState!.validate()) {
+                              Navigator.pop(context, true);
+                            }
+                          },
+                          icon: const Icon(Icons.save),
+                          label: const Text('Salvar Alterações'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => Navigator.pop(context, false),
+                          icon: const Icon(Icons.close),
+                          label: const Text('Cancelar'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
+
+    try {
+      if (result != true) {
+        nameController.dispose();
+        descriptionController.dispose();
+        locationController.dispose();
+        notesController.dispose();
+        return;
+      }
+
+      final dto = key_models.UpdateKeyDto(
+        name: nameController.text.trim(),
+        description: descriptionController.text.trim().isNotEmpty
+            ? descriptionController.text.trim()
+            : null,
+        type: keyTypeRef[0],
+        status: keyStatusRef[0],
+        location: locationController.text.trim().isNotEmpty
+            ? locationController.text.trim()
+            : null,
+        notes: notesController.text.trim().isNotEmpty
+            ? notesController.text.trim()
+            : null,
+      );
+
+      final response = await _keyService.updateKey(key.id, dto);
+
+      if (mounted) {
+        if (response.success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Chave atualizada com sucesso'),
+              backgroundColor: AppColors.status.success,
+            ),
+          );
+          _loadKeys();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(response.message ?? 'Erro ao atualizar chave'),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro: ${e.toString()}'),
+            backgroundColor: AppColors.status.error,
+          ),
+        );
+      }
+    } finally {
+      nameController.dispose();
+      descriptionController.dispose();
+      locationController.dispose();
+      notesController.dispose();
+    }
   }
 
   Future<void> _deleteKey(
@@ -3714,9 +4068,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     if (confirmed != true) return;
 
     try {
-      final response = await _apiService.delete<dynamic>(
-        ApiConstants.keyDelete(keyId),
-      );
+      final response = await _keyService.deleteKey(keyId);
 
       if (mounted) {
         if (response.success) {

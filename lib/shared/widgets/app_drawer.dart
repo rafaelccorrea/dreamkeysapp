@@ -269,24 +269,31 @@ class _AppDrawerState extends State<AppDrawer> {
                       ),
                     )
                   else
-                    CircleAvatar(
-                      radius: 32,
-                      backgroundColor: Colors.white,
-                      backgroundImage: _userAvatar != null
-                          ? NetworkImage(_userAvatar!)
-                          : null,
-                      child: _userAvatar == null
-                          ? Text(
-                              (_userName ?? 'U')[0].toUpperCase(),
-                              style: TextStyle(
-                                color: theme.brightness == Brightness.dark
-                                    ? AppColors.primary.primaryDarkMode
-                                    : AppColors.primary.primary,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 24,
-                              ),
-                            )
-                          : null,
+                    InkWell(
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.of(context).pushNamed(AppRoutes.profile);
+                      },
+                      borderRadius: BorderRadius.circular(32),
+                      child: CircleAvatar(
+                        radius: 32,
+                        backgroundColor: Colors.white,
+                        backgroundImage: _userAvatar != null
+                            ? NetworkImage(_userAvatar!)
+                            : null,
+                        child: _userAvatar == null
+                            ? Text(
+                                (_userName ?? 'U')[0].toUpperCase(),
+                                style: TextStyle(
+                                  color: theme.brightness == Brightness.dark
+                                      ? AppColors.primary.primaryDarkMode
+                                      : AppColors.primary.primary,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 24,
+                                ),
+                              )
+                            : null,
+                      ),
                     ),
                   const SizedBox(height: 16),
                   if (_isLoadingProfile)
@@ -714,7 +721,7 @@ class _AppDrawerState extends State<AppDrawer> {
     });
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: hasActiveChild
             ? primaryColor.withValues(alpha: 0.1)
@@ -791,7 +798,7 @@ class _AppDrawerState extends State<AppDrawer> {
     }
 
     return Container(
-      margin: EdgeInsets.symmetric(horizontal: isSubItem ? 32 : 8, vertical: 2),
+      margin: EdgeInsets.symmetric(horizontal: isSubItem ? 32 : 8, vertical: 4),
       decoration: BoxDecoration(
         color: active
             ? primaryColor.withValues(alpha: 0.1)
