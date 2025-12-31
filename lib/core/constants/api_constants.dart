@@ -248,18 +248,53 @@ class ApiConstants {
   static String inspectionById(String id) => '/inspection/$id';
   static String inspectionUpdate(String id) => '/inspection/$id';
   static String inspectionDelete(String id) => '/inspection/$id';
-  static String inspectionByProperty(String propertyId) => '/inspection/property/$propertyId';
-  static String inspectionByInspector(String inspectorId) => '/inspection/vistoriador/$inspectorId';
-  static String inspectionUploadPhoto(String id) => '/inspection/$id/upload-foto';
-  static String inspectionDeletePhoto(String id, String photoUrl) => '/inspection/$id/foto/${Uri.encodeComponent(photoUrl)}';
-  static String inspectionRequestApproval(String id) => '/inspection/$id/request-approval';
+  static String inspectionByProperty(String propertyId) =>
+      '/inspection/property/$propertyId';
+  static String inspectionByInspector(String inspectorId) =>
+      '/inspection/vistoriador/$inspectorId';
+  static String inspectionUploadPhoto(String id) =>
+      '/inspection/$id/upload-foto';
+  static String inspectionDeletePhoto(String id, String photoUrl) =>
+      '/inspection/$id/foto/${Uri.encodeComponent(photoUrl)}';
+  static String inspectionRequestApproval(String id) =>
+      '/inspection/$id/request-approval';
   static String inspectionHistory(String id) => '/inspection/$id/history';
-  static String inspectionHistoryEntry(String id, String historyId) => '/inspection/$id/history/$historyId';
-  
+  static String inspectionHistoryEntry(String id, String historyId) =>
+      '/inspection/$id/history/$historyId';
+
   // Endpoints de Aprovações Financeiras de Vistorias
   static const String inspectionApprovals = '/inspection-approval';
   static String inspectionApprovalById(String id) => '/inspection-approval/$id';
-  static String inspectionApprovalApprove(String id) => '/inspection-approval/$id/approve';
+  static String inspectionApprovalApprove(String id) =>
+      '/inspection-approval/$id/approve';
+
+  // Endpoints de Chaves
+  static const String keys = '/keys';
+  static String keyById(String id) => '/keys/$id';
+  static String keyUpdate(String id) => '/keys/$id';
+  static String keyDelete(String id) => '/keys/$id';
+  static String keyStatus(String propertyId) =>
+      '/keys/status?propertyId=$propertyId';
+  static String keysByProperty(String propertyId) =>
+      '/keys?propertyId=$propertyId';
+
+  // Endpoints de Despesas de Propriedades
+  static String propertyExpenses(String propertyId) =>
+      '/properties/$propertyId/expenses';
+  static String propertyExpensesSummary(String propertyId) =>
+      '/properties/$propertyId/expenses/summary';
+  static String propertyExpenseById(String propertyId, String expenseId) =>
+      '/properties/$propertyId/expenses/$expenseId';
+  static String propertyExpenseMarkAsPaid(
+    String propertyId,
+    String expenseId,
+  ) => '/properties/$propertyId/expenses/$expenseId/mark-as-paid';
+
+  // Endpoints de Checklists
+  static const String saleChecklists = '/sale-checklists';
+  static String saleChecklistById(String id) => '/sale-checklists/$id';
+  static String saleChecklistsByProperty(String propertyId) =>
+      '/sale-checklists?propertyId=$propertyId';
 
   // Headers
   static const String contentTypeHeader = 'Content-Type';

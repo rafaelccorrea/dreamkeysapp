@@ -241,10 +241,13 @@ class _NotificationHeader extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Notificações',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.bold,
+              Flexible(
+                child: Text(
+                  'Notificações',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               Row(
@@ -255,12 +258,22 @@ class _NotificationHeader extends StatelessWidget {
                       onPressed: () async {
                         await controller.markAllAsRead();
                       },
-                      child: const Text('Marcar todas como lidas'),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text(
+                        'Marcar todas',
+                        style: TextStyle(fontSize: 12),
+                      ),
                     ),
                   IconButton(
                     icon: const Icon(Icons.close),
                     onPressed: onClose,
                     iconSize: 20,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
                   ),
                 ],
               ),

@@ -9,6 +9,13 @@ import '../../../../core/theme/theme_helpers.dart';
 import '../widgets/property_public_toggle.dart';
 import '../../matches/widgets/matches_badge.dart';
 import '../../../../core/routes/app_routes.dart';
+import '../../documents/services/document_service.dart';
+import '../../documents/models/document_model.dart';
+import '../../clients/services/client_service.dart';
+import '../../documents/widgets/entity_selector.dart';
+import '../../../../core/constants/api_constants.dart';
+import '../../../../shared/services/api_service.dart';
+import 'package:flutter/foundation.dart';
 
 // Formatter de moeda
 final _currencyFormatter = NumberFormat.currency(
@@ -29,16 +36,195 @@ class PropertyDetailsPage extends StatefulWidget {
 
 class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   final PropertyService _propertyService = PropertyService.instance;
+  final DocumentService _documentService = DocumentService.instance;
+  final ClientService _clientService = ClientService.instance;
+  final ApiService _apiService = ApiService.instance;
   bool _isLoading = true;
   Property? _property;
   String? _errorMessage;
   final PageController _imagePageController = PageController();
   int _currentImageIndex = 0;
+  
+  // Documentos
+  List<Document> _documents = [];
+  bool _isLoadingDocuments = false;
+  
+  // Checklists
+  List<dynamic> _checklists = [];
+  bool _isLoadingChecklists = false;
+  
+  // Despesas
+  List<dynamic> _expenses = [];
+  bool _isLoadingExpenses = false;
+  Map<String, dynamic>? _expensesSummary;
+  
+  // Chaves
+  List<dynamic> _keys = [];
+  bool _isLoadingKeys = false;
+  Map<String, dynamic>? _keyStatus;
 
   @override
   void initState() {
     super.initState();
     _loadProperty();
+  }
+  
+  Future<void> _loadDocuments() async {
+    if (widget.propertyId.isEmpty) return;
+    
+    setState(() {
+      _isLoadingDocuments = true;
+    });
+    
+    try {
+      final response = await _documentService.getDocuments(
+        filters: DocumentFilters(propertyId: widget.propertyId),
+        page: 1,
+        limit: 10,
+      );
+      
+      if (mounted) {
+        setState(() {
+          _isLoadingDocuments = false;
+          if (response.success && response.data != null) {
+            _documents = response.data!.data;
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ [PROPERTY_DETAILS] Erro ao carregar documentos: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingDocuments = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadChecklists() async {
+    if (widget.propertyId.isEmpty) return;
+    
+    setState(() {
+      _isLoadingChecklists = true;
+    });
+    
+    try {
+      final response = await _apiService.get<dynamic>(
+        ApiConstants.saleChecklistsByProperty(widget.propertyId),
+      );
+      
+      if (mounted) {
+        setState(() {
+          _isLoadingChecklists = false;
+          if (response.success && response.data != null) {
+            if (response.data is List) {
+              _checklists = response.data as List<dynamic>;
+            } else if (response.data is Map<String, dynamic>) {
+              final data = response.data as Map<String, dynamic>;
+              _checklists = data['checklists'] as List<dynamic>? ?? 
+                           data['data'] as List<dynamic>? ?? [];
+            }
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ [PROPERTY_DETAILS] Erro ao carregar checklists: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingChecklists = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadExpenses() async {
+    if (widget.propertyId.isEmpty) return;
+    
+    setState(() {
+      _isLoadingExpenses = true;
+    });
+    
+    try {
+      // Carregar lista de despesas
+      final expensesResponse = await _apiService.get<dynamic>(
+        ApiConstants.propertyExpenses(widget.propertyId),
+      );
+      
+      // Carregar resumo de despesas
+      final summaryResponse = await _apiService.get<dynamic>(
+        ApiConstants.propertyExpensesSummary(widget.propertyId),
+      );
+      
+      if (mounted) {
+        setState(() {
+          _isLoadingExpenses = false;
+          if (expensesResponse.success && expensesResponse.data != null) {
+            if (expensesResponse.data is List) {
+              _expenses = expensesResponse.data as List<dynamic>;
+            } else if (expensesResponse.data is Map<String, dynamic>) {
+              final data = expensesResponse.data as Map<String, dynamic>;
+              _expenses = data['data'] as List<dynamic>? ?? 
+                         data['expenses'] as List<dynamic>? ?? [];
+            }
+          }
+          if (summaryResponse.success && summaryResponse.data != null) {
+            _expensesSummary = summaryResponse.data as Map<String, dynamic>;
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ [PROPERTY_DETAILS] Erro ao carregar despesas: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingExpenses = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadKeys() async {
+    if (widget.propertyId.isEmpty) return;
+    
+    setState(() {
+      _isLoadingKeys = true;
+    });
+    
+    try {
+      // Carregar lista de chaves
+      final keysResponse = await _apiService.get<dynamic>(
+        ApiConstants.keysByProperty(widget.propertyId),
+      );
+      
+      // Carregar status da chave
+      final statusResponse = await _apiService.get<dynamic>(
+        ApiConstants.keyStatus(widget.propertyId),
+      );
+      
+      if (mounted) {
+        setState(() {
+          _isLoadingKeys = false;
+          if (keysResponse.success && keysResponse.data != null) {
+            if (keysResponse.data is List) {
+              _keys = keysResponse.data as List<dynamic>;
+            } else if (keysResponse.data is Map<String, dynamic>) {
+              final data = keysResponse.data as Map<String, dynamic>;
+              _keys = data['data'] as List<dynamic>? ?? 
+                     data['keys'] as List<dynamic>? ?? [];
+            }
+          }
+          if (statusResponse.success && statusResponse.data != null) {
+            _keyStatus = statusResponse.data as Map<String, dynamic>;
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ [PROPERTY_DETAILS] Erro ao carregar chaves: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingKeys = false;
+        });
+      }
+    }
   }
 
   @override
@@ -64,6 +250,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             _property = response.data;
             _isLoading = false;
           });
+          // Carregar dados relacionados após carregar propriedade
+          _loadDocuments();
+          _loadChecklists();
+          _loadExpenses();
+          _loadKeys();
         } else {
           setState(() {
             _errorMessage = response.message ?? 'Erro ao carregar propriedade';
@@ -642,7 +833,37 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   const SizedBox(height: 32),
                 ],
 
-                // Publicação no site
+                // Status da Chave (Seção 6)
+                _buildSectionTitle(theme, 'Status da Chave'),
+                const SizedBox(height: 16),
+                _buildKeyStatusSection(context, theme, property),
+                const SizedBox(height: 32),
+
+                // Clientes Vinculados (Seção 7)
+                _buildSectionTitle(theme, 'Clientes Vinculados'),
+                const SizedBox(height: 16),
+                _buildClientsSection(context, theme, property),
+                const SizedBox(height: 32),
+
+                // Despesas do Imóvel (Seção 8)
+                _buildSectionTitle(theme, 'Despesas do Imóvel'),
+                const SizedBox(height: 16),
+                _buildExpensesSection(context, theme, property),
+                const SizedBox(height: 32),
+
+                // Checklists (Seção 9)
+                _buildSectionTitle(theme, 'Checklists'),
+                const SizedBox(height: 16),
+                _buildChecklistsSection(context, theme, property),
+                const SizedBox(height: 32),
+
+                // Documentos (Seção 10)
+                _buildSectionTitle(theme, 'Documentos'),
+                const SizedBox(height: 16),
+                _buildDocumentsSection(context, theme, property),
+                const SizedBox(height: 32),
+
+                // Publicação no site (Seção 11)
                 _buildSectionTitle(theme, 'Publicação'),
                 const SizedBox(height: 16),
                 PropertyPublicToggle(
@@ -666,22 +887,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                 ),
                 const SizedBox(height: 32),
 
-                // Ofertas (se houver)
+                // Ofertas (Seção 12)
                 if (property.hasPendingOffers == true ||
                     property.totalOffersCount != null &&
                         property.totalOffersCount! > 0) ...[
                   _buildSectionTitle(theme, 'Ofertas'),
                   const SizedBox(height: 16),
                   _buildOffersSection(context, theme, property),
-                  const SizedBox(height: 32),
-                ],
-
-                // Clientes associados (se houver)
-                if (property.clients != null &&
-                    property.clients!.isNotEmpty) ...[
-                  _buildSectionTitle(theme, 'Clientes Interessados'),
-                  const SizedBox(height: 16),
-                  _buildClientsSection(context, theme, property.clients!),
                   const SizedBox(height: 32),
                 ],
               ],
@@ -1039,28 +1251,1172 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
+  Widget _buildKeyStatusSection(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Card(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isDark
+              ? AppColors.border.borderDarkMode
+              : AppColors.border.border,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.vpn_key,
+                  color: AppColors.primary.primary,
+                  size: 24,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Status da Chave',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Visualize e gerencie chaves vinculadas a esta propriedade',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: ThemeHelpers.textSecondaryColor(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (_isLoadingKeys)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            else if (_keys.isEmpty)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.vpn_key_outlined,
+                        size: 48,
+                        color: ThemeHelpers.textSecondaryColor(context),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Nenhuma chave cadastrada',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: ThemeHelpers.textSecondaryColor(context),
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            _showCreateKeyModal(context, property);
+                          },
+                          icon: const Icon(Icons.add, size: 18),
+                          label: const Text('Criar Chave'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              Column(
+                children: [
+                  ...(_keys.map((key) {
+                    final k = key as Map<String, dynamic>;
+                    final keyId = k['id']?.toString() ?? '';
+                    final name = k['name']?.toString() ?? 'Chave';
+                    final status = k['status']?.toString() ?? 'available';
+                    final location = k['location']?.toString();
+                    
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? AppColors.background.backgroundSecondaryDarkMode
+                            : AppColors.background.backgroundSecondary,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: ThemeHelpers.borderLightColor(context),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.vpn_key,
+                            color: status == 'available' 
+                                ? AppColors.status.success
+                                : AppColors.status.warning,
+                            size: 24,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  name,
+                                  style: theme.textTheme.bodyLarge?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                if (location != null && location.isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Localização: $location',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: ThemeHelpers.textSecondaryColor(context),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: status == 'available'
+                                  ? AppColors.status.success.withValues(alpha: 0.1)
+                                  : AppColors.status.warning.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              status == 'available' ? 'Disponível' : 'Em Uso',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: status == 'available'
+                                    ? AppColors.status.success
+                                    : AppColors.status.warning,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                          PopupMenuButton<String>(
+                            icon: const Icon(Icons.more_vert),
+                            onSelected: (value) {
+                              if (value == 'edit') {
+                                _showEditKeyModal(context, property, key);
+                              } else if (value == 'delete') {
+                                _deleteKey(context, property.id, keyId, name);
+                              }
+                            },
+                            itemBuilder: (context) => [
+                              const PopupMenuItem(
+                                value: 'edit',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.edit, size: 18),
+                                    SizedBox(width: 8),
+                                    Text('Editar'),
+                                  ],
+                                ),
+                              ),
+                              const PopupMenuItem(
+                                value: 'delete',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.delete, size: 18, color: Colors.red),
+                                    SizedBox(width: 8),
+                                    Text('Excluir', style: TextStyle(color: Colors.red)),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
+                  })),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        _showCreateKeyModal(context, property);
+                      },
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Criar Chave'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildClientsSection(
     BuildContext context,
     ThemeData theme,
-    List<PropertyClient> clients,
+    Property property,
   ) {
-    return Column(
-      children: clients.take(5).map((client) {
-        return Card(
-          margin: const EdgeInsets.only(bottom: 12),
-          child: ListTile(
-            leading: CircleAvatar(child: Text(client.name[0].toUpperCase())),
-            title: Text(client.name),
-            subtitle: Text(client.email),
-            trailing: Text(
-              client.interestType,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: AppColors.primary.primary,
-              ),
+    final clients = property.clients ?? [];
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Card(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isDark
+              ? AppColors.border.borderDarkMode
+              : AppColors.border.border,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.people,
+                        color: AppColors.primary.primary,
+                        size: 24,
+                      ),
+                      const SizedBox(width: 12),
+                      Flexible(
+                        child: Text(
+                          'Clientes Vinculados',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (clients.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.primary.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            '${clients.length}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: AppColors.primary.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                TextButton.icon(
+                  onPressed: () {
+                    _showLinkClientModal(context, property);
+                  },
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Adicionar'),
+                ),
+              ],
             ),
-          ),
-        );
-      }).toList(),
+            const SizedBox(height: 16),
+            if (clients.isEmpty)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.people_outline,
+                        size: 48,
+                        color: ThemeHelpers.textSecondaryColor(context),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Nenhum cliente vinculado',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: ThemeHelpers.textSecondaryColor(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              ...clients.map((client) {
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? AppColors.background.backgroundSecondaryDarkMode
+                        : AppColors.background.backgroundSecondary,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: ThemeHelpers.borderLightColor(context),
+                    ),
+                  ),
+                  child: InkWell(
+                    onTap: () {
+                      Navigator.of(context).pushNamed(
+                        AppRoutes.clientDetails(client.id),
+                      );
+                    },
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 24,
+                          child: Text(
+                            client.name[0].toUpperCase(),
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                client.name,
+                                style: theme.textTheme.bodyLarge?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              if (client.email.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  client.email,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: ThemeHelpers.textSecondaryColor(context),
+                                  ),
+                                ),
+                              ],
+                              if (client.phone.isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  client.phone,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: ThemeHelpers.textSecondaryColor(context),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary.primary.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                client.interestType,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: AppColors.primary.primary,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Icon(
+                              Icons.arrow_forward_ios,
+                              size: 16,
+                              color: ThemeHelpers.textSecondaryColor(context),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExpensesSection(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Card(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isDark
+              ? AppColors.border.borderDarkMode
+              : AppColors.border.border,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.account_balance_wallet,
+                        color: AppColors.primary.primary,
+                        size: 24,
+                      ),
+                      const SizedBox(width: 12),
+                      Flexible(
+                        child: Text(
+                          'Despesas do Imóvel',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                TextButton.icon(
+                  onPressed: () {
+                    _showCreateExpenseModal(context, property);
+                  },
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Adicionar'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (_isLoadingExpenses)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            else if (_expenses.isEmpty)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.account_balance_wallet_outlined,
+                        size: 48,
+                        color: ThemeHelpers.textSecondaryColor(context),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Nenhuma despesa cadastrada',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: ThemeHelpers.textSecondaryColor(context),
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else ...[
+              // Resumo de Despesas
+              if (_expensesSummary != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? AppColors.background.backgroundSecondaryDarkMode
+                        : AppColors.background.backgroundSecondary,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: ThemeHelpers.borderLightColor(context),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Resumo',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Pendentes',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: ThemeHelpers.textSecondaryColor(context),
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${_expensesSummary!['totalPending'] ?? 0}',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Vencidas',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: ThemeHelpers.textSecondaryColor(context),
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${_expensesSummary!['totalOverdue'] ?? 0}',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.status.error,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Pagas',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: ThemeHelpers.textSecondaryColor(context),
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${_expensesSummary!['totalPaid'] ?? 0}',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.status.success,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Total Pendente',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: ThemeHelpers.textSecondaryColor(context),
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  _currencyFormatter.format(
+                                    ((_expensesSummary!['totalPendingAmount'] ?? 0) as num).toDouble(),
+                                  ),
+                                  style: theme.textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              // Lista de Despesas
+              ...(_expenses.take(5).map((expense) {
+                final exp = expense as Map<String, dynamic>;
+                final expenseId = exp['id']?.toString() ?? '';
+                final title = exp['title']?.toString() ?? 'Despesa';
+                final amount = exp['amount']?.toString() ?? '0';
+                final status = exp['status']?.toString() ?? 'pending';
+                final dueDate = exp['dueDate']?.toString();
+                
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? AppColors.background.backgroundSecondaryDarkMode
+                        : AppColors.background.backgroundSecondary,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: ThemeHelpers.borderLightColor(context),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              style: theme.textTheme.bodyLarge?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _currencyFormatter.format(double.tryParse(amount) ?? 0),
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: AppColors.primary.primary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            if (dueDate != null) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                'Vence: ${DateFormat('dd/MM/yyyy').format(DateTime.parse(dueDate))}',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: ThemeHelpers.textSecondaryColor(context),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: status == 'paid' 
+                              ? AppColors.status.success.withValues(alpha: 0.1)
+                              : status == 'overdue'
+                                  ? AppColors.status.error.withValues(alpha: 0.1)
+                                  : AppColors.status.warning.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          status == 'paid' ? 'Paga' : status == 'overdue' ? 'Vencida' : 'Pendente',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: status == 'paid'
+                                ? AppColors.status.success
+                                : status == 'overdue'
+                                    ? AppColors.status.error
+                                    : AppColors.status.warning,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert),
+                        onSelected: (value) {
+                          if (value == 'mark_paid') {
+                            _markExpenseAsPaid(context, property.id, expenseId);
+                          } else if (value == 'edit') {
+                            _showEditExpenseModal(context, property, expense);
+                          } else if (value == 'delete') {
+                            _deleteExpense(context, property.id, expenseId, title);
+                          }
+                        },
+                        itemBuilder: (context) => [
+                          if (status != 'paid')
+                            const PopupMenuItem(
+                              value: 'mark_paid',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.check_circle, size: 18),
+                                  SizedBox(width: 8),
+                                  Text('Marcar como Paga'),
+                                ],
+                              ),
+                            ),
+                          const PopupMenuItem(
+                            value: 'edit',
+                            child: Row(
+                              children: [
+                                Icon(Icons.edit, size: 18),
+                                SizedBox(width: 8),
+                                Text('Editar'),
+                              ],
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'delete',
+                            child: Row(
+                              children: [
+                                Icon(Icons.delete, size: 18, color: Colors.red),
+                                SizedBox(width: 8),
+                                Text('Excluir', style: TextStyle(color: Colors.red)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              })),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChecklistsSection(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Card(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isDark
+              ? AppColors.border.borderDarkMode
+              : AppColors.border.border,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.checklist,
+                        color: AppColors.primary.primary,
+                        size: 24,
+                      ),
+                      const SizedBox(width: 12),
+                      Flexible(
+                        child: Text(
+                          'Checklists',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                TextButton.icon(
+                  onPressed: () {
+                    _showCreateChecklistModal(context, property);
+                  },
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Criar Checklist'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (_isLoadingChecklists)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            else if (_checklists.isEmpty)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.checklist_outlined,
+                        size: 48,
+                        color: ThemeHelpers.textSecondaryColor(context),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Nenhum checklist cadastrado',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: ThemeHelpers.textSecondaryColor(context),
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              ...(_checklists.take(5).map((checklist) {
+                final chk = checklist as Map<String, dynamic>;
+                final checklistId = chk['id']?.toString() ?? '';
+                final type = chk['type']?.toString() ?? 'sale';
+                final status = chk['status']?.toString() ?? 'pending';
+                final stats = chk['statistics'] as Map<String, dynamic>?;
+                final completionPercentage = stats?['completionPercentage']?.toDouble() ?? 0.0;
+                final client = chk['client'] as Map<String, dynamic>?;
+                final clientName = client?['name']?.toString() ?? 'Cliente não informado';
+                
+                return InkWell(
+                  onTap: () {
+                    // TODO: Navegar para detalhes do checklist quando a página existir
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Visualizar checklist: $checklistId'),
+                        backgroundColor: AppColors.status.info,
+                      ),
+                    );
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? AppColors.background.backgroundSecondaryDarkMode
+                          : AppColors.background.backgroundSecondary,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: ThemeHelpers.borderLightColor(context),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Checklist de ${type == 'sale' ? 'Venda' : 'Aluguel'}',
+                                    style: theme.textTheme.bodyLarge?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Cliente: $clientName',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: ThemeHelpers.textSecondaryColor(context),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: status == 'completed'
+                                    ? AppColors.status.success.withValues(alpha: 0.1)
+                                    : status == 'in_progress'
+                                        ? AppColors.status.warning.withValues(alpha: 0.1)
+                                        : AppColors.background.backgroundSecondary,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                status == 'completed' ? 'Concluído' : status == 'in_progress' ? 'Em Andamento' : 'Pendente',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: status == 'completed'
+                                      ? AppColors.status.success
+                                      : status == 'in_progress'
+                                          ? AppColors.status.warning
+                                          : ThemeHelpers.textSecondaryColor(context),
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.arrow_forward_ios,
+                              size: 16,
+                              color: ThemeHelpers.textSecondaryColor(context),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: LinearProgressIndicator(
+                                value: completionPercentage / 100,
+                                backgroundColor: ThemeHelpers.borderLightColor(context),
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  AppColors.primary.primary,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              '${completionPercentage.toStringAsFixed(0)}%',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              })),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDocumentsSection(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Card(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isDark
+              ? AppColors.border.borderDarkMode
+              : AppColors.border.border,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.description,
+                        color: AppColors.primary.primary,
+                        size: 24,
+                      ),
+                      const SizedBox(width: 12),
+                      Flexible(
+                        child: Text(
+                          'Documentos',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                TextButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).pushNamed(
+                      AppRoutes.documentCreate,
+                    ).then((_) {
+                      _loadDocuments();
+                    });
+                  },
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Adicionar'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _isLoadingDocuments
+                ? const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: CircularProgressIndicator(),
+                    ),
+                  )
+                : _documents.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            children: [
+                              Icon(
+                                Icons.description_outlined,
+                                size: 48,
+                                color: ThemeHelpers.textSecondaryColor(context),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'Nenhum documento vinculado',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: ThemeHelpers.textSecondaryColor(context),
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Adicione contratos, IPTU, matrícula e outros documentos relacionados a esta propriedade',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: ThemeHelpers.textSecondaryColor(context),
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 16),
+                              OutlinedButton.icon(
+                                onPressed: () {
+                                  Navigator.of(context).pushNamed(
+                                    AppRoutes.documentCreate,
+                                  ).then((_) {
+                                    _loadDocuments();
+                                  });
+                                },
+                                icon: const Icon(Icons.add),
+                                label: const Text('Adicionar Documento'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    : Column(
+                        children: [
+                          ..._documents.take(5).map((document) {
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: isDark
+                                    ? AppColors.background.backgroundSecondaryDarkMode
+                                    : AppColors.background.backgroundSecondary,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: ThemeHelpers.borderLightColor(context),
+                                ),
+                              ),
+                              child: InkWell(
+                                onTap: () {
+                                  Navigator.of(context).pushNamed(
+                                    AppRoutes.documentDetails(document.id),
+                                  );
+                                },
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.description,
+                                      color: AppColors.primary.primary,
+                                      size: 24,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            document.title ?? document.originalName,
+                                            style: theme.textTheme.bodyLarge?.copyWith(
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          if (document.description != null &&
+                                              document.description!.isNotEmpty) ...[
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              document.description!,
+                                              style: theme.textTheme.bodySmall?.copyWith(
+                                                color: ThemeHelpers.textSecondaryColor(context),
+                                              ),
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Icon(
+                                      Icons.arrow_forward_ios,
+                                      size: 16,
+                                      color: ThemeHelpers.textSecondaryColor(context),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }),
+                          if (_documents.length > 5) ...[
+                            const SizedBox(height: 8),
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                Navigator.of(context).pushNamed(
+                                  AppRoutes.documents,
+                                );
+                              },
+                              icon: const Icon(Icons.visibility),
+                              label: Text('Ver Todos (${_documents.length})'),
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size(double.infinity, 40),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1228,6 +2584,1167 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         return AppColors.status.warning;
       case PropertyStatus.draft:
         return AppColors.text.textSecondary;
+    }
+  }
+
+  Future<void> _showLinkClientModal(
+    BuildContext context,
+    Property property,
+  ) async {
+    final selectedClientIdRef = <String?>[null];
+    final selectedClientNameRef = <String?>[null];
+    final selectedInterestTypeRef = <String?>[null];
+    final notesController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    final interestTypes = ['buy', 'rent', 'both'];
+
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Container(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+          ),
+          decoration: BoxDecoration(
+            color: ThemeHelpers.cardBackgroundColor(context),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: SingleChildScrollView(
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Handle
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 20),
+                      decoration: BoxDecoration(
+                        color: ThemeHelpers.textSecondaryColor(context),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  // Header
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Vincular Cliente',
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context, false),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  // Client Selector
+                  EntitySelector(
+                    type: 'client',
+                    selectedId: selectedClientIdRef[0],
+                    selectedName: selectedClientNameRef[0],
+                    onSelected: (id, name) {
+                      setModalState(() {
+                        selectedClientIdRef[0] = id;
+                        selectedClientNameRef[0] = name;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  // Interest Type
+                  Text(
+                    'Tipo de Interesse *',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: interestTypes.map((type) {
+                      final labels = {
+                        'buy': 'Compra',
+                        'rent': 'Aluguel',
+                        'both': 'Ambos',
+                      };
+                      final isSelected = selectedInterestTypeRef[0] == type;
+                      return ChoiceChip(
+                        label: Text(labels[type] ?? type),
+                        selected: isSelected,
+                        onSelected: (selected) {
+                          setModalState(() {
+                            selectedInterestTypeRef[0] = selected ? type : null;
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  // Notes (optional)
+                  TextFormField(
+                    controller: notesController,
+                    decoration: const InputDecoration(
+                      labelText: 'Observações (opcional)',
+                      hintText: 'Adicione observações sobre o interesse do cliente',
+                      border: OutlineInputBorder(),
+                    ),
+                    maxLines: 3,
+                    maxLength: 500,
+                  ),
+                  const SizedBox(height: 24),
+                  // Buttons (full width)
+                  Column(
+                    children: [
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            if (formKey.currentState!.validate()) {
+                              if (selectedClientIdRef[0] == null ||
+                                  selectedClientNameRef[0] == null) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: const Text(
+                                      'Por favor, selecione um cliente',
+                                    ),
+                                    backgroundColor: AppColors.status.error,
+                                  ),
+                                );
+                                return;
+                              }
+                              if (selectedInterestTypeRef[0] == null) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: const Text(
+                                      'Por favor, selecione o tipo de interesse',
+                                    ),
+                                    backgroundColor: AppColors.status.error,
+                                  ),
+                                );
+                                return;
+                              }
+                              Navigator.pop(context, true);
+                            }
+                          },
+                          icon: const Icon(Icons.link),
+                          label: const Text('Vincular Cliente'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.pop(context, false);
+                          },
+                          icon: const Icon(Icons.close),
+                          label: const Text('Cancelar'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // Usar try-finally para garantir que o controller seja sempre descartado
+    try {
+      if (result != true || selectedClientIdRef[0] == null || selectedInterestTypeRef[0] == null) {
+        return;
+      }
+
+      // Capturar o texto antes de usar
+      final notes = notesController.text.trim().isEmpty
+          ? null
+          : notesController.text.trim();
+
+      // Associar cliente à propriedade
+
+      final response = await _clientService.associateClientToProperty(
+        selectedClientIdRef[0]!,
+        property.id,
+        interestType: selectedInterestTypeRef[0]!,
+        notes: notes,
+      );
+
+      if (mounted) {
+        if (response.success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Cliente vinculado com sucesso'),
+              backgroundColor: AppColors.status.success,
+            ),
+          );
+          // Recarregar propriedade para atualizar lista de clientes
+          _loadProperty();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                response.message ?? 'Erro ao vincular cliente',
+              ),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro: ${e.toString()}'),
+            backgroundColor: AppColors.status.error,
+          ),
+        );
+      }
+    } finally {
+      // Sempre descartar o controller no final
+      notesController.dispose();
+    }
+  }
+
+  Future<void> _showCreateKeyModal(
+    BuildContext context,
+    Property property,
+  ) async {
+    final nameController = TextEditingController();
+    final descriptionController = TextEditingController();
+    final locationController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    
+    final keyTypeRef = <String>['main'];
+    final keyTypes = [
+      {'value': 'main', 'label': 'Principal'},
+      {'value': 'backup', 'label': 'Reserva'},
+      {'value': 'emergency', 'label': 'Emergência'},
+      {'value': 'garage', 'label': 'Garagem'},
+      {'value': 'mailbox', 'label': 'Caixa de Correio'},
+      {'value': 'other', 'label': 'Outra'},
+    ];
+
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Container(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+          ),
+          decoration: BoxDecoration(
+            color: ThemeHelpers.cardBackgroundColor(context),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: SingleChildScrollView(
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 20),
+                      decoration: BoxDecoration(
+                        color: ThemeHelpers.textSecondaryColor(context),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Criar Chave',
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context, false),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  TextFormField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nome da Chave *',
+                      hintText: 'Ex: Chave Principal',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Nome é obrigatório';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Tipo *',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: keyTypes.map((type) {
+                      final isSelected = keyTypeRef[0] == type['value'];
+                      return ChoiceChip(
+                        label: Text(type['label']!),
+                        selected: isSelected,
+                        onSelected: (selected) {
+                          setModalState(() {
+                            keyTypeRef[0] = type['value']!;
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: locationController,
+                    decoration: const InputDecoration(
+                      labelText: 'Localização',
+                      hintText: 'Ex: Escritório',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: descriptionController,
+                    decoration: const InputDecoration(
+                      labelText: 'Descrição',
+                      hintText: 'Informações adicionais sobre a chave',
+                      border: OutlineInputBorder(),
+                    ),
+                    maxLines: 3,
+                  ),
+                  const SizedBox(height: 24),
+                  Column(
+                    children: [
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            if (formKey.currentState!.validate()) {
+                              Navigator.pop(context, true);
+                            }
+                          },
+                          icon: const Icon(Icons.add),
+                          label: const Text('Criar Chave'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => Navigator.pop(context, false),
+                          icon: const Icon(Icons.close),
+                          label: const Text('Cancelar'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      if (result != true) {
+        nameController.dispose();
+        descriptionController.dispose();
+        locationController.dispose();
+        return;
+      }
+
+      final response = await _apiService.post<Map<String, dynamic>>(
+        ApiConstants.keys,
+        body: {
+          'name': nameController.text.trim(),
+          'propertyId': property.id,
+          'type': keyTypeRef[0],
+          'status': 'available',
+          if (locationController.text.trim().isNotEmpty)
+            'location': locationController.text.trim(),
+          if (descriptionController.text.trim().isNotEmpty)
+            'description': descriptionController.text.trim(),
+        },
+      );
+
+      if (mounted) {
+        if (response.success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Chave criada com sucesso'),
+              backgroundColor: AppColors.status.success,
+            ),
+          );
+          _loadKeys();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(response.message ?? 'Erro ao criar chave'),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro: ${e.toString()}'),
+            backgroundColor: AppColors.status.error,
+          ),
+        );
+      }
+    } finally {
+      nameController.dispose();
+      descriptionController.dispose();
+      locationController.dispose();
+    }
+  }
+
+  Future<void> _showCreateExpenseModal(
+    BuildContext context,
+    Property property,
+  ) async {
+    final titleController = TextEditingController();
+    final amountController = TextEditingController();
+    final dueDateController = TextEditingController();
+    final descriptionController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    
+    final expenseTypeRef = <String>['other'];
+    final expenseTypes = [
+      {'value': 'iptu', 'label': 'IPTU'},
+      {'value': 'condominium', 'label': 'Condomínio'},
+      {'value': 'insurance', 'label': 'Seguro'},
+      {'value': 'maintenance', 'label': 'Manutenção'},
+      {'value': 'utilities', 'label': 'Utilidades'},
+      {'value': 'other', 'label': 'Outro'},
+    ];
+
+    DateTime? selectedDueDate;
+
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Container(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+          ),
+          decoration: BoxDecoration(
+            color: ThemeHelpers.cardBackgroundColor(context),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: SingleChildScrollView(
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 20),
+                      decoration: BoxDecoration(
+                        color: ThemeHelpers.textSecondaryColor(context),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Adicionar Despesa',
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context, false),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  TextFormField(
+                    controller: titleController,
+                    decoration: const InputDecoration(
+                      labelText: 'Título *',
+                      hintText: 'Ex: IPTU 2024',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Título é obrigatório';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Tipo *',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: expenseTypes.map((type) {
+                      final isSelected = expenseTypeRef[0] == type['value'];
+                      return ChoiceChip(
+                        label: Text(type['label']!),
+                        selected: isSelected,
+                        onSelected: (selected) {
+                          setModalState(() {
+                            expenseTypeRef[0] = type['value']!;
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: amountController,
+                    decoration: const InputDecoration(
+                      labelText: 'Valor (R\$) *',
+                      hintText: '0,00',
+                      border: OutlineInputBorder(),
+                      prefixText: 'R\$ ',
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Valor é obrigatório';
+                      }
+                      final amount = double.tryParse(value.replaceAll(',', '.'));
+                      if (amount == null || amount <= 0) {
+                        return 'Valor inválido';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: dueDateController,
+                    decoration: const InputDecoration(
+                      labelText: 'Data de Vencimento *',
+                      hintText: 'DD/MM/AAAA',
+                      border: OutlineInputBorder(),
+                      suffixIcon: Icon(Icons.calendar_today),
+                    ),
+                    readOnly: true,
+                    onTap: () async {
+                      final date = await showDatePicker(
+                        context: context,
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime.now().add(const Duration(days: 3650)),
+                      );
+                      if (date != null) {
+                        setModalState(() {
+                          selectedDueDate = date;
+                          dueDateController.text = DateFormat('dd/MM/yyyy').format(date);
+                        });
+                      }
+                    },
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Data de vencimento é obrigatória';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: descriptionController,
+                    decoration: const InputDecoration(
+                      labelText: 'Descrição',
+                      hintText: 'Informações adicionais',
+                      border: OutlineInputBorder(),
+                    ),
+                    maxLines: 3,
+                  ),
+                  const SizedBox(height: 24),
+                  Column(
+                    children: [
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            if (formKey.currentState!.validate()) {
+                              Navigator.pop(context, true);
+                            }
+                          },
+                          icon: const Icon(Icons.add),
+                          label: const Text('Adicionar Despesa'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => Navigator.pop(context, false),
+                          icon: const Icon(Icons.close),
+                          label: const Text('Cancelar'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      if (result != true || selectedDueDate == null) {
+        titleController.dispose();
+        amountController.dispose();
+        dueDateController.dispose();
+        descriptionController.dispose();
+        return;
+      }
+
+      final amount = double.parse(amountController.text.replaceAll(',', '.'));
+
+      final response = await _apiService.post<Map<String, dynamic>>(
+        ApiConstants.propertyExpenses(property.id),
+        body: {
+          'title': titleController.text.trim(),
+          'type': expenseTypeRef[0],
+          'amount': amount,
+          'dueDate': selectedDueDate!.toIso8601String(),
+          'status': 'pending',
+          if (descriptionController.text.trim().isNotEmpty)
+            'description': descriptionController.text.trim(),
+        },
+      );
+
+      if (mounted) {
+        if (response.success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Despesa adicionada com sucesso'),
+              backgroundColor: AppColors.status.success,
+            ),
+          );
+          _loadExpenses();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(response.message ?? 'Erro ao adicionar despesa'),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro: ${e.toString()}'),
+            backgroundColor: AppColors.status.error,
+          ),
+        );
+      }
+    } finally {
+      titleController.dispose();
+      amountController.dispose();
+      dueDateController.dispose();
+      descriptionController.dispose();
+    }
+  }
+
+  Future<void> _showCreateChecklistModal(
+    BuildContext context,
+    Property property,
+  ) async {
+    final clientIdController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    
+    final checklistTypeRef = <String>['sale'];
+    final checklistTypes = [
+      {'value': 'sale', 'label': 'Venda'},
+      {'value': 'rental', 'label': 'Aluguel'},
+    ];
+
+    final selectedClientIdRef = <String?>[null];
+    final selectedClientNameRef = <String?>[null];
+
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Container(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+          ),
+          decoration: BoxDecoration(
+            color: ThemeHelpers.cardBackgroundColor(context),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: SingleChildScrollView(
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 20),
+                      decoration: BoxDecoration(
+                        color: ThemeHelpers.textSecondaryColor(context),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Criar Checklist',
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context, false),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Tipo *',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: checklistTypes.map((type) {
+                      final isSelected = checklistTypeRef[0] == type['value'];
+                      return ChoiceChip(
+                        label: Text(type['label']!),
+                        selected: isSelected,
+                        onSelected: (selected) {
+                          setModalState(() {
+                            checklistTypeRef[0] = type['value']!;
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Cliente *',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  EntitySelector(
+                    type: 'client',
+                    selectedId: selectedClientIdRef[0],
+                    selectedName: selectedClientNameRef[0],
+                    onSelected: (id, name) {
+                      setModalState(() {
+                        selectedClientIdRef[0] = id;
+                        selectedClientNameRef[0] = name;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 24),
+                  Column(
+                    children: [
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            if (selectedClientIdRef[0] == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: const Text('Por favor, selecione um cliente'),
+                                  backgroundColor: AppColors.status.error,
+                                ),
+                              );
+                              return;
+                            }
+                            Navigator.pop(context, true);
+                          },
+                          icon: const Icon(Icons.add),
+                          label: const Text('Criar Checklist'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => Navigator.pop(context, false),
+                          icon: const Icon(Icons.close),
+                          label: const Text('Cancelar'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      if (result != true || selectedClientIdRef[0] == null) {
+        clientIdController.dispose();
+        return;
+      }
+
+      final response = await _apiService.post<Map<String, dynamic>>(
+        ApiConstants.saleChecklists,
+        body: {
+          'propertyId': property.id,
+          'clientId': selectedClientIdRef[0]!,
+          'type': checklistTypeRef[0],
+          'status': 'pending',
+        },
+      );
+
+      if (mounted) {
+        if (response.success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Checklist criado com sucesso'),
+              backgroundColor: AppColors.status.success,
+            ),
+          );
+          _loadChecklists();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(response.message ?? 'Erro ao criar checklist'),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro: ${e.toString()}'),
+            backgroundColor: AppColors.status.error,
+          ),
+        );
+      }
+    } finally {
+      clientIdController.dispose();
+    }
+  }
+
+  Future<void> _markExpenseAsPaid(
+    BuildContext context,
+    String propertyId,
+    String expenseId,
+  ) async {
+    try {
+      final response = await _apiService.put<Map<String, dynamic>>(
+        ApiConstants.propertyExpenseMarkAsPaid(propertyId, expenseId),
+        body: {
+          'paidDate': DateTime.now().toIso8601String(),
+        },
+      );
+
+      if (mounted) {
+        if (response.success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Despesa marcada como paga'),
+              backgroundColor: AppColors.status.success,
+            ),
+          );
+          _loadExpenses();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(response.message ?? 'Erro ao marcar despesa como paga'),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro: ${e.toString()}'),
+            backgroundColor: AppColors.status.error,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _showEditExpenseModal(
+    BuildContext context,
+    Property property,
+    Map<String, dynamic> expense,
+  ) async {
+    // Por enquanto, apenas mostra mensagem
+    // TODO: Implementar modal de edição completo
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Edição de despesa será implementada em breve'),
+        backgroundColor: AppColors.status.info,
+      ),
+    );
+  }
+
+  Future<void> _deleteExpense(
+    BuildContext context,
+    String propertyId,
+    String expenseId,
+    String expenseTitle,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: AppColors.status.error),
+            const SizedBox(width: 12),
+            const Expanded(child: Text('Confirmar Exclusão')),
+          ],
+        ),
+        content: Text(
+          'Tem certeza que deseja excluir a despesa "$expenseTitle"? Esta ação não pode ser desfeita.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.status.error,
+            ),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final response = await _apiService.delete<dynamic>(
+        ApiConstants.propertyExpenseById(propertyId, expenseId),
+      );
+
+      if (mounted) {
+        if (response.success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Despesa excluída com sucesso'),
+              backgroundColor: AppColors.status.success,
+            ),
+          );
+          _loadExpenses();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(response.message ?? 'Erro ao excluir despesa'),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro: ${e.toString()}'),
+            backgroundColor: AppColors.status.error,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _showEditKeyModal(
+    BuildContext context,
+    Property property,
+    Map<String, dynamic> key,
+  ) async {
+    // Por enquanto, apenas mostra mensagem
+    // TODO: Implementar modal de edição completo
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Edição de chave será implementada em breve'),
+        backgroundColor: AppColors.status.info,
+      ),
+    );
+  }
+
+  Future<void> _deleteKey(
+    BuildContext context,
+    String propertyId,
+    String keyId,
+    String keyName,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: AppColors.status.error),
+            const SizedBox(width: 12),
+            const Expanded(child: Text('Confirmar Exclusão')),
+          ],
+        ),
+        content: Text(
+          'Tem certeza que deseja excluir a chave "$keyName"? Esta ação não pode ser desfeita.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.status.error,
+            ),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final response = await _apiService.delete<dynamic>(
+        ApiConstants.keyDelete(keyId),
+      );
+
+      if (mounted) {
+        if (response.success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Chave excluída com sucesso'),
+              backgroundColor: AppColors.status.success,
+            ),
+          );
+          _loadKeys();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(response.message ?? 'Erro ao excluir chave'),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro: ${e.toString()}'),
+            backgroundColor: AppColors.status.error,
+          ),
+        );
+      }
     }
   }
 }
