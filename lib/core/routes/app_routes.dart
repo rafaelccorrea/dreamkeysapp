@@ -30,6 +30,10 @@ import '../../features/documents/pages/document_details_page.dart';
 import '../../features/documents/pages/signatures_page.dart';
 import '../../features/chat/pages/chat_page.dart';
 import '../../features/chat/pages/edit_group_chat_page.dart';
+import '../../features/inspections/pages/inspections_page.dart';
+import '../../features/inspections/pages/inspection_details_page.dart';
+import '../../features/inspections/pages/create_inspection_page.dart';
+import '../../features/inspections/pages/edit_inspection_page.dart';
 
 /// Rotas da aplicação com transições customizadas
 class AppRoutes {
@@ -81,6 +85,12 @@ class AppRoutes {
   static const String chat = '/chat';
   static String chatRoom(String roomId) => '/chat/$roomId';
   static String chatEditGroup(String roomId) => '/chat/edit-group/$roomId';
+
+  // Vistorias
+  static const String inspections = '/inspections';
+  static const String inspectionCreate = '/inspections/new';
+  static String inspectionDetails(String id) => '/inspections/$id';
+  static String inspectionEdit(String id) => '/inspections/$id/edit';
 
   static String propertyOfferDetails(String offerId) =>
       '/properties/offers/$offerId';
@@ -204,6 +214,22 @@ class AppRoutes {
       return _buildRoute(const MatchesPage(), settings);
     } else if (routeName == AppRoutes.kanban) {
       return _buildRoute(const KanbanPage(), settings);
+    } else if (routeName == AppRoutes.inspections) {
+      return _buildRoute(const InspectionsPage(), settings);
+    } else if (routeName == AppRoutes.inspectionCreate) {
+      return _buildRoute(const CreateInspectionPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/inspections/')) {
+      final segments = routeName.split('/');
+      if (segments.length >= 3) {
+        final id = segments[2];
+        if (segments.length == 3) {
+          // Detalhes: /inspections/:id
+          return _buildRoute(InspectionDetailsPage(inspectionId: id), settings);
+        } else if (segments.length == 4 && segments[3] == 'edit') {
+          // Edição: /inspections/:id/edit
+          return _buildRoute(EditInspectionPage(inspectionId: id), settings);
+        }
+      }
     } else if (routeName == AppRoutes.documents) {
       return _buildRoute(const DocumentsPage(), settings);
     } else if (routeName == AppRoutes.signatures) {

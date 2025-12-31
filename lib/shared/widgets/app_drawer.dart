@@ -501,6 +501,25 @@ class _AppDrawerState extends State<AppDrawer> {
                     );
                   },
                 ),
+                _buildDrawerItem(
+                  context: context,
+                  currentRoute: activeRoute,
+                  route: AppRoutes.inspections,
+                  icon: Icons.home_repair_service_outlined,
+                  activeIcon: Icons.home_repair_service,
+                  title: 'Vistorias',
+                  onTap: () {
+                    Navigator.pop(context);
+                    if (activeRoute == AppRoutes.inspections || 
+                        activeRoute.startsWith('/inspections')) {
+                      return;
+                    }
+                    Navigator.of(context).pushNamedAndRemoveUntil(
+                      AppRoutes.inspections,
+                      (route) => false,
+                    );
+                  },
+                ),
                 const Divider(),
                 _buildDrawerItem(
                   context: context,

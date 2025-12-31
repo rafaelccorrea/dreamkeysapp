@@ -243,6 +243,24 @@ class ApiConstants {
   static const String chatMessagesDelete = '/chat/messages/delete';
   static const String chatCompanyUsers = '/chat/company/users';
 
+  // Endpoints de Vistorias
+  static const String inspections = '/inspection';
+  static String inspectionById(String id) => '/inspection/$id';
+  static String inspectionUpdate(String id) => '/inspection/$id';
+  static String inspectionDelete(String id) => '/inspection/$id';
+  static String inspectionByProperty(String propertyId) => '/inspection/property/$propertyId';
+  static String inspectionByInspector(String inspectorId) => '/inspection/vistoriador/$inspectorId';
+  static String inspectionUploadPhoto(String id) => '/inspection/$id/upload-foto';
+  static String inspectionDeletePhoto(String id, String photoUrl) => '/inspection/$id/foto/${Uri.encodeComponent(photoUrl)}';
+  static String inspectionRequestApproval(String id) => '/inspection/$id/request-approval';
+  static String inspectionHistory(String id) => '/inspection/$id/history';
+  static String inspectionHistoryEntry(String id, String historyId) => '/inspection/$id/history/$historyId';
+  
+  // Endpoints de Aprovações Financeiras de Vistorias
+  static const String inspectionApprovals = '/inspection-approval';
+  static String inspectionApprovalById(String id) => '/inspection-approval/$id';
+  static String inspectionApprovalApprove(String id) => '/inspection-approval/$id/approve';
+
   // Headers
   static const String contentTypeHeader = 'Content-Type';
   static const String authorizationHeader = 'Authorization';
