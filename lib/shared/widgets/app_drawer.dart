@@ -33,12 +33,17 @@ class AppDrawer extends StatefulWidget {
 class _AppDrawerState extends State<AppDrawer> {
   String? _companyName;
   bool _isLoadingCompany = true;
-  
+
   // Dados do usuário carregados do serviço
   String? _loadedUserName;
   String? _loadedUserEmail;
   String? _loadedUserAvatar;
   bool _isLoadingProfile = false;
+
+  // Estado dos expansion tiles
+  bool _gestaoExpanded = false;
+  bool _documentosExpanded = false;
+  bool _gestaoInternaExpanded = false;
 
   @override
   void initState() {
@@ -47,9 +52,44 @@ class _AppDrawerState extends State<AppDrawer> {
     // Sempre tentar carregar perfil, mas priorizar dados fornecidos
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadProfile();
+      _checkActiveRoutes();
     });
   }
-  
+
+  void _checkActiveRoutes() {
+    if (!mounted) return;
+    final activeRoute = _getCurrentRoute();
+
+    // Verificar se algum item de Gestão de Negócios está ativo
+    if (activeRoute == AppRoutes.properties ||
+        activeRoute == AppRoutes.clients ||
+        activeRoute == AppRoutes.matches ||
+        activeRoute == AppRoutes.calendar ||
+        activeRoute.startsWith('/clients')) {
+      setState(() {
+        _gestaoExpanded = true;
+      });
+    }
+
+    // Verificar se algum item de Documentos está ativo
+    if (activeRoute == AppRoutes.documents ||
+        activeRoute == AppRoutes.signatures ||
+        activeRoute.startsWith('/documents')) {
+      setState(() {
+        _documentosExpanded = true;
+      });
+    }
+
+    // Verificar se algum item de Gestão Interna está ativo
+    if (activeRoute == AppRoutes.kanban ||
+        activeRoute == AppRoutes.inspections ||
+        activeRoute.startsWith('/inspections')) {
+      setState(() {
+        _gestaoInternaExpanded = true;
+      });
+    }
+  }
+
   @override
   void didUpdateWidget(AppDrawer oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -64,11 +104,13 @@ class _AppDrawerState extends State<AppDrawer> {
 
   Future<void> _loadProfile() async {
     // Se já temos os dados completos via parâmetros, não precisa carregar
-    if (widget.userName != null && 
-        widget.userName!.isNotEmpty && 
-        widget.userEmail != null && 
+    if (widget.userName != null &&
+        widget.userName!.isNotEmpty &&
+        widget.userEmail != null &&
         widget.userEmail!.isNotEmpty) {
-      debugPrint('✅ [APP_DRAWER] Dados do usuário já fornecidos via parâmetros');
+      debugPrint(
+        '✅ [APP_DRAWER] Dados do usuário já fornecidos via parâmetros',
+      );
       // Limpar dados carregados anteriormente se agora temos via parâmetros
       if (_loadedUserName != null || _loadedUserEmail != null) {
         setState(() {
@@ -79,25 +121,29 @@ class _AppDrawerState extends State<AppDrawer> {
       }
       return;
     }
-    
+
     // Se já temos dados carregados, não precisa recarregar
-    if (_loadedUserName != null && _loadedUserEmail != null && !_isLoadingProfile) {
+    if (_loadedUserName != null &&
+        _loadedUserEmail != null &&
+        !_isLoadingProfile) {
       debugPrint('✅ [APP_DRAWER] Dados do usuário já carregados anteriormente');
       return;
     }
-    
+
     debugPrint('📡 [APP_DRAWER] Carregando perfil do usuário...');
-    
+
     setState(() {
       _isLoadingProfile = true;
     });
-    
+
     try {
       // Tentar primeiro o ProfileService
       final profileService = ProfileService.instance;
       final profileResponse = await profileService.getProfile();
 
-      debugPrint('📡 [APP_DRAWER] Resposta do perfil: success=${profileResponse.success}');
+      debugPrint(
+        '📡 [APP_DRAWER] Resposta do perfil: success=${profileResponse.success}',
+      );
 
       if (profileResponse.success && profileResponse.data != null) {
         if (mounted) {
@@ -105,15 +151,19 @@ class _AppDrawerState extends State<AppDrawer> {
             _loadedUserName = profileResponse.data!.name;
             _loadedUserEmail = profileResponse.data!.email;
             _loadedUserAvatar = profileResponse.data!.avatar;
-            debugPrint('✅ [APP_DRAWER] Perfil carregado via ProfileService: ${profileResponse.data!.name} (${profileResponse.data!.email})');
+            debugPrint(
+              '✅ [APP_DRAWER] Perfil carregado via ProfileService: ${profileResponse.data!.name} (${profileResponse.data!.email})',
+            );
             _isLoadingProfile = false;
           });
         }
         return;
       }
-      
+
       // Se ProfileService falhou, tentar DashboardService como fallback
-      debugPrint('⚠️ [APP_DRAWER] ProfileService falhou, tentando DashboardService como fallback...');
+      debugPrint(
+        '⚠️ [APP_DRAWER] ProfileService falhou, tentando DashboardService como fallback...',
+      );
       final dashboardService = DashboardService.instance;
       final dashboardResponse = await dashboardService.getUserDashboard();
 
@@ -123,9 +173,13 @@ class _AppDrawerState extends State<AppDrawer> {
             _loadedUserName = dashboardResponse.data!.user.name;
             _loadedUserEmail = dashboardResponse.data!.user.email;
             _loadedUserAvatar = dashboardResponse.data!.user.avatar;
-            debugPrint('✅ [APP_DRAWER] Perfil carregado via DashboardService: ${dashboardResponse.data!.user.name} (${dashboardResponse.data!.user.email})');
+            debugPrint(
+              '✅ [APP_DRAWER] Perfil carregado via DashboardService: ${dashboardResponse.data!.user.name} (${dashboardResponse.data!.user.email})',
+            );
           } else {
-            debugPrint('❌ [APP_DRAWER] Erro ao carregar perfil (ambos os serviços falharam): ${dashboardResponse.message}');
+            debugPrint(
+              '❌ [APP_DRAWER] Erro ao carregar perfil (ambos os serviços falharam): ${dashboardResponse.message}',
+            );
           }
           _isLoadingProfile = false;
         });
@@ -161,17 +215,16 @@ class _AppDrawerState extends State<AppDrawer> {
       }
     }
   }
-  
+
   // Métodos para obter os dados do usuário (prioriza parâmetros, depois dados carregados)
   String? get _userName => widget.userName ?? _loadedUserName;
   String? get _userEmail => widget.userEmail ?? _loadedUserEmail;
   String? get _userAvatar => widget.userAvatar ?? _loadedUserAvatar;
 
-  String _getCurrentRoute(BuildContext context) {
+  String _getCurrentRoute() {
     if (widget.currentRoute != null && widget.currentRoute!.isNotEmpty) {
       return widget.currentRoute!;
     }
-    // Tentar pegar do ModalRoute
     final route = ModalRoute.of(context);
     return route?.settings.name ?? '';
   }
@@ -179,7 +232,7 @@ class _AppDrawerState extends State<AppDrawer> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final activeRoute = _getCurrentRoute(context);
+    final activeRoute = _getCurrentRoute();
 
     return Drawer(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -326,6 +379,7 @@ class _AppDrawerState extends State<AppDrawer> {
             child: ListView(
               padding: EdgeInsets.zero,
               children: [
+                // Dashboard (item principal, sem grupo)
                 _buildDrawerItem(
                   context: context,
                   currentRoute: activeRoute,
@@ -335,136 +389,159 @@ class _AppDrawerState extends State<AppDrawer> {
                   title: 'Dashboard',
                   onTap: () {
                     Navigator.pop(context);
-                    // Se já está na tela home, não navega novamente
                     if (activeRoute == AppRoutes.home) return;
                     Navigator.of(
                       context,
                     ).pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
                   },
                 ),
-                _buildDrawerItem(
+                const Divider(),
+
+                // Gestão de Negócios (ExpansionTile)
+                _buildExpansionTile(
                   context: context,
                   currentRoute: activeRoute,
-                  route: AppRoutes.properties,
-                  icon: Icons.home_outlined,
-                  activeIcon: Icons.home,
-                  title: 'Imóveis',
-                  onTap: () {
-                    Navigator.pop(context);
-                    // Se já está na tela de propriedades, não navega novamente
-                    if (activeRoute == AppRoutes.properties) return;
-                    Navigator.of(context).pushNamedAndRemoveUntil(
-                      AppRoutes.properties,
-                      (route) => false,
-                    );
+                  title: 'Gestão de Negócios',
+                  icon: Icons.business_outlined,
+                  activeIcon: Icons.business,
+                  isExpanded: _gestaoExpanded,
+                  onExpansionChanged: (expanded) {
+                    setState(() {
+                      _gestaoExpanded = expanded;
+                    });
                   },
+                  children: [
+                    _buildDrawerItem(
+                      context: context,
+                      currentRoute: activeRoute,
+                      route: AppRoutes.properties,
+                      icon: Icons.home_outlined,
+                      activeIcon: Icons.home,
+                      title: 'Imóveis',
+                      onTap: () {
+                        Navigator.pop(context);
+                        if (activeRoute == AppRoutes.properties) return;
+                        Navigator.of(context).pushNamedAndRemoveUntil(
+                          AppRoutes.properties,
+                          (route) => false,
+                        );
+                      },
+                      isSubItem: true,
+                    ),
+                    _buildDrawerItem(
+                      context: context,
+                      currentRoute: activeRoute,
+                      route: AppRoutes.clients,
+                      icon: Icons.people_outlined,
+                      activeIcon: Icons.people,
+                      title: 'Clientes',
+                      onTap: () {
+                        Navigator.pop(context);
+                        if (activeRoute == AppRoutes.clients ||
+                            activeRoute.startsWith('/clients')) {
+                          return;
+                        }
+                        Navigator.of(context).pushNamedAndRemoveUntil(
+                          AppRoutes.clients,
+                          (route) => false,
+                        );
+                      },
+                      isSubItem: true,
+                    ),
+                    _buildDrawerItem(
+                      context: context,
+                      currentRoute: activeRoute,
+                      route: AppRoutes.matches,
+                      icon: Icons.favorite_outline,
+                      activeIcon: Icons.favorite,
+                      title: 'Matches',
+                      onTap: () {
+                        Navigator.pop(context);
+                        if (activeRoute == AppRoutes.matches) return;
+                        Navigator.of(context).pushNamedAndRemoveUntil(
+                          AppRoutes.matches,
+                          (route) => false,
+                        );
+                      },
+                      isSubItem: true,
+                    ),
+                    _buildDrawerItem(
+                      context: context,
+                      currentRoute: activeRoute,
+                      route: AppRoutes.calendar,
+                      icon: Icons.calendar_today_outlined,
+                      activeIcon: Icons.calendar_today,
+                      title: 'Agenda',
+                      onTap: () {
+                        Navigator.pop(context);
+                        if (activeRoute == AppRoutes.calendar) return;
+                        Navigator.of(context).pushNamedAndRemoveUntil(
+                          AppRoutes.calendar,
+                          (route) => false,
+                        );
+                      },
+                      isSubItem: true,
+                    ),
+                  ],
                 ),
-                _buildDrawerItem(
+
+                // Documentos e Contratos (ExpansionTile)
+                _buildExpansionTile(
                   context: context,
                   currentRoute: activeRoute,
-                  route: AppRoutes.clients,
-                  icon: Icons.people_outlined,
-                  activeIcon: Icons.people,
-                  title: 'Clientes',
-                  onTap: () {
-                    Navigator.pop(context);
-                    // Se já está na tela de clientes, não navega novamente
-                    if (activeRoute == AppRoutes.clients || 
-                        activeRoute.startsWith('/clients')) {
-                      return;
-                    }
-                    Navigator.of(context).pushNamedAndRemoveUntil(
-                      AppRoutes.clients,
-                      (route) => false,
-                    );
+                  title: 'Documentos e Contratos',
+                  icon: Icons.folder_outlined,
+                  activeIcon: Icons.folder,
+                  isExpanded: _documentosExpanded,
+                  onExpansionChanged: (expanded) {
+                    setState(() {
+                      _documentosExpanded = expanded;
+                    });
                   },
+                  children: [
+                    _buildDrawerItem(
+                      context: context,
+                      currentRoute: activeRoute,
+                      route: AppRoutes.documents,
+                      icon: Icons.description_outlined,
+                      activeIcon: Icons.description,
+                      title: 'Documentos',
+                      onTap: () {
+                        Navigator.pop(context);
+                        if (activeRoute == AppRoutes.documents ||
+                            activeRoute.startsWith('/documents')) {
+                          return;
+                        }
+                        Navigator.of(context).pushNamedAndRemoveUntil(
+                          AppRoutes.documents,
+                          (route) => false,
+                        );
+                      },
+                      isSubItem: true,
+                    ),
+                    _buildDrawerItem(
+                      context: context,
+                      currentRoute: activeRoute,
+                      route: AppRoutes.signatures,
+                      icon: Icons.draw_outlined,
+                      activeIcon: Icons.draw,
+                      title: 'Assinaturas',
+                      onTap: () {
+                        Navigator.pop(context);
+                        if (activeRoute == AppRoutes.signatures) {
+                          return;
+                        }
+                        Navigator.of(context).pushNamedAndRemoveUntil(
+                          AppRoutes.signatures,
+                          (route) => false,
+                        );
+                      },
+                      isSubItem: true,
+                    ),
+                  ],
                 ),
-                _buildDrawerItem(
-                  context: context,
-                  currentRoute: activeRoute,
-                  route: AppRoutes.calendar,
-                  icon: Icons.calendar_today_outlined,
-                  activeIcon: Icons.calendar_today,
-                  title: 'Agenda',
-                  onTap: () {
-                    Navigator.pop(context);
-                    // Se já está na tela de agenda, não navega novamente
-                    if (activeRoute == AppRoutes.calendar) return;
-                    Navigator.of(context).pushNamedAndRemoveUntil(
-                      AppRoutes.calendar,
-                      (route) => false,
-                    );
-                  },
-                ),
-                _buildDrawerItem(
-                  context: context,
-                  currentRoute: activeRoute,
-                  route: AppRoutes.matches,
-                  icon: Icons.favorite_outline,
-                  activeIcon: Icons.favorite,
-                  title: 'Matches',
-                  onTap: () {
-                    Navigator.pop(context);
-                    // Se já está na tela de matches, não navega novamente
-                    if (activeRoute == AppRoutes.matches) return;
-                    Navigator.of(context).pushNamedAndRemoveUntil(
-                      AppRoutes.matches,
-                      (route) => false,
-                    );
-                  },
-                ),
-                _buildDrawerItem(
-                  context: context,
-                  currentRoute: activeRoute,
-                  route: AppRoutes.documents,
-                  icon: Icons.description_outlined,
-                  activeIcon: Icons.description,
-                  title: 'Documentos',
-                  onTap: () {
-                    Navigator.pop(context);
-                    // Se já está na tela de documentos, não navega novamente
-                    if (activeRoute == AppRoutes.documents || 
-                        activeRoute.startsWith('/documents')) {
-                      return;
-                    }
-                    Navigator.of(context).pushNamedAndRemoveUntil(
-                      AppRoutes.documents,
-                      (route) => false,
-                    );
-                  },
-                ),
-                _buildDrawerItem(
-                  context: context,
-                  currentRoute: activeRoute,
-                  route: AppRoutes.signatures,
-                  icon: Icons.draw_outlined,
-                  activeIcon: Icons.draw,
-                  title: 'Assinaturas',
-                  onTap: () {
-                    Navigator.pop(context);
-                    // Se já está na tela de assinaturas, não navega novamente
-                    if (activeRoute == AppRoutes.signatures) {
-                      return;
-                    }
-                    Navigator.of(context).pushNamedAndRemoveUntil(
-                      AppRoutes.signatures,
-                      (route) => false,
-                    );
-                  },
-                ),
-                _buildDrawerItem(
-                  context: context,
-                  currentRoute: activeRoute,
-                  route: '/commissions',
-                  icon: Icons.attach_money_outlined,
-                  activeIcon: Icons.attach_money,
-                  title: 'Comissões',
-                  onTap: () {
-                    Navigator.pop(context);
-                    // TODO: Navegar para tela de comissões
-                    _showComingSoon(context);
-                  },
-                ),
+
+                // Mensagens (item único, sem grupo)
                 _buildDrawerItem(
                   context: context,
                   currentRoute: activeRoute,
@@ -474,52 +551,83 @@ class _AppDrawerState extends State<AppDrawer> {
                   title: 'Mensagens',
                   onTap: () {
                     Navigator.pop(context);
-                    // Se já está na tela de chat, não navega novamente
-                    if (activeRoute == AppRoutes.chat || 
+                    if (activeRoute == AppRoutes.chat ||
                         activeRoute.startsWith('/chat')) {
                       return;
                     }
-                    Navigator.of(context).pushNamedAndRemoveUntil(
-                      AppRoutes.chat,
-                      (route) => false,
-                    );
+                    Navigator.of(
+                      context,
+                    ).pushNamedAndRemoveUntil(AppRoutes.chat, (route) => false);
                   },
                 ),
-                _buildDrawerItem(
+
+                // Gestão Interna (ExpansionTile)
+                _buildExpansionTile(
                   context: context,
                   currentRoute: activeRoute,
-                  route: AppRoutes.kanban,
-                  icon: Icons.assignment_outlined,
-                  activeIcon: Icons.assignment,
-                  title: 'Tarefas',
-                  onTap: () {
-                    Navigator.pop(context);
-                    if (activeRoute == AppRoutes.kanban) return;
-                    Navigator.of(context).pushNamedAndRemoveUntil(
-                      AppRoutes.kanban,
-                      (route) => false,
-                    );
+                  title: 'Gestão Interna',
+                  icon: Icons.work_outline,
+                  activeIcon: Icons.work,
+                  isExpanded: _gestaoInternaExpanded,
+                  onExpansionChanged: (expanded) {
+                    setState(() {
+                      _gestaoInternaExpanded = expanded;
+                    });
                   },
+                  children: [
+                    _buildDrawerItem(
+                      context: context,
+                      currentRoute: activeRoute,
+                      route: AppRoutes.kanban,
+                      icon: Icons.assignment_outlined,
+                      activeIcon: Icons.assignment,
+                      title: 'Tarefas',
+                      onTap: () {
+                        Navigator.pop(context);
+                        if (activeRoute == AppRoutes.kanban) return;
+                        Navigator.of(context).pushNamedAndRemoveUntil(
+                          AppRoutes.kanban,
+                          (route) => false,
+                        );
+                      },
+                      isSubItem: true,
+                    ),
+                    _buildDrawerItem(
+                      context: context,
+                      currentRoute: activeRoute,
+                      route: AppRoutes.inspections,
+                      icon: Icons.home_repair_service_outlined,
+                      activeIcon: Icons.home_repair_service,
+                      title: 'Vistorias',
+                      onTap: () {
+                        Navigator.pop(context);
+                        if (activeRoute == AppRoutes.inspections ||
+                            activeRoute.startsWith('/inspections')) {
+                          return;
+                        }
+                        Navigator.of(context).pushNamedAndRemoveUntil(
+                          AppRoutes.inspections,
+                          (route) => false,
+                        );
+                      },
+                      isSubItem: true,
+                    ),
+                    _buildDrawerItem(
+                      context: context,
+                      currentRoute: activeRoute,
+                      route: '/commissions',
+                      icon: Icons.attach_money_outlined,
+                      activeIcon: Icons.attach_money,
+                      title: 'Comissões',
+                      onTap: () {
+                        Navigator.pop(context);
+                        _showComingSoon(context);
+                      },
+                      isSubItem: true,
+                    ),
+                  ],
                 ),
-                _buildDrawerItem(
-                  context: context,
-                  currentRoute: activeRoute,
-                  route: AppRoutes.inspections,
-                  icon: Icons.home_repair_service_outlined,
-                  activeIcon: Icons.home_repair_service,
-                  title: 'Vistorias',
-                  onTap: () {
-                    Navigator.pop(context);
-                    if (activeRoute == AppRoutes.inspections || 
-                        activeRoute.startsWith('/inspections')) {
-                      return;
-                    }
-                    Navigator.of(context).pushNamedAndRemoveUntil(
-                      AppRoutes.inspections,
-                      (route) => false,
-                    );
-                  },
-                ),
+
                 const Divider(),
                 _buildDrawerItem(
                   context: context,
@@ -530,7 +638,6 @@ class _AppDrawerState extends State<AppDrawer> {
                   title: 'Configurações',
                   onTap: () {
                     Navigator.pop(context);
-                    // Se já está na tela de configurações, não navega novamente
                     if (activeRoute == AppRoutes.settings) return;
                     Navigator.of(context).pushNamed(AppRoutes.settings);
                   },
@@ -556,6 +663,62 @@ class _AppDrawerState extends State<AppDrawer> {
     );
   }
 
+  Widget _buildExpansionTile({
+    required BuildContext context,
+    required String currentRoute,
+    required String title,
+    required IconData icon,
+    required IconData activeIcon,
+    required bool isExpanded,
+    required ValueChanged<bool> onExpansionChanged,
+    required List<Widget> children,
+  }) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final primaryColor = isDark
+        ? AppColors.primary.primaryDarkMode
+        : AppColors.primary.primary;
+
+    // Verificar se algum dos filhos está ativo
+    final hasActiveChild = children.any((child) {
+      if (child is Container) {
+        final listTile = child.child;
+        if (listTile is ListTile && listTile.onTap != null) {
+          // Tentar extrair a rota do widget se possível
+          // Por enquanto, vamos apenas verificar a expansão
+        }
+      }
+      return false;
+    });
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: hasActiveChild
+            ? primaryColor.withValues(alpha: 0.1)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ExpansionTile(
+        leading: Icon(
+          isExpanded ? activeIcon : icon,
+          color: hasActiveChild ? primaryColor : theme.colorScheme.onSurface,
+        ),
+        title: Text(
+          title,
+          style: TextStyle(
+            color: hasActiveChild ? primaryColor : theme.colorScheme.onSurface,
+            fontWeight: hasActiveChild ? FontWeight.w600 : FontWeight.w500,
+          ),
+        ),
+        initiallyExpanded: isExpanded,
+        onExpansionChanged: onExpansionChanged,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        children: children,
+      ),
+    );
+  }
+
   Widget _buildDrawerItem({
     required BuildContext context,
     required String currentRoute,
@@ -566,17 +729,19 @@ class _AppDrawerState extends State<AppDrawer> {
     required VoidCallback onTap,
     bool isDestructive = false,
     bool isActive = false,
+    bool isSubItem = false,
   }) {
     final theme = Theme.of(context);
-    final active = isActive || 
+    final active =
+        isActive ||
         (currentRoute == route && route.isNotEmpty) ||
         (route == AppRoutes.chat && currentRoute.startsWith('/chat'));
 
     final isDark = theme.brightness == Brightness.dark;
-    final primaryColor = isDark 
-        ? AppColors.primary.primaryDarkMode 
+    final primaryColor = isDark
+        ? AppColors.primary.primaryDarkMode
         : AppColors.primary.primary;
-    
+
     final color = isDestructive
         ? theme.colorScheme.error
         : active
@@ -594,7 +759,8 @@ class _AppDrawerState extends State<AppDrawer> {
           final chatController = context.watch<ChatUnreadController>();
           notificationCount = chatController.totalUnreadCount;
         } else {
-          final notificationController = context.watch<NotificationController>();
+          final notificationController = context
+              .watch<NotificationController>();
           notificationCount = notificationController.getCountForRoute(route);
         }
       } catch (e) {
@@ -603,7 +769,7 @@ class _AppDrawerState extends State<AppDrawer> {
     }
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      margin: EdgeInsets.symmetric(horizontal: isSubItem ? 32 : 8, vertical: 2),
       decoration: BoxDecoration(
         color: active
             ? primaryColor.withValues(alpha: 0.1)
@@ -620,7 +786,10 @@ class _AppDrawerState extends State<AppDrawer> {
                 right: -6,
                 top: -4,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: active ? primaryColor : const Color(0xFFEF4444),
                     borderRadius: BorderRadius.circular(8),
