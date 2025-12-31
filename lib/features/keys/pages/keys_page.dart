@@ -19,29 +19,30 @@ class KeysPage extends StatefulWidget {
   State<KeysPage> createState() => _KeysPageState();
 }
 
-class _KeysPageState extends State<KeysPage> with SingleTickerProviderStateMixin {
+class _KeysPageState extends State<KeysPage>
+    with SingleTickerProviderStateMixin {
   final KeyService _keyService = KeyService.instance;
   late TabController _tabController;
-  
+
   // Estado geral
   String? _errorMessage;
   key_models.KeyFilters? _filters;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
-  
+
   // Tab 0: Todas as Chaves
   List<key_models.Key> _keys = [];
   bool _isLoadingKeys = false;
-  
+
   // Tab 1: Controles de Chave
   List<key_models.KeyControl> _allControls = [];
   bool _isLoadingControls = false;
   String? _controlStatusFilter;
-  
+
   // Tab 2: Minhas Chaves
   List<key_models.KeyControl> _userControls = [];
   bool _isLoadingUserControls = false;
-  
+
   // Estatísticas
   key_models.KeyStatistics? _statistics;
 
@@ -68,10 +69,7 @@ class _KeysPageState extends State<KeysPage> with SingleTickerProviderStateMixin
   }
 
   Future<void> _loadData() async {
-    await Future.wait([
-      _loadStatistics(),
-      _loadDataForCurrentTab(),
-    ]);
+    await Future.wait([_loadStatistics(), _loadDataForCurrentTab()]);
   }
 
   Future<void> _loadDataForCurrentTab() async {
@@ -101,7 +99,8 @@ class _KeysPageState extends State<KeysPage> with SingleTickerProviderStateMixin
     });
 
     try {
-      final filters = _filters?.copyWith(
+      final filters =
+          _filters?.copyWith(
             search: _searchQuery.trim().isEmpty ? null : _searchQuery.trim(),
           ) ??
           key_models.KeyFilters(
@@ -230,106 +229,115 @@ class _KeysPageState extends State<KeysPage> with SingleTickerProviderStateMixin
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return AppScaffold(
-      title: 'Chaves',
-      actions: [
-        IconButton(
-          icon: Stack(
-            children: [
-              const Icon(Icons.filter_list),
-              if (_hasActiveFilters())
-                Positioned(
-                  right: 0,
-                  top: 0,
-                  child: Container(
-                    width: 8,
-                    height: 8,
-                    decoration: const BoxDecoration(
-                      color: Colors.red,
-                      shape: BoxShape.circle,
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) {
+        if (!didPop) {
+          Navigator.of(
+            context,
+          ).pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
+        }
+      },
+      child: AppScaffold(
+        title: 'Chaves',
+        actions: [
+          IconButton(
+            icon: Stack(
+              children: [
+                const Icon(Icons.filter_list),
+                if (_hasActiveFilters())
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
                     ),
                   ),
-                ),
-            ],
-          ),
-          onPressed: () {
-            showModalBottomSheet(
-              context: context,
-              isScrollControlled: true,
-              useSafeArea: true,
-              backgroundColor: Colors.transparent,
-              builder: (context) => KeyFiltersDrawer(
-                initialFilters: _filters,
-                onFiltersChanged: (filters) {
-                  setState(() {
-                    _filters = filters;
-                  });
-                  _loadDataForCurrentTab();
-                },
-              ),
-            );
-          },
-          tooltip: 'Filtros',
-        ),
-        IconButton(
-          icon: const Icon(Icons.add),
-          onPressed: () {
-            Navigator.of(context).pushNamed(AppRoutes.keyCreate);
-          },
-          tooltip: 'Criar Chave',
-        ),
-      ],
-      body: Column(
-        children: [
-          // Estatísticas
-          if (_statistics != null) _buildStatisticsCards(theme),
-          
-          // Tabs
-          Container(
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(
-                  color: ThemeHelpers.borderColor(context),
-                  width: 1,
-                ),
-              ),
-            ),
-            child: TabBar(
-              controller: _tabController,
-              labelColor: AppColors.primary.primary,
-              unselectedLabelColor: ThemeHelpers.textSecondaryColor(context),
-              indicatorColor: AppColors.primary.primary,
-              dividerColor: Colors.transparent,
-              overlayColor: WidgetStateProperty.all(Colors.transparent),
-              tabs: const [
-                Tab(
-                  icon: Icon(Icons.vpn_key_outlined, size: 20),
-                  text: 'Todas as Chaves',
-                ),
-                Tab(
-                  icon: Icon(Icons.swap_horiz_outlined, size: 20),
-                  text: 'Controles',
-                ),
-                Tab(
-                  icon: Icon(Icons.person_outline, size: 20),
-                  text: 'Minhas Chaves',
-                ),
               ],
             ),
+            onPressed: () {
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                useSafeArea: true,
+                backgroundColor: Colors.transparent,
+                builder: (context) => KeyFiltersDrawer(
+                  initialFilters: _filters,
+                  onFiltersChanged: (filters) {
+                    setState(() {
+                      _filters = filters;
+                    });
+                    _loadDataForCurrentTab();
+                  },
+                ),
+              );
+            },
+            tooltip: 'Filtros',
           ),
-          
-          // Conteúdo das tabs
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _buildKeysTab(theme),
-                _buildControlsTab(theme),
-                _buildUserControlsTab(theme),
-              ],
-            ),
+          IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: () {
+              Navigator.of(context).pushNamed(AppRoutes.keyCreate);
+            },
+            tooltip: 'Criar Chave',
           ),
         ],
+        body: Column(
+          children: [
+            // Tabs
+            Container(
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(
+                    color: ThemeHelpers.borderColor(context),
+                    width: 1,
+                  ),
+                ),
+              ),
+              child: TabBar(
+                controller: _tabController,
+                labelColor: AppColors.primary.primary,
+                unselectedLabelColor: ThemeHelpers.textSecondaryColor(context),
+                indicatorColor: AppColors.primary.primary,
+                dividerColor: Colors.transparent,
+                overlayColor: WidgetStateProperty.all(Colors.transparent),
+                isScrollable: false,
+                tabAlignment: TabAlignment.fill,
+                tabs: const [
+                  Tab(
+                    icon: Icon(Icons.vpn_key_outlined, size: 20),
+                    text: 'Todas',
+                  ),
+                  Tab(
+                    icon: Icon(Icons.swap_horiz_outlined, size: 20),
+                    text: 'Controles',
+                  ),
+                  Tab(
+                    icon: Icon(Icons.person_outline, size: 20),
+                    text: 'Minhas',
+                  ),
+                ],
+              ),
+            ),
+
+            // Conteúdo das tabs
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  _buildKeysTab(theme),
+                  _buildControlsTab(theme),
+                  _buildUserControlsTab(theme),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -348,46 +356,41 @@ class _KeysPageState extends State<KeysPage> with SingleTickerProviderStateMixin
           ),
         ),
       ),
-      child: Row(
+      child: GridView.count(
+        crossAxisCount: 2,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        childAspectRatio: 1.1,
         children: [
-          Expanded(
-            child: _buildStatCard(
-              theme,
-              'Total',
-              '${_statistics!.totalKeys}',
-              Icons.vpn_key,
-              AppColors.primary.primary,
-            ),
+          _buildStatCard(
+            theme,
+            'Total',
+            '${_statistics!.totalKeys}',
+            Icons.vpn_key,
+            AppColors.primary.primary,
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _buildStatCard(
-              theme,
-              'Disponíveis',
-              '${_statistics!.availableKeys}',
-              Icons.check_circle,
-              AppColors.status.success,
-            ),
+          _buildStatCard(
+            theme,
+            'Disponíveis',
+            '${_statistics!.availableKeys}',
+            Icons.check_circle,
+            AppColors.status.success,
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _buildStatCard(
-              theme,
-              'Em Uso',
-              '${_statistics!.inUseKeys}',
-              Icons.schedule,
-              AppColors.status.warning,
-            ),
+          _buildStatCard(
+            theme,
+            'Em Uso',
+            '${_statistics!.inUseKeys}',
+            Icons.schedule,
+            AppColors.status.warning,
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _buildStatCard(
-              theme,
-              'Em Atraso',
-              '${_statistics!.overdueCount}',
-              Icons.warning,
-              AppColors.status.error,
-            ),
+          _buildStatCard(
+            theme,
+            'Em Atraso',
+            '${_statistics!.overdueCount}',
+            Icons.warning,
+            AppColors.status.error,
           ),
         ],
       ),
@@ -402,32 +405,48 @@ class _KeysPageState extends State<KeysPage> with SingleTickerProviderStateMixin
     Color color,
   ) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: color.withValues(alpha: 0.3),
-        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.3), width: 1.5),
       ),
       child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Icon(icon, color: color, size: 24),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.bold,
-              color: color,
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.2),
+              shape: BoxShape.circle,
             ),
+            child: Icon(icon, color: color, size: 18),
           ),
           const SizedBox(height: 4),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: color,
+                fontSize: 22,
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
           Text(
             label,
             style: theme.textTheme.bodySmall?.copyWith(
               color: ThemeHelpers.textSecondaryColor(context),
+              fontWeight: FontWeight.w500,
+              fontSize: 10,
             ),
             textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
@@ -477,10 +496,7 @@ class _KeysPageState extends State<KeysPage> with SingleTickerProviderStateMixin
               color: ThemeHelpers.textSecondaryColor(context),
             ),
             const SizedBox(height: 16),
-            Text(
-              'Nenhuma chave cadastrada',
-              style: theme.textTheme.bodyLarge,
-            ),
+            Text('Nenhuma chave cadastrada', style: theme.textTheme.bodyLarge),
             const SizedBox(height: 8),
             Text(
               'Clique no botão + para criar uma nova chave',
@@ -496,31 +512,70 @@ class _KeysPageState extends State<KeysPage> with SingleTickerProviderStateMixin
 
     return RefreshIndicator(
       onRefresh: () => _loadKeys(refresh: true),
-      child: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: _keys.length,
-        itemBuilder: (context, index) {
-          final key = _keys[index];
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: KeyCard(
-              keyData: key,
-              onTap: () {
-                // TODO: Navegar para detalhes quando implementado
-              },
-              onCheckout: () {
-                _showCheckoutModal(context, key);
-              },
-              onReturn: null, // Não aplicável na lista de chaves
-              onEdit: () {
-                // TODO: Navegar para edição quando implementado
-              },
-              onDelete: () {
-                _deleteKey(context, key);
-              },
+      child: CustomScrollView(
+        slivers: [
+          // Estatísticas no topo
+          if (_statistics != null)
+            SliverToBoxAdapter(child: _buildStatisticsCards(theme)),
+          // Lista de chaves
+          if (_keys.isEmpty)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.vpn_key_outlined,
+                      size: 64,
+                      color: ThemeHelpers.textSecondaryColor(context),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Nenhuma chave cadastrada',
+                      style: theme.textTheme.bodyLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Clique no botão + para criar uma nova chave',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: ThemeHelpers.textSecondaryColor(context),
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            SliverPadding(
+              padding: const EdgeInsets.all(16),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final key = _keys[index];
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: KeyCard(
+                      keyData: key,
+                      onTap: () {
+                        _showKeyDetailsModal(context, key);
+                      },
+                      onCheckout: () {
+                        _showCheckoutModal(context, key);
+                      },
+                      onReturn: null,
+                      onEdit: () {
+                        _navigateToEditKey(key);
+                      },
+                      onDelete: () {
+                        _deleteKey(context, key);
+                      },
+                    ),
+                  );
+                }, childCount: _keys.length),
+              ),
             ),
-          );
-        },
+        ],
       ),
     );
   }
@@ -568,62 +623,90 @@ class _KeysPageState extends State<KeysPage> with SingleTickerProviderStateMixin
               color: ThemeHelpers.textSecondaryColor(context),
             ),
             const SizedBox(height: 16),
-            Text(
-              'Nenhum controle de chave',
-              style: theme.textTheme.bodyLarge,
-            ),
+            Text('Nenhum controle de chave', style: theme.textTheme.bodyLarge),
           ],
         ),
       );
     }
 
-    return Column(
-      children: [
-        // Filtro de status
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _buildStatusChip(theme, null, 'Todos'),
-                const SizedBox(width: 8),
-                _buildStatusChip(theme, 'checked_out', 'Retiradas'),
-                const SizedBox(width: 8),
-                _buildStatusChip(theme, 'returned', 'Devolvidas'),
-                const SizedBox(width: 8),
-                _buildStatusChip(theme, 'overdue', 'Em Atraso'),
-              ],
+    return RefreshIndicator(
+      onRefresh: () => _loadAllControls(status: _controlStatusFilter),
+      child: CustomScrollView(
+        slivers: [
+          // Estatísticas no topo
+          if (_statistics != null)
+            SliverToBoxAdapter(child: _buildStatisticsCards(theme)),
+          // Filtro de status
+          SliverToBoxAdapter(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _buildStatusChip(theme, null, 'Todos'),
+                    const SizedBox(width: 8),
+                    _buildStatusChip(theme, 'checked_out', 'Retiradas'),
+                    const SizedBox(width: 8),
+                    _buildStatusChip(theme, 'returned', 'Devolvidas'),
+                    const SizedBox(width: 8),
+                    _buildStatusChip(theme, 'overdue', 'Em Atraso'),
+                  ],
+                ),
+              ),
             ),
           ),
-        ),
-        Expanded(
-          child: RefreshIndicator(
-            onRefresh: () => _loadAllControls(status: _controlStatusFilter),
-            child: ListView.builder(
+          // Lista de controles
+          if (_allControls.isEmpty)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.swap_horiz_outlined,
+                      size: 64,
+                      color: ThemeHelpers.textSecondaryColor(context),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Nenhum controle de chave',
+                      style: theme.textTheme.bodyLarge,
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            SliverPadding(
               padding: const EdgeInsets.all(16),
-              itemCount: _allControls.length,
-              itemBuilder: (context, index) {
-                final control = _allControls[index];
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: KeyControlCard(
-                    control: control,
-                    onReturn: control.status == key_models.KeyControlStatus.checkedOut
-                        ? () {
-                            _showReturnModal(context, control);
-                          }
-                        : null,
-                    onViewHistory: () {
-                      // TODO: Mostrar histórico quando implementado
-                    },
-                  ),
-                );
-              },
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final control = _allControls[index];
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: KeyControlCard(
+                      control: control,
+                      onReturn:
+                          control.status ==
+                              key_models.KeyControlStatus.checkedOut
+                          ? () {
+                              _showReturnModal(context, control);
+                            }
+                          : null,
+                      onViewHistory: () {
+                        if (control.key != null) {
+                          _showKeyHistoryModal(context, control.key!);
+                        }
+                      },
+                    ),
+                  );
+                }, childCount: _allControls.length),
+              ),
             ),
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -681,26 +764,61 @@ class _KeysPageState extends State<KeysPage> with SingleTickerProviderStateMixin
 
     return RefreshIndicator(
       onRefresh: () => _loadUserControls(),
-      child: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: _userControls.length,
-        itemBuilder: (context, index) {
-          final control = _userControls[index];
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: KeyControlCard(
-              control: control,
-              onReturn: control.status == key_models.KeyControlStatus.checkedOut
-                  ? () {
-                      _showReturnModal(context, control);
-                    }
-                  : null,
-              onViewHistory: () {
-                // TODO: Mostrar histórico quando implementado
-              },
+      child: CustomScrollView(
+        slivers: [
+          // Estatísticas no topo
+          if (_statistics != null)
+            SliverToBoxAdapter(child: _buildStatisticsCards(theme)),
+          // Lista de controles do usuário
+          if (_userControls.isEmpty)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.person_outline,
+                      size: 64,
+                      color: ThemeHelpers.textSecondaryColor(context),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Você não possui chaves retiradas',
+                      style: theme.textTheme.bodyLarge,
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            SliverPadding(
+              padding: const EdgeInsets.all(16),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final control = _userControls[index];
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: KeyControlCard(
+                      control: control,
+                      onReturn:
+                          control.status ==
+                              key_models.KeyControlStatus.checkedOut
+                          ? () {
+                              _showReturnModal(context, control);
+                            }
+                          : null,
+                      onViewHistory: () {
+                        if (control.key != null) {
+                          _showKeyHistoryModal(context, control.key!);
+                        }
+                      },
+                    ),
+                  );
+                }, childCount: _userControls.length),
+              ),
             ),
-          );
-        },
+        ],
       ),
     );
   }
@@ -726,16 +844,16 @@ class _KeysPageState extends State<KeysPage> with SingleTickerProviderStateMixin
       itemBuilder: (context, index) {
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
-          child: SkeletonBox(
-            height: 120,
-            borderRadius: 12,
-          ),
+          child: SkeletonBox(height: 120, borderRadius: 12),
         );
       },
     );
   }
 
-  Future<void> _showCheckoutModal(BuildContext context, key_models.Key key) async {
+  Future<void> _showCheckoutModal(
+    BuildContext context,
+    key_models.Key key,
+  ) async {
     if (key.status != key_models.KeyStatus.available) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -793,9 +911,8 @@ class _KeysPageState extends State<KeysPage> with SingleTickerProviderStateMixin
                       Expanded(
                         child: Text(
                           'Retirar Chave',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.bold),
                         ),
                       ),
                       IconButton(
@@ -882,7 +999,9 @@ class _KeysPageState extends State<KeysPage> with SingleTickerProviderStateMixin
                           ),
                           controller: TextEditingController(
                             text: expectedReturnDate != null
-                                ? DateFormat('dd/MM/yyyy').format(expectedReturnDate!)
+                                ? DateFormat(
+                                    'dd/MM/yyyy',
+                                  ).format(expectedReturnDate!)
                                 : '',
                           ),
                           onTap: () async {
@@ -890,7 +1009,9 @@ class _KeysPageState extends State<KeysPage> with SingleTickerProviderStateMixin
                               context: context,
                               initialDate: expectedReturnDate ?? DateTime.now(),
                               firstDate: DateTime.now(),
-                              lastDate: DateTime.now().add(const Duration(days: 365)),
+                              lastDate: DateTime.now().add(
+                                const Duration(days: 365),
+                              ),
                               locale: const Locale('pt', 'BR'),
                             );
                             if (picked != null) {
@@ -919,7 +1040,8 @@ class _KeysPageState extends State<KeysPage> with SingleTickerProviderStateMixin
                           onTap: () async {
                             final picked = await showTimePicker(
                               context: context,
-                              initialTime: expectedReturnTime ?? TimeOfDay.now(),
+                              initialTime:
+                                  expectedReturnTime ?? TimeOfDay.now(),
                             );
                             if (picked != null) {
                               setModalState(() {
@@ -942,7 +1064,9 @@ class _KeysPageState extends State<KeysPage> with SingleTickerProviderStateMixin
                               if (selectedType == null) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                    content: const Text('Por favor, selecione o tipo de uso'),
+                                    content: const Text(
+                                      'Por favor, selecione o tipo de uso',
+                                    ),
                                     backgroundColor: AppColors.status.error,
                                   ),
                                 );
@@ -1213,6 +1337,367 @@ class _KeysPageState extends State<KeysPage> with SingleTickerProviderStateMixin
     }
   }
 
+  Future<void> _showKeyHistoryModal(
+    BuildContext context,
+    key_models.Key key,
+  ) async {
+    bool isLoading = true;
+    List<key_models.KeyHistoryRecord> history = [];
+    String? errorMessage;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) {
+          if (isLoading) {
+            _keyService.getKeyHistory(key.id).then((response) {
+              if (mounted) {
+                setModalState(() {
+                  isLoading = false;
+                  if (response.success && response.data != null) {
+                    history = response.data!;
+                  } else {
+                    errorMessage =
+                        response.message ?? 'Erro ao carregar histórico';
+                  }
+                });
+              }
+            });
+          }
+
+          return Container(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.9,
+            ),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: ThemeHelpers.cardBackgroundColor(context),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(20),
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 20),
+                    decoration: BoxDecoration(
+                      color: ThemeHelpers.textSecondaryColor(context),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Histórico da Chave',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  key.name,
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Flexible(
+                  child: isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : errorMessage != null
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.error_outline,
+                                size: 48,
+                                color: ThemeHelpers.textSecondaryColor(context),
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                errorMessage!,
+                                style: Theme.of(context).textTheme.bodyMedium,
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                          ),
+                        )
+                      : history.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.history,
+                                size: 48,
+                                color: ThemeHelpers.textSecondaryColor(context),
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                'Nenhum histórico encontrado',
+                                style: Theme.of(context).textTheme.bodyMedium,
+                              ),
+                            ],
+                          ),
+                        )
+                      : ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: history.length,
+                          itemBuilder: (context, index) {
+                            final record = history[index];
+                            return _buildHistoryItem(context, record);
+                          },
+                        ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildHistoryItem(
+    BuildContext context,
+    key_models.KeyHistoryRecord record,
+  ) {
+    final dateFormat = DateFormat('dd/MM/yyyy HH:mm');
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: AppColors.primary.primary.withValues(alpha: 0.1),
+          child: Icon(
+            _getHistoryIcon(record.action),
+            color: AppColors.primary.primary,
+            size: 20,
+          ),
+        ),
+        title: Text(record.description),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (record.user != null) Text('Por: ${record.user!.name}'),
+            Text(
+              dateFormat.format(DateTime.parse(record.createdAt)),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: ThemeHelpers.textSecondaryColor(context),
+              ),
+            ),
+          ],
+        ),
+        isThreeLine: true,
+      ),
+    );
+  }
+
+  IconData _getHistoryIcon(String action) {
+    switch (action) {
+      case 'create':
+        return Icons.add;
+      case 'update':
+        return Icons.edit;
+      case 'delete':
+        return Icons.delete;
+      case 'checkout':
+        return Icons.logout;
+      case 'return':
+        return Icons.login;
+      default:
+        return Icons.history;
+    }
+  }
+
+  void _navigateToEditKey(key_models.Key key) {
+    Navigator.of(context).pushNamed(AppRoutes.keyEdit(key.id)).then((result) {
+      if (result == true) {
+        _loadDataForCurrentTab();
+      }
+    });
+  }
+
+  Future<void> _showKeyDetailsModal(
+    BuildContext context,
+    key_models.Key key,
+  ) async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: ThemeHelpers.cardBackgroundColor(context),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 20),
+                  decoration: BoxDecoration(
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      key.name,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              _buildDetailRow(context, 'Tipo', key.type.label, Icons.category),
+              _buildDetailRow(context, 'Status', key.status.label, Icons.info),
+              if (key.property != null)
+                _buildDetailRow(
+                  context,
+                  'Propriedade',
+                  key.property!.title,
+                  Icons.home,
+                ),
+              if (key.location != null && key.location!.isNotEmpty)
+                _buildDetailRow(
+                  context,
+                  'Localização',
+                  key.location!,
+                  Icons.location_on,
+                ),
+              if (key.description != null && key.description!.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Descrição',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  key.description!,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ],
+              if (key.notes != null && key.notes!.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Text(
+                  'Observações',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 4),
+                Text(key.notes!, style: Theme.of(context).textTheme.bodyMedium),
+              ],
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _navigateToEditKey(key);
+                      },
+                      icon: const Icon(Icons.edit),
+                      label: const Text('Editar'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _showCheckoutModal(context, key);
+                      },
+                      icon: const Icon(Icons.logout),
+                      label: const Text('Retirar'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(
+    BuildContext context,
+    String label,
+    String value,
+    IconData icon,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: ThemeHelpers.textSecondaryColor(context)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _deleteKey(BuildContext context, key_models.Key key) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1278,4 +1763,3 @@ class _KeysPageState extends State<KeysPage> with SingleTickerProviderStateMixin
     }
   }
 }
-

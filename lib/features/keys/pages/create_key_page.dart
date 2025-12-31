@@ -9,9 +9,11 @@ import '../../documents/widgets/entity_selector.dart';
 import '../models/key_model.dart' as key_models;
 import '../services/key_service.dart';
 
-/// Página de criação de chave
+/// Página de criação/edição de chave
 class CreateKeyPage extends StatefulWidget {
-  const CreateKeyPage({super.key});
+  final String? keyId;
+  
+  const CreateKeyPage({super.key, this.keyId});
 
   @override
   State<CreateKeyPage> createState() => _CreateKeyPageState();
@@ -144,44 +146,88 @@ class _CreateKeyPageState extends State<CreateKeyPage> {
     });
 
     try {
-      final dto = key_models.CreateKeyDto(
-        name: _nameController.text.trim(),
-        description: _descriptionController.text.trim().isEmpty
-            ? null
-            : _descriptionController.text.trim(),
-        type: _selectedType.value,
-        status: _selectedStatus.value,
-        location: _locationController.text.trim().isEmpty
-            ? null
-            : _locationController.text.trim(),
-        notes: _notesController.text.trim().isEmpty
-            ? null
-            : _notesController.text.trim(),
-        propertyId: _selectedPropertyId!,
-      );
+      if (widget.keyId != null) {
+        // Edição
+        final dto = key_models.UpdateKeyDto(
+          name: _nameController.text.trim(),
+          description: _descriptionController.text.trim().isEmpty
+              ? null
+              : _descriptionController.text.trim(),
+          type: _selectedType.value,
+          status: _selectedStatus.value,
+          location: _locationController.text.trim().isEmpty
+              ? null
+              : _locationController.text.trim(),
+          notes: _notesController.text.trim().isEmpty
+              ? null
+              : _notesController.text.trim(),
+        );
 
-      final response = await _keyService.createKey(dto);
+        final response = await _keyService.updateKey(widget.keyId!, dto);
 
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
 
-        if (response.success) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Chave criada com sucesso'),
-              backgroundColor: AppColors.status.success,
-            ),
-          );
-          Navigator.of(context).pop(true);
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(response.message ?? 'Erro ao criar chave'),
-              backgroundColor: AppColors.status.error,
-            ),
-          );
+          if (response.success) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text('Chave atualizada com sucesso'),
+                backgroundColor: AppColors.status.success,
+              ),
+            );
+            Navigator.of(context).pop(true);
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(response.message ?? 'Erro ao atualizar chave'),
+                backgroundColor: AppColors.status.error,
+              ),
+            );
+          }
+        }
+      } else {
+        // Criação
+        final dto = key_models.CreateKeyDto(
+          name: _nameController.text.trim(),
+          description: _descriptionController.text.trim().isEmpty
+              ? null
+              : _descriptionController.text.trim(),
+          type: _selectedType.value,
+          status: _selectedStatus.value,
+          location: _locationController.text.trim().isEmpty
+              ? null
+              : _locationController.text.trim(),
+          notes: _notesController.text.trim().isEmpty
+              ? null
+              : _notesController.text.trim(),
+          propertyId: _selectedPropertyId!,
+        );
+
+        final response = await _keyService.createKey(dto);
+
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+
+          if (response.success) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text('Chave criada com sucesso'),
+                backgroundColor: AppColors.status.success,
+              ),
+            );
+            Navigator.of(context).pop(true);
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(response.message ?? 'Erro ao criar chave'),
+                backgroundColor: AppColors.status.error,
+              ),
+            );
+          }
         }
       }
     } catch (e) {
@@ -213,7 +259,7 @@ class _CreateKeyPageState extends State<CreateKeyPage> {
     }
 
     return AppScaffold(
-      title: 'Criar Chave',
+      title: widget.keyId != null ? 'Editar Chave' : 'Criar Chave',
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Form(
@@ -347,14 +393,16 @@ class _CreateKeyPageState extends State<CreateKeyPage> {
               // Botões
               Column(
                 children: [
-                  SizedBox(
-                    width: double.infinity,
-                    child: CustomButton(
-                      text: _isLoading ? 'Criando...' : 'Criar Chave',
-                      onPressed: _isLoading ? null : _submitForm,
-                      icon: _isLoading ? null : Icons.add,
+                    SizedBox(
+                      width: double.infinity,
+                      child: CustomButton(
+                        text: _isLoading
+                            ? (widget.keyId != null ? 'Salvando...' : 'Criando...')
+                            : (widget.keyId != null ? 'Salvar Alterações' : 'Criar Chave'),
+                        onPressed: _isLoading ? null : _submitForm,
+                        icon: _isLoading ? null : (widget.keyId != null ? Icons.save : Icons.add),
+                      ),
                     ),
-                  ),
                   const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,

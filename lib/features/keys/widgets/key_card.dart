@@ -103,7 +103,9 @@ class KeyCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 4),
-                        Row(
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
                           children: [
                             Container(
                               padding: const EdgeInsets.symmetric(
@@ -123,7 +125,6 @@ class KeyCard extends StatelessWidget {
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 8),
                             Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 8,
@@ -147,6 +148,17 @@ class KeyCard extends StatelessWidget {
                       ],
                     ),
                   ),
+                  // Botão de retirar (se disponível)
+                  if (keyData.status == key_models.KeyStatus.available && onCheckout != null)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: IconButton(
+                        icon: const Icon(Icons.logout),
+                        color: AppColors.status.success,
+                        tooltip: 'Retirar Chave',
+                        onPressed: onCheckout,
+                      ),
+                    ),
                   // Menu de ações
                   PopupMenuButton<String>(
                     icon: const Icon(Icons.more_vert),

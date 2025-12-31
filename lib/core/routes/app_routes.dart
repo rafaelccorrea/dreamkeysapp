@@ -97,6 +97,7 @@ class AppRoutes {
   // Chaves
   static const String keys = '/keys';
   static const String keyCreate = '/keys/create';
+  static String keyEdit(String id) => '/keys/$id/edit';
 
   static String propertyOfferDetails(String offerId) =>
       '/properties/offers/$offerId';
@@ -240,6 +241,12 @@ class AppRoutes {
       return _buildRoute(const KeysPage(), settings);
     } else if (routeName == AppRoutes.keyCreate) {
       return _buildRoute(const CreateKeyPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/keys/')) {
+      final segments = routeName.split('/');
+      if (segments.length >= 4 && segments[3] == 'edit') {
+        final id = segments[2];
+        return _buildRoute(CreateKeyPage(keyId: id), settings);
+      }
     } else if (routeName == AppRoutes.documents) {
       return _buildRoute(const DocumentsPage(), settings);
     } else if (routeName == AppRoutes.signatures) {
