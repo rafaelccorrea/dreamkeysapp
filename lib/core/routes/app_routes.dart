@@ -34,6 +34,8 @@ import '../../features/inspections/pages/inspections_page.dart';
 import '../../features/inspections/pages/inspection_details_page.dart';
 import '../../features/inspections/pages/create_inspection_page.dart';
 import '../../features/inspections/pages/edit_inspection_page.dart';
+import '../../features/keys/pages/keys_page.dart';
+import '../../features/keys/pages/create_key_page.dart';
 
 /// Rotas da aplicação com transições customizadas
 class AppRoutes {
@@ -91,6 +93,10 @@ class AppRoutes {
   static const String inspectionCreate = '/inspections/new';
   static String inspectionDetails(String id) => '/inspections/$id';
   static String inspectionEdit(String id) => '/inspections/$id/edit';
+
+  // Chaves
+  static const String keys = '/keys';
+  static const String keyCreate = '/keys/create';
 
   static String propertyOfferDetails(String offerId) =>
       '/properties/offers/$offerId';
@@ -230,6 +236,10 @@ class AppRoutes {
           return _buildRoute(EditInspectionPage(inspectionId: id), settings);
         }
       }
+    } else if (routeName == AppRoutes.keys) {
+      return _buildRoute(const KeysPage(), settings);
+    } else if (routeName == AppRoutes.keyCreate) {
+      return _buildRoute(const CreateKeyPage(), settings);
     } else if (routeName == AppRoutes.documents) {
       return _buildRoute(const DocumentsPage(), settings);
     } else if (routeName == AppRoutes.signatures) {

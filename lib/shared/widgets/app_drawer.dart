@@ -83,7 +83,9 @@ class _AppDrawerState extends State<AppDrawer> {
     // Verificar se algum item de Gestão Interna está ativo
     if (activeRoute == AppRoutes.kanban ||
         activeRoute == AppRoutes.inspections ||
-        activeRoute.startsWith('/inspections')) {
+        activeRoute == AppRoutes.keys ||
+        activeRoute.startsWith('/inspections') ||
+        activeRoute.startsWith('/keys')) {
       setState(() {
         _gestaoInternaExpanded = true;
       });
@@ -607,6 +609,26 @@ class _AppDrawerState extends State<AppDrawer> {
                         }
                         Navigator.of(context).pushNamedAndRemoveUntil(
                           AppRoutes.inspections,
+                          (route) => false,
+                        );
+                      },
+                      isSubItem: true,
+                    ),
+                    _buildDrawerItem(
+                      context: context,
+                      currentRoute: activeRoute,
+                      route: AppRoutes.keys,
+                      icon: Icons.vpn_key_outlined,
+                      activeIcon: Icons.vpn_key,
+                      title: 'Chaves',
+                      onTap: () {
+                        Navigator.pop(context);
+                        if (activeRoute == AppRoutes.keys ||
+                            activeRoute.startsWith('/keys')) {
+                          return;
+                        }
+                        Navigator.of(context).pushNamedAndRemoveUntil(
+                          AppRoutes.keys,
                           (route) => false,
                         );
                       },

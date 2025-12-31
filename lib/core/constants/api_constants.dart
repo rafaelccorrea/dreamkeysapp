@@ -273,10 +273,25 @@ class ApiConstants {
   static String keyById(String id) => '/keys/$id';
   static String keyUpdate(String id) => '/keys/$id';
   static String keyDelete(String id) => '/keys/$id';
+  static const String keyStatistics = '/keys/statistics';
   static String keyStatus(String propertyId) =>
       '/keys/status?propertyId=$propertyId';
   static String keysByProperty(String propertyId) =>
       '/keys?propertyId=$propertyId';
+
+  // Endpoints de Controle de Chaves (Checkout/Return)
+  static const String keyCheckout = '/keys/checkout';
+  static String keyReturn(String keyControlId) => '/keys/return/$keyControlId';
+  static const String keyControlsAll = '/keys/controls/all';
+  static const String keyControlsOverdue = '/keys/controls/overdue';
+  static const String keyControlsUser = '/keys/controls/user';
+  static String keyControlById(String id) => '/keys/controls/$id';
+
+  // Endpoints de Histórico de Chaves
+  static String keyHistoryByKey(String keyId) => '/key-history/key/$keyId';
+  static String keyHistoryByUser(String userId) => '/key-history/user/$userId';
+  static const String keyHistoryMyHistory = '/key-history/my-history';
+  static const String keyHistoryStatistics = '/key-history/statistics';
 
   // Endpoints de Despesas de Propriedades
   static String propertyExpenses(String propertyId) =>
