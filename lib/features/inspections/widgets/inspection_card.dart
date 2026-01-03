@@ -275,3 +275,4 @@ class InspectionCard extends StatelessWidget {
     );
   }
 }
+

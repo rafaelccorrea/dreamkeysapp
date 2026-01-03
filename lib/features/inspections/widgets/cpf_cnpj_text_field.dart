@@ -162,3 +162,4 @@ class _CpfCnpjTextFieldState extends State<CpfCnpjTextField> {
     );
   }
 }
+
