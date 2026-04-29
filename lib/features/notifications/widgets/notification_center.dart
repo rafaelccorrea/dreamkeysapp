@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/theme_helpers.dart';
 import '../controllers/notification_controller.dart';
 import 'notification_list.dart';
-import '../../../core/theme/app_colors.dart';
 
 /// Componente principal do centro de notificações
 /// Exibe badge com contador e painel dropdown com lista
@@ -10,9 +11,13 @@ import '../../../core/theme/app_colors.dart';
 class NotificationCenter extends StatefulWidget {
   final bool embedded;
 
+  /// Tamanho reduzido para a cápsula do [MinimalBodyChrome].
+  final bool compactToolbar;
+
   const NotificationCenter({
     super.key,
     this.embedded = false,
+    this.compactToolbar = false,
   });
 
   @override
@@ -74,19 +79,36 @@ class _NotificationCenterState extends State<NotificationCenter> {
       builder: (context, controller, child) {
         final unreadCount = controller.unreadCount;
 
+        final compact = widget.compactToolbar;
+        final dim = compact ? 40.0 : 46.0;
+        final iconSize = compact ? 20.0 : 22.0;
+
         return Stack(
           clipBehavior: Clip.none,
+          alignment: Alignment.center,
           children: [
-            IconButton(
-              key: _buttonKey,
-              icon: const Icon(Icons.notifications_outlined),
-              onPressed: _toggleOverlay,
-              tooltip: 'Notificações',
+            Tooltip(
+              message: 'Notificações',
+              child: InkWell(
+                key: _buttonKey,
+                onTap: _toggleOverlay,
+                customBorder:
+                    compact ? const CircleBorder() : RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                child: SizedBox(
+                  width: dim,
+                  height: dim,
+                  child: Icon(
+                    Icons.notifications_outlined,
+                    size: iconSize,
+                    color: ThemeHelpers.textColor(context),
+                  ),
+                ),
+              ),
             ),
             if (unreadCount > 0)
               Positioned(
-                right: 8,
-                top: 8,
+                right: compact ? 4 : 2,
+                top: compact ? 4 : 2,
                 child: Container(
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(

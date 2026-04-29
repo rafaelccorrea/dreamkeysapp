@@ -148,7 +148,7 @@ class _DocumentFiltersDrawerState extends State<DocumentFiltersDrawer> {
                     _buildSectionTitle(context, theme, 'Tipo'),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<DocumentType>(
-                      value: _selectedType,
+                      initialValue: _selectedType,
                       decoration: InputDecoration(
                         labelText: 'Tipo de Documento',
                         prefixIcon: const Icon(Icons.description_outlined),
@@ -180,7 +180,7 @@ class _DocumentFiltersDrawerState extends State<DocumentFiltersDrawer> {
                     _buildSectionTitle(context, theme, 'Status'),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<DocumentStatus>(
-                      value: _selectedStatus,
+                      initialValue: _selectedStatus,
                       decoration: InputDecoration(
                         labelText: 'Status',
                         prefixIcon: const Icon(Icons.info_outline),
@@ -212,7 +212,7 @@ class _DocumentFiltersDrawerState extends State<DocumentFiltersDrawer> {
                     _buildSectionTitle(context, theme, 'Ordenação'),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      value: _sortBy,
+                      initialValue: _sortBy,
                       decoration: InputDecoration(
                         labelText: 'Ordenar por',
                         prefixIcon: const Icon(Icons.sort),
@@ -236,7 +236,7 @@ class _DocumentFiltersDrawerState extends State<DocumentFiltersDrawer> {
                     if (_sortBy != null) ...[
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
-                        value: _sortOrder ?? 'asc',
+                        initialValue: _sortOrder ?? 'asc',
                         decoration: InputDecoration(
                           labelText: 'Ordem',
                           border: OutlineInputBorder(

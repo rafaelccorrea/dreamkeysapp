@@ -1,5 +1,6 @@
-import java.util.Properties
+import java.io.File
 import java.io.FileInputStream
+import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -9,21 +10,21 @@ plugins {
 }
 
 android {
-    namespace = "com.dreamkeys.corretor"
+    namespace = "com.intellisys.corretor"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_11.toString()
+        jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
     defaultConfig {
-        applicationId = "com.dreamkeys.corretor"
+        applicationId = "com.intellisys.corretor"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -71,4 +72,36 @@ android {
 
 flutter {
     source = "../.."
+}
+
+// Celular físico + 127.0.0.1: USB redireciona a porta da API (usa adb do SDK, não só PATH).
+afterEvaluate {
+    listOf("assembleDebug", "installDebug").forEach { taskName ->
+        tasks.findByName(taskName)?.doFirst {
+            try {
+                val home = System.getenv("ANDROID_HOME")
+                    ?: System.getenv("ANDROID_SDK_ROOT")
+                val adb = if (home != null) {
+                    val sep = File.separator
+                    val base = home.trimEnd('/', '\\')
+                    val candidate = if (
+                        System.getProperty("os.name").orEmpty().lowercase().contains("win")
+                    ) {
+                        "${base}${sep}platform-tools${sep}adb.exe"
+                    } else {
+                        "${base}${sep}platform-tools${sep}adb"
+                    }
+                    if (File(candidate).isFile) candidate else "adb"
+                } else {
+                    "adb"
+                }
+                project.exec {
+                    commandLine(adb, "reverse", "tcp:3000", "tcp:3000")
+                    isIgnoreExitValue = true
+                }
+            } catch (_: Exception) {
+                // Sem SDK, sem dispositivo ou reverse já feito
+            }
+        }
+    }
 }

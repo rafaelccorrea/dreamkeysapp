@@ -511,8 +511,9 @@ class KeyFilters {
   Map<String, String> toQueryParams() {
     final params = <String, String>{};
     if (status != null && status!.isNotEmpty) params['status'] = status!;
-    if (propertyId != null && propertyId!.isNotEmpty)
+    if (propertyId != null && propertyId!.isNotEmpty) {
       params['propertyId'] = propertyId!;
+    }
     if (search != null && search!.isNotEmpty) params['search'] = search!;
     if (onlyMyData == true) params['onlyMyData'] = 'true';
     return params;

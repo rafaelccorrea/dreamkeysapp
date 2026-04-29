@@ -373,7 +373,7 @@ class _AsyncExcelImportModalState extends State<AsyncExcelImportModal> {
 
   Future<void> _selectFile() async {
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['xlsx', 'xls'],
       );

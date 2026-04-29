@@ -17,6 +17,21 @@ subprojects {
 }
 subprojects {
     project.evaluationDependsOn(":app")
+
+    // Alinha Java e Kotlin (AGP 8.x + plugins costumam usar JVM 17).
+    plugins.withId("com.android.library") {
+        extensions.configure<com.android.build.gradle.LibraryExtension>("android") {
+            compileOptions {
+                sourceCompatibility = JavaVersion.VERSION_17
+                targetCompatibility = JavaVersion.VERSION_17
+            }
+        }
+    }
+    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+        kotlinOptions {
+            jvmTarget = "17"
+        }
+    }
 }
 
 tasks.register<Delete>("clean") {

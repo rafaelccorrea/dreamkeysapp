@@ -15,7 +15,7 @@ class ExportImportDialog extends StatefulWidget {
 class _ExportImportDialogState extends State<ExportImportDialog> {
   final PropertyService _propertyService = PropertyService.instance;
   bool _isExporting = false;
-  bool _isImporting = false;
+  final bool _isImporting = false;
   String? _importResult;
 
   Future<void> _exportProperties(String format) async {

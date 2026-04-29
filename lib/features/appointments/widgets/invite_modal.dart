@@ -25,7 +25,7 @@ class _InviteModalState extends State<InviteModal> {
   final _messageController = TextEditingController();
   String? _selectedUserId;
   bool _isLoading = false;
-  List<Map<String, dynamic>> _users = [];
+  final List<Map<String, dynamic>> _users = [];
   bool _isLoadingUsers = false;
   final TextEditingController _searchController = TextEditingController();
 

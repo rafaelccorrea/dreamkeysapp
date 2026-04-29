@@ -269,7 +269,7 @@ class _CalendarPageState extends State<CalendarPage> {
                       child: RepaintBoundary(
                         child: TableCalendar<Appointment>(
                           key: ValueKey(
-                            'calendar_${_focusedDay.year}_${_focusedDay.month}_${_calendarFormat}',
+                            'calendar_${_focusedDay.year}_${_focusedDay.month}_$_calendarFormat',
                           ),
                           firstDay: DateTime.utc(2020, 1, 1),
                           lastDay: DateTime.utc(2030, 12, 31),

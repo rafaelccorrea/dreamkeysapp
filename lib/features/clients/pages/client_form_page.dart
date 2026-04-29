@@ -763,7 +763,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
                                       ),
                                       const SizedBox(height: 8),
                                       DropdownButtonFormField<MaritalStatus?>(
-                                        value: _selectedMaritalStatus,
+                                        initialValue: _selectedMaritalStatus,
                                         decoration: InputDecoration(
                                           hintText: 'Selecione o estado civil',
                                           prefixIcon: const Icon(Icons.favorite_outline),
@@ -781,7 +781,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
                                           value: status,
                                           child: Text(status.label),
                                         );
-                                      }).toList(),
+                                      }),
                                     ],
                                         onChanged: (value) {
                                           setState(() {
@@ -837,7 +837,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
                                       ),
                                       const SizedBox(height: 8),
                                       DropdownButtonFormField<ClientSource?>(
-                                        value: _leadSource,
+                                        initialValue: _leadSource,
                                         decoration: InputDecoration(
                                           hintText: 'Selecione a origem',
                                           prefixIcon: const Icon(Icons.track_changes_outlined),
@@ -855,7 +855,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
                                               value: source,
                                               child: Text(source.label),
                                             );
-                                          }).toList(),
+                                          }),
                                         ],
                                         onChanged: (value) {
                                           setState(() {
@@ -887,7 +887,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
                                       ),
                                       const SizedBox(height: 8),
                                       DropdownButtonFormField<ClientType>(
-                                        value: _selectedType,
+                                        initialValue: _selectedType,
                                         decoration: InputDecoration(
                                           hintText: 'Selecione o tipo',
                                           prefixIcon: const Icon(Icons.category_outlined),
@@ -929,7 +929,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
                                       ),
                                       const SizedBox(height: 8),
                                       DropdownButtonFormField<ClientStatus>(
-                                        value: _selectedStatus,
+                                        initialValue: _selectedStatus,
                                         decoration: InputDecoration(
                                           hintText: 'Selecione o status',
                                           prefixIcon: const Icon(Icons.info_outline),
@@ -1082,7 +1082,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
                                       ),
                                       const SizedBox(height: 8),
                                       DropdownButtonFormField<EmploymentStatus?>(
-                                        value: _selectedEmploymentStatus,
+                                        initialValue: _selectedEmploymentStatus,
                                         decoration: InputDecoration(
                                           hintText: 'Selecione a situação',
                                           prefixIcon: const Icon(Icons.work_outline),
@@ -1100,7 +1100,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
                                               value: status,
                                               child: Text(status.label),
                                             );
-                                          }).toList(),
+                                          }),
                                         ],
                                         onChanged: (value) {
                                           setState(() {
@@ -1261,7 +1261,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
                                       ),
                                       const SizedBox(height: 8),
                                       DropdownButtonFormField<String?>(
-                                        value: _accountType,
+                                        initialValue: _accountType,
                                         decoration: InputDecoration(
                                           hintText: 'Selecione o tipo',
                                           prefixIcon: const Icon(Icons.account_balance_outlined),
@@ -1416,7 +1416,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
                                             ),
                                             const SizedBox(height: 8),
                                             DropdownButtonFormField<int?>(
-                                              value: _minBedrooms,
+                                              initialValue: _minBedrooms,
                                               decoration: InputDecoration(
                                                 hintText: 'Mín.',
                                                 prefixIcon: const Icon(Icons.bed_outlined),
@@ -1434,7 +1434,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
                                                     value: value,
                                                     child: Text('$value'),
                                                   );
-                                                }).toList(),
+                                                }),
                                               ],
                                               onChanged: (value) {
                                                 setState(() {
@@ -1458,7 +1458,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
                                             ),
                                             const SizedBox(height: 8),
                                             DropdownButtonFormField<int?>(
-                                              value: _maxBedrooms,
+                                              initialValue: _maxBedrooms,
                                               decoration: InputDecoration(
                                                 hintText: 'Máx.',
                                                 prefixIcon: const Icon(Icons.bed_outlined),
@@ -1476,7 +1476,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
                                                     value: value,
                                                     child: Text('$value'),
                                                   );
-                                                }).toList(),
+                                                }),
                                               ],
                                               onChanged: (value) {
                                                 setState(() {
@@ -1501,7 +1501,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
                                       ),
                                       const SizedBox(height: 8),
                                       DropdownButtonFormField<int?>(
-                                        value: _minBathrooms,
+                                        initialValue: _minBathrooms,
                                         decoration: InputDecoration(
                                           hintText: 'Selecione',
                                           prefixIcon: const Icon(Icons.bathroom_outlined),
@@ -1519,7 +1519,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
                                               value: value,
                                               child: Text('$value'),
                                             );
-                                          }).toList(),
+                                          }),
                                         ],
                                         onChanged: (value) {
                                           setState(() {
@@ -1658,7 +1658,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
                                         ),
                                         const SizedBox(height: 8),
                                         DropdownButtonFormField<String?>(
-                                          value: _mcmvIncomeRange,
+                                          initialValue: _mcmvIncomeRange,
                                           decoration: InputDecoration(
                                             hintText: 'Selecione a faixa',
                                             prefixIcon: const Icon(Icons.attach_money_outlined),

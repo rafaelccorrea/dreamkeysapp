@@ -1,10 +1,183 @@
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, debugPrint, defaultTargetPlatform, kDebugMode, kIsWeb;
+import 'package:flutter/services.dart' show rootBundle;
+
+import 'dev_network_config.dart';
+
 /// Constantes da API
 class ApiConstants {
   ApiConstants._();
 
-  // Base URL - TODO: Configurar através de variáveis de ambiente
-  static const String baseUrl = 'https://api.dreamkeys.com.br';
-  static const String baseApiUrl = baseUrl;
+  static String _baseUrl = 'http://127.0.0.1:3000';
+  static bool _didInit = false;
+
+  /// Chame no `main()` antes de `runApp` (já configurado em [main.dart]).
+  ///
+  /// Prioridade:
+  /// 1. `--dart-define=API_BASE_URL=https://...` (URL completa, máxima prioridade)
+  /// 2. `assets/config/api_target.txt` — primeira linha útil: `production` →
+  ///    [DevNetworkConfig.productionApiBaseUrl]; `lan` → resolve IP local (abaixo)
+  /// 3. Modo **lan**: emulador Android `10.0.2.2`, físico + `dev_lan_host.txt`, etc.
+  ///
+  /// Para API no PC, mude `api_target.txt` para `lan`.
+  static Future<void> ensureInitialized() async {
+    if (_didInit) return;
+
+    const fromEnvFull = String.fromEnvironment('API_BASE_URL');
+    if (fromEnvFull.isNotEmpty) {
+      _baseUrl = _normalizeBaseUrl(fromEnvFull);
+      _didInit = true;
+      debugPrint('📡 [API] API_BASE_URL (dart-define) → $_baseUrl');
+      return;
+    }
+
+    final target = await _apiTargetFromAsset();
+    if (target == 'production') {
+      _baseUrl = _normalizeBaseUrl(DevNetworkConfig.productionApiBaseUrl);
+      _didInit = true;
+      debugPrint('📡 [API] api_target.txt → production → $_baseUrl');
+      return;
+    }
+
+    const port = String.fromEnvironment('API_PORT', defaultValue: '3000');
+    const devLanHost = String.fromEnvironment('DEV_LAN_HOST');
+
+    if (kIsWeb) {
+      _baseUrl = 'http://127.0.0.1:$port';
+      _didInit = true;
+      return;
+    }
+
+    final deviceInfo = DeviceInfoPlugin();
+
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      final android = await deviceInfo.androidInfo;
+      if (android.isPhysicalDevice) {
+        final host = await _resolveAndroidPhysicalHost(
+          devLanHost: devLanHost,
+          port: port,
+        );
+        _baseUrl = 'http://$host:$port';
+        debugPrint('📡 [API] Android físico → $_baseUrl');
+      } else {
+        _baseUrl = 'http://10.0.2.2:$port';
+        debugPrint('📡 [API] Android emulador → $_baseUrl');
+      }
+      _didInit = true;
+      return;
+    }
+
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      final ios = await deviceInfo.iosInfo;
+      if (ios.isPhysicalDevice) {
+        final host = await _resolveIosPhysicalHost(devLanHost: devLanHost);
+        _baseUrl = 'http://$host:$port';
+        debugPrint('📡 [API] iOS físico → $_baseUrl');
+      } else {
+        _baseUrl = 'http://127.0.0.1:$port';
+        debugPrint('📡 [API] iOS Simulator → $_baseUrl');
+      }
+      _didInit = true;
+      return;
+    }
+
+    _baseUrl = 'http://127.0.0.1:$port';
+    _didInit = true;
+    debugPrint('📡 [API] Desktop/outro → $_baseUrl');
+  }
+
+  static Future<String> _resolveAndroidPhysicalHost({
+    required String devLanHost,
+    required String port,
+  }) async {
+    if (devLanHost.isNotEmpty) return devLanHost;
+    if (DevNetworkConfig.pcLanIPv4.isNotEmpty) {
+      return DevNetworkConfig.pcLanIPv4;
+    }
+    final fromAsset = await _devLanHostFromAsset();
+    if (fromAsset != null) {
+      debugPrint('📡 [API] host de assets/config/dev_lan_host.txt → $fromAsset');
+      return fromAsset;
+    }
+    if (kDebugMode) {
+      debugPrint(
+        '📡 [API] Android físico (debug): 127.0.0.1 — USB: o Gradle tenta '
+        '`adb reverse tcp:$port tcp:$port`; se falhar, rode manualmente. '
+        'Wi‑Fi: edite assets/config/dev_lan_host.txt ou DEV_LAN_HOST / pcLanIPv4.',
+      );
+      return '127.0.0.1';
+    }
+    throw StateError(
+      'Android físico em release: defina --dart-define=API_BASE_URL=... ou '
+      'DEV_LAN_HOST / DevNetworkConfig.pcLanIPv4 / dev_lan_host.txt.',
+    );
+  }
+
+  static Future<String> _resolveIosPhysicalHost({
+    required String devLanHost,
+  }) async {
+    if (devLanHost.isNotEmpty) return devLanHost;
+    if (DevNetworkConfig.pcLanIPv4.isNotEmpty) {
+      return DevNetworkConfig.pcLanIPv4;
+    }
+    final fromAsset = await _devLanHostFromAsset();
+    if (fromAsset != null) return fromAsset;
+    throw StateError(
+      'iOS físico: defina assets/config/dev_lan_host.txt, '
+      'DevNetworkConfig.pcLanIPv4 ou --dart-define=DEV_LAN_HOST= '
+      '(IPv4 do Mac na mesma Wi‑Fi).',
+    );
+  }
+
+  static final _ipv4 = RegExp(
+    r'^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$',
+  );
+
+  static Future<String?> _devLanHostFromAsset() async {
+    try {
+      final raw = await rootBundle.loadString('assets/config/dev_lan_host.txt');
+      for (final line in raw.split(RegExp(r'\r?\n'))) {
+        final t = line.trim();
+        if (t.isEmpty || t.startsWith('#')) continue;
+        if (_ipv4.hasMatch(t)) return t;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  static String _normalizeBaseUrl(String url) {
+    var u = url.trim();
+    while (u.endsWith('/')) {
+      u = u.substring(0, u.length - 1);
+    }
+    return u;
+  }
+
+  /// `production` — API pública; `lan` — mesmo PC/rede. Sem linha válida ou sem asset → `production`.
+  static Future<String> _apiTargetFromAsset() async {
+    try {
+      final raw = await rootBundle.loadString('assets/config/api_target.txt');
+      for (final line in raw.split(RegExp(r'\r?\n'))) {
+        final t = line.trim();
+        if (t.isEmpty || t.startsWith('#')) continue;
+        final lower = t.toLowerCase();
+        if (lower == 'production' || lower == 'lan') return lower;
+      }
+    } catch (_) {}
+    return 'production';
+  }
+
+  static String get baseUrl {
+    assert(
+      _didInit,
+      'Chame ApiConstants.ensureInitialized() no main() antes de usar a API.',
+    );
+    return _baseUrl;
+  }
+
+  /// Alias de [baseUrl] (sem path) — uso em uploads e URIs absolutas.
+  static String get baseApiUrl => baseUrl;
 
   // Endpoints de Autenticação
   static const String login =

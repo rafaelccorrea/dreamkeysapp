@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons/lucide_icons.dart';
 import 'package:provider/provider.dart';
 import '../../../main.dart';
 import '../../../core/routes/app_routes.dart';
@@ -347,7 +348,7 @@ class _AppDrawerState extends State<AppDrawer> {
                       child: Row(
                         children: [
                           const Icon(
-                            Icons.business,
+                            LucideIcons.building2,
                             size: 16,
                             color: Colors.white,
                           ),
@@ -393,8 +394,8 @@ class _AppDrawerState extends State<AppDrawer> {
                   context: context,
                   currentRoute: activeRoute,
                   route: AppRoutes.home,
-                  icon: Icons.dashboard_outlined,
-                  activeIcon: Icons.dashboard,
+                  icon: LucideIcons.layoutDashboard,
+                  activeIcon: LucideIcons.layoutDashboard,
                   title: 'Dashboard',
                   onTap: () {
                     Navigator.pop(context);
@@ -411,8 +412,8 @@ class _AppDrawerState extends State<AppDrawer> {
                   context: context,
                   currentRoute: activeRoute,
                   title: 'Gestão de Negócios',
-                  icon: Icons.business_outlined,
-                  activeIcon: Icons.business,
+                  icon: LucideIcons.building2,
+                  activeIcon: LucideIcons.building2,
                   isExpanded: _gestaoExpanded,
                   onExpansionChanged: (expanded) {
                     setState(() {
@@ -424,8 +425,8 @@ class _AppDrawerState extends State<AppDrawer> {
                       context: context,
                       currentRoute: activeRoute,
                       route: AppRoutes.properties,
-                      icon: Icons.home_outlined,
-                      activeIcon: Icons.home,
+                      icon: LucideIcons.home,
+                      activeIcon: LucideIcons.home,
                       title: 'Imóveis',
                       onTap: () {
                         Navigator.pop(context);
@@ -441,8 +442,8 @@ class _AppDrawerState extends State<AppDrawer> {
                       context: context,
                       currentRoute: activeRoute,
                       route: AppRoutes.clients,
-                      icon: Icons.people_outlined,
-                      activeIcon: Icons.people,
+                      icon: LucideIcons.users,
+                      activeIcon: LucideIcons.users,
                       title: 'Clientes',
                       onTap: () {
                         Navigator.pop(context);
@@ -461,8 +462,8 @@ class _AppDrawerState extends State<AppDrawer> {
                       context: context,
                       currentRoute: activeRoute,
                       route: AppRoutes.matches,
-                      icon: Icons.favorite_outline,
-                      activeIcon: Icons.favorite,
+                      icon: LucideIcons.heart,
+                      activeIcon: LucideIcons.heart,
                       title: 'Matches',
                       onTap: () {
                         Navigator.pop(context);
@@ -478,8 +479,8 @@ class _AppDrawerState extends State<AppDrawer> {
                       context: context,
                       currentRoute: activeRoute,
                       route: AppRoutes.calendar,
-                      icon: Icons.calendar_today_outlined,
-                      activeIcon: Icons.calendar_today,
+                      icon: LucideIcons.calendar,
+                      activeIcon: LucideIcons.calendar,
                       title: 'Agenda',
                       onTap: () {
                         Navigator.pop(context);
@@ -499,8 +500,8 @@ class _AppDrawerState extends State<AppDrawer> {
                   context: context,
                   currentRoute: activeRoute,
                   title: 'Documentos e Contratos',
-                  icon: Icons.folder_outlined,
-                  activeIcon: Icons.folder,
+                  icon: LucideIcons.folder,
+                  activeIcon: LucideIcons.folder,
                   isExpanded: _documentosExpanded,
                   onExpansionChanged: (expanded) {
                     setState(() {
@@ -512,8 +513,8 @@ class _AppDrawerState extends State<AppDrawer> {
                       context: context,
                       currentRoute: activeRoute,
                       route: AppRoutes.documents,
-                      icon: Icons.description_outlined,
-                      activeIcon: Icons.description,
+                      icon: LucideIcons.fileText,
+                      activeIcon: LucideIcons.fileText,
                       title: 'Documentos',
                       onTap: () {
                         Navigator.pop(context);
@@ -532,8 +533,8 @@ class _AppDrawerState extends State<AppDrawer> {
                       context: context,
                       currentRoute: activeRoute,
                       route: AppRoutes.signatures,
-                      icon: Icons.draw_outlined,
-                      activeIcon: Icons.draw,
+                      icon: LucideIcons.penTool,
+                      activeIcon: LucideIcons.penTool,
                       title: 'Assinaturas',
                       onTap: () {
                         Navigator.pop(context);
@@ -555,8 +556,8 @@ class _AppDrawerState extends State<AppDrawer> {
                   context: context,
                   currentRoute: activeRoute,
                   route: AppRoutes.chat,
-                  icon: Icons.chat_bubble_outline,
-                  activeIcon: Icons.chat_bubble,
+                  icon: LucideIcons.messageCircle,
+                  activeIcon: LucideIcons.messageCircle,
                   title: 'Mensagens',
                   onTap: () {
                     Navigator.pop(context);
@@ -575,8 +576,8 @@ class _AppDrawerState extends State<AppDrawer> {
                   context: context,
                   currentRoute: activeRoute,
                   title: 'Gestão Interna',
-                  icon: Icons.work_outline,
-                  activeIcon: Icons.work,
+                  icon: LucideIcons.briefcase,
+                  activeIcon: LucideIcons.briefcase,
                   isExpanded: _gestaoInternaExpanded,
                   onExpansionChanged: (expanded) {
                     setState(() {
@@ -588,8 +589,8 @@ class _AppDrawerState extends State<AppDrawer> {
                       context: context,
                       currentRoute: activeRoute,
                       route: AppRoutes.kanban,
-                      icon: Icons.assignment_outlined,
-                      activeIcon: Icons.assignment,
+                      icon: LucideIcons.clipboardList,
+                      activeIcon: LucideIcons.clipboardList,
                       title: 'Tarefas',
                       onTap: () {
                         Navigator.pop(context);
@@ -605,8 +606,8 @@ class _AppDrawerState extends State<AppDrawer> {
                       context: context,
                       currentRoute: activeRoute,
                       route: AppRoutes.inspections,
-                      icon: Icons.home_repair_service_outlined,
-                      activeIcon: Icons.home_repair_service,
+                      icon: LucideIcons.clipboardCheck,
+                      activeIcon: LucideIcons.clipboardCheck,
                       title: 'Vistorias',
                       onTap: () {
                         Navigator.pop(context);
@@ -625,8 +626,8 @@ class _AppDrawerState extends State<AppDrawer> {
                       context: context,
                       currentRoute: activeRoute,
                       route: AppRoutes.keys,
-                      icon: Icons.vpn_key_outlined,
-                      activeIcon: Icons.vpn_key,
+                      icon: LucideIcons.key,
+                      activeIcon: LucideIcons.key,
                       title: 'Chaves',
                       onTap: () {
                         Navigator.pop(context);
@@ -645,8 +646,8 @@ class _AppDrawerState extends State<AppDrawer> {
                       context: context,
                       currentRoute: activeRoute,
                       route: '/commissions',
-                      icon: Icons.attach_money_outlined,
-                      activeIcon: Icons.attach_money,
+                      icon: LucideIcons.dollarSign,
+                      activeIcon: LucideIcons.dollarSign,
                       title: 'Comissões',
                       onTap: () {
                         Navigator.pop(context);
@@ -662,8 +663,8 @@ class _AppDrawerState extends State<AppDrawer> {
                   context: context,
                   currentRoute: activeRoute,
                   route: AppRoutes.settings,
-                  icon: Icons.settings_outlined,
-                  activeIcon: Icons.settings,
+                  icon: LucideIcons.settings,
+                  activeIcon: LucideIcons.settings,
                   title: 'Configurações',
                   onTap: () {
                     Navigator.pop(context);
@@ -676,8 +677,8 @@ class _AppDrawerState extends State<AppDrawer> {
                   context: context,
                   currentRoute: activeRoute,
                   route: '',
-                  icon: Icons.logout,
-                  activeIcon: Icons.logout,
+                  icon: LucideIcons.logOut,
+                  activeIcon: LucideIcons.logOut,
                   title: 'Sair',
                   onTap: () {
                     _handleLogout(context);

@@ -51,14 +51,12 @@ class BiometricService {
   /// Realiza a autenticação biométrica
   Future<bool> authenticate({
     String reason = 'Autentique-se para continuar',
-    bool useErrorDialogs = true,
     bool stickyAuth = true,
   }) async {
     try {
       debugPrint('🔐 [BIOMETRIC_SERVICE] Iniciando autenticação...');
       debugPrint('🔐 [BIOMETRIC_SERVICE] Reason: $reason');
       
-      // Verifica se há biometria disponível
       final hasBiometricsResult = await hasBiometrics();
       debugPrint('🔐 [BIOMETRIC_SERVICE] hasBiometrics: $hasBiometricsResult');
       
@@ -70,35 +68,38 @@ class BiometricService {
       debugPrint('🔐 [BIOMETRIC_SERVICE] Chamando _localAuth.authenticate...');
       final didAuthenticate = await _localAuth.authenticate(
         localizedReason: reason,
-        options: AuthenticationOptions(
-          useErrorDialogs: useErrorDialogs,
-          stickyAuth: stickyAuth,
-          biometricOnly: true, // Apenas biometria, sem fallback para PIN/senha
-        ),
+        biometricOnly: true,
+        persistAcrossBackgrounding: stickyAuth,
       );
 
       debugPrint('🔐 [BIOMETRIC_SERVICE] Resultado da autenticação: $didAuthenticate');
       return didAuthenticate;
+    } on LocalAuthException catch (e) {
+      debugPrint('❌ [BIOMETRIC_SERVICE] LocalAuthException: ${e.code.name} - ${e.description}');
+      switch (e.code) {
+        case LocalAuthExceptionCode.noBiometricHardware:
+        case LocalAuthExceptionCode.biometricHardwareTemporarilyUnavailable:
+          debugPrint('❌ [BIOMETRIC_SERVICE] Biometria não disponível');
+          return false;
+        case LocalAuthExceptionCode.noBiometricsEnrolled:
+        case LocalAuthExceptionCode.noCredentialsSet:
+          debugPrint('❌ [BIOMETRIC_SERVICE] Biometria não configurada');
+          return false;
+        case LocalAuthExceptionCode.temporaryLockout:
+        case LocalAuthExceptionCode.biometricLockout:
+          debugPrint('❌ [BIOMETRIC_SERVICE] Biometria bloqueada');
+          return false;
+        case LocalAuthExceptionCode.userCanceled:
+        case LocalAuthExceptionCode.systemCanceled:
+        case LocalAuthExceptionCode.userRequestedFallback:
+          debugPrint('ℹ️ [BIOMETRIC_SERVICE] Autenticação cancelada');
+          return false;
+        default:
+          debugPrint('❌ [BIOMETRIC_SERVICE] Erro: ${e.code.name}');
+          return false;
+      }
     } on PlatformException catch (e) {
       debugPrint('❌ [BIOMETRIC_SERVICE] PlatformException: ${e.code} - ${e.message}');
-      // Trata erros específicos da plataforma
-      if (e.code == 'NotAvailable') {
-        // Biometria não disponível
-        debugPrint('❌ [BIOMETRIC_SERVICE] Biometria não disponível (NotAvailable)');
-        return false;
-      } else if (e.code == 'NotEnrolled') {
-        // Biometria não configurada
-        debugPrint('❌ [BIOMETRIC_SERVICE] Biometria não configurada (NotEnrolled)');
-        return false;
-      } else if (e.code == 'LockedOut' || e.code == 'PermanentlyLockedOut') {
-        // Muitas tentativas falhadas
-        debugPrint('❌ [BIOMETRIC_SERVICE] Biometria bloqueada (${e.code})');
-        return false;
-      } else if (e.code == 'UserCancel') {
-        debugPrint('ℹ️ [BIOMETRIC_SERVICE] Usuário cancelou a autenticação');
-        return false;
-      }
-      debugPrint('❌ [BIOMETRIC_SERVICE] Erro desconhecido: ${e.code}');
       return false;
     } catch (e, stackTrace) {
       debugPrint('❌ [BIOMETRIC_SERVICE] Erro genérico: $e');

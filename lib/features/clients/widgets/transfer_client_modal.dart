@@ -3,7 +3,6 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/widgets/custom_button.dart';
 import '../services/client_service.dart';
-import '../models/client_model.dart';
 
 /// Modal para transferir cliente para outro responsável
 class TransferClientModal extends StatefulWidget {

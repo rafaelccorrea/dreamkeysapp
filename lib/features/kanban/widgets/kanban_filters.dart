@@ -72,7 +72,7 @@ class _KanbanFiltersState extends State<KanbanFilters> {
               // Filtro de prioridade
               Expanded(
                 child: DropdownButtonFormField<KanbanPriority?>(
-                  value: _selectedPriority,
+                  initialValue: _selectedPriority,
                   decoration: InputDecoration(
                     labelText: 'Prioridade',
                     border: OutlineInputBorder(

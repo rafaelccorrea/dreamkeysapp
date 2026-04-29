@@ -4,15 +4,13 @@ class AppAssets {
   AppAssets._();
 
   // Imagens
-  static const String logo = 'assets/images/logo.png';
+  /// Modo claro — mesmo `imobx-front/public/logo.png` (`LandingPage` header).
+  static const String logoLight = 'assets/images/logo.png';
+  /// Modo escuro — mesmo `imobx-front/public/logo-dark.png` (hero da landing).
+  static const String logoDark = 'assets/images/logo-dark.png';
+  /// Favicon / ícone geométrico (“i”) — `public/favicon.png` no front. Launcher / fallback apenas.
+  static const String brandIcon = 'assets/images/intellisys_logo.png';
   static const String backgroundLogin = 'assets/images/background.jpg';
 
-  // Animações Lottie
-  static const String loadingHome = 'assets/loading-home.json';
-
-  // Ícones (se houver pasta de ícones)
-  // static const String iconHome = 'assets/icons/home.png';
-  
-  // Outros assets (se necessário)
   // static const String jsonConfig = 'assets/data/config.json';
 }

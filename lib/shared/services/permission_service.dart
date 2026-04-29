@@ -77,7 +77,7 @@ class PermissionService {
   );
 
   // Chaves de cache
-  static const String _cacheKey = 'dream_keys_permissions_cache';
+  static const String _cacheKey = 'intellisys_permissions_cache';
   static const int _cacheValidityMinutes = 5;
 
   /// Busca permissões do usuário (my-permissions)

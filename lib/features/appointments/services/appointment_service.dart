@@ -26,13 +26,16 @@ class AppointmentService {
       final params = <String, String>{};
       if (status != null && status.isNotEmpty) params['status'] = status;
       if (type != null && type.isNotEmpty) params['type'] = type;
-      if (startDate != null && startDate.isNotEmpty)
+      if (startDate != null && startDate.isNotEmpty) {
         params['startDate'] = startDate;
+      }
       if (endDate != null && endDate.isNotEmpty) params['endDate'] = endDate;
-      if (propertyId != null && propertyId.isNotEmpty)
+      if (propertyId != null && propertyId.isNotEmpty) {
         params['propertyId'] = propertyId;
-      if (clientId != null && clientId.isNotEmpty)
+      }
+      if (clientId != null && clientId.isNotEmpty) {
         params['clientId'] = clientId;
+      }
       if (page != null) params['page'] = page.toString();
       if (limit != null) params['limit'] = limit.toString();
       if (onlyMyData != null) params['onlyMyData'] = onlyMyData.toString();

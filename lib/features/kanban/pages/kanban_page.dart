@@ -451,10 +451,15 @@ class _KanbanPageState extends State<KanbanPage> {
                     ),
                   )
                 : DragTarget<KanbanTask>(
-                    onWillAccept: (data) =>
-                        data != null && data.columnId != column.id,
-                    onAccept: (task) {
-                      _handleTaskDrop(context, controller, task, column.id);
+                    onWillAcceptWithDetails: (details) =>
+                        details.data.columnId != column.id,
+                    onAcceptWithDetails: (details) {
+                      _handleTaskDrop(
+                        context,
+                        controller,
+                        details.data,
+                        column.id,
+                      );
                     },
                     builder: (context, candidateData, rejectedData) {
                       final isTargeting = candidateData.isNotEmpty;
@@ -475,12 +480,11 @@ class _KanbanPageState extends State<KanbanPage> {
                             itemBuilder: (context, index) {
                               final task = tasks[index];
                               return DragTarget<KanbanTask>(
-                                onWillAccept: (data) {
-                                  // Aceitar se for uma tarefa diferente
-                                  // Pode ser da mesma coluna (reordenação) ou de outra coluna (movimento)
-                                  return data != null && data.id != task.id;
+                                onWillAcceptWithDetails: (details) {
+                                  return details.data.id != task.id;
                                 },
-                                onAccept: (draggedTask) {
+                                onAcceptWithDetails: (details) {
+                                  final draggedTask = details.data;
                                   debugPrint(
                                     '🎯 [KANBAN_PAGE] DragTarget onAccept:',
                                   );
@@ -493,7 +497,6 @@ class _KanbanPageState extends State<KanbanPage> {
                                   debugPrint('   - Coluna alvo: ${column.id}');
                                   debugPrint('   - Índice alvo: $index');
 
-                                  // Se for da mesma coluna, reordenar
                                   if (draggedTask.columnId == column.id) {
                                     final oldIndex = tasks.indexWhere(
                                       (t) => t.id == draggedTask.id,
@@ -514,7 +517,6 @@ class _KanbanPageState extends State<KanbanPage> {
                                       );
                                     }
                                   } else {
-                                    // Se for de outra coluna, mover para esta coluna
                                     debugPrint(
                                       '   - Movendo tarefa de outra coluna',
                                     );
@@ -656,7 +658,7 @@ class _KanbanPageState extends State<KanbanPage> {
         feedback: Material(
           elevation: 8,
           borderRadius: BorderRadius.circular(8),
-          child: Container(width: 280, child: _buildTaskCard(task)),
+          child: SizedBox(width: 280, child: _buildTaskCard(task)),
         ),
         childWhenDragging: Opacity(opacity: 0.3, child: _buildTaskCard(task)),
         child: GestureDetector(

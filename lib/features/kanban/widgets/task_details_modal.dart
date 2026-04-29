@@ -32,7 +32,7 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
   bool _loadingComments = false;
   String? _commentsError;
   final TextEditingController _commentController = TextEditingController();
-  List<File> _selectedFiles = [];
+  final List<File> _selectedFiles = [];
   bool _submittingComment = false;
   int _commentLength = 0;
 
@@ -141,7 +141,7 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
 
   Future<void> _selectFiles() async {
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         allowMultiple: true,
         type: FileType.any,
       );

@@ -221,7 +221,7 @@ class _DashboardFiltersDrawerState extends State<DashboardFiltersDrawer> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: _filters.dateRange ?? 'custom',
+                initialValue: _filters.dateRange ?? 'custom',
                 decoration: InputDecoration(
                   labelText: 'Período',
                   border: OutlineInputBorder(
@@ -381,7 +381,7 @@ class _DashboardFiltersDrawerState extends State<DashboardFiltersDrawer> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: _filters.compareWith ?? 'none',
+                initialValue: _filters.compareWith ?? 'none',
                 decoration: InputDecoration(
                   labelText: 'Comparar com',
                   border: OutlineInputBorder(
@@ -416,7 +416,7 @@ class _DashboardFiltersDrawerState extends State<DashboardFiltersDrawer> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: _filters.metric ?? 'all',
+                initialValue: _filters.metric ?? 'all',
                 decoration: InputDecoration(
                   labelText: 'Métrica',
                   border: OutlineInputBorder(

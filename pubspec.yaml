@@ -1,5 +1,5 @@
-name: dreamkeys_app
-description: "Dream Keys - Sistema Imobiliário"
+name: Intellisys
+description: "Intellisys - Sistema Imobiliário"
 publish_to: 'none'
 
 version: 1.0.0+1
@@ -14,27 +14,48 @@ dependencies:
   cupertino_icons: ^1.0.8
   provider: ^6.1.1
   http: ^1.2.0
-  intl: ^0.19.0
-  flutter_secure_storage: ^9.0.0
+  http_parser: ^4.0.2
+  intl: ^0.20.2
+  flutter_secure_storage: ^10.0.0
   shared_preferences: ^2.2.2
-  local_auth: ^2.1.7
+  local_auth: ^3.0.1
   image_picker: ^1.1.2
-  image_cropper: ^8.0.2
-  file_picker: ^8.1.2
-  google_fonts: ^6.1.0
+  image_cropper: ^12.2.1
+  file_picker: ^11.0.2
+  google_fonts: ^8.1.0
   table_calendar: ^3.0.9
   lottie: ^3.0.0
-  socket_io_client: ^2.0.3+1
+  socket_io_client: ^3.1.4
   url_launcher: ^6.2.5
+  lucide_icons: ^0.257.0
+  device_info_plus: ^12.4.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^5.0.0
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  # Ícone “I” (favicon) — fundo preto atrás do PNG no launcher.
+  image_path: assets/images/launcher_icon_from_favicon.png
+  adaptive_icon_background: '#000000'
+  adaptive_icon_foreground: assets/images/launcher_icon_from_favicon.png
+  # Menos que o default 16% enche demais o círculo; +4 pp = redução visível mas pequena.
+  adaptive_icon_foreground_inset: 20
+  remove_alpha_ios: true
+  background_color_ios: '#000000'
 
 flutter:
   uses-material-design: true
 
   assets:
-    - assets/images/
-    - assets/loading-home.json
+    - assets/images/logo.png
+    - assets/images/logo-dark.png
+    - assets/images/background.jpg
+    - assets/images/intellisys_logo.png
+    - assets/images/launcher_icon_from_favicon.png
+    - assets/config/dev_lan_host.txt
+    - assets/config/api_target.txt

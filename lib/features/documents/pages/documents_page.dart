@@ -345,27 +345,6 @@ class _DocumentsPageState extends State<DocumentsPage>
     return AppScaffold(
       title: 'Documentos',
       showBottomNavigation: true,
-      bottom: PreferredSize(
-        preferredSize: const Size.fromHeight(48),
-        child: Container(
-          color: ThemeHelpers.cardBackgroundColor(context),
-          child: TabBar(
-            controller: _tabController,
-            labelColor: AppColors.primary.primary,
-            unselectedLabelColor: ThemeHelpers.textSecondaryColor(context),
-            indicatorColor: AppColors.primary.primary,
-            dividerColor: Colors.transparent,
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            tabs: [
-              Tab(icon: Icon(Icons.folder_outlined, size: 20), text: 'Todos'),
-              Tab(icon: Icon(Icons.person_outline, size: 20), text: 'Meus'),
-              Tab(icon: Icon(Icons.pending_outlined, size: 20), text: 'Pendentes'),
-              Tab(icon: Icon(Icons.check_circle_outline, size: 20), text: 'Aprovados'),
-            ],
-          ),
-        ),
-      ),
       actions: [
         IconButton(
           icon: const Icon(Icons.link),
@@ -433,6 +412,24 @@ class _DocumentsPageState extends State<DocumentsPage>
       ],
       body: Column(
         children: [
+          Container(
+            color: ThemeHelpers.cardBackgroundColor(context),
+            child: TabBar(
+              controller: _tabController,
+              labelColor: AppColors.primary.primary,
+              unselectedLabelColor: ThemeHelpers.textSecondaryColor(context),
+              indicatorColor: AppColors.primary.primary,
+              dividerColor: Colors.transparent,
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              tabs: const [
+                Tab(icon: Icon(Icons.folder_outlined, size: 20), text: 'Todos'),
+                Tab(icon: Icon(Icons.person_outline, size: 20), text: 'Meus'),
+                Tab(icon: Icon(Icons.pending_outlined, size: 20), text: 'Pendentes'),
+                Tab(icon: Icon(Icons.check_circle_outline, size: 20), text: 'Aprovados'),
+              ],
+            ),
+          ),
           // Barra de busca
           _buildSearchBar(context, theme),
           

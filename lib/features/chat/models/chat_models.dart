@@ -1,4 +1,5 @@
 /// Modelos de dados para Chat
+library;
 
 /// Tipo de Sala de Chat
 enum ChatRoomType {

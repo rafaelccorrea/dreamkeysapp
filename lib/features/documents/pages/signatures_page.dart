@@ -251,30 +251,27 @@ class _SignaturesPageState extends State<SignaturesPage>
     return AppScaffold(
       title: 'Assinaturas',
       showBottomNavigation: true,
-      bottom: PreferredSize(
-        preferredSize: const Size.fromHeight(48),
-        child: Material(
-          color: ThemeHelpers.cardBackgroundColor(context),
-          child: TabBar(
-            controller: _tabController,
-            labelColor: AppColors.primary.primary,
-            unselectedLabelColor: ThemeHelpers.textSecondaryColor(context),
-            indicatorColor: AppColors.primary.primary,
-            dividerColor: Colors.transparent,
-            overlayColor: WidgetStateProperty.all(Colors.transparent),
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            tabs: const [
-              Tab(icon: Icon(Icons.description_outlined, size: 20), text: 'Todas'),
-              Tab(icon: Icon(Icons.pending_outlined, size: 20), text: 'Pendentes'),
-              Tab(icon: Icon(Icons.check_circle_outline, size: 20), text: 'Assinadas'),
-              Tab(icon: Icon(Icons.cancel_outlined, size: 20), text: 'Rejeitadas'),
-            ],
-          ),
-        ),
-      ),
       body: Column(
         children: [
+          Material(
+            color: ThemeHelpers.cardBackgroundColor(context),
+            child: TabBar(
+              controller: _tabController,
+              labelColor: AppColors.primary.primary,
+              unselectedLabelColor: ThemeHelpers.textSecondaryColor(context),
+              indicatorColor: AppColors.primary.primary,
+              dividerColor: Colors.transparent,
+              overlayColor: WidgetStateProperty.all(Colors.transparent),
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              tabs: const [
+                Tab(icon: Icon(Icons.description_outlined, size: 20), text: 'Todas'),
+                Tab(icon: Icon(Icons.pending_outlined, size: 20), text: 'Pendentes'),
+                Tab(icon: Icon(Icons.check_circle_outline, size: 20), text: 'Assinadas'),
+                Tab(icon: Icon(Icons.cancel_outlined, size: 20), text: 'Rejeitadas'),
+              ],
+            ),
+          ),
           // Conteúdo principal
           Expanded(
             child: _isLoading && _signatures.isEmpty

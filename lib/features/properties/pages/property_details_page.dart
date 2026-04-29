@@ -17,7 +17,6 @@ import '../../../../core/constants/api_constants.dart';
 import '../../../../shared/services/api_service.dart';
 import '../../keys/services/key_service.dart';
 import '../../keys/models/key_model.dart' as key_models;
-import 'package:flutter/foundation.dart';
 
 // Formatter de moeda
 final _currencyFormatter = NumberFormat.currency(

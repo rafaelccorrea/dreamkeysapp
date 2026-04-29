@@ -28,9 +28,9 @@ class AppTheme {
       backgroundColor: AppColors.background.background,
       elevation: 0,
       scrolledUnderElevation: 1,
-      iconTheme: const IconThemeData(color: Color(0xFF4B5563)),
-      titleTextStyle: const TextStyle(
-        color: Color(0xFF4B5563),
+      iconTheme: IconThemeData(color: AppColors.text.textSecondary),
+      titleTextStyle: TextStyle(
+        color: AppColors.text.textSecondary,
         fontSize: 20,
         fontWeight: FontWeight.w600,
       ),
@@ -164,7 +164,7 @@ class AppTheme {
     ),
     colorScheme: ColorScheme.dark(
       primary: AppColors.primary.primaryDarkMode,
-      secondary: AppColors.secondary.secondary,
+      secondary: AppColors.secondary.secondaryDarkMode,
       error: AppColors.status.errorDarkMode,
       surface: AppColors.background.surfaceDarkMode,
       onPrimary: Colors.white,
@@ -177,9 +177,9 @@ class AppTheme {
       backgroundColor: AppColors.background.backgroundDarkMode,
       elevation: 0,
       scrolledUnderElevation: 1,
-      iconTheme: const IconThemeData(color: Color(0xFFF9FAFB)),
-      titleTextStyle: const TextStyle(
-        color: Color(0xFFF9FAFB),
+      iconTheme: IconThemeData(color: AppColors.text.textDarkMode),
+      titleTextStyle: TextStyle(
+        color: AppColors.text.textDarkMode,
         fontSize: 20,
         fontWeight: FontWeight.w600,
       ),

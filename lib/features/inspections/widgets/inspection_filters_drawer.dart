@@ -343,7 +343,7 @@ class _InspectionFiltersDrawerState extends State<InspectionFiltersDrawer> {
                     _buildSectionTitle(context, theme, 'Tipo'),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<InspectionType>(
-                      value: _selectedType,
+                      initialValue: _selectedType,
                       decoration: InputDecoration(
                         labelText: 'Tipo de Vistoria',
                         prefixIcon: const Icon(Icons.checklist_rtl_outlined),
@@ -375,7 +375,7 @@ class _InspectionFiltersDrawerState extends State<InspectionFiltersDrawer> {
                     _buildSectionTitle(context, theme, 'Status'),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<InspectionStatus>(
-                      value: _selectedStatus,
+                      initialValue: _selectedStatus,
                       decoration: InputDecoration(
                         labelText: 'Status',
                         prefixIcon: const Icon(Icons.info_outline),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
+import 'core/constants/api_constants.dart';
 import 'core/theme/app_theme.dart';
 import 'core/routes/app_routes.dart';
 import 'shared/services/theme_service.dart';
@@ -14,6 +15,9 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  await ApiConstants.ensureInitialized();
+  debugPrint('📡 [APP] API base (login/rede): ${ApiConstants.baseUrl}');
 
   // Inicializar dados de localização para DateFormat
   await initializeDateFormatting('pt_BR', null);
@@ -54,24 +58,16 @@ class _MyAppState extends State<MyApp> {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(
-          create: (_) {
-            final controller = NotificationController.instance;
-            controller.initialize();
-            return controller;
-          },
+          create: (_) => NotificationController.instance,
         ),
         ChangeNotifierProvider(create: (_) => AppointmentController.instance),
         ChangeNotifierProvider(create: (_) => KanbanController.instance),
         ChangeNotifierProvider(
-          create: (_) {
-            final controller = ChatUnreadController.instance;
-            // Inicialização assíncrona será feita no splash/login
-            return controller;
-          },
+          create: (_) => ChatUnreadController.instance,
         ),
       ],
       child: MaterialApp(
-        title: 'Dream Keys',
+        title: 'Intellisys',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,

@@ -117,10 +117,10 @@ class _PropertyPublicToggleState extends State<PropertyPublicToggle> {
       message: isDisabled
           ? _cannotPublishReason ?? 'Não é possível publicar esta propriedade'
           : _isPublic
-              ? 'Publicado no site Dream Keys'
-              : 'Publicar no site Dream Keys',
+              ? 'Publicado no site Intellisys'
+              : 'Publicar no site Intellisys',
       child: SwitchListTile(
-        title: const Text('Disponível no Site Dream Keys'),
+        title: const Text('Disponível no site Intellisys'),
         subtitle: _isPublic
             ? const Text('Propriedade visível no site público')
             : Text(

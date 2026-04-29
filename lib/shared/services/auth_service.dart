@@ -3,6 +3,12 @@ import '../../core/constants/api_constants.dart';
 import 'api_service.dart';
 import 'secure_storage_service.dart';
 
+Uri _apiUri(String path, [Map<String, String>? query]) {
+  final base = ApiConstants.baseApiUrl;
+  final normalized = path.startsWith('/') ? path : '/$path';
+  return Uri.parse('$base$normalized').replace(queryParameters: query);
+}
+
 /// Modelos de dados
 class LoginRequest {
   final String email;
@@ -128,6 +134,7 @@ class AuthService {
   /// Realiza o login usando o endpoint específico para corretores (/auth/broker/login)
   /// Este endpoint é exclusivo para usuários do tipo USER (corretor) associados a uma empresa
   Future<ApiResponse<LoginResponse>> login(LoginRequest request) async {
+    debugPrint('🌐 [AUTH_SERVICE] POST ${_apiUri(ApiConstants.login)}');
     final response = await _apiService.post<Map<String, dynamic>>(
       ApiConstants.login, // /auth/broker/login
       body: request.toJson(),
@@ -169,6 +176,7 @@ class AuthService {
   Future<ApiResponse<CheckTwoFactorResponse>> check2FA(String email) async {
     try {
       debugPrint('🔍 [AUTH_SERVICE] Verificando 2FA para email: $email');
+      debugPrint('🌐 [AUTH_SERVICE] GET ${_apiUri(ApiConstants.check2FA, {'email': email})}');
       final response = await _apiService.get<Map<String, dynamic>>(
         ApiConstants.check2FA,
         queryParameters: {'email': email},

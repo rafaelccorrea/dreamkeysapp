@@ -228,7 +228,7 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
                     const SizedBox(height: 16),
                     // Prioridade
                     DropdownButtonFormField<KanbanPriority>(
-                      value: _selectedPriority,
+                      initialValue: _selectedPriority,
                       decoration: const InputDecoration(
                         labelText: 'Prioridade',
                         border: OutlineInputBorder(),

@@ -95,9 +95,9 @@ class ChatSocketService {
   String _getWebSocketUrl() {
     final baseUrl = ApiConstants.baseUrl;
     if (baseUrl.startsWith('https://')) {
-      return baseUrl.replaceFirst('https://', 'wss://') + '/chat';
+      return '${baseUrl.replaceFirst('https://', 'wss://')}/chat';
     } else if (baseUrl.startsWith('http://')) {
-      return baseUrl.replaceFirst('http://', 'ws://') + '/chat';
+      return '${baseUrl.replaceFirst('http://', 'ws://')}/chat';
     }
     return '$baseUrl/chat';
   }

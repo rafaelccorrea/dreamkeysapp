@@ -94,7 +94,7 @@ class TokenRefreshService {
       } else {
         final minutesUntilExpiry = (timeUntilExpiry / 60).toStringAsFixed(1);
         debugPrint(
-          'ℹ️ [TOKEN_REFRESH] Token ainda válido por ${minutesUntilExpiry} minutos, não é necessário refresh',
+          'ℹ️ [TOKEN_REFRESH] Token ainda válido por $minutesUntilExpiry minutos, não é necessário refresh',
         );
       }
     } catch (e) {

@@ -252,7 +252,7 @@ class _ClientFiltersDrawerState extends State<ClientFiltersDrawer> {
                     _buildSectionTitle(context, theme, 'Classificações'),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<ClientType>(
-                      value: _selectedType,
+                      initialValue: _selectedType,
                       decoration: InputDecoration(
                         labelText: 'Tipo de Cliente',
                         prefixIcon: const Icon(Icons.category_outlined),
@@ -280,7 +280,7 @@ class _ClientFiltersDrawerState extends State<ClientFiltersDrawer> {
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<ClientStatus>(
-                      value: _selectedStatus,
+                      initialValue: _selectedStatus,
                       decoration: InputDecoration(
                         labelText: 'Status',
                         prefixIcon: const Icon(Icons.info_outline),
@@ -362,7 +362,7 @@ class _ClientFiltersDrawerState extends State<ClientFiltersDrawer> {
                     _buildSectionTitle(context, theme, 'Ordenação'),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      value: _sortBy,
+                      initialValue: _sortBy,
                       decoration: InputDecoration(
                         labelText: 'Ordenar por',
                         prefixIcon: const Icon(Icons.sort_outlined),
@@ -387,7 +387,7 @@ class _ClientFiltersDrawerState extends State<ClientFiltersDrawer> {
                     const SizedBox(height: 12),
                     if (_sortBy != null)
                       DropdownButtonFormField<String>(
-                        value: _sortOrder ?? 'ASC',
+                        initialValue: _sortOrder ?? 'ASC',
                         decoration: InputDecoration(
                           labelText: 'Direção',
                           prefixIcon: const Icon(Icons.arrow_upward_outlined),

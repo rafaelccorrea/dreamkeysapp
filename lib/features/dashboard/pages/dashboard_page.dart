@@ -5,6 +5,7 @@ import '../../../../core/theme/theme_helpers.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../../../../shared/services/dashboard_service.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
+import '../../../../shared/widgets/minimal_body_chrome.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
 import '../../notifications/widgets/notification_center.dart';
 import '../widgets/dashboard_filters_drawer.dart';
@@ -27,6 +28,15 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
+  /// Ritmo vertical mais curto + mais leitura horizontal (estilo app).
+  static const double _kSectionGap = 11;
+  static const double _kPagePadH = 20;
+  static const double _kPagePadTop = 10;
+  static const double _kPagePadBottom = 88;
+  static const double _kStatsHScrollMaxW = 532;
+  static const double _kTwoColMinW = 520;
+  static const double _kPerfActivityRowMinW = 640;
+
   bool _isLoading = true;
   DashboardResponse? _dashboardData;
   String? _errorMessage;
@@ -109,22 +119,17 @@ class _DashboardPageState extends State<DashboardPage> {
     final theme = Theme.of(context);
 
     return AppScaffold(
-      title: 'Dream Keys',
+      title: 'Intellisys',
       currentBottomNavIndex: 0,
       userName: _dashboardData?.user.name,
       userEmail: _dashboardData?.user.email,
       userAvatar: _dashboardData?.user.avatar,
       actions: [
-        const NotificationCenter(),
-        IconButton(
-          icon: const Icon(Icons.filter_list),
-          onPressed: () => _showFiltersDialog(context),
+        const NotificationCenter(compactToolbar: true),
+        ChromeToolbarIconButton(
+          icon: Icons.tune_rounded,
           tooltip: 'Filtros',
-        ),
-        IconButton(
-          icon: const Icon(Icons.refresh),
-          onPressed: _loadDashboardData,
-          tooltip: 'Atualizar',
+          onPressed: () => _showFiltersDialog(context),
         ),
       ],
       body: _isLoading
@@ -133,58 +138,123 @@ class _DashboardPageState extends State<DashboardPage> {
           ? _buildErrorState(context, theme)
           : RefreshIndicator(
               onRefresh: _loadDashboardData,
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // 1. Cabeçalho com Saudação
-                    _buildGreeting(context, theme),
-                    const SizedBox(height: 32),
-
-                    // 2. Card de Performance
-                    if (_dashboardData != null)
-                      _buildPerformanceCard(context, theme),
-                    if (_dashboardData != null) const SizedBox(height: 32),
-
-                    // 3. Seção de Conquistas
-                    if (_dashboardData != null &&
-                        _dashboardData!.gamification.achievements.isNotEmpty)
-                      _buildAchievementsSection(context, theme),
-                    if (_dashboardData != null &&
-                        _dashboardData!.gamification.achievements.isNotEmpty)
-                      const SizedBox(height: 32),
-
-                    // 4. Cards de Estatísticas Principais
-                    _buildStatsCards(context, theme),
-                    const SizedBox(height: 32),
-
-                    // 5. Seção de Atividades
-                    if (_dashboardData != null)
-                      _buildActivitiesSection(context, theme),
-                    if (_dashboardData != null) const SizedBox(height: 32),
-
-                    // 6. Metas Mensais
-                    if (_dashboardData != null)
-                      _buildMonthlyGoalsSection(context, theme),
-                    if (_dashboardData != null) const SizedBox(height: 32),
-
-                    // 7. Métricas de Conversão
-                    if (_dashboardData != null)
-                      _buildConversionMetrics(context, theme),
-                    if (_dashboardData != null) const SizedBox(height: 32),
-
-                    // 8. Atividades Recentes
-                    if (_dashboardData != null)
-                      _buildRecentActivities(context, theme),
-                    if (_dashboardData != null) const SizedBox(height: 32),
-
-                    // 9. Próximos Agendamentos
-                    if (_dashboardData != null)
-                      _buildUpcomingAppointments(context, theme),
-                  ],
+              color: _dashboardAccentColor(context),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: constraints.maxHeight,
+                      ),
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          ..._dashboardAmbientHighlights(context),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(
+                              _kPagePadH,
+                              _kPagePadTop,
+                              _kPagePadH,
+                              _kPagePadBottom,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                            _buildGreeting(context, theme),
+                            SizedBox(height: _kSectionGap + 2),
+                            _buildStatsCards(context, theme),
+                            if (_dashboardData != null) ...[
+                              SizedBox(height: _kSectionGap),
+                              LayoutBuilder(
+                                builder: (context, c) {
+                                  if (c.maxWidth < _kPerfActivityRowMinW) {
+                                    return Column(
+                                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                                      children: [
+                                        _buildPerformanceCard(context, theme),
+                                        SizedBox(height: _kSectionGap),
+                                        _buildActivitiesSection(context, theme),
+                                      ],
+                                    );
+                                  }
+                                  return Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        flex: 12,
+                                        child: _buildPerformanceCard(context, theme),
+                                      ),
+                                      SizedBox(width: _kSectionGap),
+                                      Expanded(
+                                        flex: 10,
+                                        child: _buildActivitiesSection(context, theme),
+                                      ),
+                                    ],
+                                  );
+                                },
+                              ),
+                              SizedBox(height: _kSectionGap),
+                              LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final isWide = constraints.maxWidth >= _kTwoColMinW;
+                                  final goals = _buildMonthlyGoalsSection(context, theme);
+                                  final conversions = _buildConversionMetrics(context, theme);
+                                  if (!isWide) {
+                                    return Column(
+                                      children: [
+                                        goals,
+                                        SizedBox(height: _kSectionGap),
+                                        conversions,
+                                      ],
+                                    );
+                                  }
+                                  return Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(child: goals),
+                                      SizedBox(width: _kSectionGap),
+                                      Expanded(child: conversions),
+                                    ],
+                                  );
+                                },
+                              ),
+                              if (_dashboardData!.gamification.achievements.isNotEmpty) ...[
+                                SizedBox(height: _kSectionGap),
+                                _buildAchievementsSection(context, theme),
+                              ],
+                              SizedBox(height: _kSectionGap),
+                              LayoutBuilder(
+                                builder: (context, c) {
+                                  if (c.maxWidth < _kTwoColMinW) {
+                                    return Column(
+                                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                                      children: [
+                                        _buildRecentActivities(context, theme),
+                                        SizedBox(height: _kSectionGap),
+                                        _buildUpcomingAppointments(context, theme),
+                                      ],
+                                    );
+                                  }
+                                  return Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(child: _buildRecentActivities(context, theme)),
+                                      SizedBox(width: _kSectionGap),
+                                      Expanded(child: _buildUpcomingAppointments(context, theme)),
+                                    ],
+                                  );
+                                },
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
+              );
+                },
               ),
             ),
     );
@@ -436,32 +506,331 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _buildGreeting(BuildContext context, ThemeData theme) {
     final userName = _dashboardData?.user.name ?? 'Usuário';
+    final firstName = userName.trim().isEmpty ? 'Usuário' : userName.trim().split(' ').first;
+    final performance = _dashboardData?.performance;
+    final stats = _dashboardData?.stats;
+    final accent = _dashboardAccentColor(context);
 
-    return Column(
+    Widget greetingIcon() {
+      return Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          gradient: LinearGradient(
+            colors: [accent, const Color(0xFF7C3AED)],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: accent.withOpacity(0.35),
+              blurRadius: 14,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: const Icon(Icons.dashboard_customize_outlined, color: Colors.white, size: 22),
+      );
+    }
+
+    Widget pillRow() {
+      return Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          _buildFilterPill(context, Icons.date_range_outlined, _activePeriodLabel()),
+          _buildFilterPill(context, Icons.compare_arrows_outlined, _activeComparisonLabel()),
+          _buildFilterPill(context, Icons.insights_outlined, _activeMetricLabel()),
+        ],
+      );
+    }
+
+    final mainTitles = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          '${_getGreeting()}, ${userName.split(' ').first}! 👋',
-          style: theme.textTheme.headlineSmall?.copyWith(
-            fontWeight: FontWeight.w700,
+          'PAINEL GERAL',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: accent,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 2.2,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '${_getGreeting()}, $firstName',
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w900,
             color: ThemeHelpers.textColor(context),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Aqui está um resumo das suas atividades',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(context),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          _formatFullDate(),
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(context),
+            height: 1.05,
           ),
         ),
       ],
+    );
+
+    final dateLine = Text(
+      'Visão executiva · ${_formatFullDate()}',
+      style: theme.textTheme.bodySmall?.copyWith(
+        color: ThemeHelpers.textSecondaryColor(context),
+        height: 1.3,
+      ),
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, bottom: 4),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+              final w = constraints.maxWidth;
+              final spread = w >= 480;
+              final actionsTop = w >= 640;
+              // Linha extra: filtros | insight lado a lado (mais “app”, menos torre).
+              final pillsBesideInsight = w >= 520;
+
+              if (!spread) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        greetingIcon(),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              mainTitles,
+                              const SizedBox(height: 6),
+                              dateLine,
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    pillRow(),
+                    const SizedBox(height: 10),
+                    _buildInsightPanel(context, theme, performance, stats),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: _buildHeaderActions(context, theme),
+                    ),
+                  ],
+                );
+              }
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      greetingIcon(),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              flex: 52,
+                              child: mainTitles,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              flex: 48,
+                              child: Align(
+                                alignment: Alignment.topRight,
+                                child: dateLine,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (actionsTop) ...[
+                        const SizedBox(width: 12),
+                        _buildHeaderActions(context, theme),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (pillsBesideInsight)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          flex: 40,
+                          child: pillRow(),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 60,
+                          child: _buildInsightPanel(context, theme, performance, stats),
+                        ),
+                      ],
+                    )
+                  else ...[
+                    pillRow(),
+                    const SizedBox(height: 10),
+                    _buildInsightPanel(context, theme, performance, stats),
+                  ],
+                  if (!actionsTop) ...[
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: _buildHeaderActions(context, theme),
+                    ),
+                  ],
+                ],
+              );
+            },
+          ),
+    );
+  }
+
+  Widget _buildHeaderActions(BuildContext context, ThemeData theme) {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      alignment: WrapAlignment.end,
+      children: [
+        _buildHeaderActionButton(
+          context: context,
+          icon: Icons.refresh_rounded,
+          label: 'Atualizar',
+          onTap: _loadDashboardData,
+        ),
+        _buildHeaderActionButton(
+          context: context,
+          icon: Icons.tune_rounded,
+          label: 'Filtros',
+          isPrimary: true,
+          onTap: () => _showFiltersDialog(context),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHeaderActionButton({
+    required BuildContext context,
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    bool isPrimary = false,
+  }) {
+    final accent = _dashboardAccentColor(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: isPrimary ? accent : _glassFillColor(context),
+          border: Border.all(color: isPrimary ? accent : _glassBorderColor(context)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18, color: isPrimary ? Colors.white : accent),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: isPrimary ? Colors.white : ThemeHelpers.textColor(context),
+                    fontWeight: FontWeight.w800,
+                  ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInsightPanel(
+    BuildContext context,
+    ThemeData theme,
+    DashboardPerformance? performance,
+    DashboardStats? stats,
+  ) {
+    final growth = performance?.growthPercentage ?? 0;
+    final isPositive = growth >= 0;
+    final accent = isPositive ? AppColors.status.success : AppColors.status.error;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(11),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: accent.withOpacity(0.14),
+            ),
+            child: Icon(
+              isPositive ? Icons.trending_up_rounded : Icons.warning_amber_rounded,
+              color: accent,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'INSIGHT',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.8,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  performance == null
+                      ? 'Acompanhe a sua performance assim que os dados forem carregados.'
+                      : '${isPositive ? 'Crescimento' : 'Queda'} de ${growth.abs().toStringAsFixed(1)}% vs. período anterior · ${_formatCurrency(performance.thisMonth)} no mês.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: ThemeHelpers.textColor(context),
+                    fontWeight: FontWeight.w700,
+                    height: 1.32,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterPill(BuildContext context, IconData icon, String label) {
+    final accent = _dashboardAccentColor(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: accent.withOpacity(0.07),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: accent.withOpacity(0.14)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: accent),
+          const SizedBox(width: 7),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: ThemeHelpers.textColor(context),
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -469,381 +838,176 @@ class _DashboardPageState extends State<DashboardPage> {
     final achievements = _dashboardData?.gamification.achievements ?? [];
     if (achievements.isEmpty) return const SizedBox.shrink();
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSectionTitle('Conquistas'),
-        const SizedBox(height: 16),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final screenWidth = constraints.maxWidth;
-            final crossAxisCount = screenWidth > 600 ? 3 : 2;
-            final spacing = screenWidth > 600 ? 16.0 : 12.0;
-            final childAspectRatio = screenWidth > 600 ? 1.1 : 1.2;
-
-            return GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: crossAxisCount,
-                crossAxisSpacing: spacing,
-                mainAxisSpacing: spacing,
-                childAspectRatio: childAspectRatio,
-              ),
-              itemCount: achievements.length > 6 ? 6 : achievements.length,
-              itemBuilder: (context, index) {
-                final achievement = achievements[index];
-                return Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: ThemeHelpers.cardBackgroundColor(context),
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: ThemeHelpers.shadowColor(context),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        achievement.icon,
-                        style: const TextStyle(fontSize: 32),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        achievement.name,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: ThemeHelpers.textColor(context),
-                        ),
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                );
-              },
-            );
-          },
-        ),
-      ],
+    return _buildDashboardPanel(
+      context: context,
+      title: 'Conquistas',
+      eyebrow: 'GAMIFICAÇÃO',
+      icon: Icons.workspace_premium_outlined,
+      elevatedSurface: false,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          final itemWidth = width >= 900 ? (width - 60) / 4 : width >= 620 ? (width - 40) / 3 : (width - 12) / 2;
+          return Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: achievements.take(6).map((achievement) {
+              return SizedBox(
+                width: itemWidth,
+                child: LayoutBuilder(
+                  builder: (context, cell) {
+                    final rowLayout = cell.maxWidth >= 168;
+                    return Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: _inlineTileDecoration(context, radius: 16),
+                      child: rowLayout
+                          ? Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                Text(achievement.icon, style: const TextStyle(fontSize: 26)),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    achievement.name,
+                                    style: theme.textTheme.titleSmall?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                      color: ThemeHelpers.textColor(context),
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            )
+                          : Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(achievement.icon, style: const TextStyle(fontSize: 26)),
+                                const SizedBox(height: 8),
+                                Text(
+                                  achievement.name,
+                                  style: theme.textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                    color: ThemeHelpers.textColor(context),
+                                  ),
+                                  textAlign: TextAlign.center,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                    );
+                  },
+                ),
+              );
+            }).toList(),
+          );
+        },
+      ),
     );
   }
 
   Widget _buildStatsCards(BuildContext context, ThemeData theme) {
-    final stats = _dashboardData?.stats;
-    if (stats == null) return const SizedBox.shrink();
+    final stats = _dashboardData?.stats ?? DashboardStats.empty;
+
+    final cards = [
+      _buildSummaryCard(context: context, theme: theme, title: 'Imóveis', value: _formatNumber(stats.myProperties), icon: Icons.home_work_outlined, color: const Color(0xFF6366F1)),
+      _buildSummaryCard(context: context, theme: theme, title: 'Clientes', value: _formatNumber(stats.myClients), icon: Icons.groups_2_outlined, color: const Color(0xFF10B981)),
+      _buildSummaryCard(context: context, theme: theme, title: 'Vistorias', value: _formatNumber(stats.myInspections), icon: Icons.fact_check_outlined, color: const Color(0xFFF59E0B)),
+      _buildSummaryCard(context: context, theme: theme, title: 'Comissões', value: _formatCurrency(stats.myCommissions), icon: Icons.payments_outlined, color: const Color(0xFFEC4899)),
+    ];
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final screenWidth = constraints.maxWidth;
-        final isTablet = screenWidth > 600;
-        final isDesktop = screenWidth > 900;
-
-        // Em telas grandes, mostrar 4 cards em uma linha
-        if (isDesktop) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildSectionTitle('Estatísticas'),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: _buildSummaryCard(
-                      context: context,
-                      theme: theme,
-                      title: 'Imóveis',
-                      value: _formatNumber(stats.myProperties),
-                      icon: Icons.home_outlined,
-                      color: const Color(0xFF3b82f6),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: _buildSummaryCard(
-                      context: context,
-                      theme: theme,
-                      title: 'Clientes',
-                      value: _formatNumber(stats.myClients),
-                      icon: Icons.people_outlined,
-                      color: const Color(0xFF10b981),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: _buildSummaryCard(
-                      context: context,
-                      theme: theme,
-                      title: 'Vistorias',
-                      value: _formatNumber(stats.myInspections),
-                      icon: Icons.task_alt_outlined,
-                      color: const Color(0xFFf59e0b),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: _buildSummaryCard(
-                      context: context,
-                      theme: theme,
-                      title: 'Comissões',
-                      value: _formatCurrency(stats.myCommissions),
-                      icon: Icons.attach_money_outlined,
-                      color: const Color(0xFFec4899),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          );
-        }
-
-        // Em tablets, mostrar 2x2
-        if (isTablet) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildSectionTitle('Estatísticas'),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: _buildSummaryCard(
-                      context: context,
-                      theme: theme,
-                      title: 'Imóveis',
-                      value: _formatNumber(stats.myProperties),
-                      icon: Icons.home_outlined,
-                      color: const Color(0xFF3b82f6),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: _buildSummaryCard(
-                      context: context,
-                      theme: theme,
-                      title: 'Clientes',
-                      value: _formatNumber(stats.myClients),
-                      icon: Icons.people_outlined,
-                      color: const Color(0xFF10b981),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: _buildSummaryCard(
-                      context: context,
-                      theme: theme,
-                      title: 'Vistorias',
-                      value: _formatNumber(stats.myInspections),
-                      icon: Icons.task_alt_outlined,
-                      color: const Color(0xFFf59e0b),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: _buildSummaryCard(
-                      context: context,
-                      theme: theme,
-                      title: 'Comissões',
-                      value: _formatCurrency(stats.myCommissions),
-                      icon: Icons.attach_money_outlined,
-                      color: const Color(0xFFec4899),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          );
-        }
-
-        // Em mobile, manter 2x2
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Estatísticas',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w600,
-                color: ThemeHelpers.textColor(context),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildSummaryCard(
-                    context: context,
-                    theme: theme,
-                    title: 'Imóveis',
-                    value: _formatNumber(stats.myProperties),
-                    icon: Icons.home_outlined,
-                    color: const Color(0xFF3b82f6),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildSummaryCard(
-                    context: context,
-                    theme: theme,
-                    title: 'Clientes',
-                    value: _formatNumber(stats.myClients),
-                    icon: Icons.people_outlined,
-                    color: const Color(0xFF10b981),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildSummaryCard(
-                    context: context,
-                    theme: theme,
-                    title: 'Vistorias',
-                    value: _formatNumber(stats.myInspections),
-                    icon: Icons.task_alt_outlined,
-                    color: const Color(0xFFf59e0b),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildSummaryCard(
-                    context: context,
-                    theme: theme,
-                    title: 'Comissões',
-                    value: _formatCurrency(stats.myCommissions),
-                    icon: Icons.attach_money_outlined,
-                    color: const Color(0xFFec4899),
-                  ),
-                ),
-              ],
-            ),
-          ],
+        final width = constraints.maxWidth;
+        final columns = width >= 860
+            ? 4
+            : width > _kStatsHScrollMaxW
+                ? 2
+                : (width >= 340 ? 2 : 1);
+        final spacing = width >= 620 ? 10.0 : 8.0;
+        final itemWidth = (width - (spacing * (columns - 1))) / columns;
+        return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
+          children: cards.map((card) => SizedBox(width: itemWidth, child: card)).toList(),
         );
       },
     );
   }
 
   Widget _buildActivitiesSection(BuildContext context, ThemeData theme) {
-    final stats = _dashboardData?.stats;
+    final stats = _dashboardData?.stats ?? DashboardStats.empty;
     final activityStats = _dashboardData?.activityStats;
-    if (stats == null) return const SizedBox.shrink();
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSectionTitle('Atividades'),
-        const SizedBox(height: 16),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final screenWidth = constraints.maxWidth;
-            final isTablet = screenWidth > 600;
-            final spacing = isTablet ? 16.0 : 12.0;
+    return _buildDashboardPanel(
+      context: context,
+      title: 'Operação ativa',
+      eyebrow: 'RITMO DO DIA',
+      icon: Icons.bolt_outlined,
+      child: LayoutBuilder(
+        builder: (context, outer) {
+          Widget cardsArea() {
+            return LayoutBuilder(
+              builder: (context, constraints) {
+                final isWide = constraints.maxWidth >= 560;
+                final spacing = isWide ? 10.0 : 8.0;
+                final itemWidth = isWide ? (constraints.maxWidth - spacing * 2) / 3 : constraints.maxWidth;
+                final cards = [
+                  _buildActivityCard(context: context, theme: theme, title: 'Tarefas', value: _formatNumber(stats.myTasks), subtitle: 'Em andamento', icon: Icons.assignment_turned_in_outlined, color: const Color(0xFF6366F1)),
+                  _buildActivityCard(context: context, theme: theme, title: 'Agendamentos', value: _formatNumber(activityStats?.appointmentsThisMonth ?? 0), subtitle: 'Este mês', icon: Icons.event_available_outlined, color: const Color(0xFFF59E0B)),
+                  _buildActivityCard(context: context, theme: theme, title: 'Matches', value: _formatNumber(stats.myMatches), subtitle: 'Pendentes', icon: Icons.favorite_border_rounded, color: const Color(0xFF10B981)),
+                ];
+                return Wrap(
+                  spacing: spacing,
+                  runSpacing: spacing,
+                  children: cards.map((card) => SizedBox(width: itemWidth, child: card)).toList(),
+                );
+              },
+            );
+          }
 
+          final strip = activityStats != null
+              ? _buildProgressStrip(
+                  context: context,
+                  label: 'Taxa de conclusão',
+                  valueLabel: '${activityStats.completionRate.toStringAsFixed(1)}%',
+                  value: (activityStats.completionRate / 100).clamp(0.0, 1.0).toDouble(),
+                  color: _dashboardAccentColor(context),
+                )
+              : null;
+
+          final besideStrip = outer.maxWidth >= 520 && strip != null;
+
+          if (besideStrip) {
             return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: _buildActivityCard(
-                    context: context,
-                    theme: theme,
-                    title: 'Tarefas',
-                    value: _formatNumber(stats.myTasks),
-                    icon: Icons.assignment_outlined,
-                    color: const Color(0xFF3b82f6),
-                  ),
+                  flex: 58,
+                  child: cardsArea(),
                 ),
-                SizedBox(width: spacing),
+                const SizedBox(width: 12),
                 Expanded(
-                  child: _buildActivityCard(
-                    context: context,
-                    theme: theme,
-                    title: 'Agendamentos',
-                    value: _formatNumber(
-                      activityStats?.appointmentsThisMonth ?? 0,
-                    ),
-                    subtitle: 'Este mês',
-                    icon: Icons.calendar_today_outlined,
-                    color: const Color(0xFFf59e0b),
-                  ),
-                ),
-                SizedBox(width: spacing),
-                Expanded(
-                  child: _buildActivityCard(
-                    context: context,
-                    theme: theme,
-                    title: 'Matches',
-                    value: _formatNumber(stats.myMatches),
-                    subtitle: 'Pendentes',
-                    icon: Icons.favorite_outline,
-                    color: const Color(0xFF10b981),
-                  ),
+                  flex: 42,
+                  child: strip,
                 ),
               ],
             );
-          },
-        ),
-        if (activityStats != null) ...[
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: ThemeHelpers.cardBackgroundColor(context),
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: ThemeHelpers.shadowColor(context),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
+          }
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              cardsArea(),
+              if (strip != null) ...[
+                const SizedBox(height: 10),
+                strip,
               ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Taxa de Conclusão',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: ThemeHelpers.textColor(context),
-                      ),
-                    ),
-                    Text(
-                      '${activityStats.completionRate.toStringAsFixed(1)}%',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.primary.primary,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                LinearProgressIndicator(
-                  value: activityStats.completionRate / 100,
-                  backgroundColor: AppColors.primary.primary.withOpacity(0.1),
-                  valueColor: AlwaysStoppedAnimation<Color>(
-                    AppColors.primary.primary,
-                  ),
-                  borderRadius: BorderRadius.circular(10),
-                  minHeight: 10,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ],
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -857,80 +1021,81 @@ class _DashboardPageState extends State<DashboardPage> {
     required Color color,
   }) {
     return LayoutBuilder(
-      builder: (context, constraints) {
-        final screenWidth = constraints.maxWidth;
-        final isSmall = screenWidth < 300;
-        final padding = isSmall ? 12.0 : 16.0;
-        final iconSize = isSmall ? 18.0 : 20.0;
-        final iconPadding = isSmall ? 6.0 : 8.0;
-
-        return Container(
-          padding: EdgeInsets.all(padding),
-          decoration: BoxDecoration(
-            color: ThemeHelpers.cardBackgroundColor(context),
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: ThemeHelpers.shadowColor(context),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              ),
-            ],
+      builder: (context, c) {
+        final spread = c.maxWidth >= 400;
+        final valueText = FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            value,
+            style: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w900,
+              color: ThemeHelpers.textColor(context),
+            ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Container(
-                    padding: EdgeInsets.all(iconPadding),
-                    decoration: BoxDecoration(
-                      color: color.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(icon, color: color, size: iconSize),
-                  ),
-                ],
-              ),
-              SizedBox(height: isSmall ? 8 : 12),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
+        );
+        final titleText = Text(
+          title.toUpperCase(),
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: ThemeHelpers.textSecondaryColor(context),
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.1,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        );
+        final subtitleW = subtitle != null
+            ? Padding(
+                padding: const EdgeInsets.only(top: 4),
                 child: Text(
-                  value,
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: ThemeHelpers.textColor(context),
-                    fontSize: isSmall ? 18 : null,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                title,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                  fontSize: isSmall ? 12 : null,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              if (subtitle != null) ...[
-                const SizedBox(height: 2),
-                Text(
                   subtitle,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    fontSize: isSmall ? 10 : 11,
-                  ),
+                  style: theme.textTheme.bodySmall?.copyWith(color: ThemeHelpers.textSecondaryColor(context)),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-              ],
-            ],
-          ),
+              )
+            : null;
+
+        return Container(
+          padding: const EdgeInsets.all(12),
+          decoration: _inlineTileDecoration(context, radius: 18, accent: color),
+          child: spread
+              ? Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildIconBadge(context, icon, color, size: 38, iconSize: 18),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          valueText,
+                          const SizedBox(height: 4),
+                          titleText,
+                          if (subtitleW != null) subtitleW,
+                        ],
+                      ),
+                    ),
+                    Icon(Icons.more_horiz_rounded, color: ThemeHelpers.textSecondaryColor(context), size: 18),
+                  ],
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        _buildIconBadge(context, icon, color, size: 38, iconSize: 18),
+                        Icon(Icons.more_horiz_rounded, color: ThemeHelpers.textSecondaryColor(context), size: 18),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    valueText,
+                    const SizedBox(height: 4),
+                    titleText,
+                    if (subtitleW != null) subtitleW,
+                  ],
+                ),
         );
       },
     );
@@ -938,244 +1103,202 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _buildPerformanceCard(BuildContext context, ThemeData theme) {
     final performance = _dashboardData?.performance;
-    final gamification = _dashboardData?.gamification;
-    if (performance == null || gamification == null)
-      return const SizedBox.shrink();
+    final gamification =
+        _dashboardData?.gamification ?? DashboardGamification.empty();
+    if (performance == null) return const SizedBox.shrink();
 
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: ThemeHelpers.shadowColor(context),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Título e informações principais
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildSectionTitle('Performance Mensal'),
-                    const SizedBox(height: 8),
-                    Text(
-                      _formatCurrency(performance.thisMonth),
-                      style: theme.textTheme.headlineMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.primary.primary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        performance.growthPercentage >= 0
-                            ? Icons.trending_up
-                            : Icons.trending_down,
-                        color: performance.growthPercentage >= 0
-                            ? AppColors.status.success
-                            : AppColors.status.error,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${performance.growthPercentage.toStringAsFixed(1)}%',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: performance.growthPercentage >= 0
-                              ? AppColors.status.success
-                              : AppColors.status.error,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'vs mês anterior',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
+    final growthPositive = performance.growthPercentage >= 0;
+    final growthColor = growthPositive ? AppColors.status.success : AppColors.status.error;
 
-          // Ranking e Nível
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Ranking',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: ThemeHelpers.textSecondaryColor(context),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '#${performance.ranking} de ${performance.totalUsers}',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: ThemeHelpers.textColor(context),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Nível',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: ThemeHelpers.textSecondaryColor(context),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Nível ${gamification.level}',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.primary.primary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Pontos',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: ThemeHelpers.textSecondaryColor(context),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${gamification.currentPoints}',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: ThemeHelpers.textColor(context),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-
-          // Breakdown de pontos (gráfico simples com barras)
-          ...[
-            const SizedBox(height: 24),
-            const Divider(),
-            const SizedBox(height: 16),
+    return _buildDashboardPanel(
+      context: context,
+      title: 'Performance mensal',
+      eyebrow: 'META · PROJEÇÃO · RANKING',
+      icon: Icons.query_stats_rounded,
+      trailing: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: growthColor.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: growthColor.withOpacity(0.28)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(growthPositive ? Icons.trending_up_rounded : Icons.trending_down_rounded, color: growthColor, size: 18),
+            const SizedBox(width: 6),
             Text(
-              'Breakdown de Pontos',
-              style: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w600,
-                color: ThemeHelpers.textColor(context),
-              ),
+              '${performance.growthPercentage.toStringAsFixed(1)}%',
+              style: theme.textTheme.labelLarge?.copyWith(color: growthColor, fontWeight: FontWeight.w900),
             ),
-            const SizedBox(height: 16),
-            _buildPointsBreakdown(gamification.pointsBreakdown, theme),
           ],
-        ],
+        ),
+      ),
+      child: LayoutBuilder(
+        builder: (context, c) {
+          final topSpread = c.maxWidth >= 520;
+          final miniCards = [
+            _buildMiniInfoCard(context, 'Ranking', '#${performance.ranking} de ${performance.totalUsers}', Icons.emoji_events_outlined, const Color(0xFFF59E0B)),
+            _buildMiniInfoCard(context, 'Nível', 'Nível ${gamification.level}', Icons.auto_awesome_outlined, const Color(0xFF8B5CF6)),
+            _buildMiniInfoCard(context, 'Pontos', '${gamification.currentPoints}', Icons.stars_outlined, const Color(0xFF06B6D4)),
+          ];
+
+          final valueBlock = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _formatCurrency(performance.thisMonth),
+                style: theme.textTheme.headlineLarge?.copyWith(
+                  color: ThemeHelpers.textColor(context),
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -1.2,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Resultado acumulado no período selecionado, comparado ao ciclo anterior.',
+                style: theme.textTheme.bodySmall?.copyWith(color: ThemeHelpers.textSecondaryColor(context)),
+              ),
+            ],
+          );
+
+          Widget miniLayout() {
+            return LayoutBuilder(
+              builder: (context, c2) {
+                final row3 = c2.maxWidth >= 400;
+                if (!row3) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (var i = 0; i < miniCards.length; i++) ...[
+                        if (i > 0) const SizedBox(height: 10),
+                        miniCards[i],
+                      ],
+                    ],
+                  );
+                }
+                return Row(
+                  children: [
+                    Expanded(child: miniCards[0]),
+                    const SizedBox(width: 10),
+                    Expanded(child: miniCards[1]),
+                    const SizedBox(width: 10),
+                    Expanded(child: miniCards[2]),
+                  ],
+                );
+              },
+            );
+          }
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (topSpread)
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 50,
+                      child: valueBlock,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 50,
+                      child: miniLayout(),
+                    ),
+                  ],
+                )
+              else ...[
+                valueBlock,
+                const SizedBox(height: 12),
+                miniLayout(),
+              ],
+              const SizedBox(height: 14),
+              Text(
+                'Breakdown de pontos'.toUpperCase(),
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: ThemeHelpers.textSecondaryColor(context),
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.3,
+                ),
+              ),
+              const SizedBox(height: 10),
+              _buildPointsBreakdown(
+                gamification.pointsBreakdown,
+                theme,
+                layoutWidth: c.maxWidth,
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 
   Widget _buildPointsBreakdown(
     DashboardPointsBreakdown breakdown,
-    ThemeData theme,
-  ) {
-    final total =
-        breakdown.sales +
-        breakdown.rentals +
-        breakdown.clients +
-        breakdown.appointments +
-        breakdown.tasks +
-        breakdown.other;
-
+    ThemeData theme, {
+    double? layoutWidth,
+  }) {
+    final total = breakdown.sales + breakdown.rentals + breakdown.clients + breakdown.appointments + breakdown.tasks + breakdown.other;
     if (total == 0) {
-      return Text(
-        'Nenhum ponto registrado',
-        style: theme.textTheme.bodySmall?.copyWith(
-          color: ThemeHelpers.textSecondaryColor(context),
-        ),
+      return Text('Nenhum ponto registrado', style: theme.textTheme.bodySmall?.copyWith(color: ThemeHelpers.textSecondaryColor(context)));
+    }
+    final twoCols = layoutWidth != null && layoutWidth >= 520;
+    final bars = <Widget>[
+      _buildBreakdownBar(label: 'Vendas', value: breakdown.sales, total: total, color: AppColors.status.success, theme: theme),
+      _buildBreakdownBar(label: 'Aluguéis', value: breakdown.rentals, total: total, color: Colors.pinkAccent, theme: theme),
+      _buildBreakdownBar(label: 'Clientes', value: breakdown.clients, total: total, color: _dashboardAccentColor(context), theme: theme),
+      _buildBreakdownBar(label: 'Agendamentos', value: breakdown.appointments, total: total, color: Colors.orangeAccent, theme: theme),
+      _buildBreakdownBar(label: 'Tarefas', value: breakdown.tasks, total: total, color: Colors.deepPurpleAccent, theme: theme),
+      _buildBreakdownBar(label: 'Outros', value: breakdown.other, total: total, color: Colors.blueGrey, theme: theme),
+    ];
+
+    if (twoCols) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              children: [
+                bars[0],
+                const SizedBox(height: 6),
+                bars[1],
+                const SizedBox(height: 6),
+                bars[2],
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              children: [
+                bars[3],
+                const SizedBox(height: 6),
+                bars[4],
+                const SizedBox(height: 6),
+                bars[5],
+              ],
+            ),
+          ),
+        ],
       );
     }
 
     return Column(
       children: [
-        _buildBreakdownBar(
-          label: 'Vendas',
-          value: breakdown.sales,
-          total: total,
-          color: AppColors.status.success,
-          theme: theme,
-        ),
-        const SizedBox(height: 8),
-        _buildBreakdownBar(
-          label: 'Aluguéis',
-          value: breakdown.rentals,
-          total: total,
-          color: Colors.pink,
-          theme: theme,
-        ),
-        const SizedBox(height: 8),
-        _buildBreakdownBar(
-          label: 'Clientes',
-          value: breakdown.clients,
-          total: total,
-          color: AppColors.primary.primary,
-          theme: theme,
-        ),
-        const SizedBox(height: 8),
-        _buildBreakdownBar(
-          label: 'Agendamentos',
-          value: breakdown.appointments,
-          total: total,
-          color: Colors.orange,
-          theme: theme,
-        ),
-        const SizedBox(height: 8),
-        _buildBreakdownBar(
-          label: 'Tarefas',
-          value: breakdown.tasks,
-          total: total,
-          color: Colors.purple,
-          theme: theme,
-        ),
-        const SizedBox(height: 8),
-        _buildBreakdownBar(
-          label: 'Outros',
-          value: breakdown.other,
-          total: total,
-          color: Colors.grey,
-          theme: theme,
-        ),
+        bars[0],
+        const SizedBox(height: 6),
+        bars[1],
+        const SizedBox(height: 6),
+        bars[2],
+        const SizedBox(height: 6),
+        bars[3],
+        const SizedBox(height: 6),
+        bars[4],
+        const SizedBox(height: 6),
+        bars[5],
       ],
     );
   }
@@ -1187,53 +1310,36 @@ class _DashboardPageState extends State<DashboardPage> {
     required Color color,
     required ThemeData theme,
   }) {
-    final percentage = total > 0 ? (value / total) : 0.0;
-
+    final percentage = total > 0 ? (value / total).clamp(0.0, 1.0).toDouble() : 0.0;
     return Row(
       children: [
         SizedBox(
-          width: 80,
-          child: Text(
-            label,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
-            ),
-          ),
+          width: 82,
+          child: Text(label, style: theme.textTheme.bodySmall?.copyWith(color: ThemeHelpers.textSecondaryColor(context), fontWeight: FontWeight.w700)),
         ),
         Expanded(
-          child: Stack(
-            children: [
-              Container(
-                height: 24,
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              FractionallySizedBox(
-                widthFactor: percentage,
-                child: Container(
-                  height: 24,
-                  decoration: BoxDecoration(
-                    color: color,
-                    borderRadius: BorderRadius.circular(12),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: Stack(
+              children: [
+                Container(height: 9, color: color.withOpacity(0.12)),
+                FractionallySizedBox(
+                  widthFactor: percentage,
+                  child: Container(
+                    height: 9,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(colors: [color.withOpacity(0.75), color]),
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 10),
         SizedBox(
-          width: 50,
-          child: Text(
-            '$value',
-            style: theme.textTheme.bodySmall?.copyWith(
-              fontWeight: FontWeight.w600,
-              color: ThemeHelpers.textColor(context),
-            ),
-            textAlign: TextAlign.right,
-          ),
+          width: 44,
+          child: Text('$value', style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w900, color: ThemeHelpers.textColor(context)), textAlign: TextAlign.right),
         ),
       ],
     );
@@ -1241,46 +1347,27 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _buildUpcomingAppointments(BuildContext context, ThemeData theme) {
     final appointments = _dashboardData?.upcomingAppointments ?? [];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(child: _buildSectionTitle('Próximos Compromissos')),
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pushNamed(AppRoutes.calendar);
-              },
-              child: const Text('Ver todos'),
+    return _buildDashboardPanel(
+      context: context,
+      title: 'Próximos compromissos',
+      eyebrow: 'AGENDA',
+      icon: Icons.calendar_month_outlined,
+      elevatedSurface: false,
+      trailing: TextButton.icon(
+        onPressed: () => Navigator.of(context).pushNamed(AppRoutes.calendar),
+        icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+        label: const Text('Ver todos'),
+      ),
+      child: appointments.isNotEmpty
+          ? Column(children: appointments.take(5).map((appointment) => _buildAppointmentCard(context: context, theme: theme, appointment: appointment)).toList())
+          : _buildEmptyState(
+              icon: Icons.calendar_today_outlined,
+              title: 'Nenhum agendamento',
+              message: 'Você não tem compromissos agendados no momento. Que tal agendar uma visita?',
+              actionLabel: 'Ir para Agenda',
+              onAction: () => Navigator.of(context).pushNamed(AppRoutes.calendar),
+              isCard: false,
             ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        if (appointments.isNotEmpty)
-          ...appointments
-              .take(5)
-              .map(
-                (appointment) => _buildAppointmentCard(
-                  context: context,
-                  theme: theme,
-                  appointment: appointment,
-                ),
-              )
-        else
-          _buildEmptyState(
-            icon: Icons.calendar_today_outlined,
-            title: 'Nenhum agendamento',
-            message:
-                'Você não tem compromissos agendados no momento. Que tal agendar uma visita?',
-            actionLabel: 'Ir para Agenda',
-            onAction: () {
-              Navigator.of(context).pushNamed(AppRoutes.calendar);
-            },
-            isCard: false,
-          ),
-      ],
     );
   }
 
@@ -1290,76 +1377,74 @@ class _DashboardPageState extends State<DashboardPage> {
     required DashboardAppointment appointment,
   }) {
     return InkWell(
-      onTap: () {
-        Navigator.of(
-          context,
-        ).pushNamed(AppRoutes.calendarDetails(appointment.id));
-      },
-      borderRadius: BorderRadius.circular(12),
+      onTap: () => Navigator.of(context).pushNamed(AppRoutes.calendarDetails(appointment.id)),
+      borderRadius: BorderRadius.circular(16),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
+        margin: const EdgeInsets.only(bottom: 4),
+        padding: const EdgeInsets.fromLTRB(14, 12, 10, 14),
         decoration: BoxDecoration(
-          color: ThemeHelpers.cardBackgroundColor(context),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: ThemeHelpers.borderLightColor(context),
-            width: 1,
+          border: Border(
+            left: const BorderSide(color: Color(0xFF6366F1), width: 3),
+            bottom: BorderSide(color: _glassBorderColor(context)),
           ),
         ),
         child: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.primary.primary.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                Icons.calendar_today,
-                color: AppColors.primary.primary,
-                size: 24,
-              ),
-            ),
-            const SizedBox(width: 16),
+            _buildIconBadge(context, Icons.calendar_today_rounded, const Color(0xFF6366F1), size: 36, iconSize: 18),
+            const SizedBox(width: 10),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    appointment.title,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: ThemeHelpers.textColor(context),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    appointment.client,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.access_time,
-                        size: 14,
-                        color: ThemeHelpers.textSecondaryColor(context),
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${appointment.date} às ${appointment.time}',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
+              child: LayoutBuilder(
+                builder: (context, c) {
+                  final lineSpread = c.maxWidth >= 320;
+                  if (!lineSpread) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(appointment.title, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900, color: ThemeHelpers.textColor(context)), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        const SizedBox(height: 4),
+                        Text(appointment.client, style: theme.textTheme.bodySmall?.copyWith(color: ThemeHelpers.textSecondaryColor(context)), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Icon(Icons.access_time_rounded, size: 14, color: ThemeHelpers.textSecondaryColor(context)),
+                            const SizedBox(width: 4),
+                            Expanded(child: Text('${appointment.date} às ${appointment.time}', style: theme.textTheme.bodySmall?.copyWith(color: ThemeHelpers.textSecondaryColor(context), fontWeight: FontWeight.w700), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                          ],
                         ),
+                      ],
+                    );
+                  }
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              appointment.title,
+                              style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900, color: ThemeHelpers.textColor(context)),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${appointment.date}\n${appointment.time}',
+                            style: theme.textTheme.labelSmall?.copyWith(color: ThemeHelpers.textSecondaryColor(context), fontWeight: FontWeight.w800),
+                            textAlign: TextAlign.right,
+                            maxLines: 2,
+                          ),
+                        ],
                       ),
+                      const SizedBox(height: 6),
+                      Text(appointment.client, style: theme.textTheme.bodySmall?.copyWith(color: ThemeHelpers.textSecondaryColor(context)), maxLines: 1, overflow: TextOverflow.ellipsis),
                     ],
-                  ),
-                ],
+                  );
+                },
               ),
             ),
+            Icon(Icons.chevron_right_rounded, color: ThemeHelpers.textSecondaryColor(context)),
           ],
         ),
       ),
@@ -1368,33 +1453,22 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _buildRecentActivities(BuildContext context, ThemeData theme) {
     final activities = _dashboardData?.recentActivities ?? [];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSectionTitle('Atividades Recentes'),
-        const SizedBox(height: 16),
-        if (activities.isNotEmpty)
-          ...activities
-              .take(5)
-              .map(
-                (activity) => _buildActivityItem(
-                  context: context,
-                  theme: theme,
-                  activity: activity,
-                ),
-              )
-        else
-          _buildEmptyState(
-            icon: Icons.history_outlined,
-            title: 'Nenhuma atividade recente',
-            message:
-                'Suas atividades aparecerão aqui conforme você usar o sistema.',
-            actionLabel: null,
-            onAction: null,
-            isCard: false,
-          ),
-      ],
+    return _buildDashboardPanel(
+      context: context,
+      title: 'Atividades recentes',
+      eyebrow: 'TIMELINE',
+      icon: Icons.history_rounded,
+      elevatedSurface: false,
+      child: activities.isNotEmpty
+          ? Column(children: activities.take(5).map((activity) => _buildActivityItem(context: context, theme: theme, activity: activity)).toList())
+          : _buildEmptyState(
+              icon: Icons.history_outlined,
+              title: 'Nenhuma atividade recente',
+              message: 'Suas atividades aparecerão aqui conforme você usar o sistema.',
+              actionLabel: null,
+              onAction: null,
+              isCard: false,
+            ),
     );
   }
 
@@ -1403,46 +1477,65 @@ class _DashboardPageState extends State<DashboardPage> {
     required ThemeData theme,
     required DashboardActivity activity,
   }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+    final accent = _dashboardAccentColor(context);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 2),
+      padding: const EdgeInsets.only(bottom: 14),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: _glassBorderColor(context)),
+        ),
+      ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: AppColors.primary.primary,
-              shape: BoxShape.circle,
-            ),
+          Column(
+            children: [
+              Container(width: 10, height: 10, decoration: BoxDecoration(color: accent, shape: BoxShape.circle, boxShadow: [BoxShadow(color: accent.withOpacity(0.35), blurRadius: 10)])),
+              Container(width: 2, height: 44, color: accent.withOpacity(0.18)),
+            ],
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  activity.title,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: ThemeHelpers.textColor(context),
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  activity.description,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  activity.time,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    fontSize: 11,
-                  ),
-                ),
-              ],
+            child: Padding(
+              padding: const EdgeInsets.only(left: 2, top: 2, bottom: 10, right: 2),
+              child: LayoutBuilder(
+                builder: (context, c) {
+                  final spread = c.maxWidth >= 340;
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (spread) ...[
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                activity.title,
+                                style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w900, color: ThemeHelpers.textColor(context)),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              activity.time,
+                              style: theme.textTheme.labelSmall?.copyWith(color: ThemeHelpers.textSecondaryColor(context), fontWeight: FontWeight.w800, letterSpacing: 0.5),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(activity.description, style: theme.textTheme.bodySmall?.copyWith(color: ThemeHelpers.textSecondaryColor(context))),
+                      ]
+                      else ...[
+                        Text(activity.title, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w900, color: ThemeHelpers.textColor(context))),
+                        const SizedBox(height: 4),
+                        Text(activity.description, style: theme.textTheme.bodySmall?.copyWith(color: ThemeHelpers.textSecondaryColor(context))),
+                        const SizedBox(height: 6),
+                        Text(activity.time, style: theme.textTheme.labelSmall?.copyWith(color: ThemeHelpers.textSecondaryColor(context), fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+                      ],
+                    ],
+                  );
+                },
+              ),
             ),
           ),
         ],
@@ -1452,75 +1545,72 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _buildMonthlyGoalsSection(BuildContext context, ThemeData theme) {
     final goals = _dashboardData?.monthlyGoals;
-    final hasGoals =
-        goals != null && (goals.sales != null || goals.commissions != null);
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: ThemeHelpers.shadowColor(context),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildSectionTitle('Metas Mensais'),
-          const SizedBox(height: 16),
-          if (hasGoals)
-            _buildGoalsContent(context, theme, goals)
-          else
-            _buildEmptyState(
+    final hasGoals = goals != null && (goals.sales != null || goals.commissions != null);
+    return _buildDashboardPanel(
+      context: context,
+      title: 'Metas mensais',
+      eyebrow: 'OBJETIVOS',
+      icon: Icons.track_changes_rounded,
+      elevatedSurface: false,
+      child: hasGoals
+          ? _buildGoalsContent(context, theme, goals)
+          : _buildEmptyState(
               icon: Icons.track_changes_outlined,
               title: 'Nenhuma meta definida',
-              message:
-                  'Configure suas metas mensais para acompanhar seu progresso e alcançar seus objetivos!',
+              message: 'Configure suas metas mensais para acompanhar seu progresso e alcançar seus objetivos!',
               actionLabel: null,
               onAction: null,
+              isCard: false,
             ),
-        ],
-      ),
     );
   }
 
-  Widget _buildGoalsContent(
-    BuildContext context,
-    ThemeData theme,
-    DashboardMonthlyGoals goals,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (goals.sales != null)
-          _buildGoalProgress(
-            context: context,
-            theme: theme,
-            label: 'Vendas',
-            current: goals.sales!.current.toInt(),
-            target: goals.sales!.target.toInt(),
-            percentage: goals.sales!.percentage,
-            icon: Icons.home_work_outlined,
-          ),
-        if (goals.sales != null && goals.commissions != null)
-          const SizedBox(height: 16),
-        if (goals.commissions != null)
-          _buildGoalProgress(
-            context: context,
-            theme: theme,
-            label: 'Comissões',
-            current: goals.commissions!.current.toInt(),
-            target: goals.commissions!.target.toInt(),
-            percentage: goals.commissions!.percentage,
-            icon: Icons.attach_money_outlined,
-            isCurrency: true,
-          ),
-      ],
+  Widget _buildGoalsContent(BuildContext context, ThemeData theme, DashboardMonthlyGoals goals) {
+    return LayoutBuilder(
+      builder: (context, c) {
+        final sideBySide = c.maxWidth >= 480 && goals.sales != null && goals.commissions != null;
+        if (sideBySide) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _buildGoalProgress(
+                  context: context,
+                  theme: theme,
+                  label: 'Vendas',
+                  current: goals.sales!.current.toInt(),
+                  target: goals.sales!.target.toInt(),
+                  percentage: goals.sales!.percentage,
+                  icon: Icons.home_work_outlined,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildGoalProgress(
+                  context: context,
+                  theme: theme,
+                  label: 'Comissões',
+                  current: goals.commissions!.current.toInt(),
+                  target: goals.commissions!.target.toInt(),
+                  percentage: goals.commissions!.percentage,
+                  icon: Icons.payments_outlined,
+                  isCurrency: true,
+                ),
+              ),
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (goals.sales != null)
+              _buildGoalProgress(context: context, theme: theme, label: 'Vendas', current: goals.sales!.current.toInt(), target: goals.sales!.target.toInt(), percentage: goals.sales!.percentage, icon: Icons.home_work_outlined),
+            if (goals.sales != null && goals.commissions != null) const SizedBox(height: 12),
+            if (goals.commissions != null)
+              _buildGoalProgress(context: context, theme: theme, label: 'Comissões', current: goals.commissions!.current.toInt(), target: goals.commissions!.target.toInt(), percentage: goals.commissions!.percentage, icon: Icons.payments_outlined, isCurrency: true),
+          ],
+        );
+      },
     );
   }
 
@@ -1534,112 +1624,53 @@ class _DashboardPageState extends State<DashboardPage> {
     required IconData icon,
     bool isCurrency = false,
   }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(icon, size: 20, color: AppColors.primary.primary),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                label,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: ThemeHelpers.textColor(context),
-                ),
-              ),
-            ),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                isCurrency
-                    ? '${_formatCurrency(current.toDouble())} / ${_formatCurrency(target.toDouble())}'
-                    : '${_formatNumber(current)} / ${_formatNumber(target)}',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: ThemeHelpers.textSecondaryColor(context),
-                  fontSize: 12,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(
-            value: percentage / 100,
-            minHeight: 8,
-            backgroundColor: AppColors.background.backgroundSecondary,
-            valueColor: AlwaysStoppedAnimation<Color>(
-              percentage >= 100
-                  ? AppColors.status.success
-                  : AppColors.primary.primary,
-            ),
+    final color = percentage >= 100 ? AppColors.status.success : _dashboardAccentColor(context);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: _inlineTileDecoration(context, radius: 16, accent: color),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _buildIconBadge(context, icon, color, size: 38, iconSize: 18),
+              const SizedBox(width: 8),
+              Expanded(child: Text(label, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900, color: ThemeHelpers.textColor(context)))),
+              Text('${percentage.toStringAsFixed(1)}%', style: theme.textTheme.titleSmall?.copyWith(color: color, fontWeight: FontWeight.w900)),
+            ],
           ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          '${percentage.toStringAsFixed(1)}% concluído',
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(context),
-            fontSize: 12,
+          const SizedBox(height: 10),
+          _buildProgressStrip(
+            context: context,
+            label: isCurrency ? '${_formatCurrency(current.toDouble())} / ${_formatCurrency(target.toDouble())}' : '${_formatNumber(current)} / ${_formatNumber(target)}',
+            valueLabel: '${percentage.toStringAsFixed(1)}% concluído',
+            value: (percentage / 100).clamp(0.0, 1.0).toDouble(),
+            color: color,
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
   Widget _buildConversionMetrics(BuildContext context, ThemeData theme) {
     final metrics = _dashboardData?.conversionMetrics;
     if (metrics == null) return const SizedBox.shrink();
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: ThemeHelpers.shadowColor(context),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildSectionTitle('Métricas de Conversão'),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _buildMetricItem(
-                  theme: theme,
-                  label: 'Taxa Visitas/Vendas',
-                  value: '${metrics.visitsToSales.toStringAsFixed(1)}%',
-                  icon: Icons.trending_up_outlined,
-                ),
-              ),
-              Container(
-                width: 1,
-                height: 50,
-                color: ThemeHelpers.borderLightColor(context),
-                margin: const EdgeInsets.symmetric(horizontal: 16),
-              ),
-              Expanded(
-                child: _buildMetricItem(
-                  theme: theme,
-                  label: 'Matches Aceitos',
-                  value: _formatNumber(metrics.matchesAccepted),
-                  icon: Icons.favorite_outlined,
-                ),
-              ),
-            ],
-          ),
-        ],
+    return _buildDashboardPanel(
+      context: context,
+      title: 'Métricas de conversão',
+      eyebrow: 'EFICIÊNCIA',
+      icon: Icons.insights_outlined,
+      elevatedSurface: false,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 340;
+          final cards = [
+            _buildMetricItem(theme: theme, label: 'Taxa Visitas/Vendas', value: '${metrics.visitsToSales.toStringAsFixed(1)}%', icon: Icons.show_chart_rounded),
+            _buildMetricItem(theme: theme, label: 'Matches Aceitos', value: _formatNumber(metrics.matchesAccepted), icon: Icons.favorite_rounded),
+          ];
+          if (!isWide) return Column(children: [cards[0], const SizedBox(height: 10), cards[1]]);
+          return Row(children: [Expanded(child: cards[0]), const SizedBox(width: 10), Expanded(child: cards[1])]);
+        },
       ),
     );
   }
@@ -1650,27 +1681,43 @@ class _DashboardPageState extends State<DashboardPage> {
     required String value,
     required IconData icon,
   }) {
-    return Column(
-      children: [
-        Icon(icon, color: AppColors.primary.primary, size: 24),
-        const SizedBox(height: 8),
-        Text(
-          value,
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w700,
-            color: ThemeHelpers.textColor(context),
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(context),
-            fontSize: 11,
-          ),
-          textAlign: TextAlign.center,
-        ),
-      ],
+    final accent = _dashboardAccentColor(context);
+    return LayoutBuilder(
+      builder: (context, c) {
+        final spread = c.maxWidth >= 280;
+        return Container(
+          padding: const EdgeInsets.all(12),
+          decoration: _inlineTileDecoration(context, radius: 16, accent: accent),
+          child: spread
+              ? Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildIconBadge(context, icon, accent, size: 38, iconSize: 18),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(value, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900, color: ThemeHelpers.textColor(context))),
+                          const SizedBox(height: 4),
+                          Text(label.toUpperCase(), style: theme.textTheme.labelSmall?.copyWith(color: ThemeHelpers.textSecondaryColor(context), fontWeight: FontWeight.w900, letterSpacing: 1.0)),
+                        ],
+                      ),
+                    ),
+                  ],
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildIconBadge(context, icon, accent, size: 38, iconSize: 18),
+                    const SizedBox(height: 12),
+                    Text(value, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900, color: ThemeHelpers.textColor(context))),
+                    const SizedBox(height: 4),
+                    Text(label.toUpperCase(), style: theme.textTheme.labelSmall?.copyWith(color: ThemeHelpers.textSecondaryColor(context), fontWeight: FontWeight.w900, letterSpacing: 1.0)),
+                  ],
+                ),
+        );
+      },
     );
   }
 
@@ -1700,18 +1747,94 @@ class _DashboardPageState extends State<DashboardPage> {
     return _numberFormatter.format(value);
   }
 
-  /// Widget padrão para títulos de seções
-  Widget _buildSectionTitle(String title, {double? topPadding}) {
-    return Padding(
-      padding: EdgeInsets.only(top: topPadding ?? 0),
-      child: Text(
-        title,
-        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-          fontWeight: FontWeight.w600,
-          color: ThemeHelpers.textColor(context),
-          fontSize: 20,
+  Widget _buildDashboardPanel({
+    required BuildContext context,
+    required String title,
+    required String eyebrow,
+    required IconData icon,
+    required Widget child,
+    Widget? trailing,
+    bool elevatedSurface = true,
+  }) {
+    final accent = _dashboardAccentColor(context);
+    final theme = Theme.of(context);
+
+    final headerIcon = elevatedSurface
+        ? _buildIconBadge(context, icon, accent, size: 40, iconSize: 20)
+        : Container(
+            padding: const EdgeInsets.all(11),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              color: accent.withOpacity(Theme.of(context).brightness == Brightness.dark ? 0.14 : 0.10),
+            ),
+            child: Icon(icon, color: accent, size: 22),
+          );
+
+    final header = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        headerIcon,
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                eyebrow,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: ThemeHelpers.textSecondaryColor(context),
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.4,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                title,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: ThemeHelpers.textColor(context),
+                ),
+              ),
+            ],
+          ),
         ),
-      ),
+        if (trailing != null) trailing,
+      ],
+    );
+
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        header,
+        if (elevatedSurface) const SizedBox(height: 12) else const SizedBox(height: 10),
+        if (!elevatedSurface) ...[
+          Container(
+            height: 3,
+            width: 44,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(3),
+              gradient: LinearGradient(
+                colors: [accent, accent.withOpacity(0.15)],
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+        ],
+        child,
+      ],
+    );
+
+    if (!elevatedSurface) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 2),
+        child: body,
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: _panelDecoration(context),
+      child: body,
     );
   }
 
@@ -1725,91 +1848,33 @@ class _DashboardPageState extends State<DashboardPage> {
     bool isCard = true,
   }) {
     final theme = Theme.of(context);
+    final accent = _dashboardAccentColor(context);
 
     final content = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color:
-                (theme.brightness == Brightness.dark
-                        ? AppColors.primary.primaryDarkMode
-                        : AppColors.primary.primary)
-                    .withOpacity(0.1),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(
-            icon,
-            size: 48,
-            color: theme.brightness == Brightness.dark
-                ? AppColors.primary.primaryDarkMode
-                : AppColors.primary.primary,
-          ),
-        ),
-        const SizedBox(height: 16),
-        Text(
-          title,
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w600,
-            color: ThemeHelpers.textColor(context),
-          ),
-          textAlign: TextAlign.center,
-        ),
+        _buildIconBadge(context, icon, accent, size: 58, iconSize: 28),
+        const SizedBox(height: 14),
+        Text(title, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900, color: ThemeHelpers.textColor(context)), textAlign: TextAlign.center),
         const SizedBox(height: 8),
-        Text(
-          message,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(context),
-          ),
-          textAlign: TextAlign.center,
-        ),
+        Text(message, style: theme.textTheme.bodyMedium?.copyWith(color: ThemeHelpers.textSecondaryColor(context), height: 1.35), textAlign: TextAlign.center),
         if (actionLabel != null && onAction != null) ...[
           const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: onAction,
-            icon: const Icon(Icons.add, size: 18, color: Colors.white),
-            label: Text(
-              actionLabel,
-              style: const TextStyle(color: Colors.white),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: theme.brightness == Brightness.dark
-                  ? AppColors.primary.primaryDarkMode
-                  : AppColors.primary.primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
+          _buildHeaderActionButton(context: context, icon: Icons.arrow_forward_rounded, label: actionLabel, isPrimary: true, onTap: onAction),
         ],
       ],
     );
 
     if (isCard) {
       return Container(
-        padding: const EdgeInsets.all(32),
-        decoration: BoxDecoration(
-          color: ThemeHelpers.cardBackgroundColor(context),
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: ThemeHelpers.shadowColor(context),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
+        width: double.infinity,
+        padding: const EdgeInsets.all(24),
+        decoration: _inlineTileDecoration(context, radius: 24),
         child: content,
       );
     }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 24),
-      child: content,
-    );
+    return Padding(padding: const EdgeInsets.symmetric(vertical: 18), child: content);
   }
 
   Widget _buildSummaryCard({
@@ -1820,66 +1885,294 @@ class _DashboardPageState extends State<DashboardPage> {
     required IconData icon,
     required Color color,
   }) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final screenWidth = constraints.maxWidth;
-        final isSmall = screenWidth < 350;
-        final padding = isSmall ? 12.0 : 16.0;
-        final iconSize = isSmall ? 20.0 : 24.0;
-        final iconPadding = isSmall ? 8.0 : 12.0;
-
-        return Container(
-          padding: EdgeInsets.all(padding),
-          decoration: BoxDecoration(
-            color: ThemeHelpers.cardBackgroundColor(context),
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: ThemeHelpers.shadowColor(context),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
+    // Altura fixa: filhos de `Wrap` têm altura máxima ilimitada — `Spacer`/`Expanded`
+    // no eixo vertical quebram o layout e podem deixar o dashboard em branco.
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      height: 122,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(22),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            color.withOpacity(isDark ? 0.16 : 0.11),
+            color.withOpacity(isDark ? 0.05 : 0.04),
+          ],
+        ),
+        border: Border.all(color: _glassBorderColor(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildIconBadge(context, icon, color, size: 36, iconSize: 17),
+              Container(
+                width: 38,
+                height: 6,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  gradient: LinearGradient(colors: [color.withOpacity(0.16), color.withOpacity(0.72)]),
+                ),
               ),
             ],
           ),
-          child: Column(
+          Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                padding: EdgeInsets.all(iconPadding),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, color: color, size: iconSize),
-              ),
-              SizedBox(height: isSmall ? 12 : 16),
               FittedBox(
                 fit: BoxFit.scaleDown,
                 alignment: Alignment.centerLeft,
                 child: Text(
                   value,
-                  style: theme.textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w900,
                     color: ThemeHelpers.textColor(context),
-                    fontSize: isSmall ? 20 : null,
+                    letterSpacing: -0.6,
                   ),
                 ),
               ),
               const SizedBox(height: 4),
               Text(
-                title,
-                style: theme.textTheme.bodyMedium?.copyWith(
+                title.toUpperCase(),
+                style: theme.textTheme.labelSmall?.copyWith(
                   color: ThemeHelpers.textSecondaryColor(context),
-                  fontSize: isSmall ? 12 : null,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.1,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
-        );
-      },
+        ],
+      ),
     );
+  }
+
+  Widget _buildMiniInfoCard(BuildContext context, String label, String value, IconData icon, Color color) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: _inlineTileDecoration(context, radius: 16, accent: color),
+      child: Row(
+        children: [
+          _buildIconBadge(context, icon, color, size: 36, iconSize: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: theme.textTheme.labelSmall?.copyWith(color: ThemeHelpers.textSecondaryColor(context), fontWeight: FontWeight.w800)),
+                const SizedBox(height: 2),
+                Text(value, style: theme.textTheme.titleSmall?.copyWith(color: ThemeHelpers.textColor(context), fontWeight: FontWeight.w900), maxLines: 1, overflow: TextOverflow.ellipsis),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIconBadge(BuildContext context, IconData icon, Color color, {double size = 44, double iconSize = 22}) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(size * 0.33),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [color.withOpacity(0.95), color.withOpacity(0.62)],
+        ),
+        boxShadow: [BoxShadow(color: color.withOpacity(0.24), blurRadius: 16, offset: const Offset(0, 8))],
+      ),
+      child: Icon(icon, color: Colors.white, size: iconSize),
+    );
+  }
+
+  Widget _buildProgressStrip({
+    required BuildContext context,
+    required String label,
+    required String valueLabel,
+    required double value,
+    required Color color,
+  }) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(child: Text(label, style: theme.textTheme.bodySmall?.copyWith(color: ThemeHelpers.textSecondaryColor(context), fontWeight: FontWeight.w800))),
+            Text(valueLabel, style: theme.textTheme.bodySmall?.copyWith(color: color, fontWeight: FontWeight.w900)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: Stack(
+            children: [
+              Container(height: 9, color: color.withOpacity(0.12)),
+              FractionallySizedBox(
+                widthFactor: value,
+                child: Container(
+                  height: 9,
+                  decoration: BoxDecoration(gradient: LinearGradient(colors: [color.withOpacity(0.75), color])),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Color _dashboardAccentColor(BuildContext context) {
+    return Theme.of(context).brightness == Brightness.dark ? const Color(0xFFFF4D67) : AppColors.primary.primary;
+  }
+
+  Color _glassFillColor(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark ? Colors.white.withOpacity(0.045) : Colors.white.withOpacity(0.72);
+  }
+
+  Color _glassBorderColor(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.055);
+  }
+
+  /// Orbes desfocados por trás do conteúdo — leitura em camadas sem mais um “card” no topo.
+  List<Widget> _dashboardAmbientHighlights(BuildContext context) {
+    final accent = _dashboardAccentColor(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cool = isDark ? const Color(0xFF4F46E5) : const Color(0xFF818CF8);
+    return [
+      Positioned(
+        top: -72,
+        right: -48,
+        child: IgnorePointer(
+          child: Container(
+            width: 240,
+            height: 240,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: [
+                  accent.withOpacity(isDark ? 0.26 : 0.16),
+                  accent.withOpacity(0),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+      Positioned(
+        top: 280,
+        left: -110,
+        child: IgnorePointer(
+          child: Container(
+            width: 280,
+            height: 280,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: [
+                  cool.withOpacity(isDark ? 0.18 : 0.10),
+                  cool.withOpacity(0),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    ];
+  }
+
+  /// Superfície leve para itens em secções “no fundo” (sem painel elevado).
+  BoxDecoration _inlineTileDecoration(BuildContext context, {double radius = 16, Color? accent}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final a = accent ?? _dashboardAccentColor(context);
+    return BoxDecoration(
+      borderRadius: BorderRadius.circular(radius),
+      color: isDark ? Colors.white.withOpacity(0.042) : Colors.white.withOpacity(0.5),
+      border: Border.all(color: a.withOpacity(isDark ? 0.12 : 0.065)),
+    );
+  }
+
+  BoxDecoration _panelDecoration(BuildContext context, {Color? accent}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final effectiveAccent = accent ?? _dashboardAccentColor(context);
+    return BoxDecoration(
+      borderRadius: BorderRadius.circular(24),
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: isDark
+            ? [const Color(0xFF16151E), const Color(0xFF0E0E14)]
+            : [Colors.white, const Color(0xFFFFFCFC)],
+      ),
+      border: Border.all(color: effectiveAccent.withOpacity(isDark ? 0.16 : 0.09)),
+      boxShadow: [
+        BoxShadow(
+          color: effectiveAccent.withOpacity(isDark ? 0.14 : 0.07),
+          blurRadius: 28,
+          offset: const Offset(0, 14),
+        ),
+        BoxShadow(
+          color: isDark ? Colors.black.withOpacity(0.35) : Colors.black.withOpacity(0.04),
+          blurRadius: 18,
+          offset: const Offset(0, 8),
+        ),
+      ],
+    );
+  }
+
+  String _activePeriodLabel() {
+    switch (_filters.dateRange) {
+      case '7d':
+        return 'Últimos 7 dias';
+      case '30d':
+        return 'Últimos 30 dias';
+      case '90d':
+        return 'Últimos 90 dias';
+      case 'custom':
+        return 'Período personalizado';
+      default:
+        return 'Período atual';
+    }
+  }
+
+  String _activeComparisonLabel() {
+    switch (_filters.compareWith) {
+      case 'previous_period':
+        return 'Comparando período';
+      case 'previous_year':
+        return 'Comparando ano';
+      case 'none':
+        return 'Sem comparação';
+      default:
+        return 'Comparação ativa';
+    }
+  }
+
+  String _activeMetricLabel() {
+    switch (_filters.metric) {
+      case 'sales':
+        return 'Vendas';
+      case 'commissions':
+        return 'Comissões';
+      case 'properties':
+        return 'Imóveis';
+      case 'clients':
+        return 'Clientes';
+      default:
+        return 'Todas as métricas';
+    }
   }
 }

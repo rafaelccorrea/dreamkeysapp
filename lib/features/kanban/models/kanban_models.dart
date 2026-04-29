@@ -1,4 +1,5 @@
 /// Modelos de dados do sistema Kanban
+library;
 
 /// Prioridade da tarefa
 enum KanbanPriority {

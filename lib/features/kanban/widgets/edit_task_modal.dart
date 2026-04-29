@@ -28,7 +28,6 @@ class _EditTaskModalState extends State<EditTaskModal> {
   bool _isLoading = false;
   bool _loadingTags = false;
   List<KanbanUser> _projectMembers = [];
-  bool _loadingMembers = false;
 
   @override
   void initState() {
@@ -150,10 +149,6 @@ class _EditTaskModalState extends State<EditTaskModal> {
     debugPrint('👥 [EDIT_TASK_MODAL] ✅ Carregando membros do projeto...');
     debugPrint('   - projectId: $finalProjectId');
 
-    setState(() {
-      _loadingMembers = true;
-    });
-
     try {
       debugPrint('👥 [EDIT_TASK_MODAL] Chamando _kanbanService.getProjectMembers($finalProjectId)');
       final response = await _kanbanService.getProjectMembers(finalProjectId);
@@ -166,29 +161,22 @@ class _EditTaskModalState extends State<EditTaskModal> {
       
       if (response.success && response.data != null) {
         debugPrint('👥 [EDIT_TASK_MODAL] ✅ ${response.data!.length} membros carregados');
+        if (!mounted) return;
         setState(() {
-          // Converter ProjectMember para KanbanUser
           _projectMembers = response.data!
               .map((member) {
                 debugPrint('   - Membro: ${member.user.name} (${member.user.id}) - Role: ${member.role}');
                 return member.user;
               })
               .toList();
-          _loadingMembers = false;
         });
         debugPrint('👥 [EDIT_TASK_MODAL] ✅ _projectMembers atualizado com ${_projectMembers.length} usuários');
       } else {
         debugPrint('👥 [EDIT_TASK_MODAL] ❌ Erro ao carregar membros: ${response.message}');
-        setState(() {
-          _loadingMembers = false;
-        });
       }
     } catch (e, stackTrace) {
       debugPrint('👥 [EDIT_TASK_MODAL] ❌ Exceção ao carregar membros: $e');
       debugPrint('👥 [EDIT_TASK_MODAL] StackTrace: $stackTrace');
-      setState(() {
-        _loadingMembers = false;
-      });
     }
   }
 
@@ -437,7 +425,7 @@ class _EditTaskModalState extends State<EditTaskModal> {
                           child: Opacity(
                             opacity: isPersonalProject ? 0.6 : 1.0,
                             child: DropdownButtonFormField<String>(
-                              value: _selectedAssignedToId,
+                              initialValue: _selectedAssignedToId,
                               decoration: InputDecoration(
                                 labelText: 'Responsável *',
                                 border: const OutlineInputBorder(),
@@ -501,7 +489,7 @@ class _EditTaskModalState extends State<EditTaskModal> {
                     const SizedBox(height: 16),
                     // Prioridade
                     DropdownButtonFormField<KanbanPriority>(
-                      value: _selectedPriority,
+                      initialValue: _selectedPriority,
                       decoration: const InputDecoration(
                         labelText: 'Prioridade',
                         border: OutlineInputBorder(),

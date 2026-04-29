@@ -19,7 +19,7 @@ class SecureStorageService {
   static const String _keyBiometricEnabled = 'biometric_enabled';
   static const String _keyAccessToken = 'access_token';
   static const String _keyRefreshToken = 'refresh_token';
-  static const String _keyCompanyId = 'dream_keys_selected_company_id';
+  static const String _keyCompanyId = 'intellisys_selected_company_id';
 
   /// Salva as credenciais do usuário
   Future<void> saveCredentials({

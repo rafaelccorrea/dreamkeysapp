@@ -579,10 +579,10 @@ class _CreateInspectionPageState extends State<CreateInspectionPage> {
                         : () {
                             Navigator.pop(context);
                           },
-                    child: const Text('Cancelar'),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 16),
                     ),
+                    child: const Text('Cancelar'),
                   ),
                 ),
               ],

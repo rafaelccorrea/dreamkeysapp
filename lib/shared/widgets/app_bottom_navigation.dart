@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons/lucide_icons.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/routes/app_routes.dart';
@@ -65,9 +66,7 @@ class AppBottomNavigation extends StatelessWidget {
                   Expanded(
                     child: _buildNavItem(
                       context: context,
-                      icon: currentIndex == 1
-                          ? Icons.home
-                          : Icons.home_outlined,
+                      icon: LucideIcons.home,
                       label: 'Imóveis',
                       isSelected: currentIndex == 1,
                       color: currentIndex == 1 ? primaryColor : unselectedColor,
@@ -80,9 +79,7 @@ class AppBottomNavigation extends StatelessWidget {
                   // Agenda (próximo ao centro)
                   _buildNavItem(
                     context: context,
-                    icon: currentIndex == 2
-                        ? Icons.calendar_today
-                        : Icons.calendar_today_outlined,
+                    icon: LucideIcons.calendar,
                     label: 'Agenda',
                     isSelected: currentIndex == 2,
                     color: currentIndex == 2 ? primaryColor : unselectedColor,
@@ -95,9 +92,7 @@ class AppBottomNavigation extends StatelessWidget {
                   // Clientes (próximo ao centro)
                   _buildNavItem(
                     context: context,
-                    icon: currentIndex == 3
-                        ? Icons.people
-                        : Icons.people_outline,
+                    icon: LucideIcons.users,
                     label: 'Clientes',
                     isSelected: currentIndex == 3,
                     color: currentIndex == 3 ? primaryColor : unselectedColor,
@@ -110,9 +105,7 @@ class AppBottomNavigation extends StatelessWidget {
                   Expanded(
                     child: _buildNavItem(
                       context: context,
-                      icon: currentIndex == 4
-                          ? Icons.person
-                          : Icons.person_outline,
+                      icon: LucideIcons.userCircle,
                       label: 'Perfil',
                       isSelected: currentIndex == 4,
                       color: currentIndex == 4 ? primaryColor : unselectedColor,
@@ -152,9 +145,7 @@ class AppBottomNavigation extends StatelessWidget {
                   ),
                 ),
                 child: Icon(
-                  currentIndex == 0
-                      ? Icons.dashboard
-                      : Icons.dashboard_outlined,
+                  LucideIcons.layoutDashboard,
                   color: currentIndex == 0 ? Colors.white : unselectedColor,
                   size: 28,
                 ),
@@ -252,12 +243,15 @@ class AppBottomNavigation extends StatelessWidget {
     if (routeName == null) return 0;
 
     if (routeName == AppRoutes.home) return 0;
-    if (routeName == AppRoutes.properties || routeName.startsWith('/properties'))
+    if (routeName == AppRoutes.properties || routeName.startsWith('/properties')) {
       return 1;
-    if (routeName == AppRoutes.calendar || routeName.startsWith('/calendar'))
+    }
+    if (routeName == AppRoutes.calendar || routeName.startsWith('/calendar')) {
       return 2;
-    if (routeName == AppRoutes.clients || routeName.startsWith('/clients'))
+    }
+    if (routeName == AppRoutes.clients || routeName.startsWith('/clients')) {
       return 3;
+    }
     if (routeName == AppRoutes.profile || 
         routeName == AppRoutes.profileEdit ||
         routeName == AppRoutes.documents ||
@@ -265,8 +259,9 @@ class AppBottomNavigation extends StatelessWidget {
         routeName == AppRoutes.chat ||
         routeName.startsWith('/documents') ||
         routeName.startsWith('/signatures') ||
-        routeName.startsWith('/chat'))
+        routeName.startsWith('/chat')) {
       return 4; // Documentos, assinaturas e chat ficam no mesmo grupo do perfil
+    }
     return 0;
   }
 
@@ -310,8 +305,9 @@ class AppBottomNavigation extends StatelessWidget {
       case 4:
         // Se já está na tela de perfil, não navega novamente
         if (currentRoute == AppRoutes.profile ||
-            currentRoute == AppRoutes.profileEdit)
+            currentRoute == AppRoutes.profileEdit) {
           return;
+        }
         Navigator.of(context).pushNamed(AppRoutes.profile);
         break;
     }

@@ -369,8 +369,8 @@ class KanbanService {
                   debugPrint('🔍 [KANBAN_SERVICE]       [$i]: ${value[i]}');
                 }
               } else if (value is Map) {
-                debugPrint('🔍 [KANBAN_SERVICE]     (Map com ${(value as Map).length} chaves)');
-                (value as Map).forEach((k, v) {
+                debugPrint('🔍 [KANBAN_SERVICE]     (Map com ${value.length} chaves)');
+                value.forEach((k, v) {
                   debugPrint('🔍 [KANBAN_SERVICE]       $k: $v');
                 });
               }

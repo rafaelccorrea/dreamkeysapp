@@ -17,7 +17,7 @@ class ChatUnreadController extends ChangeNotifier {
   final ChatSocketService _chatSocket = ChatSocketService.instance;
 
   int _totalUnreadCount = 0;
-  Map<String, int> _roomUnreadCounts = {};
+  final Map<String, int> _roomUnreadCounts = {};
   String? _currentUserId;
   String? _currentlyOpenRoomId; // ID da sala que está aberta no ChatPage
 

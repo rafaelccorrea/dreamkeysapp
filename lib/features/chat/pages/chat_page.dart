@@ -558,8 +558,9 @@ class _ChatPageState extends State<ChatPage>
   }
 
   Future<void> _handleSendMessage(String content, {File? file}) async {
-    if (_selectedRoom == null || (content.trim().isEmpty && file == null))
+    if (_selectedRoom == null || (content.trim().isEmpty && file == null)) {
       return;
+    }
 
     // Criar mensagem temporária para feedback imediato
     final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';

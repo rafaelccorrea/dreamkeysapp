@@ -89,9 +89,9 @@ class NotificationWebSocketService {
     // Converter https:// para ws:// ou wss://
     final baseUrl = ApiConstants.baseUrl;
     if (baseUrl.startsWith('https://')) {
-      return baseUrl.replaceFirst('https://', 'wss://') + '/notifications';
+      return '${baseUrl.replaceFirst('https://', 'wss://')}/notifications';
     } else if (baseUrl.startsWith('http://')) {
-      return baseUrl.replaceFirst('http://', 'ws://') + '/notifications';
+      return '${baseUrl.replaceFirst('http://', 'ws://')}/notifications';
     }
     return '$baseUrl/notifications';
   }

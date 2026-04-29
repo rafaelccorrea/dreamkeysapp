@@ -1,0 +1,2 @@
+# PC (ipconfig — Ethernet 3). Celular precisa estar na mesma rede 192.168.5.x.
+192.168.5.209

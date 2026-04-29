@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../../core/constants/api_constants.dart';
+import '../../core/utils/api_connection_message.dart';
 import 'secure_storage_service.dart';
 import 'auth_service.dart';
 import '../utils/jwt_utils.dart';
@@ -414,8 +415,12 @@ class ApiService {
         );
       }
 
+      debugPrint(
+        '❌ [API_SERVICE] Falha de rede → ${ApiConstants.baseApiUrl}$endpoint → $e',
+      );
+
       return ApiResponse.error(
-        message: 'Erro de conexão: ${e.toString()}',
+        message: ApiConnectionMessage.forException(e),
         statusCode: 0,
       );
     }
@@ -485,7 +490,14 @@ class ApiService {
 
     if (statusCode >= 200 && statusCode < 300) {
       debugPrint('✅ [API_SERVICE] Status code OK, retornando success');
-      return ApiResponse.success(data: body is T ? body : null, statusCode: statusCode);
+      // jsonDecode às vezes devolve Map sem reificação Map<String, dynamic>, e
+      // `body is T` falha — o dashboard (e outros GET) ficavam sem `data` mesmo com 200.
+      dynamic normalized = body;
+      if (body is Map && body is! Map<String, dynamic>) {
+        normalized = Map<String, dynamic>.from(body);
+      }
+      final data = normalized is T ? normalized as T : null;
+      return ApiResponse.success(data: data, statusCode: statusCode);
     } else {
       debugPrint('❌ [API_SERVICE] Status code de erro');
       final errorMessage = _extractErrorMessage(body);

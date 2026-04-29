@@ -23,7 +23,7 @@ class _UploadTokensModalState extends State<UploadTokensModal> {
   final DocumentService _documentService = DocumentService.instance;
   final ClientService _clientService = ClientService.instance;
   
-  List<UploadToken> _tokens = [];
+  final List<UploadToken> _tokens = [];
   bool _isLoading = true;
   bool _isCreating = false;
   
@@ -610,7 +610,7 @@ class _UploadTokensModalState extends State<UploadTokensModal> {
                     ),
                   ).copyWith(
                     backgroundColor: (_selectedClientId == null || _selectedClientId!.isEmpty)
-                        ? MaterialStateProperty.all(ThemeHelpers.borderLightColor(context))
+                        ? WidgetStateProperty.all(ThemeHelpers.borderLightColor(context))
                         : null,
                   ),
                   child: _isCreating

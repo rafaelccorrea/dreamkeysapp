@@ -6,10 +6,11 @@ import '../../../../shared/services/profile_service.dart';
 
 /// Modal para gerenciamento de sessões
 class SessionsModal {
-  static void show({
+  /// Retorna quando o sheet é fechado (útil para atualizar lista/contagem na tela pai).
+  static Future<void> show({
     required BuildContext context,
   }) {
-    showModalBottomSheet(
+    return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,

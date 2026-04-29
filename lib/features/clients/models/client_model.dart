@@ -107,7 +107,8 @@ enum ClientSource {
   olx('olx', 'OLX'),
   zapImoveis('zap_imoveis', 'Zap Imóveis'),
   vivaReal('viva_real', 'Viva Real'),
-  dreamKeys('dream_keys', 'Dream Keys'),
+  /// Valor `dream_keys` mantido para compatibilidade com API/enum do backend (site público).
+  intellisys('dream_keys', 'Intellisys'),
   other('other', 'Outro');
 
   final String value;
@@ -1042,27 +1043,33 @@ class ClientSearchFilters {
     if (email != null && email!.isNotEmpty) params['email'] = email!;
     if (phone != null && phone!.isNotEmpty) params['phone'] = phone!;
     if (search != null && search!.isNotEmpty) params['search'] = search!;
-    if (document != null && document!.isNotEmpty)
+    if (document != null && document!.isNotEmpty) {
       params['document'] = document!;
+    }
     if (city != null && city!.isNotEmpty) params['city'] = city!;
-    if (neighborhood != null && neighborhood!.isNotEmpty)
+    if (neighborhood != null && neighborhood!.isNotEmpty) {
       params['neighborhood'] = neighborhood!;
+    }
     if (state != null && state!.isNotEmpty) params['state'] = state!;
     if (type != null) params['type'] = type!.value;
     if (status != null) params['status'] = status!.value;
-    if (responsibleUserId != null && responsibleUserId!.isNotEmpty)
+    if (responsibleUserId != null && responsibleUserId!.isNotEmpty) {
       params['responsibleUserId'] = responsibleUserId!;
+    }
     if (isActive != null) params['isActive'] = isActive.toString();
     if (onlyMyData != null) params['onlyMyData'] = onlyMyData.toString();
-    if (createdFrom != null && createdFrom!.isNotEmpty)
+    if (createdFrom != null && createdFrom!.isNotEmpty) {
       params['createdFrom'] = createdFrom!;
-    if (createdTo != null && createdTo!.isNotEmpty)
+    }
+    if (createdTo != null && createdTo!.isNotEmpty) {
       params['createdTo'] = createdTo!;
+    }
     if (limit != null) params['limit'] = limit.toString();
     if (page != null) params['page'] = page.toString();
     if (sortBy != null && sortBy!.isNotEmpty) params['sortBy'] = sortBy!;
-    if (sortOrder != null && sortOrder!.isNotEmpty)
+    if (sortOrder != null && sortOrder!.isNotEmpty) {
       params['sortOrder'] = sortOrder!;
+    }
     return params;
   }
 }
@@ -1133,9 +1140,7 @@ class ClientListResponse {
 
       // Se ainda não encontrou, tentar verificar se o próprio json é uma lista
       // (isso não deve acontecer aqui, mas por segurança)
-      if (dataList == null) {
-        dataList = [];
-      }
+      dataList ??= [];
 
       return ClientListResponse(
         data: dataList

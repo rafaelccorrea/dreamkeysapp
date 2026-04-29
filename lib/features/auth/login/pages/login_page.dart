@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../../../shared/services/auth_service.dart';
 import '../../../../shared/services/biometric_service.dart';
 import '../../../../shared/services/secure_storage_service.dart';
 import '../../../../shared/services/login_flow_service.dart';
+import '../../../../core/constants/app_assets.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../../../../shared/widgets/image_curve_clipper.dart';
@@ -562,35 +564,43 @@ class _LoginPageState extends State<LoginPage> {
     final theme = Theme.of(context);
     final screenHeight = MediaQuery.of(context).size.height;
     final screenWidth = MediaQuery.of(context).size.width;
+    final isDark = theme.brightness == Brightness.dark;
 
     return LoadingOverlay(
       isLoading: _isLoading,
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor:
+            isDark ? AppColors.background.backgroundDarkMode : Colors.white,
         body: SafeArea(
           child: SingleChildScrollView(
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // PARTE SUPERIOR com background.jpg - REDUZIDA e COM CURVA
                 Stack(
                   children: [
-                    // Fundo branco completo (aparece na área cortada pela curva)
                     Container(
                       height: screenHeight * 0.35,
                       width: double.infinity,
-                      color: Colors.white,
+                      color: isDark
+                          ? AppColors.background.backgroundSecondaryDarkMode
+                          : Colors.white,
                     ),
-                    // Imagem cortada pela curva (a área cortada mostra o branco de fundo)
                     SizedBox(
                       height: screenHeight * 0.35,
                       width: double.infinity,
                       child: ClipPath(
                         clipper: ImageCurveClipper(),
                         child: Container(
-                          decoration: const BoxDecoration(
+                          decoration: BoxDecoration(
                             image: DecorationImage(
-                              image: AssetImage('assets/images/background.jpg'),
+                              image: const AssetImage(AppAssets.backgroundLogin),
                               fit: BoxFit.cover,
+                              colorFilter: isDark
+                                  ? ColorFilter.mode(
+                                      Colors.black.withValues(alpha: 0.5),
+                                      BlendMode.darken,
+                                    )
+                                  : null,
                             ),
                           ),
                           child: Container(
@@ -599,8 +609,12 @@ class _LoginPageState extends State<LoginPage> {
                                 begin: Alignment.topCenter,
                                 end: Alignment.bottomCenter,
                                 colors: [
-                                  Colors.white.withOpacity(0.2),
-                                  Colors.white.withOpacity(0.7),
+                                  Colors.white.withValues(
+                                    alpha: isDark ? 0.08 : 0.2,
+                                  ),
+                                  Colors.white.withValues(
+                                    alpha: isDark ? 0.35 : 0.72,
+                                  ),
                                 ],
                               ),
                             ),
@@ -610,57 +624,74 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ],
                 ),
-
-                // PARTE INFERIOR com formulário
                 Container(
                   width: double.infinity,
-                  decoration: const BoxDecoration(color: Colors.white),
+                  color: isDark
+                      ? AppColors.background.backgroundDarkMode
+                      : Colors.white,
                   padding: EdgeInsets.symmetric(
                     horizontal: screenWidth * 0.08,
-                    vertical: screenHeight * 0.04,
+                    vertical: screenHeight * 0.035,
                   ),
                   child: Form(
                     key: _formKey,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Título "Bem-vindo de volta"
                         Text(
                           'Bem-vindo',
                           style: theme.textTheme.displaySmall?.copyWith(
-                            fontWeight: FontWeight.w400,
-                            color: AppColors.text.text,
-                            letterSpacing: 0.5,
-                          ),
+                                fontWeight: FontWeight.w400,
+                                color: isDark
+                                    ? AppColors.text.textDarkMode
+                                    : AppColors.text.text,
+                                letterSpacing: 0.5,
+                              ) ??
+                              GoogleFonts.poppins(
+                                fontSize: 28,
+                                fontWeight: FontWeight.w400,
+                                color: isDark
+                                    ? AppColors.text.textDarkMode
+                                    : AppColors.text.text,
+                              ),
                         ),
                         Text(
                           'de volta!',
                           style: theme.textTheme.displaySmall?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.primary.primary,
-                            letterSpacing: -0.5,
-                            height: 0.9,
-                          ),
+                                fontWeight: FontWeight.w800,
+                                color: isDark
+                                    ? AppColors.primary.primaryDarkMode
+                                    : AppColors.primary.primary,
+                                letterSpacing: -0.5,
+                                height: 0.95,
+                              ) ??
+                              GoogleFonts.poppins(
+                                fontSize: 28,
+                                fontWeight: FontWeight.w800,
+                                color: isDark
+                                    ? AppColors.primary.primaryDarkMode
+                                    : AppColors.primary.primary,
+                                height: 0.95,
+                              ),
                         ),
-
-                        SizedBox(height: screenHeight * 0.01),
-                        // Subtítulo
+                        SizedBox(height: screenHeight * 0.012),
                         Text(
                           'Entre na sua conta',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: AppColors.text.textSecondary,
-                            letterSpacing: 0.3,
+                          style: GoogleFonts.poppins(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w400,
+                            color: isDark
+                                ? AppColors.text.textSecondaryDarkMode
+                                : AppColors.text.textSecondary,
+                            letterSpacing: 0.2,
                           ),
                         ),
-
-                        SizedBox(height: screenHeight * 0.025),
-
-                        // Email Field
+                        SizedBox(height: screenHeight * 0.028),
                         _buildTextField(
                           context: context,
+                          isDark: isDark,
                           controller: _emailController,
-                          labelText: 'Email',
-                          prefixIcon: Icons.email_outlined,
+                          labelText: 'E-mail',
                           keyboardType: TextInputType.emailAddress,
                           focusNode: _emailFocusNode,
                           validator: _validateEmail,
@@ -669,58 +700,63 @@ class _LoginPageState extends State<LoginPage> {
                             _passwordFocusNode.requestFocus();
                           },
                         ),
-
-                        SizedBox(height: screenHeight * 0.02),
-                        // Password Field
+                        SizedBox(height: screenHeight * 0.018),
                         _buildTextField(
                           context: context,
+                          isDark: isDark,
                           controller: _passwordController,
                           labelText: 'Senha',
-                          prefixIcon: Icons.lock_outline,
                           obscureText: _obscureText,
                           focusNode: _passwordFocusNode,
                           validator: _validatePassword,
                           onSubmitted: (_) {
                             _handleLogin();
                           },
-                          suffixIcon: _buildPasswordToggle(),
+                          suffixIcon: _buildPasswordToggle(isDark),
                         ),
-
-                        SizedBox(height: screenHeight * 0.03),
-                        // Login Button
-                        _buildLoginButton(screenHeight),
-
-                        // Log de debug para ver estado atual
-                        Builder(
-                          builder: (context) {
-                            debugPrint(
-                              '🔍 [UI] Build - Biometria: $_biometricAvailable, Credenciais: $_hasSavedCredentials, Tipo: $_biometricType',
-                            );
-                            return const SizedBox.shrink();
-                          },
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: () {
+                              Navigator.of(context).pushNamed(
+                                AppRoutes.forgotPassword,
+                              );
+                            },
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            child: Text(
+                              'Esqueceu a senha?',
+                              style: GoogleFonts.poppins(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: isDark
+                                    ? AppColors.primary.primaryDarkMode
+                                    : AppColors.primary.primary,
+                              ),
+                            ),
+                          ),
                         ),
-
-                        // Botão de Biometria (se disponível e há credenciais salvas)
+                        SizedBox(height: screenHeight * 0.02),
+                        _buildLoginButton(screenHeight, isDark),
                         if (_biometricAvailable &&
                             _hasSavedCredentials &&
                             !_isLoading) ...[
-                          SizedBox(height: screenHeight * 0.02),
-                          _buildBiometricButton(),
+                          const SizedBox(height: 14),
+                          _buildBiometricButton(isDark),
                         ],
-
-                        // Checkbox para salvar credenciais (se biometria disponível e não há credenciais salvas)
                         if (_biometricAvailable &&
                             !_hasSavedCredentials &&
                             !_isLoading) ...[
-                          SizedBox(height: screenHeight * 0.02),
-                          _buildSaveCredentialsCheckbox(),
+                          const SizedBox(height: 12),
+                          _buildSaveCredentialsCheckbox(isDark),
                         ],
-
-                        SizedBox(height: screenHeight * 0.03),
-                        // Links de Ajuda
-                        _buildHelpLinks(),
-
-                        SizedBox(height: screenHeight * 0.02),
                       ],
                     ),
                   ),
@@ -735,9 +771,9 @@ class _LoginPageState extends State<LoginPage> {
 
   Widget _buildTextField({
     required BuildContext context,
+    required bool isDark,
     required TextEditingController controller,
     required String labelText,
-    required IconData prefixIcon,
     TextInputType? keyboardType,
     bool obscureText = false,
     Widget? suffixIcon,
@@ -746,7 +782,17 @@ class _LoginPageState extends State<LoginPage> {
     void Function(String)? onSubmitted,
     TextInputAction? textInputAction,
   }) {
-    final theme = Theme.of(context);
+    final accent =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    final fillColor = isDark
+        ? AppColors.background.backgroundTertiaryDarkMode
+        : const Color(0xFFF3F4F6);
+    final borderColor = isDark
+        ? AppColors.border.borderDarkMode.withValues(alpha: 0.9)
+        : AppColors.border.border;
+    final labelMuted =
+        isDark ? AppColors.text.textLightDarkMode : AppColors.text.textLight;
+
     return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
@@ -756,316 +802,244 @@ class _LoginPageState extends State<LoginPage> {
       textInputAction:
           textInputAction ??
           (onSubmitted != null ? TextInputAction.next : TextInputAction.done),
-      style: theme.textTheme.bodyLarge?.copyWith(
-        color:
-            AppColors.text.text, // Sempre cor de texto do light mode no input
+      style: GoogleFonts.poppins(
+        fontSize: 15,
+        fontWeight: FontWeight.w400,
+        color: isDark ? AppColors.text.textDarkMode : AppColors.text.text,
+        height: 1.25,
       ),
       decoration: InputDecoration(
+        isDense: true,
         labelText: labelText,
-        labelStyle: TextStyle(
-          color: AppColors.primary.primary,
+        floatingLabelBehavior: FloatingLabelBehavior.auto,
+        labelStyle: GoogleFonts.poppins(
+          color: labelMuted,
+          fontSize: 14,
+          fontWeight: FontWeight.w400,
+        ),
+        floatingLabelStyle: GoogleFonts.poppins(
+          color: accent,
           fontSize: 13,
           fontWeight: FontWeight.w500,
         ),
-        prefixIcon: Container(
-          margin: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: AppColors.primary.primary.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Icon(prefixIcon, color: AppColors.primary.primary, size: 20),
-        ),
         suffixIcon: suffixIcon,
+        suffixIconConstraints: const BoxConstraints(
+          minWidth: 40,
+          minHeight: 40,
+        ),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide(color: AppColors.border.borderLight, width: 1),
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: borderColor, width: 1),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide(color: AppColors.border.borderLight, width: 1),
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: borderColor, width: 1),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide(color: AppColors.primary.primary, width: 1.5),
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: accent, width: 1.5),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(
-            color: AppColors.status.error.withOpacity(0.6),
+            color: AppColors.status.error.withValues(alpha: 0.7),
             width: 1,
           ),
         ),
         focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide(color: AppColors.status.error, width: 1.5),
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: AppColors.status.error, width: 1.25),
         ),
-        errorStyle: theme.textTheme.bodySmall?.copyWith(
+        errorStyle: GoogleFonts.poppins(
           color: AppColors.status.error,
           fontSize: 11,
           height: 1.2,
         ),
-        errorMaxLines: 1,
+        errorMaxLines: 2,
         filled: true,
-        fillColor: Colors.white,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 16,
-        ),
+        fillColor: fillColor,
+        contentPadding: const EdgeInsets.fromLTRB(16, 18, 12, 18),
       ),
       validator: validator,
     );
   }
 
-  Widget _buildPasswordToggle() {
-    return Container(
-      margin: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.primary.primary.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(10),
+  Widget _buildPasswordToggle(bool isDark) {
+    final muted = isDark
+        ? AppColors.text.textSecondaryDarkMode
+        : AppColors.text.textSecondary;
+
+    return IconButton(
+      visualDensity: VisualDensity.compact,
+      style: IconButton.styleFrom(
+        foregroundColor: muted,
+        hoverColor: muted.withValues(alpha: 0.08),
+        minimumSize: const Size(40, 40),
+        padding: EdgeInsets.zero,
       ),
-      child: IconButton(
-        icon: Icon(
-          _obscureText
-              ? Icons.visibility_outlined
-              : Icons.visibility_off_outlined,
-          color: AppColors.primary.primary,
-          size: 20,
-        ),
-        onPressed: () {
-          setState(() {
-            _obscureText = !_obscureText;
-          });
-        },
+      icon: Icon(
+        _obscureText
+            ? Icons.visibility_outlined
+            : Icons.visibility_off_outlined,
+        size: 20,
       ),
+      tooltip: _obscureText ? 'Mostrar senha' : 'Ocultar senha',
+      onPressed: () {
+        setState(() {
+          _obscureText = !_obscureText;
+        });
+      },
     );
   }
 
-  Widget _buildLoginButton(double screenHeight) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
+  Widget _buildLoginButton(double screenHeight, bool isDark) {
+    final base = isDark
+        ? AppColors.primary.primaryDarkMode
+        : AppColors.primary.primary;
+
+    return SizedBox(
       width: double.infinity,
-      height: 56,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        color: _isLoading
-            ? AppColors.primary.primaryDarkMode
-            : AppColors.primary.primary,
-        boxShadow: _isLoading
-            ? [
-                BoxShadow(
-                  color: AppColors.primary.primary.withOpacity(0.2),
-                  blurRadius: 15,
-                  spreadRadius: 0,
-                  offset: const Offset(0, 6),
-                ),
-              ]
-            : [
-                BoxShadow(
-                  color: AppColors.primary.primary.withOpacity(0.3),
-                  blurRadius: 20,
-                  spreadRadius: 0,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: _isLoading
-              ? null
-              : () {
-                  // Feedback haptic (se disponível)
-                  FocusScope.of(context).unfocus();
-                  _handleLogin();
-                },
-          borderRadius: BorderRadius.circular(16),
-          splashColor: Colors.white.withOpacity(0.2),
-          highlightColor: Colors.white.withOpacity(0.1),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (_isLoading)
-                  Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    ),
-                  )
-                else
-                  AnimatedOpacity(
-                    opacity: _isLoading ? 0.5 : 1.0,
-                    duration: const Duration(milliseconds: 200),
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(
-                        Icons.login_rounded,
-                        color: Colors.white,
-                        size: 20,
-                      ),
-                    ),
-                  ),
-                const SizedBox(width: 12),
-                AnimatedDefaultTextStyle(
-                  duration: const Duration(milliseconds: 200),
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                    fontSize: _isLoading ? 15 : 16,
-                    letterSpacing: 0.5,
-                  ),
-                  child: Text(_isLoading ? 'Entrando...' : 'Entrar'),
-                ),
-              ],
-            ),
+      height: 50,
+      child: FilledButton(
+        onPressed: _isLoading
+            ? null
+            : () {
+                FocusScope.of(context).unfocus();
+                _handleLogin();
+              },
+        style: FilledButton.styleFrom(
+          elevation: 0,
+          shadowColor: Colors.transparent,
+          backgroundColor: base,
+          foregroundColor: Colors.white,
+          disabledForegroundColor: Colors.white.withValues(alpha: 0.85),
+          disabledBackgroundColor: base.withValues(alpha: 0.55),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          textStyle: GoogleFonts.poppins(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.2,
           ),
         ),
+        child: _isLoading
+            ? const SizedBox(
+                height: 22,
+                width: 22,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.2,
+                  color: Colors.white,
+                ),
+              )
+            : const Text('Entrar'),
       ),
     );
   }
 
-  Widget _buildBiometricButton() {
-    return Container(
+  Widget _buildBiometricButton(bool isDark) {
+    final borderColor = isDark
+        ? AppColors.border.borderDarkMode
+        : AppColors.border.border;
+    final fg = isDark
+        ? AppColors.text.textDarkMode
+        : AppColors.text.text;
+
+    return SizedBox(
       width: double.infinity,
-      height: 56,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: AppColors.primary.primary.withOpacity(0.3),
-          width: 1.5,
-        ),
-        color: Colors.transparent,
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: _isLoading ? null : () => _handleBiometricLogin(isManual: true),
-          borderRadius: BorderRadius.circular(16),
-          splashColor: AppColors.primary.primary.withOpacity(0.1),
-          highlightColor: AppColors.primary.primary.withOpacity(0.05),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  _biometricType.contains('Face')
-                      ? Icons.face_outlined
-                      : Icons.fingerprint_outlined,
-                  color: AppColors.primary.primary,
-                  size: 24,
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  'Entrar com $_biometricType',
-                  style: TextStyle(
-                    color: AppColors.primary.primary,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 16,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ],
-            ),
+      height: 48,
+      child: OutlinedButton(
+        onPressed: _isLoading ? null : () => _handleBiometricLogin(isManual: true),
+        style: OutlinedButton.styleFrom(
+          elevation: 0,
+          foregroundColor: fg,
+          side: BorderSide(color: borderColor, width: 1),
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          textStyle: GoogleFonts.poppins(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
           ),
         ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              _biometricType.contains('Face')
+                  ? Icons.face_outlined
+                  : Icons.fingerprint_outlined,
+              size: 20,
+              color: fg.withValues(alpha: 0.85),
+            ),
+            const SizedBox(width: 10),
+            Text('Entrar com $_biometricType'),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildSaveCredentialsCheckbox() {
-    debugPrint(
-      '🔲 [CHECKBOX] Renderizando checkbox - Biometria: $_biometricAvailable, Salvar: $_saveCredentials',
-    );
+  Widget _buildSaveCredentialsCheckbox(bool isDark) {
+    final accent =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    final labelColor = isDark
+        ? AppColors.text.textSecondaryDarkMode
+        : AppColors.text.textSecondary;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            height: 24,
-            width: 24,
+            height: 26,
+            width: 26,
             child: Checkbox(
               value: _saveCredentials,
               onChanged: (value) {
-                debugPrint(
-                  '☑️ [CHECKBOX] Checkbox alterado: ${value ?? false}',
-                );
                 setState(() {
                   _saveCredentials = value ?? false;
                 });
               },
-              activeColor: AppColors.primary.primary,
+              activeColor: accent,
+              side: BorderSide(
+                color: isDark
+                    ? AppColors.border.borderDarkMode
+                    : AppColors.border.border,
+                width: 1.5,
+              ),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(4),
               ),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           Expanded(
             child: GestureDetector(
               onTap: () {
-                debugPrint(
-                  '👆 [CHECKBOX] Texto clicado, alternando de $_saveCredentials',
-                );
                 setState(() {
                   _saveCredentials = !_saveCredentials;
                 });
               },
-              child: Text(
-                'Salvar credenciais para $_biometricType',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppColors.text.textSecondary,
-                  fontSize: 14,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  'Salvar credenciais para login com $_biometricType',
+                  style: GoogleFonts.poppins(
+                    color: labelColor,
+                    fontSize: 13,
+                    height: 1.35,
+                  ),
                 ),
               ),
             ),
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildHelpLinks() {
-    return Column(
-      children: [
-        // Esqueceu a senha - Alinhado à esquerda
-        Row(
-          children: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pushNamed(AppRoutes.forgotPassword);
-              },
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 0,
-                  vertical: 12,
-                ),
-              ),
-              child: Text(
-                'Esqueceu a senha?',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppColors.primary.primary,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
     );
   }
 }

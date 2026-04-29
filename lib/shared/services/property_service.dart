@@ -170,7 +170,7 @@ class Property {
 
   factory Property.fromJson(Map<String, dynamic> json) {
     // Helper para converter valores que podem vir como String ou num
-    double? _parseDouble(dynamic value) {
+    double? parseDouble(dynamic value) {
       if (value == null) return null;
       if (value is num) return value.toDouble();
       if (value is String) {
@@ -180,7 +180,7 @@ class Property {
       return null;
     }
 
-    int? _parseInt(dynamic value) {
+    int? parseInt(dynamic value) {
       if (value == null) return null;
       if (value is num) return value.toInt();
       if (value is String) {
@@ -205,15 +205,15 @@ class Property {
       state: json['state']?.toString() ?? '',
       zipCode: json['zipCode']?.toString() ?? json['zip_code']?.toString() ?? '',
       neighborhood: json['neighborhood']?.toString() ?? '',
-      totalArea: _parseDouble(json['totalArea'] ?? json['total_area']) ?? 0.0,
-      builtArea: _parseDouble(json['builtArea'] ?? json['built_area']),
-      bedrooms: _parseInt(json['bedrooms']),
-      bathrooms: _parseInt(json['bathrooms']),
-      parkingSpaces: _parseInt(json['parkingSpaces'] ?? json['parking_spaces']),
-      salePrice: _parseDouble(json['salePrice'] ?? json['sale_price']),
-      rentPrice: _parseDouble(json['rentPrice'] ?? json['rent_price']),
-      condominiumFee: _parseDouble(json['condominiumFee'] ?? json['condominium_fee']),
-      iptu: _parseDouble(json['iptu']),
+      totalArea: parseDouble(json['totalArea'] ?? json['total_area']) ?? 0.0,
+      builtArea: parseDouble(json['builtArea'] ?? json['built_area']),
+      bedrooms: parseInt(json['bedrooms']),
+      bathrooms: parseInt(json['bathrooms']),
+      parkingSpaces: parseInt(json['parkingSpaces'] ?? json['parking_spaces']),
+      salePrice: parseDouble(json['salePrice'] ?? json['sale_price']),
+      rentPrice: parseDouble(json['rentPrice'] ?? json['rent_price']),
+      condominiumFee: parseDouble(json['condominiumFee'] ?? json['condominium_fee']),
+      iptu: parseDouble(json['iptu']),
       features: json['features'] != null
           ? List<String>.from((json['features'] as List).map((e) => e.toString()))
           : [],
@@ -230,7 +230,7 @@ class Property {
               : null,
       createdAt: json['createdAt']?.toString() ?? json['created_at']?.toString() ?? '',
       updatedAt: json['updatedAt']?.toString() ?? json['updated_at']?.toString() ?? '',
-      imageCount: _parseInt(json['imageCount'] ?? json['image_count']),
+      imageCount: parseInt(json['imageCount'] ?? json['image_count']),
       images: json['images'] != null
           ? (json['images'] as List).map((e) => PropertyImage.fromJson(e as Map<String, dynamic>)).toList()
           : null,
@@ -242,24 +242,24 @@ class Property {
       clients: json['clients'] != null
           ? (json['clients'] as List).map((e) => PropertyClient.fromJson(e as Map<String, dynamic>)).toList()
           : null,
-      clientCount: _parseInt(json['clientCount'] ?? json['client_count']),
+      clientCount: parseInt(json['clientCount'] ?? json['client_count']),
       owner: json['owner'] != null
           ? PropertyOwner.fromJson(json['owner'] as Map<String, dynamic>)
           : null,
       acceptsNegotiation: json['acceptsNegotiation'] as bool? ?? json['accepts_negotiation'] as bool?,
-      minSalePrice: _parseDouble(json['minSalePrice'] ?? json['min_sale_price']),
-      minRentPrice: _parseDouble(json['minRentPrice'] ?? json['min_rent_price']),
+      minSalePrice: parseDouble(json['minSalePrice'] ?? json['min_sale_price']),
+      minRentPrice: parseDouble(json['minRentPrice'] ?? json['min_rent_price']),
       offerBelowMinSaleAction: json['offerBelowMinSaleAction']?.toString() ?? json['offer_below_min_sale_action']?.toString(),
       offerBelowMinRentAction: json['offerBelowMinRentAction']?.toString() ?? json['offer_below_min_rent_action']?.toString(),
-      totalOffersCount: _parseInt(json['totalOffersCount'] ?? json['total_offers_count']),
-      pendingOffersCount: _parseInt(json['pendingOffersCount'] ?? json['pending_offers_count']),
-      acceptedOffersCount: _parseInt(json['acceptedOffersCount'] ?? json['accepted_offers_count']),
-      rejectedOffersCount: _parseInt(json['rejectedOffersCount'] ?? json['rejected_offers_count']),
+      totalOffersCount: parseInt(json['totalOffersCount'] ?? json['total_offers_count']),
+      pendingOffersCount: parseInt(json['pendingOffersCount'] ?? json['pending_offers_count']),
+      acceptedOffersCount: parseInt(json['acceptedOffersCount'] ?? json['accepted_offers_count']),
+      rejectedOffersCount: parseInt(json['rejectedOffersCount'] ?? json['rejected_offers_count']),
       hasPendingOffers: json['hasPendingOffers'] as bool? ?? json['has_pending_offers'] as bool?,
       mcmvEligible: json['mcmvEligible'] as bool? ?? json['mcmv_eligible'] as bool?,
       mcmvIncomeRange: json['mcmvIncomeRange']?.toString() ?? json['mcmv_income_range']?.toString(),
-      mcmvMaxValue: _parseDouble(json['mcmvMaxValue'] ?? json['mcmv_max_value']),
-      mcmvSubsidy: _parseDouble(json['mcmvSubsidy'] ?? json['mcmv_subsidy']),
+      mcmvMaxValue: parseDouble(json['mcmvMaxValue'] ?? json['mcmv_max_value']),
+      mcmvSubsidy: parseDouble(json['mcmvSubsidy'] ?? json['mcmv_subsidy']),
       mcmvDocumentation: json['mcmvDocumentation'] != null
           ? List<String>.from((json['mcmvDocumentation'] as List).map((e) => e.toString()))
           : json['mcmv_documentation'] != null
@@ -412,13 +412,24 @@ class PropertiesListResponse {
   });
 
   factory PropertiesListResponse.fromJson(Map<String, dynamic> json) {
+    int asInt(dynamic v, int fallback) {
+      if (v == null) return fallback;
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      if (v is String) return int.tryParse(v) ?? fallback;
+      return fallback;
+    }
+
     final dataList = json['data'] as List<dynamic>? ?? [];
     return PropertiesListResponse(
       data: dataList.map((e) => Property.fromJson(e as Map<String, dynamic>)).toList(),
-      total: json['total'] as int? ?? 0,
-      page: json['page'] as int? ?? 1,
-      limit: json['limit'] as int? ?? 50,
-      totalPages: json['totalPages'] as int? ?? json['total_pages'] as int? ?? 1,
+      total: asInt(json['total'], 0),
+      page: asInt(json['page'], 1),
+      limit: asInt(json['limit'], 50),
+      totalPages: asInt(
+        json['totalPages'] ?? json['total_pages'],
+        1,
+      ),
     );
   }
 }
@@ -1008,7 +1019,16 @@ class PropertyService {
     debugPrint('📊 [PROPERTY_SERVICE] Buscando estatísticas');
 
     try {
-      final response = await _apiService.get<Map<String, dynamic>>('/properties/stats');
+      final companyId = await SecureStorageService.instance.getCompanyId();
+      final queryParameters = <String, String>{};
+      if (companyId != null && companyId.isNotEmpty) {
+        queryParameters['companyId'] = companyId;
+      }
+
+      final response = await _apiService.get<Map<String, dynamic>>(
+        '/properties/stats',
+        queryParameters: queryParameters.isEmpty ? null : queryParameters,
+      );
 
       if (response.success && response.data != null) {
         try {

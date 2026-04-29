@@ -64,7 +64,7 @@ class Inspection {
 
   factory Inspection.fromJson(Map<String, dynamic> json) {
     // Helper para converter valores numéricos que podem vir como string ou número
-    double? _parseDouble(dynamic value) {
+    double? parseDouble(dynamic value) {
       if (value == null) return null;
       if (value is num) return value.toDouble();
       if (value is String) {
@@ -94,7 +94,7 @@ class Inspection {
       photos: json['photos'] != null
           ? List<String>.from((json['photos'] as List).map((e) => e.toString()))
           : [],
-      value: _parseDouble(json['value']),
+      value: parseDouble(json['value']),
       responsibleName: json['responsibleName']?.toString(),
       responsibleDocument: json['responsibleDocument']?.toString(),
       responsiblePhone: json['responsiblePhone']?.toString(),
@@ -392,20 +392,25 @@ class UpdateInspectionDto {
     if (description != null) json['description'] = description!.trim();
     if (type != null) json['type'] = type!.value;
     if (status != null) json['status'] = status!.value;
-    if (scheduledDate != null)
+    if (scheduledDate != null) {
       json['scheduledDate'] = scheduledDate!.toIso8601String();
+    }
     if (startDate != null) json['startDate'] = startDate!.toIso8601String();
-    if (completionDate != null)
+    if (completionDate != null) {
       json['completionDate'] = completionDate!.toIso8601String();
+    }
     if (propertyId != null) json['propertyId'] = propertyId;
     if (inspectorId != null) json['inspectorId'] = inspectorId;
     if (value != null) json['value'] = value;
-    if (responsibleName != null)
+    if (responsibleName != null) {
       json['responsibleName'] = responsibleName!.trim();
-    if (responsibleDocument != null)
+    }
+    if (responsibleDocument != null) {
       json['responsibleDocument'] = responsibleDocument!.trim();
-    if (responsiblePhone != null)
+    }
+    if (responsiblePhone != null) {
       json['responsiblePhone'] = responsiblePhone!.trim();
+    }
     if (observations != null) json['observations'] = observations!.trim();
     if (checklist != null) json['checklist'] = checklist;
 
@@ -445,10 +450,12 @@ class InspectionFilters {
     if (title != null && title!.isNotEmpty) params['title'] = title!;
     if (status != null) params['status'] = status!.value;
     if (type != null) params['type'] = type!.value;
-    if (propertyId != null && propertyId!.isNotEmpty)
+    if (propertyId != null && propertyId!.isNotEmpty) {
       params['propertyId'] = propertyId!;
-    if (inspectorId != null && inspectorId!.isNotEmpty)
+    }
+    if (inspectorId != null && inspectorId!.isNotEmpty) {
       params['inspectorId'] = inspectorId!;
+    }
     if (startDate != null) params['dataInicial'] = startDate!.toIso8601String();
     if (endDate != null) params['dataFinal'] = endDate!.toIso8601String();
     if (page != null) params['page'] = page!.toString();

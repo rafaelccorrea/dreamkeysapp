@@ -95,7 +95,7 @@ class _CreateDocumentPageState extends State<CreateDocumentPage> {
 
   Future<void> _pickFile() async {
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         type: FileType.any,
         allowMultiple: false,
       );
@@ -299,7 +299,7 @@ class _CreateDocumentPageState extends State<CreateDocumentPage> {
                     ),
                     const SizedBox(height: 8),
                     DropdownButtonFormField<DocumentType>(
-                      value: _selectedType,
+                      initialValue: _selectedType,
                       decoration: InputDecoration(
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -400,7 +400,7 @@ class _CreateDocumentPageState extends State<CreateDocumentPage> {
                       ),
                       const SizedBox(height: 8),
                       DropdownButtonFormField<DocumentStatus>(
-                        value: _selectedStatus,
+                        initialValue: _selectedStatus,
                         decoration: InputDecoration(
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),

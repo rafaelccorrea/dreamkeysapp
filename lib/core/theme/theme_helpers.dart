@@ -76,4 +76,19 @@ class ThemeHelpers {
         ? AppColors.background.backgroundDarkMode
         : AppColors.background.background;
   }
+
+  /// Gradiente de fundo do shell (dashboard + área sob a AppBar) — uma única camada contínua.
+  static BoxDecoration shellBackgroundDecoration(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        stops: const [0.0, 0.42, 1.0],
+        colors: isDark
+            ? const [Color(0xFF06060C), Color(0xFF0C0A12), Color(0xFF141018)]
+            : const [Color(0xFFF3F5F9), Color(0xFFFDF8FA), Color(0xFFF5F8FF)],
+      ),
+    );
+  }
 }

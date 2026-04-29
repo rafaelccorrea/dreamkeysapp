@@ -1,16 +1,17 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:async';
 import '../../../../core/routes/app_routes.dart';
-import '../../../../core/constants/app_assets.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../shared/widgets/brand_wordmark_logo.dart'
+    show BrandWordmarkLoadingDimensions, BrandWordmarkLogo;
 import '../../../../shared/services/auth_service.dart';
 import '../../../../shared/services/api_service.dart';
 import '../../../../shared/services/token_refresh_service.dart';
 import '../../../../shared/services/company_service.dart';
 import '../../../../shared/services/module_access_service.dart';
 import '../../chat/controllers/chat_unread_controller.dart';
+import '../../notifications/controllers/notification_controller.dart';
 
 class SplashPage extends StatefulWidget {
   const SplashPage({super.key});
@@ -131,6 +132,14 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
         await ChatUnreadController.instance.initialize();
         debugPrint('✅ [SPLASH] ChatUnreadController inicializado');
 
+        // Inicializar NotificationController em background (não bloqueia navegação)
+        debugPrint('🔄 [SPLASH] Inicializando NotificationController em background...');
+        unawaited(
+          NotificationController.instance.initialize().catchError((e) {
+            debugPrint('⚠️ [SPLASH] Erro ao iniciar NotificationController: $e');
+          }),
+        );
+
         // NOTA: Biometria não é solicitada aqui porque o usuário já está autenticado.
         // A biometria deve ser usada apenas no login, não toda vez que o app abre.
         // Se o token for válido, o usuário pode acessar o app diretamente.
@@ -180,9 +189,6 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
     final primaryColor = isDark
         ? AppColors.primary.primaryDarkMode
         : AppColors.primary.primary;
-    final primaryLight = isDark
-        ? AppColors.primary.primaryLightDarkMode
-        : AppColors.primary.primaryLight;
 
     return Scaffold(
       body: Container(
@@ -223,36 +229,9 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
                       // Logo com animações e efeitos
                       _buildAnimatedLogo(
                         context,
-                        theme,
                         primaryColor,
-                        primaryLight,
-                        isDark,
                       ),
-                      const SizedBox(height: 32),
-
-                      // Nome da aplicação com fade e slide
-                      Opacity(
-                        opacity: _fadeAnimation.value,
-                        child: Transform.translate(
-                          offset: Offset(0, _slideAnimation.value * 0.5),
-                          child: ShaderMask(
-                            shaderCallback: (bounds) => LinearGradient(
-                              colors: [primaryColor, primaryLight],
-                            ).createShader(bounds),
-                            child: Text(
-                              'Dream Keys',
-                              style: GoogleFonts.poppins(
-                                fontSize: 48,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white,
-                                letterSpacing: -0.5,
-                                height: 1.2,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 28),
 
                       // Subtítulo sutil
                       Opacity(
@@ -264,8 +243,8 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
                             fontWeight: FontWeight.w500,
                             color: isDark
                                 ? AppColors.text.textSecondaryDarkMode
-                                      .withOpacity(0.7)
-                                : AppColors.text.textSecondary.withOpacity(0.7),
+                                      .withValues(alpha: 0.7)
+                                : AppColors.text.textSecondary.withValues(alpha: 0.7),
                             letterSpacing: 0.5,
                           ),
                         ),
@@ -288,83 +267,58 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
     );
   }
 
-  /// Constrói o logo com animações e efeitos visuais
+  /// Wordmark animada — mesmos PNG da landing do front (`logo.png` / `logo-dark.png`).
   Widget _buildAnimatedLogo(
     BuildContext context,
-    ThemeData theme,
     Color primaryColor,
-    Color primaryLight,
-    bool isDark,
   ) {
+    final maxW = BrandWordmarkLoadingDimensions.splashMaxWidth(
+      MediaQuery.sizeOf(context).width,
+    );
+    final stackH = BrandWordmarkLoadingDimensions.splashStackHeight;
+    final logoH = BrandWordmarkLoadingDimensions.splashLogoHeight;
+
     return Opacity(
       opacity: _fadeAnimation.value,
       child: Transform.translate(
         offset: Offset(0, _slideAnimation.value),
         child: Transform.scale(
-          scale: _scaleAnimation.value * _pulseAnimation.value,
-          child: Container(
-            width: 140,
-            height: 140,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(32),
-              boxShadow: [
-                BoxShadow(
-                  color: primaryColor.withOpacity(0.3),
-                  blurRadius: 40,
-                  spreadRadius: 8,
-                  offset: const Offset(0, 10),
-                ),
-                BoxShadow(
-                  color: primaryColor.withOpacity(0.1),
-                  blurRadius: 60,
-                  spreadRadius: 0,
-                ),
-              ],
-            ),
+          scale: (_scaleAnimation.value * _pulseAnimation.value).clamp(0.35, 1.06),
+          child: SizedBox(
+            width: maxW,
+            height: stackH,
             child: Stack(
+              clipBehavior: Clip.none,
+              alignment: Alignment.center,
               children: [
-                // Container com gradiente
-                Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(32),
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        primaryColor.withOpacity(0.1),
-                        primaryLight.withOpacity(0.05),
-                      ],
-                    ),
+                Center(
+                  child: BrandWordmarkLogo(
+                    height: logoH,
+                    maxWidth: maxW,
+                    alignment: Alignment.center,
                   ),
                 ),
-
-                // Logo
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(32),
-                  child: Image.asset(
-                    AppAssets.logo,
-                    fit: BoxFit.contain,
-                    width: 140,
-                    height: 140,
-                  ),
-                ),
-
-                // Efeito shimmer
                 AnimatedBuilder(
                   animation: _shimmerAnimation,
                   builder: (context, child) {
-                    return ClipRRect(
-                      borderRadius: BorderRadius.circular(32),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment(_shimmerAnimation.value - 1, 0),
-                            end: Alignment(_shimmerAnimation.value, 0),
-                            colors: [
-                              Colors.transparent,
-                              primaryColor.withOpacity(0.2),
-                              Colors.transparent,
-                            ],
+                    return ClipRect(
+                      child: Align(
+                        alignment: Alignment.center,
+                        child: SizedBox(
+                          width: maxW,
+                          height: stackH,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment(_shimmerAnimation.value - 1, 0),
+                                end: Alignment(_shimmerAnimation.value, 0),
+                                colors: [
+                                  Colors.transparent,
+                                  primaryColor.withValues(alpha: 0.12),
+                                  Colors.transparent,
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -401,7 +355,7 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
                       (isDark
                               ? AppColors.primary.primaryDarkMode
                               : AppColors.primary.primary)
-                          .withOpacity(0.1),
+                          .withValues(alpha: 0.1),
                       Colors.transparent,
                     ],
                   ),
@@ -431,7 +385,7 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
                       (isDark
                               ? AppColors.primary.primaryLightDarkMode
                               : AppColors.primary.primaryLight)
-                          .withOpacity(0.08),
+                          .withValues(alpha: 0.08),
                       Colors.transparent,
                     ],
                   ),
@@ -459,7 +413,7 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               border: Border.all(
-                color: primaryColor.withOpacity(0.2),
+                color: primaryColor.withValues(alpha: 0.2),
                 width: 3,
               ),
             ),

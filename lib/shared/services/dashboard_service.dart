@@ -29,25 +29,38 @@ class DashboardResponse {
   });
 
   factory DashboardResponse.fromJson(Map<String, dynamic> json) {
-    final data = json['data'] as Map<String, dynamic>;
+    final data = json['data'];
+    if (data is! Map<String, dynamic>) {
+      throw FormatException(
+        'Dashboard: "data" ausente ou inválido na resposta da API',
+      );
+    }
     return DashboardResponse(
       user: DashboardUser.fromJson(data['user'] as Map<String, dynamic>),
       stats: DashboardStats.fromJson(data['stats'] as Map<String, dynamic>),
       performance: DashboardPerformance.fromJson(
         data['performance'] as Map<String, dynamic>,
       ),
-      gamification: DashboardGamification.fromJson(
-        data['gamification'] as Map<String, dynamic>,
-      ),
+      // Backend envia null quando módulo de gamificação está desligado (user-dashboard.service).
+      gamification: data['gamification'] != null
+          ? DashboardGamification.fromJson(
+              data['gamification'] as Map<String, dynamic>,
+            )
+          : DashboardGamification.empty(),
       activityStats: DashboardActivityStats.fromJson(
         data['activityStats'] as Map<String, dynamic>,
       ),
-      recentActivities: (data['recentActivities'] as List<dynamic>)
-          .map((e) => DashboardActivity.fromJson(e as Map<String, dynamic>))
-          .toList(),
-      upcomingAppointments: (data['upcomingAppointments'] as List<dynamic>)
-          .map((e) => DashboardAppointment.fromJson(e as Map<String, dynamic>))
-          .toList(),
+      recentActivities: (data['recentActivities'] as List<dynamic>?)
+              ?.map((e) => DashboardActivity.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          [],
+      upcomingAppointments:
+          (data['upcomingAppointments'] as List<dynamic>?)
+              ?.map(
+                (e) => DashboardAppointment.fromJson(e as Map<String, dynamic>),
+              )
+              .toList() ??
+          [],
       monthlyGoals: data['monthlyGoals'] != null
           ? DashboardMonthlyGoals.fromJson(
               data['monthlyGoals'] as Map<String, dynamic>,
@@ -109,6 +122,19 @@ class DashboardStats {
     required this.myNotes,
     required this.myMatches,
   });
+
+  /// Valores zero quando a API ainda não preencheu stats (UI não some os cards).
+  static DashboardStats get empty => DashboardStats(
+        myProperties: 0,
+        myClients: 0,
+        myInspections: 0,
+        myAppointments: 0,
+        myCommissions: 0,
+        myTasks: 0,
+        myKeys: 0,
+        myNotes: 0,
+        myMatches: 0,
+      );
 
   factory DashboardStats.fromJson(Map<String, dynamic> json) {
     return DashboardStats(
@@ -175,11 +201,20 @@ class DashboardGamification {
               ?.map((e) => DashboardAchievement.fromJson(e as Map<String, dynamic>))
               .toList() ??
           [],
-      pointsBreakdown: DashboardPointsBreakdown.fromJson(
-        json['pointsBreakdown'] as Map<String, dynamic>,
-      ),
+      pointsBreakdown: json['pointsBreakdown'] != null
+          ? DashboardPointsBreakdown.fromJson(
+              json['pointsBreakdown'] as Map<String, dynamic>,
+            )
+          : DashboardPointsBreakdown.fromJson(const {}),
     );
   }
+
+  factory DashboardGamification.empty() => DashboardGamification(
+        currentPoints: 0,
+        level: 0,
+        achievements: [],
+        pointsBreakdown: DashboardPointsBreakdown.fromJson(const {}),
+      );
 }
 
 class DashboardAchievement {

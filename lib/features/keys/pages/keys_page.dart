@@ -27,7 +27,7 @@ class _KeysPageState extends State<KeysPage>
   // Estado geral
   String? _errorMessage;
   key_models.KeyFilters? _filters;
-  String _searchQuery = '';
+  final String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
 
   // Tab 0: Todas as Chaves
