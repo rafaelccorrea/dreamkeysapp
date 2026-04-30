@@ -2668,6 +2668,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         return AppColors.status.warning;
       case PropertyStatus.draft:
         return AppColors.text.textSecondary;
+      case PropertyStatus.pendingApproval:
+      case PropertyStatus.pendingOwnerAuthorization:
+        return AppColors.status.warning;
     }
   }
 

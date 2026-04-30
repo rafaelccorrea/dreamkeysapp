@@ -150,6 +150,24 @@ class ChatUnreadController extends ChangeNotifier {
     }
   }
 
+  /// Chamado após o Master mudar de empresa (`X-Company-ID`): novo socket + contagens atualizadas.
+  Future<void> reconnectForCompanyChange() async {
+    try {
+      final companyId = await SecureStorageService.instance.getCompanyId();
+      if (companyId == null || companyId.isEmpty) return;
+
+      _roomUnreadCounts.clear();
+      _totalUnreadCount = 0;
+      notifyListeners();
+
+      await _chatSocket.connect(companyId);
+      await _loadUnreadCounts();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('❌ [CHAT_UNREAD] reconnectForCompanyChange: $e');
+    }
+  }
+
   /// Atualiza contagem baseado na lista de salas atualizada
   void updateFromRooms(List<ChatRoom> rooms) {
     _calculateTotalUnread(rooms);

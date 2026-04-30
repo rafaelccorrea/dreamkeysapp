@@ -203,8 +203,8 @@ class _ToolbarActionCluster extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: edge.withValues(alpha: isDark ? 0.42 : 0.38)),
-        color: isDark ? Colors.white.withValues(alpha: 0.07) : Colors.white.withValues(alpha: 0.58),
+        border: Border.all(color: edge.withValues(alpha: isDark ? 0.42 : 0.52)),
+        color: isDark ? Colors.white.withValues(alpha: 0.07) : const Color(0xFFF5F6FA),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

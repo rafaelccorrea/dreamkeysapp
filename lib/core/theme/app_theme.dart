@@ -9,6 +9,51 @@ class AppTheme {
   // Fonte Poppins
   static final _textTheme = GoogleFonts.poppinsTextTheme();
 
+  /// Overlay dos menus ⋯ — repita em [PopupMenuButton] (color/shape/elevation) se o tema global não aparecer no overlay.
+  static PopupMenuThemeData styledPopupMenu(Brightness brightness) =>
+      _popupMenuTheme(brightness);
+
+  /// Atalho com o brilho atual do [BuildContext].
+  static PopupMenuThemeData styledPopupMenuOf(BuildContext context) =>
+      styledPopupMenu(Theme.of(context).brightness);
+
+  /// Menu dos três pontinhos (`PopupMenuButton`) — card com borda, sem tint M3.
+  static PopupMenuThemeData _popupMenuTheme(Brightness brightness) {
+    final isDark = brightness == Brightness.dark;
+    final card = isDark
+        ? AppColors.background.cardBackgroundDarkMode
+        : AppColors.background.cardBackground;
+    final border =
+        isDark ? AppColors.border.borderDarkMode : AppColors.border.border;
+    final onSurface = isDark ? AppColors.text.textDarkMode : AppColors.text.text;
+    final iconTone =
+        isDark ? AppColors.text.textSecondaryDarkMode : AppColors.text.textSecondary;
+
+    return PopupMenuThemeData(
+      color: card,
+      surfaceTintColor: Colors.transparent,
+      elevation: 20,
+      shadowColor: Colors.black.withValues(alpha: isDark ? 0.52 : 0.14),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(
+          color: border.withValues(alpha: isDark ? 0.72 : 0.82),
+          width: 1,
+        ),
+      ),
+      textStyle: GoogleFonts.poppins(
+        fontSize: 14.5,
+        fontWeight: FontWeight.w600,
+        height: 1.28,
+        letterSpacing: -0.12,
+        color: onSurface,
+      ),
+      iconColor: iconTone,
+      menuPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+      position: PopupMenuPosition.under,
+    );
+  }
+
   static ThemeData lightTheme = ThemeData(
     useMaterial3: true,
     brightness: Brightness.light,
@@ -148,6 +193,7 @@ class AppTheme {
       thickness: 1,
       space: 1,
     ),
+    popupMenuTheme: _popupMenuTheme(Brightness.light),
     progressIndicatorTheme: ProgressIndicatorThemeData(
       color: AppColors.primary.primary,
       linearTrackColor: AppColors.primary.primary.withOpacity(0.2),
@@ -297,6 +343,7 @@ class AppTheme {
       thickness: 1,
       space: 1,
     ),
+    popupMenuTheme: _popupMenuTheme(Brightness.dark),
     progressIndicatorTheme: ProgressIndicatorThemeData(
       color: AppColors.primary.primaryDarkMode,
       linearTrackColor: AppColors.primary.primaryDarkMode.withOpacity(0.2),

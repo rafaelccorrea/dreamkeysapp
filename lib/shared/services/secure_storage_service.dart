@@ -17,6 +17,7 @@ class SecureStorageService {
   static const String _keyEmail = 'saved_email';
   static const String _keyPassword = 'saved_password';
   static const String _keyBiometricEnabled = 'biometric_enabled';
+  static const String _keyBiometricEnrollmentDeclined = 'biometric_enrollment_declined';
   static const String _keyAccessToken = 'access_token';
   static const String _keyRefreshToken = 'refresh_token';
   static const String _keyCompanyId = 'intellisys_selected_company_id';
@@ -30,6 +31,7 @@ class SecureStorageService {
       await _storage.write(key: _keyEmail, value: email);
       await _storage.write(key: _keyPassword, value: password);
       await _storage.write(key: _keyBiometricEnabled, value: 'true');
+      await _storage.delete(key: _keyBiometricEnrollmentDeclined);
       debugPrint('✅ [SECURE_STORAGE] Credenciais salvas com sucesso');
     } catch (e) {
       debugPrint('❌ [SECURE_STORAGE] Erro ao salvar credenciais: $e');
@@ -68,12 +70,35 @@ class SecureStorageService {
     }
   }
 
+  /// Optou por não guardar biometria neste dispositivo (o convite não volta até limpar credenciais).
+  Future<bool> isBiometricEnrollmentDeclined() async {
+    try {
+      final value = await _storage.read(key: _keyBiometricEnrollmentDeclined);
+      return value == 'true';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<void> setBiometricEnrollmentDeclined(bool declined) async {
+    try {
+      if (declined) {
+        await _storage.write(key: _keyBiometricEnrollmentDeclined, value: 'true');
+      } else {
+        await _storage.delete(key: _keyBiometricEnrollmentDeclined);
+      }
+    } catch (e) {
+      debugPrint('⚠️ [SECURE_STORAGE] Erro ao guardar preferência de biometria: $e');
+    }
+  }
+
   /// Remove as credenciais salvas
   Future<void> clearCredentials() async {
     try {
       await _storage.delete(key: _keyEmail);
       await _storage.delete(key: _keyPassword);
       await _storage.delete(key: _keyBiometricEnabled);
+      await _storage.delete(key: _keyBiometricEnrollmentDeclined);
     } catch (e) {
       debugPrint('⚠️ [SECURE_STORAGE] Erro ao limpar credenciais: $e');
     }

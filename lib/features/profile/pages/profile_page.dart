@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/shell_visual_tokens.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../../../../shared/services/profile_service.dart';
@@ -34,43 +35,12 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Color _accent(BuildContext context) => AppColors.primary.primary;
 
-  Color _glassFill(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return isDark
-        ? Colors.white.withValues(alpha: 0.055)
-        : Colors.white.withValues(alpha: 0.72);
-  }
-
-  Color _glassBorder(BuildContext context) {
-    return ThemeHelpers.borderLightColor(context).withValues(alpha: 0.55);
-  }
-
   /// Superfície elevada alinhada ao painel do dashboard (gradiente leve + borda accent).
   BoxDecoration _profilePanelDecoration(BuildContext context) {
-    final accent = _accent(context);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return BoxDecoration(
-      borderRadius: BorderRadius.circular(22),
-      gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: isDark
-            ? [const Color(0xFF16151E), const Color(0xFF0E0E14)]
-            : [Colors.white, const Color(0xFFFFFCFC)],
-      ),
-      border: Border.all(color: accent.withValues(alpha: isDark ? 0.16 : 0.09)),
-      boxShadow: [
-        BoxShadow(
-          color: accent.withValues(alpha: isDark ? 0.14 : 0.07),
-          blurRadius: 24,
-          offset: const Offset(0, 12),
-        ),
-        BoxShadow(
-          color: Colors.black.withValues(alpha: isDark ? 0.32 : 0.04),
-          blurRadius: 16,
-          offset: const Offset(0, 6),
-        ),
-      ],
+    return ShellVisualTokens.elevatedPanelDecoration(
+      context,
+      _accent(context),
+      style: ShellElevatedPanelStyle.profile,
     );
   }
 
@@ -440,8 +410,8 @@ class _ProfilePageState extends State<ProfilePage> {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        color: _glassFill(context),
-        border: Border.all(color: _glassBorder(context)),
+        color: ShellVisualTokens.profileGlassFill(context),
+        border: Border.all(color: ShellVisualTokens.profileSectionBorder(context)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -479,8 +449,8 @@ class _ProfilePageState extends State<ProfilePage> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          color: primary ? accent : _glassFill(context),
-          border: Border.all(color: primary ? accent : _glassBorder(context)),
+          color: primary ? accent : ShellVisualTokens.profileGlassFill(context),
+          border: Border.all(color: primary ? accent : ShellVisualTokens.profileSectionBorder(context)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -732,8 +702,8 @@ class _ProfilePageState extends State<ProfilePage> {
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),
-          color: _glassFill(context),
-          border: Border.all(color: _glassBorder(context)),
+          color: ShellVisualTokens.profileGlassFill(context),
+          border: Border.all(color: ShellVisualTokens.profileSectionBorder(context)),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -987,10 +957,18 @@ class _ProfilePageState extends State<ProfilePage> {
     final cs = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
     final borderCol = ThemeHelpers.borderLightColor(context).withValues(alpha: 0.65);
-    final subtleBg = Color.alphaBlend(
-      cs.surfaceTint.withValues(alpha: isDark ? 0.06 : 0.04),
-      cs.surfaceContainerHighest.withValues(alpha: isDark ? 0.42 : 0.94),
-    );
+    final stripeColor = isDark
+        ? borderCol.withValues(alpha: 0.85)
+        : ThemeHelpers.borderColor(context).withValues(alpha: 0.44);
+    final subtleBg = isDark
+        ? Color.alphaBlend(
+            cs.surfaceTint.withValues(alpha: 0.06),
+            cs.surfaceContainerHighest.withValues(alpha: 0.42),
+          )
+        : Color.alphaBlend(
+            cs.surfaceTint.withValues(alpha: 0.024),
+            const Color(0xFFEEF0F5),
+          );
 
     EdgeInsets padWide() =>
         const EdgeInsets.symmetric(horizontal: 18, vertical: 18);
@@ -1134,13 +1112,13 @@ class _ProfilePageState extends State<ProfilePage> {
       decoration: BoxDecoration(
         color: subtleBg,
         border: Border(
-          top: BorderSide(color: borderCol.withValues(alpha: 0.85)),
-          bottom: BorderSide(color: borderCol.withValues(alpha: 0.85)),
+          top: BorderSide(color: stripeColor),
+          bottom: BorderSide(color: stripeColor),
         ),
         borderRadius: BorderRadius.circular(14),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.28 : 0.05),
+            color: Colors.black.withValues(alpha: isDark ? 0.28 : 0.075),
             blurRadius: 14,
             offset: const Offset(0, 6),
           ),

@@ -172,5 +172,46 @@ class CompanyService {
       );
     }
   }
+
+  /// Define a empresa ativa (`X-Company-ID`). Usado por utilizadores Master ao mudar de contexto.
+  Future<ApiResponse<void>> setSelectedCompany(String companyId) async {
+    if (companyId.isEmpty) {
+      return ApiResponse.error(
+        message: 'Empresa inválida',
+        statusCode: 0,
+      );
+    }
+
+    try {
+      final accessible = await isCompanyAccessible(companyId);
+      if (!accessible) {
+        debugPrint(
+          '⚠️ [COMPANY_SERVICE] ID $companyId não está na lista de empresas do utilizador',
+        );
+        return ApiResponse.error(
+          message: 'Sem acesso a esta empresa',
+          statusCode: 403,
+        );
+      }
+
+      await SecureStorageService.instance.saveCompanyId(companyId);
+      debugPrint('✅ [COMPANY_SERVICE] Empresa ativa atualizada: $companyId');
+      return ApiResponse.success(data: null, statusCode: 200);
+    } catch (e, stackTrace) {
+      debugPrint('❌ [COMPANY_SERVICE] Erro ao selecionar empresa: $e');
+      debugPrint('📚 [COMPANY_SERVICE] StackTrace: $stackTrace');
+      return ApiResponse.error(
+        message: 'Erro ao trocar de empresa',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Indica se o utilizador pode aceder ao ID na lista atual de `/companies`.
+  Future<bool> isCompanyAccessible(String companyId) async {
+    final r = await getCompanies();
+    if (!r.success || r.data == null) return false;
+    return r.data!.any((c) => c.id == companyId);
+  }
 }
 

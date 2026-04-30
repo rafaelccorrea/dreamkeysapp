@@ -180,8 +180,10 @@ class ApiConstants {
   static String get baseApiUrl => baseUrl;
 
   // Endpoints de Autenticação
-  static const String login =
-      '/auth/broker/login'; // Login específico para corretores
+  /// App móvel tenta primeiro esta rota (corretores); [standardLogin] faz fallback (ex.: MASTER).
+  static const String login = '/auth/broker/login';
+  /// Mesma rota que o imobx-front (`POST /auth/login`) — administradores / master.
+  static const String standardLogin = '/auth/login';
   static const String logout = '/auth/logout';
   static const String refreshToken = '/auth/refresh';
   static const String forgotPassword = '/auth/forgot-password';

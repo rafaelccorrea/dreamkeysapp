@@ -5,6 +5,8 @@ import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
 import '../../../../shared/widgets/shimmer_image.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../../core/theme/shell_visual_tokens.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../widgets/property_filters_drawer.dart';
 import '../widgets/intelligent_search_modal.dart';
@@ -29,6 +31,7 @@ class _ListedPropertyMetrics {
     required this.rented,
     required this.sold,
     required this.draft,
+    required this.pendingReview,
     required this.maintenance,
     required this.active,
     required this.inactive,
@@ -45,6 +48,8 @@ class _ListedPropertyMetrics {
   final int rented;
   final int sold;
   final int draft;
+  /// `pending_approval` + `pending_owner_authorization` no CRM.
+  final int pendingReview;
   final int maintenance;
   final int active;
   final int inactive;
@@ -66,11 +71,32 @@ class PropertiesPage extends StatefulWidget {
 
 class _PropertiesPageState extends State<PropertiesPage> {
   static const double _kHeaderPadH = 20;
-  static const double _kHeaderPadVTop = 8;
+  static const double _kHeaderPadVTop = 10;
   static const double _kStatCarouselHeight = 118;
   static const double _kStatTileWidth = 140;
-  static const double _kQuickCarouselHeight = 44;
-  static const double _kHeaderSectionGap = 12;
+
+  int _exploreGridCrossAxisCount(double width) {
+    if (width >= 900) return 4;
+    if (width >= 640) return 3;
+    return 2;
+  }
+
+  double _exploreGridChildAspectRatio(int columns) {
+    switch (columns) {
+      case 4:
+        return 0.86;
+      case 3:
+        return 0.78;
+      default:
+        return 0.69;
+    }
+  }
+
+  /// Acima deste tamanho, uma faixa horizontal de destaques evita sensação de “fila” única.
+  int _discoverLeadCount(int total) {
+    if (total <= 8) return 0;
+    return total >= 18 ? 8 : 6;
+  }
 
   final PropertyService _propertyService = PropertyService.instance;
   bool _isLoading = true;
@@ -225,18 +251,30 @@ class _PropertiesPageState extends State<PropertiesPage> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return AppScaffold(
-      title: 'Imóveis',
-      currentBottomNavIndex: 1,
-      showBottomNavigation: true,
-      actions: [
-        PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert),
-          tooltip: 'Mais opções',
-          onSelected: (value) {
-            switch (value) {
+  Widget _buildPropertiesScreenOverflowMenu(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
+    final pm = AppTheme.styledPopupMenu(brightness);
+    final base = Theme.of(context);
+
+    return Theme(
+      data: base.copyWith(
+        popupMenuTheme: pm,
+        splashColor: AppColors.primary.primary.withValues(alpha: 0.10),
+        highlightColor: AppColors.primary.primary.withValues(alpha: 0.05),
+      ),
+      child: PopupMenuButton<String>(
+        clipBehavior: Clip.antiAlias,
+        constraints: const BoxConstraints(minHeight: 40, minWidth: 44),
+        color: pm.color,
+        surfaceTintColor: pm.surfaceTintColor,
+        elevation: pm.elevation ?? 20,
+        shadowColor: pm.shadowColor,
+        shape: pm.shape,
+        offset: const Offset(0, 8),
+        icon: Icon(Icons.more_vert, color: ThemeHelpers.textColor(context).withValues(alpha: 0.88)),
+        tooltip: 'Mais opções',
+        onSelected: (value) {
+          switch (value) {
               case 'search':
                 _showSearchBottomSheet(context);
                 break;
@@ -285,185 +323,446 @@ class _PropertiesPageState extends State<PropertiesPage> {
                   }
                 });
                 break;
-            }
-          },
-          itemBuilder: (context) => [
-            const PopupMenuItem(
-              value: 'search',
-              child: Row(
-                children: [
-                  Icon(Icons.search, size: 20),
-                  SizedBox(width: 8),
-                  Text('Buscar'),
-                ],
-              ),
-            ),
-            PopupMenuItem(
-              value: 'filters',
-              child: Row(
-                children: [
-                  Stack(
-                    children: [
-                      const Icon(Icons.filter_list, size: 20),
-                      if (_filters != null && _hasActiveFilters())
-                        Positioned(
-                          right: 0,
-                          top: 0,
-                          child: Container(
-                            width: 8,
-                            height: 8,
-                            decoration: const BoxDecoration(
-                              color: Colors.red,
-                              shape: BoxShape.circle,
-                            ),
+              case 'portfolio_metrics':
+                _showPortfolioOverflowMetricsSheet(context);
+                break;
+              case 'ai_search':
+                showModalBottomSheet<void>(
+                  context: context,
+                  isScrollControlled: true,
+                  useSafeArea: true,
+                  barrierColor: Colors.black54,
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  builder: (context) => IntelligentSearchModal(
+                    onResults: (results) {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            '${results.results.length} propriedades encontradas',
+                          ),
+                          action: SnackBarAction(
+                            label: 'Ver Resultados',
+                            onPressed: () {},
                           ),
                         ),
+                      );
+                    },
+                  ),
+                );
+                break;
+              case 'optimize':
+                _showOptimizationDialog(context);
+                break;
+            }
+          },
+          itemBuilder: (menuCtx) {
+            final pmt = Theme.of(menuCtx).popupMenuTheme;
+            final labelStyle = pmt.textStyle ?? Theme.of(menuCtx).textTheme.bodyMedium;
+            final iconColor =
+                pmt.iconColor ?? ThemeHelpers.textSecondaryColor(menuCtx);
+            return [
+              PopupMenuItem(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                value: 'search',
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.middle,
+                        child: Icon(Icons.search, size: 20, color: iconColor),
+                      ),
+                      const WidgetSpan(child: SizedBox(width: 10)),
+                      TextSpan(text: 'Buscar', style: labelStyle),
                     ],
                   ),
-                  const SizedBox(width: 8),
-                  const Text('Filtros'),
-                ],
+                ),
               ),
-            ),
-            const PopupMenuDivider(),
-            const PopupMenuItem(
-              value: 'offers',
-              child: Row(
-                children: [
-                  Icon(Icons.request_quote, size: 20),
-                  SizedBox(width: 8),
-                  Text('Ver Ofertas'),
-                ],
+              PopupMenuItem(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                value: 'filters',
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.middle,
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Icon(Icons.filter_list, size: 20, color: iconColor),
+                            if (_filters != null && _hasActiveFilters())
+                              Positioned(
+                                right: -2,
+                                top: -2,
+                                child: Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: const BoxDecoration(
+                                    color: Colors.red,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const WidgetSpan(child: SizedBox(width: 10)),
+                      TextSpan(text: 'Filtros', style: labelStyle),
+                    ],
+                  ),
+                ),
               ),
-            ),
-            const PopupMenuItem(
-              value: 'export_import',
-              child: Row(
-                children: [
-                  Icon(Icons.import_export, size: 20),
-                  SizedBox(width: 8),
-                  Text('Exportar/Importar'),
-                ],
+              const PopupMenuDivider(height: 10, thickness: 1),
+              PopupMenuItem(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                value: 'portfolio_metrics',
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.middle,
+                        child: Icon(Icons.insights_outlined, size: 20, color: iconColor),
+                      ),
+                      const WidgetSpan(child: SizedBox(width: 10)),
+                      TextSpan(text: 'Métricas detalhadas', style: labelStyle),
+                    ],
+                  ),
+                ),
               ),
-            ),
-          ],
-        ),
-      ],
-      body: Column(
-        children: [
-          // Barra de ações com botões
-          _buildActionBar(context),
-
-          // Lista de propriedades
-          Expanded(
-            child: _isLoading
-                ? _buildSkeleton(context)
-                : _errorMessage != null
-                ? _buildErrorState(context)
-                : _buildPropertiesList(context),
-          ),
-        ],
+              PopupMenuItem(
+                value: 'ai_search',
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                height: 58,
+                child: _buildPremiumAiSearchMenuHighlight(menuCtx),
+              ),
+              PopupMenuItem(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                value: 'optimize',
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.middle,
+                        child: Icon(Icons.trending_up_rounded, size: 20, color: iconColor),
+                      ),
+                      const WidgetSpan(child: SizedBox(width: 10)),
+                      TextSpan(text: 'Otimizar portfólio', style: labelStyle),
+                    ],
+                  ),
+                ),
+              ),
+              PopupMenuItem(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                value: 'offers',
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.middle,
+                        child: Icon(Icons.request_quote, size: 20, color: iconColor),
+                      ),
+                      const WidgetSpan(child: SizedBox(width: 10)),
+                      TextSpan(text: 'Ver Ofertas', style: labelStyle),
+                    ],
+                  ),
+                ),
+              ),
+              PopupMenuItem(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                value: 'export_import',
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.middle,
+                        child: Icon(Icons.import_export, size: 20, color: iconColor),
+                      ),
+                      const WidgetSpan(child: SizedBox(width: 10)),
+                      TextSpan(text: 'Exportar/Importar', style: labelStyle),
+                    ],
+                  ),
+                ),
+              ),
+            ];
+          },
       ),
     );
   }
 
-  Widget _buildActionBar(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+  @override
+  Widget build(BuildContext context) {
+    return AppScaffold(
+      title: 'Imóveis',
+      currentBottomNavIndex: 1,
+      showBottomNavigation: true,
+      actions: [
+        _buildPropertiesScreenOverflowMenu(context),
+      ],
+      body: _isLoading
+          ? Column(
+              children: [
+                _buildPortfolioHeader(context),
+                Expanded(child: _buildSkeleton(context)),
+              ],
+            )
+          : _errorMessage != null
+              ? Column(
+                  children: [
+                    _buildPortfolioHeader(context),
+                    Expanded(child: _buildErrorState(context)),
+                  ],
+                )
+              : _properties.isEmpty
+                  ? Column(
+                      children: [
+                        _buildPortfolioHeader(context),
+                        Expanded(
+                          child: _buildEmptyPropertiesState(context, Theme.of(context)),
+                        ),
+                      ],
+                    )
+                  : _buildScrollablePropertiesViewport(context),
+    );
+  }
+
+  /// Faixa de 4 KPIs: preenche a largura com colunas iguais ([Expanded]).
+  Widget _buildHeroKpiStripe(List<Widget> tiles, double gap, int columns) {
+    assert(tiles.length == 4);
+    Widget row2(Widget a, Widget b) => Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(child: a),
+            SizedBox(width: gap),
+            Expanded(child: b),
+          ],
+        );
+    if (columns >= 4) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(child: tiles[0]),
+          SizedBox(width: gap),
+          Expanded(child: tiles[1]),
+          SizedBox(width: gap),
+          Expanded(child: tiles[2]),
+          SizedBox(width: gap),
+          Expanded(child: tiles[3]),
+        ],
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        row2(tiles[0], tiles[1]),
+        SizedBox(height: gap),
+        row2(tiles[2], tiles[3]),
+      ],
+    );
+  }
+
+  /// KPIs compactos do hero (4 peças). Largura vem do [Expanded] no pai.
+  List<Widget> _portfolioHeroKpiTiles(
+    BuildContext context, {
+    required double th,
+  }) {
     final accent = _portfolioAccentColor(context);
     final hasFilters = _filters != null && _hasActiveFilters();
     final hasSearch = _searchQuery.trim().isNotEmpty;
     final gatedGlobal = !hasFilters && !hasSearch;
     final m = _listedPropertyMetrics();
+    final gs = _globalStats;
 
-    final statTiles = <Widget>[
-      if (_globalStats != null && gatedGlobal) ...[
+    if (gs != null && gatedGlobal) {
+      return [
         _buildPortfolioStatTile(
           context,
-          value: _compactIntFormatter.format(_globalStats!.total),
+          value: _compactIntFormatter.format(gs.total),
           label: 'No CRM',
-          hint: 'Portfolio completo',
           icon: Icons.apartment_rounded,
           accent: accent,
+          tileHeight: th,
+          dense: true,
         ),
         _buildPortfolioStatTile(
           context,
-          value: _compactIntFormatter.format(_globalStats!.available),
+          value: _compactIntFormatter.format(gs.available),
           label: 'Disponíveis',
-          hint: 'Mercado',
           icon: Icons.event_available_rounded,
           accent: AppColors.status.success,
+          tileHeight: th,
+          dense: true,
         ),
         _buildPortfolioStatTile(
           context,
-          value: _compactIntFormatter.format(_globalStats!.rented),
-          label: 'Locação',
-          hint: 'Contratos ativos',
-          icon: Icons.key_rounded,
-          accent: const Color(0xFF818CF8),
+          value: '${_properties.length}',
+          label: 'Nesta página',
+          icon: Icons.view_module_outlined,
+          accent: accent,
+          tileHeight: th,
+          dense: true,
         ),
         _buildPortfolioStatTile(
           context,
-          value: _compactIntFormatter.format(_globalStats!.sold),
-          label: 'Vendas',
-          hint: 'Encerradas',
-          icon: Icons.sell_outlined,
-          accent: AppColors.status.info,
+          value: '${m.available}',
+          label: 'Seleção · livres',
+          icon: Icons.circle_outlined,
+          accent: AppColors.status.success,
+          tileHeight: th,
+          dense: true,
         ),
-      ],
+      ];
+    }
+
+    return [
       _buildPortfolioStatTile(
         context,
         value: _compactIntFormatter.format(_total),
         label: 'Filtro',
-        hint: gatedGlobal
-            ? 'Ranking'
-            : hasSearch
-                ? 'Busca'
-                : 'Critérios',
         icon: Icons.filter_alt_outlined,
         accent: const Color(0xFF6366F1),
+        tileHeight: th,
+        dense: true,
       ),
       _buildPortfolioStatTile(
         context,
         value: '${_properties.length}',
         label: 'Nesta página',
-        hint: m.sumOfferPending > 0
-            ? '${m.sumOfferPending} pendências'
-            : 'Lista carregada',
-        icon: Icons.view_carousel_rounded,
+        icon: Icons.view_module_outlined,
         accent: accent,
+        tileHeight: th,
+        dense: true,
       ),
       _buildPortfolioStatTile(
         context,
         value: '${m.available}',
-        label: 'Lista · livres',
-        hint: '${m.negotiationFriendly} negócio',
+        label: 'Seleção · livres',
         icon: Icons.circle_outlined,
         accent: AppColors.status.success,
+        tileHeight: th,
+        dense: true,
       ),
       _buildPortfolioStatTile(
         context,
+        value: '${m.active}',
+        label: 'Ativos',
+        icon: Icons.verified_rounded,
+        accent: AppColors.status.success,
+        tileHeight: th,
+        dense: true,
+      ),
+    ];
+  }
+
+  /// Indicadores que saíram do hero (menu ⋮ → Métricas detalhadas).
+  List<Widget> _portfolioOverflowKpiTiles(
+    BuildContext context, {
+    required double tw,
+    required double th,
+  }) {
+    final accent = _portfolioAccentColor(context);
+    final hasFilters = _filters != null && _hasActiveFilters();
+    final hasSearch = _searchQuery.trim().isNotEmpty;
+    final gatedGlobal = !hasFilters && !hasSearch;
+    final m = _listedPropertyMetrics();
+    final gs = _globalStats;
+
+    return [
+      if (gs != null && gatedGlobal) ...[
+        _buildPortfolioStatTile(
+          context,
+          value: _compactIntFormatter.format(gs.rented),
+          label: 'Locação (CRM)',
+          hint: 'Contratos ativos',
+          icon: Icons.key_rounded,
+          accent: const Color(0xFF818CF8),
+          tileWidth: tw,
+          tileHeight: th,
+        ),
+        _buildPortfolioStatTile(
+          context,
+          value: _compactIntFormatter.format(gs.sold),
+          label: 'Vendas (CRM)',
+          hint: 'Encerradas',
+          icon: Icons.sell_outlined,
+          accent: AppColors.status.info,
+          tileWidth: tw,
+          tileHeight: th,
+        ),
+      ],
+      if (gs != null && !gatedGlobal) ...[
+        _buildPortfolioStatTile(
+          context,
+          value: _compactIntFormatter.format(gs.total),
+          label: 'No CRM',
+          hint: 'Portfolio completo',
+          icon: Icons.apartment_rounded,
+          accent: accent,
+          tileHeight: th,
+        ),
+        _buildPortfolioStatTile(
+          context,
+          value: _compactIntFormatter.format(gs.available),
+          label: 'Disponíveis (CRM)',
+          hint: 'Mercado',
+          icon: Icons.event_available_rounded,
+          accent: AppColors.status.success,
+          tileHeight: th,
+        ),
+        _buildPortfolioStatTile(
+          context,
+          value: _compactIntFormatter.format(gs.rented),
+          label: 'Locação (CRM)',
+          hint: 'Contratos ativos',
+          icon: Icons.key_rounded,
+          accent: const Color(0xFF818CF8),
+          tileWidth: tw,
+          tileHeight: th,
+        ),
+        _buildPortfolioStatTile(
+          context,
+          value: _compactIntFormatter.format(gs.sold),
+          label: 'Vendas (CRM)',
+          hint: 'Encerradas',
+          icon: Icons.sell_outlined,
+          accent: AppColors.status.info,
+          tileWidth: tw,
+          tileHeight: th,
+        ),
+      ],
+      _buildPortfolioStatTile(
+        context,
         value: '${m.rented}',
-        label: 'Lista · locação',
+        label: 'Seleção · locação',
         hint: '${m.featuredHighlights} destaques',
         icon: Icons.houseboat_outlined,
         accent: const Color(0xFFF59E0B),
+        tileWidth: tw,
+        tileHeight: th,
       ),
       _buildPortfolioStatTile(
         context,
         value: '${m.sold}',
-        label: 'Lista · vendas',
+        label: 'Seleção · vendas',
         hint: '${m.publishedOnline} públicos',
         icon: Icons.receipt_long_outlined,
         accent: AppColors.status.info,
+        tileWidth: tw,
+        tileHeight: th,
       ),
       _buildPortfolioStatTile(
         context,
-        value: '${m.draft}',
-        label: 'Rascunhos',
-        hint: '${m.maintenance} revisão',
+        value: '${m.draft + m.pendingReview}',
+        label: 'Pré-publicação',
+        hint: m.pendingReview > 0
+            ? '${m.draft} rasc. · ${m.pendingReview} em análise'
+            : '${m.maintenance} revisão',
         icon: Icons.edit_note_rounded,
         accent: ThemeHelpers.textSecondaryColor(context),
+        tileWidth: tw,
+        tileHeight: th,
       ),
       if (m.avgRentPrice != null)
         _buildPortfolioStatTile(
@@ -473,6 +772,8 @@ class _PropertiesPageState extends State<PropertiesPage> {
           hint: 'Nesta página',
           icon: Icons.payments_rounded,
           accent: const Color(0xFFEC4899),
+          tileWidth: tw,
+          tileHeight: th,
         ),
       if (m.avgSalePriceOnly != null)
         _buildPortfolioStatTile(
@@ -482,25 +783,42 @@ class _PropertiesPageState extends State<PropertiesPage> {
           hint: 'Nesta página',
           icon: Icons.storefront_rounded,
           accent: const Color(0xFF06B6D4),
+          tileWidth: tw,
+          tileHeight: th,
         ),
       if (m.avgAreaSqm != null)
         _buildPortfolioStatTile(
           context,
-          value: '${m.avgAreaSqm!.toStringAsFixed(m.avgAreaSqm! >= 10 ? 0 : 1)} m²',
+          value:
+              '${m.avgAreaSqm!.toStringAsFixed(m.avgAreaSqm! >= 10 ? 0 : 1)} m²',
           label: 'Área média',
           hint: 'Declarada',
           icon: Icons.straighten_rounded,
           accent: AppColors.primary.primary,
+          tileWidth: tw,
+          tileHeight: th,
         ),
-      _buildPortfolioStatTile(
-        context,
-        value: '${m.active}',
-        label: 'Ativos',
-        hint: '${m.inactive} pausados',
-        icon: Icons.verified_rounded,
-        accent: AppColors.status.success,
-      ),
+      if (gatedGlobal && gs != null)
+        _buildPortfolioStatTile(
+          context,
+          value: '${m.active}',
+          label: 'Ativos',
+          hint: '${m.inactive} pausados',
+          icon: Icons.verified_rounded,
+          accent: AppColors.status.success,
+          tileHeight: th,
+        ),
     ];
+  }
+
+  /// Radar / KPIs / atalhos — hero alinhado ao painel principal (dashboard).
+  Widget _buildPortfolioHeader(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = _portfolioAccentColor(context);
+    final hasFilters = _filters != null && _hasActiveFilters();
+    final hasSearch = _searchQuery.trim().isNotEmpty;
+    final gatedGlobal = !hasFilters && !hasSearch;
 
     final quickActions = <Widget>[
       _buildQuickActionButton(
@@ -509,37 +827,6 @@ class _PropertiesPageState extends State<PropertiesPage> {
         label: 'Novo imóvel',
         isPrimary: true,
         onPressed: () => Navigator.of(context).pushNamed(AppRoutes.propertyCreate),
-      ),
-      _buildPremiumAiSearchQuickAction(
-        context,
-        onPressed: () {
-          showModalBottomSheet<void>(
-            context: context,
-            isScrollControlled: true,
-            useSafeArea: true,
-            barrierColor: Colors.black54,
-            shape: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            clipBehavior: Clip.antiAlias,
-            builder: (context) => IntelligentSearchModal(
-              onResults: (results) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      '${results.results.length} propriedades encontradas',
-                    ),
-                    action: SnackBarAction(
-                      label: 'Ver Resultados',
-                      onPressed: () {},
-                    ),
-                  ),
-                );
-              },
-            ),
-          );
-        },
       ),
       _buildQuickActionButton(
         context,
@@ -566,18 +853,6 @@ class _PropertiesPageState extends State<PropertiesPage> {
           );
         },
       ),
-      _buildQuickActionButton(
-        context,
-        icon: Icons.trending_up_rounded,
-        label: 'Otimizar',
-        onPressed: () => _showOptimizationDialog(context),
-      ),
-      _buildQuickActionButton(
-        context,
-        icon: Icons.request_quote_outlined,
-        label: 'Ofertas',
-        onPressed: () => Navigator.of(context).pushNamed(AppRoutes.propertyOffers),
-      ),
     ];
 
     final subtitleParts = [
@@ -595,146 +870,273 @@ class _PropertiesPageState extends State<PropertiesPage> {
         'filtros combinados',
     ].where((s) => s.trim().isNotEmpty).join(' · ');
 
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: isDark
-              ? [
-                  AppColors.background.backgroundDarkMode,
-                  AppColors.background.backgroundSecondaryDarkMode,
-                ]
-              : [
-                  AppColors.background.background,
-                  AppColors.background.backgroundSecondary,
-                ],
-        ),
-        border: Border(
-          bottom: BorderSide(
-            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.65),
-          ),
-        ),
-      ),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          ..._portfolioAmbientGlows(context),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              _kHeaderPadH,
-              _kHeaderPadVTop,
-              _kHeaderPadH,
-              14,
+    final headline =
+        hasSearch ? 'Radar de imóveis' : 'Radar comercial Intellisys';
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final w = constraints.maxWidth;
+        final compact = w < 360;
+        final narrow = w < 332;
+        final spread = w >= 480;
+        final actionsTop = w >= 640;
+        final pillsBesideInsight = w >= 520;
+
+        final padH = narrow ? 12.0 : (compact ? 16.0 : _kHeaderPadH);
+        final statSep = compact ? 6.0 : 8.0;
+        final innerW =
+            (w - padH * 2).clamp(0.0, double.infinity).toDouble();
+        final kpiCols = innerW >= 360 ? 4 : 2;
+        final gap = statSep;
+        final statH = compact ? 72.0 : (w >= 520 ? 78.0 : 74.0);
+        final statTiles = _portfolioHeroKpiTiles(
+          context,
+          th: statH,
+        );
+
+        final mainTitles = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'GESTÃO PORTFÓLIO',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: accent,
+                letterSpacing: compact ? 1.15 : 2.35,
+                fontWeight: FontWeight.w900,
+              ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Column(
+            const SizedBox(height: 4),
+            Text(
+              headline,
+              style: (compact
+                      ? theme.textTheme.titleMedium
+                      : theme.textTheme.titleLarge)
+                  ?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    height: 1.02,
+                    color: ThemeHelpers.textColor(context),
+                  ),
+            ),
+          ],
+        );
+
+        final dateLineWidget = Text(
+          subtitleParts,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: ThemeHelpers.textSecondaryColor(context),
+            fontWeight: FontWeight.w600,
+            height: 1.35,
+          ),
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+          textAlign: spread ? TextAlign.right : TextAlign.start,
+        );
+
+        Widget pillRow() {
+          return Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.start,
+            children: _portfolioHeroContextPills(
+              context,
+              gatedGlobal: gatedGlobal,
+              compact: compact,
+            ),
+          );
+        }
+
+        Widget insightBlock() => _buildPortfolioHeroInsight(
+              context,
+              gatedGlobal: gatedGlobal,
+              hasSearch: hasSearch,
+              hasFilters: hasFilters,
+            );
+
+        Widget actionsBar() {
+          return Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            alignment: WrapAlignment.end,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: quickActions,
+          );
+        }
+
+        Widget heroTop;
+        if (!spread) {
+          heroTop = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _portfolioHeroLeadingIcon(context),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        mainTitles,
+                        const SizedBox(height: 6),
+                        dateLineWidget,
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              pillRow(),
+              const SizedBox(height: 10),
+              insightBlock(),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerRight,
+                child: actionsBar(),
+              ),
+            ],
+          );
+        } else {
+          heroTop = Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _portfolioHeroLeadingIcon(context),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          flex: 52,
+                          child: mainTitles,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 48,
+                          child: Align(
+                            alignment: Alignment.topRight,
+                            child: dateLineWidget,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (actionsTop) ...[
+                    const SizedBox(width: 12),
+                    actionsBar(),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (pillsBesideInsight)
+                Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'GESTÃO PORTFÓLIO',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: accent,
-                        letterSpacing: 2.35,
-                        fontWeight: FontWeight.w900,
-                      ),
+                    Expanded(
+                      flex: 42,
+                      child: pillRow(),
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      hasSearch ? 'Radar de imóveis' : 'Radar comercial Intellisys',
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        height: 1.02,
-                        color: ThemeHelpers.textColor(context),
-                      ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 58,
+                      child: insightBlock(),
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      subtitleParts,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: ThemeHelpers.textSecondaryColor(context),
-                        fontWeight: FontWeight.w600,
-                        height: 1.4,
-                      ),
-                    ),
+                  ],
+                )
+              else ...[
+                pillRow(),
+                const SizedBox(height: 10),
+                insightBlock(),
+              ],
+              if (!actionsTop) ...[
+                const SizedBox(height: 10),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: actionsBar(),
+                ),
+              ],
+            ],
+          );
+        }
+
+        return Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isDark
+                  ? [
+                      AppColors.background.backgroundDarkMode,
+                      AppColors.background.backgroundSecondaryDarkMode,
+                    ]
+                  : const [
+                      Colors.transparent,
+                      Colors.transparent,
+                    ],
+            ),
+            border: Border(
+              bottom: BorderSide(
+                color: ThemeHelpers.borderColor(context).withValues(alpha: 0.65),
+              ),
+            ),
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              ..._portfolioAmbientGlows(context),
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  padH,
+                  _kHeaderPadVTop,
+                  padH,
+                  12,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    heroTop,
+                    SizedBox(height: compact ? 8 : 10),
+                    _buildHeroKpiStripe(statTiles, gap, kpiCols),
                     if (hasFilters || hasSearch) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        'Use as faixas abaixo para comparar cenário global e recorte atual sem empilhar a lista inteira.',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color:
-                              ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.88),
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          if (hasSearch)
+                            _buildActiveContextChip(
+                              context,
+                              Icons.search_rounded,
+                              _searchQuery,
+                              onClear: () {
+                                _searchController.clear();
+                                setState(() => _searchQuery = '');
+                                _loadProperties(refresh: true);
+                              },
+                            ),
+                          if (hasFilters)
+                            _buildActiveContextChip(
+                              context,
+                              Icons.tune_rounded,
+                              'Filtros aplicados',
+                              onClear: () {
+                                setState(() => _filters = null);
+                                _loadProperties(refresh: true);
+                              },
+                            ),
+                        ],
                       ),
                     ],
                   ],
                 ),
-                const SizedBox(height: _kHeaderSectionGap),
-                SizedBox(
-                  height: _kStatCarouselHeight,
-                  child: ListView.separated(
-                    physics: const BouncingScrollPhysics(),
-                    clipBehavior: Clip.none,
-                    scrollDirection: Axis.horizontal,
-                    separatorBuilder: (_, _) => const SizedBox(width: 10),
-                    itemCount: statTiles.length,
-                    itemBuilder: (_, i) => statTiles[i],
-                  ),
-                ),
-                if (hasFilters || hasSearch) ...[
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      if (hasSearch)
-                        _buildActiveContextChip(
-                          context,
-                          Icons.search_rounded,
-                          _searchQuery,
-                          onClear: () {
-                            _searchController.clear();
-                            setState(() => _searchQuery = '');
-                            _loadProperties(refresh: true);
-                          },
-                        ),
-                      if (hasFilters)
-                        _buildActiveContextChip(
-                          context,
-                          Icons.tune_rounded,
-                          'Filtros aplicados',
-                          onClear: () {
-                            setState(() => _filters = null);
-                            _loadProperties(refresh: true);
-                          },
-                        ),
-                    ],
-                  ),
-                ],
-                const SizedBox(height: 10),
-                SizedBox(
-                  height: _kQuickCarouselHeight + 10,
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      physics: const BouncingScrollPhysics(),
-                      scrollDirection: Axis.horizontal,
-                      separatorBuilder: (_, _) => const SizedBox(width: 8),
-                      itemCount: quickActions.length,
-                      itemBuilder: (_, i) => quickActions[i],
-                    ),
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -795,6 +1197,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
     int rented = 0;
     int sold = 0;
     int draft = 0;
+    int pendingReview = 0;
     int maintenance = 0;
     int active = 0;
     int inactive = 0;
@@ -834,6 +1237,10 @@ class _PropertiesPageState extends State<PropertiesPage> {
         case PropertyStatus.draft:
           draft++;
           break;
+        case PropertyStatus.pendingApproval:
+        case PropertyStatus.pendingOwnerAuthorization:
+          pendingReview++;
+          break;
         case PropertyStatus.maintenance:
           maintenance++;
           break;
@@ -857,6 +1264,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
       rented: rented,
       sold: sold,
       draft: draft,
+      pendingReview: pendingReview,
       maintenance: maintenance,
       active: active,
       inactive: inactive,
@@ -870,18 +1278,64 @@ class _PropertiesPageState extends State<PropertiesPage> {
     );
   }
 
-  Color _portfolioGlassBorderColor(BuildContext context) {
+  /// Cartões KPI do **hero** — alinhados às pills / glass do cabeçalho (sem gradiente forte).
+  BoxDecoration _portfolioHeroKpiDecoration(BuildContext context, Color accent) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return isDark
-        ? Colors.white.withValues(alpha: 0.085)
-        : Colors.black.withValues(alpha: 0.055);
+    final borderCol = ThemeHelpers.borderColor(context);
+    return BoxDecoration(
+      borderRadius: BorderRadius.circular(16),
+      color: isDark
+          ? accent.withValues(alpha: 0.065)
+          : ShellVisualTokens.dashboardGlassFill(context),
+      border: Border.all(
+        color: isDark
+            ? accent.withValues(alpha: 0.14)
+            : borderCol.withValues(alpha: 0.52),
+      ),
+      boxShadow: isDark
+          ? null
+          : [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 12,
+                offset: const Offset(0, 3),
+                spreadRadius: -2,
+              ),
+            ],
+    );
+  }
+
+  Widget _portfolioHeroKpiIconPlate(
+    BuildContext context,
+    IconData icon,
+    Color accent,
+  ) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    const sz = 34.0;
+    return Container(
+      width: sz,
+      height: sz,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        color: accent.withValues(alpha: isDark ? 0.14 : 0.1),
+        border: Border.all(
+          color: accent.withValues(alpha: isDark ? 0.26 : 0.24),
+        ),
+      ),
+      child: Icon(icon, size: 18, color: accent),
+    );
   }
 
   /// Alinhado ao `_buildSummaryCard` do dashboard (gradiente suave + borda glass).
-  BoxDecoration _kpiMetricCardDecoration(BuildContext context, Color accent) {
+  BoxDecoration _kpiMetricCardDecoration(
+    BuildContext context,
+    Color accent, {
+    bool dense = false,
+  }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final r = dense ? 14.0 : 20.0;
     return BoxDecoration(
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(r),
       gradient: LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
@@ -890,15 +1344,182 @@ class _PropertiesPageState extends State<PropertiesPage> {
           accent.withValues(alpha: isDark ? 0.05 : 0.04),
         ],
       ),
-      border: Border.all(color: _portfolioGlassBorderColor(context)),
+      border: Border.all(color: ShellVisualTokens.portfolioGlassBorder(context)),
       boxShadow: [
         BoxShadow(
-          color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.04),
-          blurRadius: 14,
-          offset: const Offset(0, 7),
-          spreadRadius: -3,
+          color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.06),
+          blurRadius: isDark ? 14 : 14,
+          offset: Offset(0, isDark ? 7 : 4),
+          spreadRadius: isDark ? -3 : -2,
         ),
       ],
+    );
+  }
+
+  Widget _portfolioHeroLeadingIcon(BuildContext context) {
+    final accent = _portfolioAccentColor(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        gradient: LinearGradient(
+          colors: [
+            accent,
+            const Color(0xFF7C3AED),
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: isDark
+                ? accent.withValues(alpha: 0.35)
+                : Colors.black.withValues(alpha: 0.14),
+            blurRadius: isDark ? 14 : 10,
+            offset: Offset(0, isDark ? 8 : 5),
+          ),
+        ],
+      ),
+      child: const Icon(Icons.maps_home_work_outlined, color: Colors.white, size: 22),
+    );
+  }
+
+  Widget _buildPortfolioHeroPill(BuildContext context, IconData icon, String label) {
+    final accent = _portfolioAccentColor(context);
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final borderCol = ThemeHelpers.borderColor(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: isDark ? accent.withValues(alpha: 0.07) : ThemeHelpers.cardBackgroundColor(context),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: isDark ? accent.withValues(alpha: 0.14) : borderCol.withValues(alpha: 0.55),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: accent),
+          const SizedBox(width: 7),
+          Text(
+            label,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: ThemeHelpers.textColor(context),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _portfolioHeroContextPills(
+    BuildContext context, {
+    required bool gatedGlobal,
+    required bool compact,
+  }) {
+    final pageChip = _totalPages > 1
+        ? 'Pág. $_currentPage · $_totalPages'
+        : '${_compactIntFormatter.format(_properties.length)} neste painel';
+    return [
+      _buildPortfolioHeroPill(
+        context,
+        gatedGlobal ? Icons.hub_outlined : Icons.filter_alt_outlined,
+        gatedGlobal ? 'Portfolio CRM' : 'Contexto filtrado',
+      ),
+      _buildPortfolioHeroPill(
+        context,
+        Icons.visibility_outlined,
+        compact && pageChip.length > 18 ? '${_properties.length} itens' : pageChip,
+      ),
+    ];
+  }
+
+  Widget _buildPortfolioHeroInsight(
+    BuildContext context, {
+    required bool gatedGlobal,
+    required bool hasSearch,
+    required bool hasFilters,
+  }) {
+    final theme = Theme.of(context);
+    final gs = _globalStats;
+    final m = _listedPropertyMetrics();
+
+    late final IconData insightIcon;
+    late final Color iconBg;
+    late final Color iconFg;
+    late final String body;
+
+    if (hasSearch) {
+      insightIcon = Icons.manage_search_rounded;
+      iconBg = ThemeHelpers.borderColor(context).withValues(alpha: 0.2);
+      iconFg = ThemeHelpers.textSecondaryColor(context);
+      body =
+          'Resultados combinam busca textual com os filtros deste momento — use os KPIs para validar distribuição na página atual.';
+    } else if (hasFilters) {
+      insightIcon = Icons.tune_rounded;
+      iconBg = _portfolioAccentColor(context).withValues(alpha: 0.14);
+      iconFg = _portfolioAccentColor(context);
+      body =
+          'Métricas da listagem espelham o filtro granular. Limpe os chips de contexto ou redefina os filtros para alinhar ao CRM global.';
+    } else if (gs != null && gatedGlobal) {
+      insightIcon = Icons.auto_graph_rounded;
+      iconFg = AppColors.status.success;
+      iconBg = AppColors.status.success.withValues(alpha: 0.14);
+      body =
+          '${_compactIntFormatter.format(gs.total)} imóveis catalogados · '
+          '${_compactIntFormatter.format(gs.available)} disponíveis neste panorama · '
+          '${m.negotiationFriendly} aceitam negociação na página atual.';
+    } else {
+      insightIcon = Icons.layers_outlined;
+      iconFg = ThemeHelpers.textSecondaryColor(context);
+      iconBg = ThemeHelpers.borderColor(context).withValues(alpha: 0.18);
+      body = '$_total registros combinam filtros pesquisáveis · '
+          '${m.available} listados livres · ${m.negotiationFriendly} flexíveis a proposta.';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(11),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: iconBg,
+            ),
+            child: Icon(insightIcon, color: iconFg, size: 22),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'INSIGHT PORTFÓLIO',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.65,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  body,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: ThemeHelpers.textColor(context),
+                    fontWeight: FontWeight.w700,
+                    height: 1.32,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -941,41 +1562,29 @@ class _PropertiesPageState extends State<PropertiesPage> {
     String? hint,
     required IconData icon,
     required Color accent,
+    double? tileWidth,
+    double? tileHeight,
+    bool dense = false,
   }) {
     final theme = Theme.of(context);
+    final tw = tileWidth ?? (dense ? double.infinity : _kStatTileWidth);
+    final th = tileHeight ?? _kStatCarouselHeight;
+    final pad = dense
+        ? const EdgeInsets.symmetric(horizontal: 10, vertical: 8)
+        : const EdgeInsets.fromLTRB(12, 10, 12, 10);
+    final showHint = !dense && hint != null && hint.isNotEmpty;
 
-    final content = SizedBox(
-      width: _kStatTileWidth,
-      height: _kStatCarouselHeight,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-        decoration: _kpiMetricCardDecoration(context, accent),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
+    final Widget inner;
+    if (dense) {
+      inner = Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          _portfolioHeroKpiIconPlate(context, icon, accent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _buildPortfolioIconBadge(context, icon, accent, size: 32, iconSize: 16),
-                Container(
-                  width: 34,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(999),
-                    gradient: LinearGradient(
-                      colors: [
-                        accent.withValues(alpha: 0.2),
-                        accent.withValues(alpha: 0.75),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
               mainAxisSize: MainAxisSize.min,
               children: [
                 FittedBox(
@@ -984,49 +1593,126 @@ class _PropertiesPageState extends State<PropertiesPage> {
                   child: Text(
                     value,
                     maxLines: 1,
-                    style: theme.textTheme.titleLarge?.copyWith(
+                    style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w900,
-                      letterSpacing: -0.5,
+                      letterSpacing: -0.35,
                       height: 1.05,
                       color: ThemeHelpers.textColor(context),
                     ),
                   ),
                 ),
-                const SizedBox(height: 3),
+                const SizedBox(height: 2),
                 Text(
                   label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: ThemeHelpers.textSecondaryColor(context),
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.35,
-                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.2,
+                    fontSize: 10,
                   ),
                 ),
-                if (hint != null && hint.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    hint,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context)
-                          .withValues(alpha: 0.88),
-                      fontSize: 9.5,
-                      fontWeight: FontWeight.w600,
-                      height: 1.1,
-                    ),
-                  ),
-                ],
               ],
             ),
-          ],
-        ),
+          ),
+        ],
+      );
+    } else {
+      inner = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildPortfolioIconBadge(
+                context,
+                icon,
+                accent,
+                size: 32,
+                iconSize: 16,
+              ),
+              Container(
+                width: 38,
+                height: 5,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  gradient: LinearGradient(
+                    colors: [
+                      accent.withValues(alpha: 0.22),
+                      accent.withValues(alpha: 0.82),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.5,
+                    height: 1.02,
+                    color: ThemeHelpers.textColor(context),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: ThemeHelpers.textSecondaryColor(context),
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.35,
+                  fontSize: 10.5,
+                ),
+              ),
+              if (showHint) ...[
+                const SizedBox(height: 2),
+                Text(
+                  hint,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context)
+                        .withValues(alpha: 0.88),
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w600,
+                    height: 1.1,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      );
+    }
+
+    final content = SizedBox(
+      width: tw,
+      height: th,
+      child: Container(
+        padding: pad,
+        decoration: dense
+            ? _portfolioHeroKpiDecoration(context, accent)
+            : _kpiMetricCardDecoration(context, accent, dense: false),
+        child: inner,
       ),
     );
 
-    if (hint != null && hint.length > 26) {
+    if (!dense && hint != null && hint.length > 26) {
       return Tooltip(
         message: '$label · $hint',
         waitDuration: const Duration(milliseconds: 450),
@@ -1034,6 +1720,93 @@ class _PropertiesPageState extends State<PropertiesPage> {
       );
     }
     return content;
+  }
+
+  void _showPortfolioOverflowMetricsSheet(BuildContext context) {
+    final theme = Theme.of(context);
+    final mq = MediaQuery.sizeOf(context);
+    const padH = 20.0;
+    final innerW = (mq.width - padH * 2).clamp(0.0, double.infinity);
+    const gap = 10.0;
+    final kpiCols = innerW >= 520 ? 3 : 2;
+    final kpiTileRaw = (innerW - gap * (kpiCols - 1)) / kpiCols;
+    final kpiTileW = kpiTileRaw.clamp(100.0, 168.0);
+    const tileH = 104.0;
+
+    final tiles = _portfolioOverflowKpiTiles(
+      context,
+      tw: kpiTileW,
+      th: tileH,
+    );
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      barrierColor: Colors.black54,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      builder: (ctx) {
+        final maxH = MediaQuery.sizeOf(ctx).height * 0.72;
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxH),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(padH, 10, padH, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: ThemeHelpers.borderColor(ctx).withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                Text(
+                  'Métricas detalhadas',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Indicadores desta página e panorama do CRM.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(ctx),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                if (tiles.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 28),
+                    child: Text(
+                      'Sem métricas adicionais neste contexto.',
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  )
+                else
+                  Expanded(
+                    child: SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      child: Wrap(
+                        spacing: gap,
+                        runSpacing: gap,
+                        children: tiles,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   void _showOptimizationDialog(BuildContext context) {
@@ -1068,25 +1841,32 @@ class _PropertiesPageState extends State<PropertiesPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.trending_up, color: AppColors.primary.primary),
-                    const SizedBox(width: 8),
-                    const Expanded(
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Icon(
+                        Icons.trending_up_rounded,
+                        color: AppColors.primary.primary,
+                        size: 28,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
                       child: Text(
                         'Otimização de Portfólio',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.3,
                         ),
                       ),
                     ),
                     IconButton(
                       icon: const Icon(Icons.close),
-                      onPressed: isOptimizing
-                          ? null
-                          : () => Navigator.pop(context),
+                      onPressed: isOptimizing ? null : () => Navigator.pop(context),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
+                      visualDensity: VisualDensity.compact,
                     ),
                   ],
                 ),
@@ -1279,14 +2059,15 @@ class _PropertiesPageState extends State<PropertiesPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Expanded(
+                    Expanded(
                       child: Text(
                         'Resultados da Otimização',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.25,
+                            ),
                       ),
                     ),
                     IconButton(
@@ -1294,6 +2075,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
                       onPressed: () => Navigator.pop(context),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
+                      visualDensity: VisualDensity.compact,
                     ),
                   ],
                 ),
@@ -1377,14 +2159,15 @@ class _PropertiesPageState extends State<PropertiesPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Expanded(
+                      Expanded(
                         child: Text(
                           'Resultados da Otimização',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.25,
+                              ),
                         ),
                       ),
                       IconButton(
@@ -1392,6 +2175,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
                         onPressed: () => Navigator.pop(context),
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
+                        visualDensity: VisualDensity.compact,
                       ),
                     ],
                   ),
@@ -1416,12 +2200,27 @@ class _PropertiesPageState extends State<PropertiesPage> {
                     const SizedBox(height: 8),
                     ...result.recommendedActions.map(
                       (action) => Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
+                        padding: const EdgeInsets.only(bottom: 6),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('• '),
-                            Expanded(child: Text(action)),
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Icon(
+                                Icons.chevron_right_rounded,
+                                size: 16,
+                                color: theme.colorScheme.primary,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                action,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  height: 1.38,
+                                ),
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -1466,72 +2265,80 @@ class _PropertiesPageState extends State<PropertiesPage> {
   }
 
   Widget _buildSkeleton(BuildContext context) {
+    final w = MediaQuery.sizeOf(context).width;
+    final cols = _exploreGridCrossAxisCount(w);
+    final aspect = _exploreGridChildAspectRatio(cols);
+    final hPad = w < 360 ? 10.0 : (cols >= 3 ? 14.0 : 12.0);
+    final spacingH = cols >= 3 ? 9.0 : 11.0;
+    final spacingV = cols >= 3 ? 11.0 : 13.0;
+    final narrow = w < 360;
+
+    Widget gridTile() {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            const SkeletonBox(
+              width: double.infinity,
+              height: double.infinity,
+              borderRadius: 20,
+            ),
+            Positioned(
+              left: 10,
+              right: 10,
+              bottom: 12,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SkeletonText(width: 118, height: 13, borderRadius: 6),
+                  const SizedBox(height: 8),
+                  SkeletonText(width: w * 0.42, height: 11, borderRadius: 5),
+                  const SizedBox(height: 6),
+                  SkeletonText(width: w * 0.24, height: 9, borderRadius: 4),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.fromLTRB(hPad, 12, hPad, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Skeleton da barra de busca
           Row(
             children: [
               Expanded(
                 child: SkeletonBox(
                   height: 48,
                   borderRadius: 12,
-                  margin: const EdgeInsets.only(bottom: 16),
+                  margin: EdgeInsets.only(bottom: narrow ? 12 : 16),
                 ),
               ),
-              const SizedBox(width: 12),
-              SkeletonBox(width: 48, height: 48, borderRadius: 12),
+              SizedBox(width: narrow ? 8 : 12),
+              SkeletonBox(
+                width: narrow ? 44 : 48,
+                height: narrow ? 44 : 48,
+                borderRadius: 12,
+                margin: EdgeInsets.only(bottom: narrow ? 12 : 16),
+              ),
             ],
           ),
-          // Skeleton dos cards
-          ...List.generate(
-            3,
-            (index) => Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: SkeletonCard(
-                height: 200,
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SkeletonBox(width: 150, height: 150, borderRadius: 12),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SkeletonText(
-                            width: double.infinity,
-                            height: 20,
-                            margin: const EdgeInsets.only(bottom: 8),
-                          ),
-                          SkeletonText(
-                            width: 150,
-                            height: 16,
-                            margin: const EdgeInsets.only(bottom: 8),
-                          ),
-                          SkeletonText(
-                            width: 200,
-                            height: 16,
-                            margin: const EdgeInsets.only(bottom: 12),
-                          ),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              SkeletonText(width: 50, height: 14),
-                              SkeletonText(width: 50, height: 14),
-                              SkeletonText(width: 50, height: 14),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: cols,
+              crossAxisSpacing: spacingH,
+              mainAxisSpacing: spacingV,
+              childAspectRatio: aspect,
             ),
+            itemCount: 10,
+            itemBuilder: (_, _) => gridTile(),
           ),
         ],
       ),
@@ -1562,7 +2369,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: isDark ? 0.26 : 0.05),
+                  color: Colors.black.withValues(alpha: isDark ? 0.26 : 0.075),
                   blurRadius: 22,
                   offset: const Offset(0, 8),
                   spreadRadius: -6,
@@ -1690,27 +2497,29 @@ class _PropertiesPageState extends State<PropertiesPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'Buscar Propriedades',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Buscar Propriedades',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.25,
+                            ),
                       ),
                     ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(context),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
               TextField(
                 controller: _searchController,
                 decoration: const InputDecoration(
@@ -1781,20 +2590,197 @@ class _PropertiesPageState extends State<PropertiesPage> {
     _loadProperties(refresh: true);
   }
 
-  Widget _buildPropertiesList(BuildContext context) {
-    final theme = Theme.of(context);
+  /// Faixa horizontal antes da malha — quebra o ritmo “tudo empilhado”.
+  Widget _buildDiscoverHorizontalStrip(
+    BuildContext context,
+    ThemeData theme, {
+    required double horizontalPad,
+    required int columns,
+  }) {
+    final lead = _discoverLeadCount(_properties.length);
+    if (lead <= 0) return const SizedBox.shrink();
 
-    if (_properties.isEmpty) {
-      return _buildEmptyPropertiesState(context, theme);
-    }
+    final w = MediaQuery.sizeOf(context).width;
+    final aspect = _exploreGridChildAspectRatio(columns);
+    final cardW = (w * 0.74).clamp(258.0, 312.0);
+    final cardH = cardW / aspect;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 16, bottom: 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: EdgeInsets.fromLTRB(horizontalPad, 0, horizontalPad, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.view_carousel_outlined,
+                      size: 18,
+                      color: AppColors.primary.primary,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Destaques — percorra ao lado',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.25,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  'Abaixo ficam os demais cartões (sem repetir esta faixa).',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: muted,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(
+            height: cardH,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              padding: EdgeInsets.fromLTRB(horizontalPad, 0, horizontalPad + 8, 0),
+              itemCount: lead,
+              itemBuilder: (context, i) {
+                return Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: SizedBox(
+                    width: cardW,
+                    child: AspectRatio(
+                      aspectRatio: aspect,
+                      child: _buildPropertyExploreTile(
+                        context,
+                        theme,
+                        _properties[i],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Radar + grade explorável (mobile como galeria; sem fila de cartões largos).
+  Widget _buildScrollablePropertiesViewport(BuildContext context) {
+    final theme = Theme.of(context);
+    final w = MediaQuery.sizeOf(context).width;
+    final cols = _exploreGridCrossAxisCount(w);
+    final horizontal = w < 360 ? 10.0 : (cols >= 3 ? 14.0 : 12.0);
+    final n = _properties.length;
+    final aspect = _exploreGridChildAspectRatio(cols);
+    final lead = _discoverLeadCount(n);
+    final gridCount = n - lead;
 
     return RefreshIndicator(
       onRefresh: () => _loadProperties(refresh: true),
       color: AppColors.primary.primary,
-      child: Column(
-        children: [
-          Expanded(child: _buildListView(context, theme)),
-          if (_totalPages > 1) _buildPagination(context),
+      child: CustomScrollView(
+        controller: _scrollController,
+        physics: const BouncingScrollPhysics(
+          parent: AlwaysScrollableScrollPhysics(),
+        ),
+        slivers: [
+          SliverToBoxAdapter(child: _buildPortfolioHeader(context)),
+          SliverToBoxAdapter(
+            child: _buildDiscoverHorizontalStrip(
+              context,
+              theme,
+              horizontalPad: horizontal,
+              columns: cols,
+            ),
+          ),
+          if (lead > 0 && gridCount > 0)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(horizontal, 12, horizontal, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Divider(
+                        color: theme.dividerColor.withValues(alpha: 0.38),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text(
+                        'Explorar o restante',
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: ThemeHelpers.textSecondaryColor(context),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Divider(
+                        color: theme.dividerColor.withValues(alpha: 0.38),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(horizontal, lead > 0 ? 2 : 14, horizontal, 8),
+            sliver: SliverGrid.builder(
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: cols,
+                crossAxisSpacing: cols >= 3 ? 9 : 11,
+                mainAxisSpacing: cols >= 3 ? 11 : 13,
+                childAspectRatio: aspect,
+              ),
+              itemCount: gridCount,
+              itemBuilder: (context, index) {
+                return _buildPropertyExploreTile(
+                  context,
+                  theme,
+                  _properties[lead + index],
+                );
+              },
+            ),
+          ),
+          if (_isLoadingMore)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 18),
+                child: Center(
+                  child: SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: AppColors.primary.primary,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (_totalPages > 1)
+            SliverToBoxAdapter(
+              child: KeyedSubtree(
+                key: const ValueKey<String>('properties_pagination_footer'),
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 4),
+                  child: _buildPagination(context),
+                ),
+              ),
+            ),
+          const SliverToBoxAdapter(child: SizedBox(height: 10)),
         ],
       ),
     );
@@ -1838,7 +2824,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.26 : 0.05),
+              color: Colors.black.withValues(alpha: isDark ? 0.26 : 0.075),
               blurRadius: 22,
               offset: const Offset(0, 8),
               spreadRadius: -6,
@@ -1862,67 +2848,67 @@ class _PropertiesPageState extends State<PropertiesPage> {
                   ),
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(22, 20, 22, 20),
-                child: Column(
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(22, 20, 22, 20),
+                    child: Column(
                       children: [
-                        Container(
-                          padding: const EdgeInsets.all(11),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(16),
-                            color: accent.withValues(alpha: isDark ? 0.12 : 0.1),
-                            border: Border.all(
-                              color: accent.withValues(alpha: 0.22),
-                              width: 1,
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(11),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(16),
+                                color: accent.withValues(alpha: isDark ? 0.12 : 0.1),
+                                border: Border.all(
+                                  color: accent.withValues(alpha: 0.22),
+                                  width: 1,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: accent.withValues(alpha: 0.14),
+                                    blurRadius: 12,
+                                    offset: const Offset(0, 5),
+                                  ),
+                                ],
+                              ),
+                              child: Icon(
+                                obstructed
+                                    ? Icons.manage_search_rounded
+                                    : Icons.layers_outlined,
+                                size: 26,
+                                color: accent,
+                              ),
                             ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: accent.withValues(alpha: 0.14),
-                                blurRadius: 12,
-                                offset: const Offset(0, 5),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    eyebrow.toUpperCase(),
+                                    style: theme.textTheme.labelSmall?.copyWith(
+                                      letterSpacing: 0.9,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 10,
+                                      color: muted.withValues(alpha: 0.95),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 5),
+                                  Text(
+                                    title,
+                                    style: theme.textTheme.titleLarge?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -0.35,
+                                      height: 1.12,
+                                      color: ThemeHelpers.textColor(context),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                          child: Icon(
-                            obstructed
-                                ? Icons.manage_search_rounded
-                                : Icons.layers_outlined,
-                            size: 26,
-                            color: accent,
-                          ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                eyebrow.toUpperCase(),
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  letterSpacing: 0.9,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 10,
-                                  color: muted.withValues(alpha: 0.95),
-                                ),
-                              ),
-                              const SizedBox(height: 5),
-                              Text(
-                                title,
-                                style: theme.textTheme.titleLarge?.copyWith(
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: -0.35,
-                                  height: 1.12,
-                                  color: ThemeHelpers.textColor(context),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
                     const SizedBox(height: 14),
                     Divider(
                       height: 1,
@@ -2028,287 +3014,264 @@ class _PropertiesPageState extends State<PropertiesPage> {
     );
   }
 
-  Widget _buildListView(BuildContext context, ThemeData theme) {
-    return ListView.builder(
-      controller: _scrollController,
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 22),
-      itemCount: _properties.length + (_isLoadingMore ? 1 : 0),
-      itemBuilder: (context, index) {
-        if (index == _properties.length) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 22),
-            child: Center(
-              child: CircularProgressIndicator(color: AppColors.primary.primary),
-            ),
-          );
-        }
-        final property = _properties[index];
-        return _buildPropertyListCard(context, theme, property, index);
-      },
-    );
+  /// Resumo editorial (sem „grade de formulário”) — detalhe completo na ficha.
+  String? _editorialSpecsLine(Property property) {
+    final parts = <String>[];
+    if (property.bedrooms != null && property.bedrooms! > 0) {
+      parts.add('${property.bedrooms} qt');
+    }
+    if (property.bathrooms != null && property.bathrooms! > 0) {
+      parts.add('${property.bathrooms} ban');
+    }
+    if (property.parkingSpaces != null && property.parkingSpaces! > 0) {
+      parts.add('${property.parkingSpaces} vag');
+    }
+    if (property.totalArea > 0) {
+      parts.add('${property.totalArea.toInt()} m²');
+    }
+    if (parts.isEmpty) return null;
+    return parts.join(' · ');
   }
 
-  Widget _buildPropertyListCard(
+  /// Localização curta só para preview na grade (bairro · cidade quando existir).
+  String _compactLocationLine(Property property) {
+    final n = property.neighborhood.trim();
+    final c = property.city.trim();
+    final s =
+        (n.isNotEmpty && c.isNotEmpty) ? '$n · $c' : _formatPropertyLocation(property);
+    if (s.length <= 38) return s;
+    return '${s.substring(0, 36)}…';
+  }
+
+  /// Célula da grade: foto cheia + overlay (explorar, não lista linear).
+  Widget _buildPropertyExploreTile(
     BuildContext context,
     ThemeData theme,
     Property property,
-    int index,
   ) {
     final isDark = theme.brightness == Brightness.dark;
-    final cardColor = isDark
-        ? AppColors.background.backgroundSecondaryDarkMode
-        : AppColors.background.backgroundSecondary;
     final price = _formatMainPrice(property);
-    final location = _formatPropertyLocation(property);
-    final hasCommercialFlags = property.hasPendingOffers == true ||
-        property.totalOffersCount != null ||
-        property.acceptsNegotiation == true ||
-        property.mcmvEligible == true;
+    final specs = _editorialSpecsLine(property);
+    final locCompact = _compactLocationLine(property);
+    final statusColor = _getStatusColor(property.status);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 18),
+    return DecoratedBox(
       decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(30),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context).withValues(alpha: isDark ? 0.58 : 0.80),
-        ),
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.06),
-            blurRadius: 26,
-            offset: const Offset(0, 14),
+            color: Colors.black.withValues(alpha: isDark ? 0.42 : 0.08),
+            blurRadius: isDark ? 18 : 12,
+            offset: const Offset(0, 8),
+            spreadRadius: -3,
           ),
         ],
       ),
-      clipBehavior: Clip.antiAlias,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () =>
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () =>
                 Navigator.of(context).pushNamed(AppRoutes.propertyDetails(property.id)),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Stack(
+            child: Ink(
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: ThemeHelpers.borderColor(context)
+                      .withValues(alpha: isDark ? 0.38 : 0.22),
+                ),
+              ),
+              child: Stack(
+                fit: StackFit.expand,
                 children: [
-                  SizedBox(
-                    height: 214,
-                    width: double.infinity,
-                    child: property.mainImage != null
-                        ? ShimmerImage(
-                            imageUrl: property.mainImage!.url,
-                            width: double.infinity,
-                            height: 214,
-                            fit: BoxFit.cover,
-                            errorWidget: _buildPropertyImageFallback(context, theme),
-                          )
-                        : _buildPropertyImageFallback(context, theme),
-                  ),
-                  Positioned.fill(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.black.withValues(alpha: 0.10),
-                            Colors.black.withValues(alpha: 0.03),
-                            Colors.black.withValues(alpha: 0.72),
-                          ],
-                          stops: const [0.0, 0.44, 1.0],
-                        ),
+                  if (property.mainImage != null)
+                    ShimmerImage(
+                      imageUrl: property.mainImage!.url,
+                      width: double.infinity,
+                      height: double.infinity,
+                      fit: BoxFit.cover,
+                      errorWidget: _buildPropertyImageFallback(context, theme),
+                    )
+                  else
+                    _buildPropertyImageFallback(context, theme),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        stops: const [0.0, 0.32, 1.0],
+                        colors: [
+                          Colors.black.withValues(alpha: 0.52),
+                          Colors.transparent,
+                          Colors.black.withValues(alpha: 0.9),
+                        ],
                       ),
                     ),
                   ),
                   Positioned(
-                    top: 12,
-                    left: 12,
-                    right: 12,
+                    top: 7,
+                    left: 7,
+                    right: 7,
                     child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Flexible(
-                          child: Wrap(
-                            spacing: 7,
-                            runSpacing: 7,
+                        Expanded(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              _buildOverlayBadge(
-                                context,
-                                property.type.label,
-                                Icons.category_outlined,
-                                Colors.white,
-                              ),
-                              _buildOverlayBadge(
-                                context,
-                                property.status.label,
-                                Icons.circle,
-                                _getStatusColor(property.status),
-                              ),
-                              if (property.isFeatured)
-                                _buildOverlayBadge(
-                                  context,
-                                  'Destaque',
-                                  Icons.star_rounded,
-                                  AppColors.status.warning,
+                              Flexible(
+                                child: Container(
+                                  constraints: const BoxConstraints(maxHeight: 34),
+                                  padding: const EdgeInsets.fromLTRB(6, 4, 8, 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.36),
+                                    borderRadius: BorderRadius.circular(11),
+                                    border: Border.all(
+                                      color: Colors.white.withValues(alpha: 0.14),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.circle, size: 6, color: statusColor),
+                                      const SizedBox(width: 5),
+                                      Flexible(
+                                        child: Text(
+                                          property.status.label,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 9.5,
+                                            fontWeight: FontWeight.w800,
+                                            height: 1.05,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
+                              ),
+                              if (property.isFeatured) ...[
+                                const SizedBox(width: 5),
+                                Container(
+                                  padding: const EdgeInsets.all(5),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.36),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: Colors.white.withValues(alpha: 0.14),
+                                    ),
+                                  ),
+                                  child: Icon(
+                                    Icons.star_rounded,
+                                    size: 13,
+                                    color: AppColors.status.warning,
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        _buildPropertyActionsMenu(context, theme, property),
+                        Transform.scale(
+                          scale: 0.86,
+                          alignment: Alignment.topRight,
+                          child: _buildPropertyActionsMenu(context, theme, property),
+                        ),
                       ],
                     ),
                   ),
                   Positioned(
-                    left: 14,
-                    right: 14,
-                    bottom: 14,
+                    left: 8,
+                    right: 8,
+                    bottom: 9,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                price.label,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: Colors.white.withValues(alpha: 0.82),
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 1.1,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            if (property.imageCount != null && property.imageCount! > 0)
-                              _buildOverlayBadge(
-                                context,
-                                '${property.imageCount}',
-                                Icons.photo_library_outlined,
-                                Colors.white,
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
                         Text(
                           price.value,
-                          style: theme.textTheme.headlineSmall?.copyWith(
+                          style: theme.textTheme.titleSmall?.copyWith(
                             color: Colors.white,
                             fontWeight: FontWeight.w900,
                             height: 1.05,
+                            letterSpacing: -0.35,
+                            fontSize: 13.5,
+                            shadows: const [
+                              Shadow(
+                                offset: Offset(0, 1),
+                                blurRadius: 8,
+                                color: Colors.black54,
+                              ),
+                            ],
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        MatchesBadge(
+                          propertyId: property.id,
+                          onClick: () => Navigator.pushNamed(
+                            context,
+                            AppRoutes.matchesByProperty(property.id),
+                          ),
+                          child: Text(
+                            property.title,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: Colors.white.withValues(alpha: 0.96),
+                              fontWeight: FontWeight.w800,
+                              height: 1.2,
+                              fontSize: 11.25,
+                              shadows: const [
+                                Shadow(
+                                  offset: Offset(0, 1),
+                                  blurRadius: 6,
+                                  color: Colors.black45,
+                                ),
+                              ],
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          locCompact,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: Colors.white.withValues(alpha: 0.72),
+                            fontWeight: FontWeight.w600,
+                            fontSize: 9,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
+                        if (specs != null) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            specs,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: Colors.white.withValues(alpha: 0.62),
+                              fontWeight: FontWeight.w700,
+                              fontSize: 8.5,
+                              height: 1.05,
+                              fontFeatures: const [FontFeature.tabularFigures()],
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
                       ],
                     ),
                   ),
                 ],
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: MatchesBadge(
-                            propertyId: property.id,
-                            onClick: () {
-                              Navigator.pushNamed(
-                                context,
-                                AppRoutes.matchesByProperty(property.id),
-                              );
-                            },
-                            child: Text(
-                              property.title,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                color: ThemeHelpers.textColor(context),
-                                fontWeight: FontWeight.w900,
-                                height: 1.15,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ),
-                        if (property.code != null && property.code!.trim().isNotEmpty) ...[
-                          const SizedBox(width: 10),
-                          _buildCodePill(context, property.code!),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    _buildLocationLine(context, theme, location),
-                    const SizedBox(height: 14),
-                    _buildCompactSpecsGrid(context, theme, property),
-                    if (_buildFinancialDetails(property).isNotEmpty) ...[
-                      const SizedBox(height: 14),
-                      _buildFinancialStrip(context, theme, property),
-                    ],
-                    if (property.description.trim().isNotEmpty) ...[
-                      const SizedBox(height: 14),
-                      Text(
-                        property.description,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                          height: 1.45,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                    if (property.features.isNotEmpty) ...[
-                      const SizedBox(height: 14),
-                      _buildFeaturesPreview(context, theme, property),
-                    ],
-                    if (hasCommercialFlags) ...[
-                      const SizedBox(height: 14),
-                      _buildCommercialSignals(context, theme, property),
-                    ],
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _buildCardFooterSignal(
-                            context,
-                            icon: property.isAvailableForSite == true
-                                ? Icons.public_rounded
-                                : Icons.visibility_off_outlined,
-                            label: property.isAvailableForSite == true
-                                ? 'Publicado no site'
-                                : 'Interno',
-                            color: property.isAvailableForSite == true
-                                ? AppColors.status.success
-                                : ThemeHelpers.textSecondaryColor(context),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: _buildCardFooterSignal(
-                            context,
-                            icon: property.isActive
-                                ? Icons.check_circle_outline_rounded
-                                : Icons.pause_circle_outline_rounded,
-                            label: property.isActive ? 'Ativo' : 'Inativo',
-                            color: property.isActive
-                                ? AppColors.status.success
-                                : AppColors.status.warning,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
+
 
   Widget _buildPropertyImageFallback(BuildContext context, ThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
@@ -2351,6 +3314,10 @@ class _PropertiesPageState extends State<PropertiesPage> {
     ThemeData theme,
     Property property,
   ) {
+    final brightness = theme.brightness;
+    final pm = AppTheme.styledPopupMenu(brightness);
+    final base = Theme.of(context);
+
     return Container(
       width: 42,
       height: 42,
@@ -2359,52 +3326,82 @@ class _PropertiesPageState extends State<PropertiesPage> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
       ),
-      child: PopupMenuButton<String>(
-        icon: const Icon(Icons.more_vert_rounded, color: Colors.white, size: 20),
-        tooltip: 'Ações do imóvel',
-        color: theme.scaffoldBackgroundColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        onSelected: (value) async {
-          if (value == 'edit' && mounted) {
-            Navigator.of(context).pushNamed('/properties/${property.id}/edit');
-          } else if (value == 'delete') {
-            await _confirmAndDeleteProperty(context, property);
-          }
-        },
-        itemBuilder: (context) => [
-          PopupMenuItem(
-            value: 'edit',
-            child: Row(
-              children: [
-                Icon(Icons.edit_outlined, size: 20, color: ThemeHelpers.textColor(context)),
-                const SizedBox(width: 12),
-                Text(
-                  'Editar',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: ThemeHelpers.textColor(context),
-                    fontWeight: FontWeight.w600,
+      child: Theme(
+        data: base.copyWith(
+          popupMenuTheme: pm,
+          splashColor: AppColors.primary.primary.withValues(alpha: 0.10),
+          highlightColor: AppColors.primary.primary.withValues(alpha: 0.05),
+        ),
+        child: PopupMenuButton<String>(
+          clipBehavior: Clip.antiAlias,
+          color: pm.color,
+          surfaceTintColor: pm.surfaceTintColor,
+          elevation: pm.elevation ?? 20,
+          shadowColor: pm.shadowColor,
+          shape: pm.shape,
+          icon: const Icon(Icons.more_vert_rounded, color: Colors.white, size: 20),
+          tooltip: 'Ações do imóvel',
+          onSelected: (value) async {
+            if (value == 'edit' && mounted) {
+              Navigator.of(context).pushNamed('/properties/${property.id}/edit');
+            } else if (value == 'delete') {
+              await _confirmAndDeleteProperty(context, property);
+            }
+          },
+          itemBuilder: (menuCtx) {
+            final pmt = Theme.of(menuCtx).popupMenuTheme;
+            final editStyle =
+                (pmt.textStyle ?? theme.textTheme.bodyMedium)?.copyWith(
+              color: ThemeHelpers.textColor(menuCtx),
+              fontWeight: FontWeight.w600,
+            );
+            final deleteStyle =
+                (pmt.textStyle ?? theme.textTheme.bodyMedium)?.copyWith(
+              color: Colors.red,
+              fontWeight: FontWeight.w600,
+            );
+            final iconMuted =
+                pmt.iconColor ?? ThemeHelpers.textSecondaryColor(menuCtx);
+            return [
+              PopupMenuItem(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                value: 'edit',
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.middle,
+                        child: Icon(
+                          Icons.edit_outlined,
+                          size: 20,
+                          color: iconMuted,
+                        ),
+                      ),
+                      const WidgetSpan(child: SizedBox(width: 12)),
+                      TextSpan(text: 'Editar', style: editStyle),
+                    ],
                   ),
                 ),
-              ],
-            ),
-          ),
-          PopupMenuItem(
-            value: 'delete',
-            child: Row(
-              children: [
-                const Icon(Icons.delete_outline_rounded, size: 20, color: Colors.red),
-                const SizedBox(width: 12),
-                Text(
-                  'Excluir',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: Colors.red,
-                    fontWeight: FontWeight.w600,
+              ),
+              PopupMenuItem(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                value: 'delete',
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      const WidgetSpan(
+                        alignment: PlaceholderAlignment.middle,
+                        child: Icon(Icons.delete_outline_rounded, size: 20, color: Colors.red),
+                      ),
+                      const WidgetSpan(child: SizedBox(width: 12)),
+                      TextSpan(text: 'Excluir', style: deleteStyle),
+                    ],
                   ),
                 ),
-              ],
-            ),
-          ),
-        ],
+              ),
+            ];
+          },
+        ),
       ),
     );
   }
@@ -2432,26 +3429,33 @@ class _PropertiesPageState extends State<PropertiesPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
-                      width: 44,
-                      height: 44,
+                      width: 48,
+                      height: 48,
                       decoration: BoxDecoration(
                         color: AppColors.status.error.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: Icon(Icons.delete_outline_rounded, color: AppColors.status.error),
                     ),
-                    const SizedBox(width: 12),
-                    const Expanded(
+                    const SizedBox(width: 14),
+                    Expanded(
                       child: Text(
                         'Excluir imóvel',
-                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.2,
+                            ),
                       ),
                     ),
                     IconButton(
                       icon: const Icon(Icons.close),
                       onPressed: () => Navigator.pop(context, false),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      visualDensity: VisualDensity.compact,
                     ),
                   ],
                 ),
@@ -2516,20 +3520,23 @@ class _PropertiesPageState extends State<PropertiesPage> {
     VoidCallback? onClear,
   }) {
     final theme = Theme.of(context);
+    final accent = _portfolioAccentColor(context);
+    final chipMaxW =
+        (MediaQuery.sizeOf(context).width * 0.52).clamp(96.0, 220.0);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: AppColors.primary.primary.withValues(alpha: 0.10),
+        color: accent.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.primary.primary.withValues(alpha: 0.22)),
+        border: Border.all(color: accent.withValues(alpha: 0.22)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 15, color: AppColors.primary.primary),
-          const SizedBox(width: 7),
+          Icon(icon, size: 16, color: accent),
+          const SizedBox(width: 8),
           ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 172),
+            constraints: BoxConstraints(maxWidth: chipMaxW),
             child: Text(
               label,
               style: theme.textTheme.bodySmall?.copyWith(
@@ -2556,11 +3563,8 @@ class _PropertiesPageState extends State<PropertiesPage> {
     );
   }
 
-  /// Atalho «Busca IA» com acabamento premium (gradiente, borda luminosa, halo no ícone).
-  Widget _buildPremiumAiSearchQuickAction(
-    BuildContext context, {
-    required VoidCallback onPressed,
-  }) {
+  /// Item do menu ⋮ — acabamento premium (gradiente, borda luminosa, ícone halo).
+  Widget _buildPremiumAiSearchMenuHighlight(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final bgGradient = LinearGradient(
@@ -2589,8 +3593,8 @@ class _PropertiesPageState extends State<PropertiesPage> {
 
     Widget sparkleIcon() {
       return Container(
-        width: 26,
-        height: 26,
+        width: 28,
+        height: 28,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           gradient: RadialGradient(
@@ -2621,12 +3625,12 @@ class _PropertiesPageState extends State<PropertiesPage> {
               Color(0xFF67E8F9),
             ],
           ).createShader(bounds),
-          child: const Icon(Icons.auto_awesome_rounded, size: 14, color: Colors.white),
+          child: const Icon(Icons.auto_awesome_rounded, size: 15, color: Colors.white),
         ),
       );
     }
 
-    Widget labelPrimary() {
+    Widget titlePrimary() {
       final ts = theme.textTheme.titleSmall;
       if (isDark) {
         return Text(
@@ -2635,7 +3639,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
             color: Colors.white,
             fontWeight: FontWeight.w800,
             fontSize: 14,
-            letterSpacing: 0.2,
+            letterSpacing: 0.18,
             height: 1.1,
             shadows: [
               Shadow(
@@ -2662,85 +3666,71 @@ class _PropertiesPageState extends State<PropertiesPage> {
             color: Colors.white,
             fontWeight: FontWeight.w800,
             fontSize: 14,
-            letterSpacing: 0.15,
+            letterSpacing: 0.12,
             height: 1.1,
           ),
         ),
       );
     }
 
-    return Tooltip(
-      message: 'Busca inteligente com critérios semânticos',
-      child: Material(
-        color: Colors.transparent,
-        elevation: 0,
-        shadowColor: Colors.transparent,
-        borderRadius: BorderRadius.circular(18),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onPressed,
-          borderRadius: BorderRadius.circular(18),
-          splashColor: const Color(0xFF818CF8).withValues(alpha: 0.22),
-          highlightColor: Colors.white.withValues(alpha: 0.06),
-          child: Ink(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              gradient: bgGradient,
-              border: Border.all(width: 0.95, color: borderColor.withValues(alpha: 0.9)),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF6366F1).withValues(alpha: isDark ? 0.32 : 0.18),
-                  blurRadius: isDark ? 16 : 12,
-                  offset: const Offset(0, 6),
-                  spreadRadius: -2,
-                ),
-                BoxShadow(
-                  color: const Color(0xFF22D3EE).withValues(alpha: isDark ? 0.18 : 0.14),
-                  blurRadius: 10,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-            ),
-            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-            child: Wrap(
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 8,
-              children: [
-                sparkleIcon(),
-                Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    labelPrimary(),
-                    const SizedBox(height: 1),
-                    Text(
-                      'Semântico · matches',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: isDark
-                            ? Colors.white.withValues(alpha: 0.68)
-                            : const Color(0xFF475569),
-                        letterSpacing: 0.06,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 9.5,
-                        height: 1.05,
-                      ),
-                    ),
-                  ],
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(left: 2),
-                  child: Icon(
-                    Icons.arrow_forward_ios_rounded,
-                    size: 11,
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.68)
-                        : const Color(0xFF64748B).withValues(alpha: 0.88),
-                  ),
-                ),
-              ],
-            ),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        gradient: bgGradient,
+        border: Border.all(width: 0.95, color: borderColor.withValues(alpha: 0.9)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF6366F1).withValues(alpha: isDark ? 0.32 : 0.18),
+            blurRadius: isDark ? 14 : 11,
+            offset: const Offset(0, 5),
+            spreadRadius: -2,
           ),
+          BoxShadow(
+            color: const Color(0xFF22D3EE).withValues(alpha: isDark ? 0.18 : 0.14),
+            blurRadius: 9,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+        child: Row(
+          children: [
+            sparkleIcon(),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  titlePrimary(),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Semântico · critérios inteligentes',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.7)
+                          : const Color(0xFF475569),
+                      fontWeight: FontWeight.w600,
+                      fontSize: 9.5,
+                      height: 1.05,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 6),
+            Icon(
+              Icons.arrow_forward_ios_rounded,
+              size: 11,
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.68)
+                  : const Color(0xFF64748B).withValues(alpha: 0.88),
+            ),
+          ],
         ),
       ),
     );
@@ -2754,495 +3744,50 @@ class _PropertiesPageState extends State<PropertiesPage> {
     bool isPrimary = false,
     bool highlight = false,
   }) {
+    final accent = _portfolioAccentColor(context);
     final theme = Theme.of(context);
-    final muted = ThemeHelpers.textSecondaryColor(context);
-    final appPrimary = AppColors.primary.primary;
-
-    final Color accent = isPrimary || highlight ? appPrimary : muted;
-
-    Decoration decoration() {
-      final r = BorderRadius.circular(16);
-      if (isPrimary) {
-        return BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color.lerp(appPrimary, Colors.white, 0.12)!,
-              Color.lerp(appPrimary, Colors.black, 0.08)!,
-            ],
-          ),
-          borderRadius: r,
-          border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
-          boxShadow: [
-            BoxShadow(
-              color: appPrimary.withValues(alpha: 0.35),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
-              spreadRadius: -2,
-            ),
-          ],
-        );
-      }
-      if (highlight) {
-        return BoxDecoration(
-          color: appPrimary.withValues(alpha: 0.077),
-          borderRadius: r,
-          border: Border.all(
-            color: appPrimary.withValues(alpha: 0.48),
-            width: 1.15,
-          ),
-        );
-      }
-      return BoxDecoration(
-        color: accent.withValues(alpha: 0.058),
-        borderRadius: r,
-        border: Border.all(
-          color: accent.withValues(alpha: 0.14),
-          width: 1,
-        ),
-      );
-    }
-
-    Color iconColor() {
-      if (isPrimary) return Colors.white.withValues(alpha: 0.96);
-      if (highlight) return appPrimary;
-      return accent;
-    }
-
-    Color labelColor() {
-      if (isPrimary) return Colors.white;
-      if (highlight) return appPrimary;
-      return ThemeHelpers.textColor(context);
-    }
-
     final style = theme.textTheme.labelLarge?.copyWith(
       fontWeight: FontWeight.w800,
       fontSize: 12.75,
       height: 1.15,
       letterSpacing: -0.1,
-      color: labelColor(),
+      color: isPrimary
+          ? Colors.white
+          : highlight
+              ? accent
+              : ThemeHelpers.textColor(context),
     );
 
-    return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(16),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(16),
-        splashFactory: InkRipple.splashFactory,
-        overlayColor: WidgetStateProperty.resolveWith((states) {
-          if (!isPrimary && states.contains(WidgetState.pressed)) {
-            return accent.withValues(alpha: 0.07);
-          }
-          return accent.withValues(alpha: 0.055);
-        }),
-        child: Ink(
-          decoration: decoration(),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 16.5, color: iconColor()),
-              const SizedBox(width: 7),
-              Text(label, style: style),
-            ],
+    return InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: isPrimary
+              ? accent
+              : ShellVisualTokens.dashboardGlassFill(context),
+          border: Border.all(
+            color: isPrimary
+                ? accent
+                : highlight
+                    ? accent.withValues(alpha: 0.55)
+                    : ShellVisualTokens.dashboardGlassBorder(context),
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildOverlayBadge(
-    BuildContext context,
-    String label,
-    IconData icon,
-    Color accent,
-  ) {
-    final displayColor = accent == Colors.white ? Colors.white : accent;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.46),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 13, color: displayColor),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCodePill(BuildContext context, String code) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppColors.primary.primary.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.primary.primary.withValues(alpha: 0.20)),
-      ),
-      child: Text(
-        '#$code',
-        style: theme.textTheme.bodySmall?.copyWith(
-          color: AppColors.primary.primary,
-          fontWeight: FontWeight.w900,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLocationLine(BuildContext context, ThemeData theme, String location) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(
-          Icons.location_on_outlined,
-          size: 18,
-          color: AppColors.primary.primary,
-        ),
-        const SizedBox(width: 7),
-        Expanded(
-          child: Text(
-            location,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
-              fontWeight: FontWeight.w600,
-              height: 1.35,
-            ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildCompactSpecsGrid(
-    BuildContext context,
-    ThemeData theme,
-    Property property,
-  ) {
-    final specs = <Widget>[
-      if (property.bedrooms != null)
-        _buildSpecTile(context, theme, Icons.bed_rounded, '${property.bedrooms}', 'quartos'),
-      if (property.bathrooms != null)
-        _buildSpecTile(context, theme, Icons.bathtub_outlined, '${property.bathrooms}', 'banhos'),
-      if (property.parkingSpaces != null)
-        _buildSpecTile(context, theme, Icons.local_parking_rounded, '${property.parkingSpaces}', 'vagas'),
-      if (property.totalArea > 0)
-        _buildSpecTile(context, theme, Icons.square_foot_rounded, '${property.totalArea.toInt()}', 'm² total'),
-      if (property.builtArea != null && property.builtArea! > 0)
-        _buildSpecTile(context, theme, Icons.architecture_outlined, '${property.builtArea!.toInt()}', 'm² útil'),
-    ];
-
-    if (specs.isEmpty) {
-      return _buildSoftInfoBox(
-        context,
-        icon: Icons.info_outline_rounded,
-        text: 'Características principais ainda não informadas',
-      );
-    }
-
-    return Wrap(spacing: 8, runSpacing: 8, children: specs);
-  }
-
-  Widget _buildSpecTile(
-    BuildContext context,
-    ThemeData theme,
-    IconData icon,
-    String value,
-    String label,
-  ) {
-    final isDark = theme.brightness == Brightness.dark;
-    return Container(
-      constraints: const BoxConstraints(minWidth: 82),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.04)
-            : Colors.black.withValues(alpha: 0.035),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: ThemeHelpers.borderColor(context).withValues(alpha: 0.65)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 17, color: AppColors.primary.primary),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: theme.textTheme.titleSmall?.copyWith(
-              color: ThemeHelpers.textColor(context),
-              fontWeight: FontWeight.w900,
-              height: 1,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFinancialStrip(
-    BuildContext context,
-    ThemeData theme,
-    Property property,
-  ) {
-    final details = _buildFinancialDetails(property);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.primary.primary.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.primary.primary.withValues(alpha: 0.14)),
-      ),
-      child: Wrap(
-        spacing: 10,
-        runSpacing: 8,
-        children: details,
-      ),
-    );
-  }
-
-  List<Widget> _buildFinancialDetails(Property property) {
-    return [
-      if (property.condominiumFee != null)
-        _buildFinancialItem(Icons.apartment_rounded, 'Condomínio', property.condominiumFee!),
-      if (property.iptu != null)
-        _buildFinancialItem(Icons.receipt_long_outlined, 'IPTU', property.iptu!),
-      if (property.minSalePrice != null)
-        _buildFinancialItem(Icons.sell_outlined, 'Mín. venda', property.minSalePrice!),
-      if (property.minRentPrice != null)
-        _buildFinancialItem(Icons.key_outlined, 'Mín. aluguel', property.minRentPrice!),
-    ];
-  }
-
-  Widget _buildFinancialItem(IconData icon, String label, double value) {
-    return Builder(
-      builder: (context) {
-        final theme = Theme.of(context);
-        return Row(
+        child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 15, color: AppColors.primary.primary),
-            const SizedBox(width: 5),
-            Text(
-              '$label: ${_formatCompactCurrency(value)}',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w800,
-              ),
+            Icon(
+              icon,
+              size: 18,
+              color: isPrimary ? Colors.white : accent,
             ),
+            const SizedBox(width: 8),
+            Text(label, style: style),
           ],
-        );
-      },
-    );
-  }
-
-  Widget _buildFeaturesPreview(
-    BuildContext context,
-    ThemeData theme,
-    Property property,
-  ) {
-    final visibleFeatures = property.features.take(3).toList();
-    final remaining = property.features.length - visibleFeatures.length;
-
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        ...visibleFeatures.map(
-          (feature) => _buildMiniTag(context, feature, Icons.check_rounded),
         ),
-        if (remaining > 0)
-          _buildMiniTag(context, '+$remaining detalhes', Icons.more_horiz_rounded),
-      ],
-    );
-  }
-
-  Widget _buildCommercialSignals(
-    BuildContext context,
-    ThemeData theme,
-    Property property,
-  ) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        if (property.hasPendingOffers == true)
-          _buildSignalTag(
-            context,
-            'Oferta pendente',
-            Icons.notifications_active_outlined,
-            AppColors.status.warning,
-          ),
-        if (property.totalOffersCount != null && property.totalOffersCount! > 0)
-          _buildSignalTag(
-            context,
-            '${property.totalOffersCount} ofertas',
-            Icons.request_quote_outlined,
-            AppColors.status.info,
-          ),
-        if (property.acceptsNegotiation == true)
-          _buildSignalTag(
-            context,
-            'Negociável',
-            Icons.handshake_outlined,
-            AppColors.status.success,
-          ),
-        if (property.mcmvEligible == true)
-          _buildSignalTag(
-            context,
-            'MCMV',
-            Icons.account_balance_outlined,
-            AppColors.primary.primary,
-          ),
-      ],
-    );
-  }
-
-  Widget _buildMiniTag(BuildContext context, String label, IconData icon) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-      decoration: BoxDecoration(
-        color: ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 13, color: ThemeHelpers.textSecondaryColor(context)),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSignalTag(
-    BuildContext context,
-    String label,
-    IconData icon,
-    Color color,
-  ) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(13),
-        border: Border.all(color: color.withValues(alpha: 0.18)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: color,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCardFooterSignal(
-    BuildContext context, {
-    required IconData icon,
-    required String label,
-    required Color color,
-  }) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.16)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 15, color: color),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              label,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: color,
-                fontWeight: FontWeight.w900,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSoftInfoBox(
-    BuildContext context, {
-    required IconData icon,
-    required String text,
-  }) {
-    final theme = Theme.of(context);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 17, color: ThemeHelpers.textSecondaryColor(context)),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: ThemeHelpers.textSecondaryColor(context),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -3307,15 +3852,19 @@ class _PropertiesPageState extends State<PropertiesPage> {
         return AppColors.status.warning;
       case PropertyStatus.draft:
         return AppColors.text.textSecondary;
+      case PropertyStatus.pendingApproval:
+      case PropertyStatus.pendingOwnerAuthorization:
+        return AppColors.status.warning;
     }
   }
 
   Widget _buildPagination(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final narrow = MediaQuery.sizeOf(context).width < 360;
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+      padding: EdgeInsets.fromLTRB(narrow ? 10 : 14, 10, narrow ? 10 : 14, 14),
       decoration: BoxDecoration(
         color: isDark
             ? AppColors.background.backgroundDarkMode
@@ -3329,7 +3878,8 @@ class _PropertiesPageState extends State<PropertiesPage> {
       child: SafeArea(
         top: false,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding:
+              EdgeInsets.symmetric(horizontal: narrow ? 8 : 12, vertical: 10),
           decoration: BoxDecoration(
             color: isDark
                 ? AppColors.background.backgroundSecondaryDarkMode
@@ -3340,6 +3890,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
             ),
           ),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Expanded(
                 child: Column(
@@ -3352,6 +3903,8 @@ class _PropertiesPageState extends State<PropertiesPage> {
                         color: ThemeHelpers.textColor(context),
                         fontWeight: FontWeight.w900,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -3360,11 +3913,17 @@ class _PropertiesPageState extends State<PropertiesPage> {
                         color: ThemeHelpers.textSecondaryColor(context),
                         fontWeight: FontWeight.w600,
                       ),
+                      maxLines: narrow ? 2 : 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
               ),
               IconButton.filledTonal(
+                constraints: narrow
+                    ? const BoxConstraints(minWidth: 38, minHeight: 38)
+                    : BoxConstraints.loose(const Size.square(48)),
+                padding: narrow ? EdgeInsets.zero : null,
                 icon: const Icon(Icons.chevron_left_rounded),
                 onPressed: _currentPage > 1
                     ? () {
@@ -3375,6 +3934,10 @@ class _PropertiesPageState extends State<PropertiesPage> {
               ),
               const SizedBox(width: 8),
               IconButton.filledTonal(
+                constraints: narrow
+                    ? const BoxConstraints(minWidth: 38, minHeight: 38)
+                    : BoxConstraints.loose(const Size.square(48)),
+                padding: narrow ? EdgeInsets.zero : null,
                 icon: const Icon(Icons.chevron_right_rounded),
                 onPressed: _currentPage < _totalPages
                     ? () {

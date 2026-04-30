@@ -28,9 +28,14 @@ enum PropertyType {
   }
 }
 
-/// Status de propriedade
+/// Status de propriedade — alinhado a `PropertyStatus` do backend (`imobx`).
 enum PropertyStatus {
   draft('draft', 'Rascunho'),
+  pendingApproval('pending_approval', 'Aguardando aprovação'),
+  pendingOwnerAuthorization(
+    'pending_owner_authorization',
+    'Aguardando autorização do proprietário',
+  ),
   available('available', 'Disponível'),
   rented('rented', 'Alugado'),
   sold('sold', 'Vendido'),
@@ -43,8 +48,10 @@ enum PropertyStatus {
 
   static PropertyStatus? fromString(String? value) {
     if (value == null) return null;
+    final v = value.trim().toLowerCase();
+    if (v.isEmpty) return null;
     try {
-      return PropertyStatus.values.firstWhere((e) => e.value == value);
+      return PropertyStatus.values.firstWhere((e) => e.value == v);
     } catch (e) {
       return null;
     }

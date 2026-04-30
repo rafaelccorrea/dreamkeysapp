@@ -133,7 +133,6 @@ class AppRoutes {
           email: args?['email'] ?? '',
           password: args?['password'] ?? '',
           tempToken: args?['tempToken'] ?? '',
-          rememberMe: args?['rememberMe'] ?? false,
         ),
         settings,
       );

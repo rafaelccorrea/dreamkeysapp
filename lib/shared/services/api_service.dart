@@ -100,13 +100,17 @@ class ApiService {
     return false;
   }
 
-  /// Verifica se é uma rota de dashboard (tem tratamento especial)
-  bool _isDashboardRoute(String? endpoint) {
+  /// Rotas onde o Company ID pode estar a ser gravado em paralelo (paridade com
+  /// `api.ts` do imobx-front: dashboard, /properties, /kanban).
+  bool _mayReceiveCompanyIdSoon(String? endpoint) {
     if (endpoint == null) return false;
-    return endpoint.contains('/dashboard');
+    if (endpoint.contains('/dashboard')) return true;
+    if (endpoint.startsWith('/properties')) return true;
+    if (endpoint.startsWith('/kanban')) return true;
+    return false;
   }
 
-  /// Aguarda Company ID aparecer (para rotas de dashboard)
+  /// Aguarda Company ID aparecer (ex.: após login enquanto `/companies` grava o ID)
   Future<String?> _waitForCompanyId({Duration maxWait = const Duration(milliseconds: 500)}) async {
     final startTime = DateTime.now();
     
@@ -126,7 +130,7 @@ class ApiService {
   Future<Map<String, String>> _getDefaultHeaders(String? endpoint) async {
     final isAuthRoute = _isExceptionRoute(endpoint);
     final isOptionalRoute = _isOptionalCompanyIdRoute(endpoint);
-    final isDashboardRoute = _isDashboardRoute(endpoint);
+    final mayReceiveCompanySoon = _mayReceiveCompanyIdSoon(endpoint);
     
     final headers = <String, String>{
       ApiConstants.contentTypeHeader: ApiConstants.contentTypeJson,
@@ -157,11 +161,16 @@ class ApiService {
         // Não bloquear - retornar headers normalmente
       } else {
         // Para rotas protegidas, Company ID é obrigatório
-        // Se não tiver e for rota de dashboard, aguardar um pouco
+        // Se não tiver, aguardar como no imobx-front (dashboard/imóveis/kanban).
         if (companyId == null || companyId.isEmpty) {
-          if (isDashboardRoute && _token != null) {
-            debugPrint('⏳ [API_SERVICE] Aguardando Company ID para rota de dashboard...');
-            companyId = await _waitForCompanyId();
+          // Mesmo padrão do imobx-front: até ~2s para o ID sair do storage após seleção da empresa.
+          if (mayReceiveCompanySoon && _token != null) {
+            debugPrint(
+              '⏳ [API_SERVICE] Aguardando Company ID (dashboard/imóveis/kanban)...',
+            );
+            companyId = await _waitForCompanyId(
+              maxWait: const Duration(milliseconds: 2000),
+            );
           }
         }
 

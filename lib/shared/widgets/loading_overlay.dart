@@ -32,8 +32,9 @@ class LoadingOverlay extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       BrandWordmarkLogo(
-                        height: BrandWordmarkLoadingDimensions.overlayLogoHeight,
-                        maxWidth: BrandWordmarkLoadingDimensions.overlayLogoMaxWidth,
+                        variant: BrandWordmarkVariant.loading,
+                        height: BrandWordmarkLoadingDimensions.overlayLogoHeight(context),
+                        maxWidth: BrandWordmarkLoadingDimensions.overlayLogoMaxWidth(context),
                         alignment: Alignment.center,
                       ),
                       SizedBox(

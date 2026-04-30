@@ -37,10 +37,19 @@ class LoginResponse {
   });
 
   factory LoginResponse.fromJson(Map<String, dynamic> json) {
+    var root = json;
+    final nested = json['data'];
+    if (nested is Map) {
+      final m = Map<String, dynamic>.from(nested);
+      if (m['user'] != null && json['user'] == null) {
+        root = m;
+      }
+    }
     return LoginResponse(
-      user: User.fromJson(json['user'] as Map<String, dynamic>),
-      token: json['access_token'] as String? ?? json['token'] as String? ?? json['accessToken'] as String? ?? '',
-      refreshToken: json['refresh_token'] as String? ?? json['refreshToken'] as String? ?? '',
+      user: User.fromJson(root['user'] as Map<String, dynamic>),
+      token: root['access_token'] as String? ?? root['token'] as String? ?? root['accessToken'] as String? ?? '',
+      refreshToken:
+          root['refresh_token'] as String? ?? root['refreshToken'] as String? ?? '',
     );
   }
 }
@@ -131,24 +140,62 @@ class AuthService {
   static final AuthService instance = AuthService._();
   final ApiService _apiService = ApiService.instance;
 
-  /// Realiza o login usando o endpoint específico para corretores (/auth/broker/login)
-  /// Este endpoint é exclusivo para usuários do tipo USER (corretor) associados a uma empresa
+  /// Login: primeiro `/auth/broker/login` (corretores); se o utilizador não for corretor
+  /// na API (`INVALID_USER_ROLE`), repete em `/auth/login` como no imobx-front (master, etc.).
   Future<ApiResponse<LoginResponse>> login(LoginRequest request) async {
-    debugPrint('🌐 [AUTH_SERVICE] POST ${_apiUri(ApiConstants.login)}');
+    final broker = await _loginAtEndpoint(ApiConstants.login, request);
+    if (broker.success && broker.data != null) {
+      return broker;
+    }
+    if (_shouldFallbackToStandardLogin(broker)) {
+      debugPrint(
+        '🌐 [AUTH_SERVICE] Broker recusou o perfil — tentando ${ApiConstants.standardLogin}',
+      );
+      return _loginAtEndpoint(ApiConstants.standardLogin, request);
+    }
+    return broker;
+  }
+
+  static bool _shouldFallbackToStandardLogin<T>(
+    ApiResponse<T> response,
+  ) {
+    if (response.error is! Map) return false;
+    final err = Map<String, dynamic>.from(response.error as Map);
+    final code = err['errorCode']?.toString();
+    if (code == 'INVALID_USER_ROLE') return true;
+
+    final status = response.statusCode;
+    return (status == 401 || status == 403) &&
+        (messageSuggestsNonBroker(err['message']?.toString()) ||
+            messageSuggestsNonBroker(err['detail']?.toString()));
+  }
+
+  static bool messageSuggestsNonBroker(String? msg) {
+    if (msg == null || msg.isEmpty) return false;
+    final m = msg.toLowerCase();
+    return m.contains('corretor') ||
+        m.contains('broker') ||
+        m.contains('apenas usuários') ||
+        m.contains('user role');
+  }
+
+  Future<ApiResponse<LoginResponse>> _loginAtEndpoint(
+    String endpoint,
+    LoginRequest request,
+  ) async {
+    debugPrint('🌐 [AUTH_SERVICE] POST ${_apiUri(endpoint)}');
     final response = await _apiService.post<Map<String, dynamic>>(
-      ApiConstants.login, // /auth/broker/login
+      endpoint,
       body: request.toJson(),
     );
 
     if (response.success && response.data != null) {
-      // Log para debug
       debugPrint('📥 [AUTH_SERVICE] Response data: ${response.data}');
-      
+
       try {
-        final loginResponse = LoginResponse.fromJson(response.data!);
-        // Define o token no serviço de API
+        final normalized = _normalizeLoginPayload(response.data!);
+        final loginResponse = LoginResponse.fromJson(normalized);
         _apiService.setToken(loginResponse.token);
-        // Salva os tokens no armazenamento seguro
         await SecureStorageService.instance.saveTokens(
           accessToken: loginResponse.token,
           refreshToken: loginResponse.refreshToken,
@@ -170,6 +217,16 @@ class AuthService {
       statusCode: response.statusCode,
       data: response.error,
     );
+  }
+
+  /// Garante `Map<String,dynamic>` com `user`/tokens no formato esperado por [LoginResponse.fromJson].
+  Map<String, dynamic> _normalizeLoginPayload(Map<String, dynamic> raw) {
+    if (raw['user'] != null) return raw;
+    final data = raw['data'];
+    if (data is Map) {
+      return Map<String, dynamic>.from(data);
+    }
+    return raw;
   }
 
   /// Verifica se o email requer 2FA

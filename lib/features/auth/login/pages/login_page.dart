@@ -10,6 +10,7 @@ import '../../../../core/routes/app_routes.dart';
 import '../../../../shared/widgets/image_curve_clipper.dart';
 import '../../../../shared/widgets/loading_overlay.dart';
 import '../../../../shared/utils/validators.dart';
+import '../widgets/biometric_enrollment_dialog.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -30,7 +31,6 @@ class _LoginPageState extends State<LoginPage> {
   bool _biometricAvailable = false;
   bool _hasSavedCredentials = false;
   String _biometricType = 'Biometria';
-  bool _saveCredentials = false;
   bool _biometricLoginAttempted = false; // Flag para evitar múltiplas tentativas
   bool _isBiometricLoginInProgress = false; // Flag para evitar chamadas simultâneas
 
@@ -114,7 +114,7 @@ class _LoginPageState extends State<LoginPage> {
       final result = await loginFlowService.executeLoginFlow(
         email: email,
         password: _passwordController.text,
-        rememberMe: _saveCredentials,
+        rememberMe: false,
         context: context,
       );
 
@@ -127,7 +127,6 @@ class _LoginPageState extends State<LoginPage> {
               'email': result.email ?? email,
               'password': result.password ?? _passwordController.text,
               'tempToken': result.tempToken ?? '',
-              'rememberMe': result.rememberMe ?? _saveCredentials,
             },
           );
         }
@@ -136,24 +135,27 @@ class _LoginPageState extends State<LoginPage> {
 
       if (result.success && result.route != null) {
         debugPrint('✅ [LOGIN] Login bem-sucedido!');
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+        if (!mounted) return;
 
-        // Salvar credenciais se solicitado
-        if (_saveCredentials && _biometricAvailable) {
-          debugPrint('💾 [LOGIN] Salvando credenciais para biometria...');
-          await SecureStorageService.instance.saveCredentials(
-            email: email,
-            password: _passwordController.text,
-          );
-          if (mounted) {
-            setState(() {
-              _hasSavedCredentials = true;
-            });
-          }
-          debugPrint('✅ [LOGIN] Credenciais salvas com sucesso');
+        final savedBio = await showBiometricEnrollmentOffer(
+          context,
+          email: email,
+          password: _passwordController.text,
+          biometricHardwareAvailable: _biometricAvailable,
+          biometricTypeLabel: _biometricType,
+        );
+        if (savedBio && mounted) {
+          setState(() {
+            _hasSavedCredentials = true;
+          });
         }
 
         if (mounted) {
-          // Navegar para a rota retornada
           Navigator.of(
             context,
           ).pushNamedAndRemoveUntil(result.route!, (route) => false);
@@ -751,12 +753,6 @@ class _LoginPageState extends State<LoginPage> {
                           const SizedBox(height: 14),
                           _buildBiometricButton(isDark),
                         ],
-                        if (_biometricAvailable &&
-                            !_hasSavedCredentials &&
-                            !_isLoading) ...[
-                          const SizedBox(height: 12),
-                          _buildSaveCredentialsCheckbox(isDark),
-                        ],
                       ],
                     ),
                   ),
@@ -982,64 +978,4 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  Widget _buildSaveCredentialsCheckbox(bool isDark) {
-    final accent =
-        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
-    final labelColor = isDark
-        ? AppColors.text.textSecondaryDarkMode
-        : AppColors.text.textSecondary;
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            height: 26,
-            width: 26,
-            child: Checkbox(
-              value: _saveCredentials,
-              onChanged: (value) {
-                setState(() {
-                  _saveCredentials = value ?? false;
-                });
-              },
-              activeColor: accent,
-              side: BorderSide(
-                color: isDark
-                    ? AppColors.border.borderDarkMode
-                    : AppColors.border.border,
-                width: 1.5,
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(4),
-              ),
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: GestureDetector(
-              onTap: () {
-                setState(() {
-                  _saveCredentials = !_saveCredentials;
-                });
-              },
-              child: Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text(
-                  'Salvar credenciais para login com $_biometricType',
-                  style: GoogleFonts.poppins(
-                    color: labelColor,
-                    fontSize: 13,
-                    height: 1.35,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
