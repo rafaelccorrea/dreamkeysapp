@@ -108,7 +108,7 @@ class _BiometricEnrollmentDialog extends StatelessWidget {
                   clipBehavior: Clip.none,
                   children: [
                     Container(
-                      height: 132,
+                      height: 140,
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
                           begin: Alignment.topLeft,
@@ -151,7 +151,7 @@ class _BiometricEnrollmentDialog extends StatelessWidget {
                     ),
                     Positioned.fill(
                       child: Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 20, 20, 14),
+                        padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -221,18 +221,21 @@ class _BiometricEnrollmentDialog extends StatelessWidget {
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
                                 letterSpacing: 1.2,
+                                height: 1.25,
                                 color: Colors.white.withValues(alpha: 0.88),
                               ),
                             ),
-                            const SizedBox(height: 4),
+                            const SizedBox(height: 3),
                             Text(
                               biometricTypeLabel,
                               style: GoogleFonts.poppins(
-                                fontSize: 22,
+                                fontSize: 21,
                                 fontWeight: FontWeight.w800,
-                                height: 1.15,
+                                height: 1.1,
                                 color: Colors.white,
                               ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ],
                         ),

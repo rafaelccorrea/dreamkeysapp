@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
 import '../../features/auth/login/pages/login_page.dart';
 import '../../features/auth/forgot_password/pages/forgot_password_page.dart';
 import '../../features/auth/forgot_password/pages/forgot_password_confirmation_page.dart';
@@ -108,31 +109,40 @@ class AppRoutes {
   /// Gera rota de edição da propriedade
   static String propertyEdit(String id) => '/properties/edit/$id';
 
+  /// Autenticação sempre em tema claro (independente do modo escuro do app).
+  static Widget _authLightTheme(Widget child) =>
+      Theme(data: AppTheme.lightTheme, child: child);
+
   static Route<dynamic> generateRoute(RouteSettings settings) {
     final routeName = settings.name;
 
     if (routeName == splash) {
       return _buildRoute(const SplashPage(), settings);
     } else if (routeName == login) {
-      return _buildRoute(const LoginPage(), settings);
+      return _buildRoute(_authLightTheme(const LoginPage()), settings);
     } else if (routeName == forgotPassword) {
-      return _buildRoute(const ForgotPasswordPage(), settings);
+      return _buildRoute(_authLightTheme(const ForgotPasswordPage()), settings);
     } else if (routeName == forgotPasswordConfirmation) {
       final email = settings.arguments as String?;
       return _buildRoute(
-        ForgotPasswordConfirmationPage(email: email),
+        _authLightTheme(ForgotPasswordConfirmationPage(email: email)),
         settings,
       );
     } else if (routeName == resetPassword) {
       final token = settings.arguments as String?;
-      return _buildRoute(ResetPasswordPage(token: token), settings);
+      return _buildRoute(
+        _authLightTheme(ResetPasswordPage(token: token)),
+        settings,
+      );
     } else if (routeName == twoFactor) {
       final args = settings.arguments as Map<String, dynamic>?;
       return _buildRoute(
-        TwoFactorPage(
-          email: args?['email'] ?? '',
-          password: args?['password'] ?? '',
-          tempToken: args?['tempToken'] ?? '',
+        _authLightTheme(
+          TwoFactorPage(
+            email: args?['email'] ?? '',
+            password: args?['password'] ?? '',
+            tempToken: args?['tempToken'] ?? '',
+          ),
         ),
         settings,
       );

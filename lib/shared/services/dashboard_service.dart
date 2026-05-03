@@ -9,7 +9,6 @@ class DashboardResponse {
   final DashboardPerformance performance;
   final DashboardGamification gamification;
   final DashboardActivityStats activityStats;
-  final List<DashboardActivity> recentActivities;
   final List<DashboardAppointment> upcomingAppointments;
   final DashboardMonthlyGoals? monthlyGoals;
   final DashboardConversionMetrics conversionMetrics;
@@ -21,7 +20,6 @@ class DashboardResponse {
     required this.performance,
     required this.gamification,
     required this.activityStats,
-    required this.recentActivities,
     required this.upcomingAppointments,
     this.monthlyGoals,
     required this.conversionMetrics,
@@ -50,10 +48,6 @@ class DashboardResponse {
       activityStats: DashboardActivityStats.fromJson(
         data['activityStats'] as Map<String, dynamic>,
       ),
-      recentActivities: (data['recentActivities'] as List<dynamic>?)
-              ?.map((e) => DashboardActivity.fromJson(e as Map<String, dynamic>))
-              .toList() ??
-          [],
       upcomingAppointments:
           (data['upcomingAppointments'] as List<dynamic>?)
               ?.map(
@@ -295,38 +289,6 @@ class DashboardActivityStats {
   }
 }
 
-class DashboardActivity {
-  final String id;
-  final String type;
-  final String title;
-  final String description;
-  final String time;
-  final String status;
-  final String createdAt;
-
-  DashboardActivity({
-    required this.id,
-    required this.type,
-    required this.title,
-    required this.description,
-    required this.time,
-    required this.status,
-    required this.createdAt,
-  });
-
-  factory DashboardActivity.fromJson(Map<String, dynamic> json) {
-    return DashboardActivity(
-      id: json['id']?.toString() ?? '',
-      type: json['type']?.toString() ?? '',
-      title: json['title']?.toString() ?? '',
-      description: json['description']?.toString() ?? '',
-      time: json['time']?.toString() ?? '',
-      status: json['status']?.toString() ?? '',
-      createdAt: json['createdAt']?.toString() ?? '',
-    );
-  }
-}
-
 class DashboardAppointment {
   final String id;
   final String title;
@@ -487,7 +449,6 @@ class DashboardService {
           debugPrint('   - Ranking: #${dashboardResponse.performance.ranking} de ${dashboardResponse.performance.totalUsers}');
           debugPrint('   - Gamificação: Nível ${dashboardResponse.gamification.level}, ${dashboardResponse.gamification.currentPoints} pontos');
           debugPrint('   - Conquistas: ${dashboardResponse.gamification.achievements.length}');
-          debugPrint('   - Atividades recentes: ${dashboardResponse.recentActivities.length}');
           debugPrint('   - Próximos agendamentos: ${dashboardResponse.upcomingAppointments.length}');
           
           return ApiResponse.success(

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../../../../shared/services/property_service.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
@@ -24,6 +25,33 @@ final _currencyFormatter = NumberFormat.currency(
   symbol: 'R\$',
   decimalDigits: 2,
 );
+
+/// Aba interna da ficha de imóvel.
+enum _DetailsTab { overview, commercial, management }
+
+extension on _DetailsTab {
+  String get label {
+    switch (this) {
+      case _DetailsTab.overview:
+        return 'Visão geral';
+      case _DetailsTab.commercial:
+        return 'Comercial';
+      case _DetailsTab.management:
+        return 'Gestão';
+    }
+  }
+
+  IconData get icon {
+    switch (this) {
+      case _DetailsTab.overview:
+        return Icons.storefront_outlined;
+      case _DetailsTab.commercial:
+        return Icons.handshake_outlined;
+      case _DetailsTab.management:
+        return Icons.fact_check_outlined;
+    }
+  }
+}
 
 /// Página de detalhes da propriedade
 class PropertyDetailsPage extends StatefulWidget {
@@ -64,10 +92,27 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   List<key_models.Key> _keys = [];
   bool _isLoadingKeys = false;
 
+  /// Aba interna ativa: Visão geral, Comercial ou Gestão.
+  _DetailsTab _activeTab = _DetailsTab.overview;
+
+  /// Controlador da rolagem — controla FAB "voltar ao topo".
+  final ScrollController _detailsScrollController = ScrollController();
+  bool _showScrollTopFab = false;
+
   @override
   void initState() {
     super.initState();
     _loadProperty();
+    _detailsScrollController.addListener(_handleDetailsScroll);
+  }
+
+  void _handleDetailsScroll() {
+    if (!_detailsScrollController.hasClients) return;
+    final offset = _detailsScrollController.offset;
+    final shouldShow = offset > 480;
+    if (shouldShow != _showScrollTopFab) {
+      setState(() => _showScrollTopFab = shouldShow);
+    }
   }
 
   Future<void> _loadDocuments() async {
@@ -221,6 +266,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   @override
   void dispose() {
     _imagePageController.dispose();
+    _detailsScrollController
+      ..removeListener(_handleDetailsScroll)
+      ..dispose();
     super.dispose();
   }
 
@@ -460,7 +508,30 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           : _errorMessage != null
           ? _buildErrorState(context, theme)
           : _property != null
-          ? _buildPropertyDetails(context, theme, _property!)
+          ? Stack(
+              children: [
+                Positioned.fill(
+                  child: _buildPropertyDetails(context, theme, _property!),
+                ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: _buildBottomActionBar(context, theme, _property!),
+                ),
+                AnimatedPositioned(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOut,
+                  right: 16,
+                  bottom: _showScrollTopFab ? 92 : -64,
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 220),
+                    opacity: _showScrollTopFab ? 1 : 0,
+                    child: _buildScrollTopButton(context, theme),
+                  ),
+                ),
+              ],
+            )
           : const SizedBox.shrink(),
     );
   }
@@ -568,335 +639,1062 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     ThemeData theme,
     Property property,
   ) {
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Galeria de imagens
-          _buildImageGallery(context, property),
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final isDark = theme.brightness == Brightness.dark;
 
-          // Conteúdo principal
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Título e código
-                MatchesBadge(
-                  propertyId: widget.propertyId,
-                  onClick: () {
-                    Navigator.pushNamed(
-                      context,
-                      AppRoutes.matchesByProperty(widget.propertyId),
-                    );
-                  },
-                  child: Text(
-                    property.title,
-                    style: theme.textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: ThemeHelpers.textColor(context),
+    return CustomScrollView(
+      controller: _detailsScrollController,
+      physics: const BouncingScrollPhysics(
+        parent: AlwaysScrollableScrollPhysics(),
+      ),
+      slivers: [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: _buildDetailsHero(context, theme, property),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            child: _buildIdentityCard(context, theme, property, muted, isDark),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+            child: _buildQuickStatsStrip(context, theme, property),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+            child: _buildPriceShowcase(context, theme, property, isDark),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.only(top: 14),
+            child: _buildQuickActionsStrip(context, theme, property),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: _buildSectionTabs(context, theme),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
+            child: _buildActiveTabContent(context, theme, property),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ────────────────────────────── HERO ──────────────────────────────
+
+  Widget _buildDetailsHero(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    final images = property.images ?? [];
+    final mediaCount = property.imageCount ?? images.length;
+    const heroH = 248.0;
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+
+    Widget imageLayer() => GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: images.isEmpty
+              ? null
+              : () => _openFullscreenGallery(images, _currentImageIndex),
+          child: images.isEmpty
+              ? _buildHeroFallback(context, theme)
+              : PageView.builder(
+                  controller: _imagePageController,
+                  itemCount: images.length,
+                  onPageChanged: (i) => setState(() => _currentImageIndex = i),
+                  itemBuilder: (_, i) => Hero(
+                    tag: 'property-image-${property.id}-$i',
+                    child: ShimmerImage(
+                      imageUrl: images[i].url,
+                      width: double.infinity,
+                      height: heroH,
+                      fit: BoxFit.cover,
+                      errorWidget: _buildHeroFallback(context, theme),
                     ),
                   ),
                 ),
-                if (property.code != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    'Código: ${property.code}',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
+        );
+
+    return Material(
+      color: isDark ? AppColors.background.cardBackgroundDarkMode : AppColors.background.cardBackground,
+      elevation: isDark ? 2 : 3,
+      shadowColor: accent.withValues(alpha: isDark ? 0.35 : 0.22),
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(color: accent.withValues(alpha: isDark ? 0.32 : 0.18)),
+      ),
+      child: SizedBox(
+        height: heroH,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(child: imageLayer()),
+            IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    stops: const [0.0, 0.38, 0.72, 1.0],
+                    colors: [
+                      Colors.black.withValues(alpha: 0.42),
+                      Colors.transparent,
+                      Colors.black.withValues(alpha: 0.28),
+                      Colors.black.withValues(alpha: 0.62),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 14,
+              left: 14,
+              child: _buildStatusPill(theme, property),
+            ),
+            if (property.isFeatured)
+              Positioned(
+                top: 14,
+                right: 14,
+                child: _buildHeroFeaturedChip(),
+              ),
+            if (mediaCount > 1)
+              Positioned(
+                right: 14,
+                bottom: 60,
+                child: _buildHeroMediaCounter(
+                  images.isEmpty ? 1 : _currentImageIndex + 1,
+                  mediaCount,
+                ),
+              ),
+            if (images.isNotEmpty)
+              Positioned(
+                left: 14,
+                bottom: 60,
+                child: _buildExpandHint(),
+              ),
+            if (images.length > 1)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 22,
+                child: Center(
+                  child: _buildHeroDots(images.length, _currentImageIndex),
+                ),
+              ),
+            if (images.length > 1 && _currentImageIndex > 0)
+              Positioned(
+                left: 8,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: _buildHeroNavArrow(
+                    Icons.chevron_left_rounded,
+                    () => _imagePageController.previousPage(
+                      duration: const Duration(milliseconds: 280),
+                      curve: Curves.easeOut,
                     ),
                   ),
-                ],
-                const SizedBox(height: 8),
+                ),
+              ),
+            if (images.length > 1 && _currentImageIndex < images.length - 1)
+              Positioned(
+                right: 8,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: _buildHeroNavArrow(
+                    Icons.chevron_right_rounded,
+                    () => _imagePageController.nextPage(
+                      duration: const Duration(milliseconds: 280),
+                      curve: Curves.easeOut,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 
-                // Endereço
-                Row(
-                  children: [
-                    Icon(
-                      Icons.location_on_outlined,
-                      size: 16,
-                      color: ThemeHelpers.textSecondaryColor(context),
-                    ),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        property.address.isNotEmpty
-                            ? property.address
-                            : '${property.street}, ${property.number} - ${property.neighborhood}, ${property.city} - ${property.state}',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                        ),
-                      ),
-                    ),
+  Widget _buildExpandHint() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(11),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: const [
+          Icon(Icons.zoom_out_map_rounded, size: 12, color: Colors.white),
+          SizedBox(width: 5),
+          Text(
+            'Toque para ampliar',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w700,
+              height: 1,
+              letterSpacing: -0.05,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openFullscreenGallery(List<PropertyImage> images, int initial) {
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        opaque: false,
+        barrierColor: Colors.black,
+        transitionDuration: const Duration(milliseconds: 250),
+        reverseTransitionDuration: const Duration(milliseconds: 200),
+        pageBuilder: (_, __, ___) => _FullscreenGallery(
+          images: images,
+          initialIndex: initial,
+          propertyId: _property?.id ?? '',
+        ),
+        transitionsBuilder: (_, anim, __, child) =>
+            FadeTransition(opacity: anim, child: child),
+      ),
+    );
+  }
+
+  Widget _buildHeroFallback(BuildContext context, ThemeData theme) {
+    final isDark = theme.brightness == Brightness.dark;
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: isDark
+              ? [
+                  AppColors.background.backgroundDarkMode,
+                  AppColors.background.backgroundSecondaryDarkMode,
+                ]
+              : [
+                  AppColors.background.backgroundSecondary,
+                  AppColors.background.background,
+                ],
+        ),
+      ),
+      child: Center(
+        child: Container(
+          width: 86,
+          height: 86,
+          decoration: BoxDecoration(
+            color: AppColors.primary.primary.withValues(alpha: 0.14),
+            borderRadius: BorderRadius.circular(28),
+          ),
+          child: Icon(
+            Icons.home_work_outlined,
+            size: 44,
+            color: AppColors.primary.primary,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusPill(ThemeData theme, Property property) {
+    final color = _getStatusColor(property.status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.42),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.35),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color,
+              boxShadow: [
+                BoxShadow(
+                  color: color.withValues(alpha: 0.7),
+                  blurRadius: 8,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 7),
+          Text(
+            property.status.label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+              fontSize: 11.5,
+              height: 1,
+              letterSpacing: -0.1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeroFeaturedChip() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFFFE082), Color(0xFFFFA000)],
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.6), width: 0.85),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFFFA000).withValues(alpha: 0.42),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: const [
+          Icon(Icons.star_rounded, size: 14, color: Color(0xFF4E342E)),
+          SizedBox(width: 5),
+          Text(
+            'Em destaque',
+            style: TextStyle(
+              color: Color(0xFF3E2723),
+              fontWeight: FontWeight.w900,
+              fontSize: 11,
+              height: 1,
+              letterSpacing: -0.15,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeroMediaCounter(int current, int total) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(11),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.photo_library_outlined, size: 12, color: Colors.white),
+          const SizedBox(width: 5),
+          Text(
+            '$current / $total',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              height: 1,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeroDots(int total, int current) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(total, (i) {
+        final active = i == current;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          margin: const EdgeInsets.symmetric(horizontal: 3),
+          width: active ? 18 : 6,
+          height: 6,
+          decoration: BoxDecoration(
+            color: active
+                ? Colors.white
+                : Colors.white.withValues(alpha: 0.4),
+            borderRadius: BorderRadius.circular(3),
+          ),
+        );
+      }),
+    );
+  }
+
+  Widget _buildHeroNavArrow(IconData icon, VoidCallback onTap) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.42),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+          ),
+          child: Icon(icon, color: Colors.white, size: 22),
+        ),
+      ),
+    );
+  }
+
+  // ────────────────────────────── IDENTIDADE ──────────────────────────────
+
+  Widget _buildIdentityCard(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+    Color muted,
+    bool isDark,
+  ) {
+    final cardBg = isDark
+        ? AppColors.background.cardBackgroundDarkMode
+        : AppColors.background.cardBackground;
+    final borderColor = isDark
+        ? AppColors.border.borderDarkMode
+        : AppColors.border.border;
+
+    final addressFull = property.address.isNotEmpty
+        ? property.address
+        : '${property.street}, ${property.number} - ${property.neighborhood}, ${property.city} - ${property.state}';
+
+    final accent = isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: borderColor.withValues(alpha: isDark ? 0.48 : 0.62),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.26 : 0.075),
+            blurRadius: 22,
+            offset: const Offset(0, 8),
+            spreadRadius: -6,
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(19),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              height: 3,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    accent.withValues(alpha: 0.9),
+                    accent.withValues(alpha: 0.22),
                   ],
                 ),
-                const SizedBox(height: 16),
-
-                // Status
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+              child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: _getStatusColor(
-                      property.status,
-                    ).withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(6),
+                    color: accent.withValues(alpha: isDark ? 0.14 : 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: accent.withValues(alpha: 0.22)),
                   ),
-                  child: Text(
-                    property.status.label,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: _getStatusColor(property.status),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-
-                // Preço (destaque melhorado)
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        AppColors.primary.primary.withValues(alpha: 0.15),
-                        AppColors.primary.primary.withValues(alpha: 0.08),
-                      ],
-                    ),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: AppColors.primary.primary.withValues(alpha: 0.3),
-                      width: 2,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primary.primary.withValues(
-                          alpha: 0.15,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _typeIcon(property.type),
+                        size: 12,
+                        color: accent,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        property.type.label.toUpperCase(),
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.6,
+                          color: accent,
                         ),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
                       ),
                     ],
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Label do tipo de operação
-                      Row(
+                ),
+                if (property.code != null && property.code!.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () {
+                      Clipboard.setData(ClipboardData(text: property.code!));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Código copiado'),
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: muted.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(
-                            property.salePrice != null
-                                ? Icons.sell
-                                : Icons.home,
-                            size: 20,
-                            color: AppColors.primary.primary,
-                          ),
-                          const SizedBox(width: 8),
+                          Icon(Icons.tag, size: 11, color: muted),
+                          const SizedBox(width: 3),
                           Text(
-                            property.salePrice != null ? 'VENDA' : 'ALUGUEL',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.primary.primary,
-                              fontSize: 12,
-                              letterSpacing: 1.5,
+                            property.code!,
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w800,
+                              color: muted,
+                              letterSpacing: 0.2,
+                              fontFeatures: const [FontFeature.tabularFigures()],
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
-                      // Preço principal (maior e mais destacado)
-                      if (property.salePrice != null)
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Text(
-                                'R\$',
-                                style: theme.textTheme.headlineSmall?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.primary.primary,
-                                  fontSize: 24,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Flexible(
-                              child: Text(
-                                _currencyFormatter
-                                    .format(property.salePrice)
-                                    .replaceAll('R\$', '')
-                                    .trim(),
-                                style: theme.textTheme.headlineLarge?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.primary.primary,
-                                  fontSize: 42,
-                                  height: 1.1,
-                                  letterSpacing: -1,
-                                ),
-                              ),
-                            ),
-                          ],
-                        )
-                      else if (property.rentPrice != null)
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Text(
-                                'R\$',
-                                style: theme.textTheme.headlineSmall?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.primary.primary,
-                                  fontSize: 24,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Flexible(
-                              child: Text(
-                                _currencyFormatter
-                                    .format(property.rentPrice)
-                                    .replaceAll('R\$', '')
-                                    .trim(),
-                                style: theme.textTheme.headlineLarge?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.primary.primary,
-                                  fontSize: 42,
-                                  height: 1.1,
-                                  letterSpacing: -1,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Padding(
-                              padding: const EdgeInsets.only(top: 8),
-                              child: Text(
-                                '/mês',
-                                style: theme.textTheme.titleLarge?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.primary.primary.withValues(
-                                    alpha: 0.8,
-                                  ),
-                                  fontSize: 18,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 10),
+            MatchesBadge(
+              propertyId: widget.propertyId,
+              onClick: () => Navigator.pushNamed(
+                context,
+                AppRoutes.matchesByProperty(widget.propertyId),
+              ),
+              child: Text(
+                property.title,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.4,
+                  height: 1.15,
+                  color: ThemeHelpers.textColor(context),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.place_outlined, size: 16, color: accent.withValues(alpha: 0.75)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    addressFull,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: muted,
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (_buildIdentityMetaPills(property, isDark).isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: _buildIdentityMetaPills(property, isDark),
+              ),
+            ],
+            if (_hasIdentityFooterContent(property)) ...[
+              const SizedBox(height: 14),
+              Container(
+                height: 1,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      borderColor.withValues(alpha: 0),
+                      borderColor.withValues(alpha: isDark ? 0.6 : 0.85),
+                      borderColor.withValues(alpha: 0),
                     ],
                   ),
                 ),
-                const SizedBox(height: 32),
+              ),
+              const SizedBox(height: 12),
+              _buildIdentityFooter(theme, property, muted),
+            ],
+              ],
+            ),
+          ),
+          ],
+        ),
+      ),
+    );
+  }
 
-                // Características principais
-                _buildSectionTitle(theme, 'Características'),
-                const SizedBox(height: 16),
-                _buildCharacteristicsCard(context, theme, property),
-                const SizedBox(height: 32),
+  /// Pills com meta-info do imóvel: público, MCMV, aceita proposta, ofertas.
+  List<Widget> _buildIdentityMetaPills(Property property, bool isDark) {
+    final pills = <Widget>[];
 
-                // Descrição
-                _buildSectionTitle(theme, 'Descrição'),
-                const SizedBox(height: 16),
+    final publicLive =
+        property.isAvailableForSite == true && property.isActive;
+    pills.add(_metaPill(
+      icon: publicLive ? Icons.public : Icons.lock_outline_rounded,
+      label: publicLive ? 'No site' : 'Privado',
+      color: publicLive ? AppColors.status.success : AppColors.text.textSecondary,
+      isDark: isDark,
+    ));
+
+    if (property.acceptsNegotiation == true) {
+      pills.add(_metaPill(
+        icon: Icons.handshake_outlined,
+        label: 'Aceita proposta',
+        color: AppColors.status.success,
+        isDark: isDark,
+      ));
+    }
+    if (property.mcmvEligible == true) {
+      pills.add(_metaPill(
+        icon: Icons.home_work_outlined,
+        label: 'MCMV',
+        color: AppColors.status.info,
+        isDark: isDark,
+      ));
+    }
+    final pending = property.pendingOffersCount ?? 0;
+    if (pending > 0) {
+      pills.add(_metaPill(
+        icon: Icons.request_quote_outlined,
+        label: '$pending oferta${pending > 1 ? 's' : ''} pendente${pending > 1 ? 's' : ''}',
+        color: AppColors.status.warning,
+        isDark: isDark,
+      ));
+    }
+    if ((property.imageCount ?? property.images?.length ?? 0) == 0) {
+      pills.add(_metaPill(
+        icon: Icons.image_not_supported_outlined,
+        label: 'Sem fotos',
+        color: AppColors.status.warning,
+        isDark: isDark,
+      ));
+    }
+    return pills;
+  }
+
+  Widget _metaPill({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required bool isDark,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: isDark ? 0.18 : 0.11),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.32)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w800,
+              fontSize: 10.5,
+              letterSpacing: 0.1,
+              height: 1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  bool _hasIdentityFooterContent(Property property) {
+    return property.updatedAt.isNotEmpty ||
+        property.capturedBy != null ||
+        property.createdAt.isNotEmpty;
+  }
+
+  Widget _buildIdentityFooter(ThemeData theme, Property property, Color muted) {
+    final updatedAgo = _humanRelativeTime(property.updatedAt);
+    final captured = property.capturedBy?.name;
+    final createdAgo = _humanRelativeTime(property.createdAt);
+
+    return Wrap(
+      spacing: 14,
+      runSpacing: 6,
+      children: [
+        if (updatedAgo != null)
+          _identityMicroInfo(
+            icon: Icons.history_rounded,
+            label: 'Atualizado $updatedAgo',
+            muted: muted,
+            theme: theme,
+          ),
+        if (captured != null && captured.isNotEmpty)
+          _identityMicroInfo(
+            icon: Icons.person_pin_circle_outlined,
+            label: 'Captado por $captured',
+            muted: muted,
+            theme: theme,
+          ),
+        if (updatedAgo == null && createdAgo != null)
+          _identityMicroInfo(
+            icon: Icons.event_available_outlined,
+            label: 'Criado $createdAgo',
+            muted: muted,
+            theme: theme,
+          ),
+      ],
+    );
+  }
+
+  Widget _identityMicroInfo({
+    required IconData icon,
+    required String label,
+    required Color muted,
+    required ThemeData theme,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 12, color: muted),
+        const SizedBox(width: 5),
+        Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: muted,
+            fontWeight: FontWeight.w600,
+            fontSize: 10.5,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Devolve algo como "há 3d", "há 2h" ou null se a string for inválida.
+  String? _humanRelativeTime(String iso) {
+    if (iso.trim().isEmpty) return null;
+    DateTime? dt;
+    try {
+      dt = DateTime.parse(iso).toLocal();
+    } catch (_) {
+      return null;
+    }
+    final delta = DateTime.now().difference(dt);
+    if (delta.isNegative) return null;
+    if (delta.inMinutes < 1) return 'agora';
+    if (delta.inMinutes < 60) return 'há ${delta.inMinutes} min';
+    if (delta.inHours < 24) return 'há ${delta.inHours} h';
+    if (delta.inDays < 7) return 'há ${delta.inDays} d';
+    if (delta.inDays < 30) return 'há ${(delta.inDays / 7).floor()} sem';
+    if (delta.inDays < 365) return 'há ${(delta.inDays / 30).floor()} mes';
+    return 'há ${(delta.inDays / 365).floor()} a';
+  }
+
+  IconData _typeIcon(PropertyType type) {
+    switch (type) {
+      case PropertyType.house:
+        return Icons.cottage_outlined;
+      case PropertyType.apartment:
+        return Icons.apartment;
+      case PropertyType.commercial:
+        return Icons.storefront_outlined;
+      case PropertyType.land:
+        return Icons.terrain_outlined;
+      case PropertyType.rural:
+        return Icons.agriculture_outlined;
+    }
+  }
+
+  // ────────────────────────────── QUICK STATS ──────────────────────────────
+
+  Widget _buildQuickStatsStrip(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    final stats = <({IconData icon, String value, String label})>[];
+    if (property.bedrooms != null && property.bedrooms! > 0) {
+      stats.add((icon: Icons.king_bed_outlined, value: '${property.bedrooms}', label: 'Quartos'));
+    }
+    if (property.bathrooms != null && property.bathrooms! > 0) {
+      stats.add((icon: Icons.bathtub_outlined, value: '${property.bathrooms}', label: 'Banheiros'));
+    }
+    if (property.parkingSpaces != null && property.parkingSpaces! > 0) {
+      stats.add((
+        icon: Icons.directions_car_filled_outlined,
+        value: '${property.parkingSpaces}',
+        label: 'Vagas',
+      ));
+    }
+    if (property.totalArea > 0) {
+      stats.add((
+        icon: Icons.square_foot_rounded,
+        value: '${property.totalArea.toInt()}',
+        label: 'm² total',
+      ));
+    }
+    if (property.builtArea != null && property.builtArea! > 0) {
+      stats.add((
+        icon: Icons.crop_free_rounded,
+        value: '${property.builtArea!.toInt()}',
+        label: 'm² const.',
+      ));
+    }
+    if (stats.isEmpty) return const SizedBox.shrink();
+
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final cardBg = isDark
+        ? AppColors.background.cardBackgroundDarkMode
+        : AppColors.background.cardBackground;
+    final borderColor = isDark
+        ? AppColors.border.borderDarkMode
+        : AppColors.border.border;
+    final accent = isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: accent.withValues(alpha: isDark ? 0.22 : 0.16),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.05),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+            spreadRadius: -4,
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(17),
+        child: ColoredBox(
+          color: cardBg,
+          child: SizedBox(
+            height: 94,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              itemCount: stats.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (_, i) {
+                final s = stats[i];
+                return Container(
+                  width: 88,
+                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
+                  decoration: BoxDecoration(
+                    color: (isDark
+                            ? AppColors.background.backgroundSecondaryDarkMode
+                            : AppColors.background.backgroundSecondary)
+                        .withValues(alpha: isDark ? 0.72 : 0.88),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: borderColor.withValues(alpha: isDark ? 0.5 : 0.65),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.max,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: accent.withValues(alpha: isDark ? 0.18 : 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(s.icon, size: 13, color: accent),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        s.value,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          height: 1.05,
+                          letterSpacing: -0.35,
+                          color: ThemeHelpers.textColor(context),
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        s.label,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: muted,
+                          fontSize: 9,
+                          height: 1.2,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.2,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ────────────────────────────── PRICE SHOWCASE ──────────────────────────────
+
+  Widget _buildPriceShowcase(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+    bool isDark,
+  ) {
+    final hasSale = property.salePrice != null;
+    final hasRent = property.rentPrice != null;
+    if (!hasSale && !hasRent) {
+      return _buildPriceUnavailableCard(context, theme, isDark);
+    }
+
+    final accent = isDark
+        ? AppColors.primary.primaryDarkMode
+        : AppColors.primary.primary;
+
+    final surface = isDark
+        ? AppColors.background.backgroundSecondaryDarkMode
+        : AppColors.background.backgroundSecondary;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: accent.withValues(alpha: isDark ? 0.36 : 0.24),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.24 : 0.07),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+            spreadRadius: -5,
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(19),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              height: 3,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    accent.withValues(alpha: 0.95),
+                    accent.withValues(alpha: 0.2),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+              child: hasSale && hasRent
+                  ? _buildPriceDualLayout(theme, property, accent, isDark)
+                  : _buildPriceSingleLayout(theme, property, hasSale, accent, isDark),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPriceUnavailableCard(BuildContext context, ThemeData theme, bool isDark) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+      decoration: BoxDecoration(
+        color: isDark
+            ? AppColors.background.cardBackgroundDarkMode
+            : AppColors.background.cardBackground,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: (isDark
+                  ? AppColors.border.borderDarkMode
+                  : AppColors.border.border)
+              .withValues(alpha: 0.7),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.price_change_outlined, size: 22, color: muted),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
                 Text(
-                  property.description,
-                  style: theme.textTheme.bodyLarge?.copyWith(
+                  'Preço sob consulta',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
                     color: ThemeHelpers.textColor(context),
-                    height: 1.5,
                   ),
                 ),
-                const SizedBox(height: 32),
-
-                // Informações adicionais
-                if (property.condominiumFee != null ||
-                    property.iptu != null) ...[
-                  _buildSectionTitle(theme, 'Valores Adicionais'),
-                  const SizedBox(height: 16),
-                  _buildAdditionalValuesCard(context, theme, property),
-                  const SizedBox(height: 32),
-                ],
-
-                // Localização no mapa
-                _buildSectionTitle(theme, 'Localização'),
-                const SizedBox(height: 16),
-                _buildMapSection(context, theme, property),
-                const SizedBox(height: 32),
-
-                // Recursos/Comodidades
-                if (property.features.isNotEmpty) ...[
-                  _buildSectionTitle(theme, 'Recursos e Comodidades'),
-                  const SizedBox(height: 16),
-                  _buildFeaturesSection(context, theme, property.features),
-                  const SizedBox(height: 32),
-                ],
-
-                // Status da Chave (Seção 6)
-                _buildSectionTitle(theme, 'Status da Chave'),
-                const SizedBox(height: 16),
-                _buildKeyStatusSection(context, theme, property),
-                const SizedBox(height: 32),
-
-                // Clientes Vinculados (Seção 7)
-                _buildSectionTitle(theme, 'Clientes Vinculados'),
-                const SizedBox(height: 16),
-                _buildClientsSection(context, theme, property),
-                const SizedBox(height: 32),
-
-                // Despesas do Imóvel (Seção 8)
-                _buildSectionTitle(theme, 'Despesas do Imóvel'),
-                const SizedBox(height: 16),
-                _buildExpensesSection(context, theme, property),
-                const SizedBox(height: 32),
-
-                // Checklists (Seção 9)
-                _buildSectionTitle(theme, 'Checklists'),
-                const SizedBox(height: 16),
-                _buildChecklistsSection(context, theme, property),
-                const SizedBox(height: 32),
-
-                // Documentos (Seção 10)
-                _buildSectionTitle(theme, 'Documentos'),
-                const SizedBox(height: 16),
-                _buildDocumentsSection(context, theme, property),
-                const SizedBox(height: 32),
-
-                // Publicação no site (Seção 11)
-                _buildSectionTitle(theme, 'Publicação'),
-                const SizedBox(height: 16),
-                PropertyPublicToggle(
-                  propertyId: property.id,
-                  initialValue: property.isAvailableForSite ?? false,
-                  propertyStatus: property.status,
-                  isActive: property.isActive,
-                  imageCount:
-                      property.imageCount ?? property.images?.length ?? 0,
-                  onSuccess: () {
-                    _loadProperty(); // Recarregar dados
-                  },
-                  onError: (error) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(error),
-                        backgroundColor: AppColors.status.error,
-                      ),
-                    );
-                  },
+                const SizedBox(height: 2),
+                Text(
+                  'Preencha os valores na ficha para apresentar nesta tela.',
+                  style: theme.textTheme.bodySmall?.copyWith(color: muted),
                 ),
-                const SizedBox(height: 32),
-
-                // Ofertas (Seção 12)
-                if (property.hasPendingOffers == true ||
-                    property.totalOffersCount != null &&
-                        property.totalOffersCount! > 0) ...[
-                  _buildSectionTitle(theme, 'Ofertas'),
-                  const SizedBox(height: 16),
-                  _buildOffersSection(context, theme, property),
-                  const SizedBox(height: 32),
-                ],
               ],
             ),
           ),
@@ -905,126 +1703,637 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  Widget _buildImageGallery(BuildContext context, Property property) {
-    final images = property.images ?? [];
-    final theme = Theme.of(context);
+  Widget _buildPriceSingleLayout(
+    ThemeData theme,
+    Property property,
+    bool isSale,
+    Color accent,
+    bool isDark,
+  ) {
+    final value = isSale ? property.salePrice! : property.rentPrice!;
+    final label = isSale ? 'VENDA' : 'LOCAÇÃO';
+    final icon = isSale ? Icons.sell_outlined : Icons.vpn_key_outlined;
 
-    if (images.isEmpty) {
-      return Container(
-        width: double.infinity,
-        height: 300,
-        color: theme.brightness == Brightness.dark
-            ? AppColors.background.backgroundSecondaryDarkMode
-            : AppColors.background.backgroundSecondary,
-        child: Icon(
-          Icons.home_outlined,
-          size: 64,
-          color: ThemeHelpers.textSecondaryColor(context),
-        ),
-      );
-    }
-
-    return SizedBox(
-      height: 300,
-      child: Stack(
-        children: [
-          PageView.builder(
-            controller: _imagePageController,
-            itemCount: images.length,
-            onPageChanged: (index) {
-              setState(() {
-                _currentImageIndex = index;
-              });
-            },
-            itemBuilder: (context, index) {
-              final image = images[index];
-              return ShimmerImage(
-                imageUrl: image.url,
-                width: double.infinity,
-                height: 300,
-                fit: BoxFit.cover,
-                errorWidget: Container(
-                  color: AppColors.background.backgroundSecondary,
-                  child: Icon(
-                    Icons.broken_image_outlined,
-                    size: 64,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildPriceLabelRow(label, icon, accent),
+        const SizedBox(height: 12),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                'R\$',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: accent,
+                  fontSize: 20,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  _currencyFormatter
+                      .format(value)
+                      .replaceAll('R\$', '')
+                      .trim(),
+                  style: theme.textTheme.headlineLarge?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: ThemeHelpers.textColor(context),
+                    fontSize: 38,
+                    height: 1.05,
+                    letterSpacing: -1.4,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+            ),
+            if (!isSale)
+              Padding(
+                padding: const EdgeInsets.only(top: 14, left: 4),
+                child: Text(
+                  '/mês',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
                     color: ThemeHelpers.textSecondaryColor(context),
                   ),
                 ),
-              );
-            },
+              ),
+          ],
+        ),
+        if (property.acceptsNegotiation == true) ...[
+          const SizedBox(height: 12),
+          _buildAcceptsNegotiationChip(theme, isDark),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildPriceDualLayout(
+    ThemeData theme,
+    Property property,
+    Color accent,
+    bool isDark,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildPriceLabelRow('VENDA · LOCAÇÃO', Icons.compare_arrows_rounded, accent),
+        const SizedBox(height: 14),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _buildPriceColumn(
+                theme,
+                'Venda',
+                _currencyFormatter
+                    .format(property.salePrice)
+                    .replaceAll('R\$', '')
+                    .trim(),
+                Icons.sell_outlined,
+                accent,
+              ),
+            ),
+            Container(
+              width: 1,
+              height: 56,
+              margin: const EdgeInsets.symmetric(horizontal: 12),
+              color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+            ),
+            Expanded(
+              child: _buildPriceColumn(
+                theme,
+                'Aluguel/mês',
+                _currencyFormatter
+                    .format(property.rentPrice)
+                    .replaceAll('R\$', '')
+                    .trim(),
+                Icons.vpn_key_outlined,
+                accent,
+              ),
+            ),
+          ],
+        ),
+        if (property.acceptsNegotiation == true) ...[
+          const SizedBox(height: 12),
+          _buildAcceptsNegotiationChip(theme, isDark),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildPriceColumn(
+    ThemeData theme,
+    String label,
+    String value,
+    IconData icon,
+    Color accent,
+  ) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 11, color: muted),
+            const SizedBox(width: 4),
+            Text(
+              label.toUpperCase(),
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: muted,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.6,
+                fontSize: 9.5,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                'R\$',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: accent,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+            const SizedBox(width: 3),
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  value,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: ThemeHelpers.textColor(context),
+                    height: 1.05,
+                    letterSpacing: -0.6,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPriceLabelRow(String label, IconData icon, Color accent) {
+    return Row(
+      children: [
+        Icon(icon, size: 14, color: accent),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: TextStyle(
+            color: accent,
+            fontWeight: FontWeight.w900,
+            fontSize: 11,
+            letterSpacing: 1.4,
           ),
-          // Seta esquerda (anterior)
-          if (images.length > 1 && _currentImageIndex > 0)
-            Positioned(
-              left: 12,
-              top: 0,
-              bottom: 0,
-              child: Center(
-                child: GestureDetector(
-                  onTap: () {
-                    _imagePageController.previousPage(
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.easeInOut,
-                    );
-                  },
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.3),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      Icons.chevron_left,
-                      color: AppColors.primary.primary,
-                      size: 24,
-                    ),
-                  ),
-                ),
-              ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAcceptsNegotiationChip(ThemeData theme, bool isDark) {
+    final c = AppColors.status.success;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: isDark ? 0.18 : 0.13),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: c.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.handshake_outlined, size: 13, color: c),
+          const SizedBox(width: 5),
+          Text(
+            'Aceita proposta',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: c,
+              fontWeight: FontWeight.w800,
+              fontSize: 10.5,
+              letterSpacing: 0.2,
             ),
-          // Seta direita (próxima)
-          if (images.length > 1 && _currentImageIndex < images.length - 1)
-            Positioned(
-              right: 12,
-              top: 0,
-              bottom: 0,
-              child: Center(
-                child: GestureDetector(
-                  onTap: () {
-                    _imagePageController.nextPage(
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.easeInOut,
-                    );
-                  },
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.3),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      Icons.chevron_right,
-                      color: AppColors.primary.primary,
-                      size: 24,
-                    ),
-                  ),
-                ),
-              ),
-            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildSectionTitle(ThemeData theme, String title) {
-    return Text(
-      title,
-      style: theme.textTheme.titleLarge?.copyWith(
-        fontWeight: FontWeight.w600,
-        color: ThemeHelpers.textColor(context),
+  // ────────────────────────────── QUICK ACTIONS ──────────────────────────────
+
+  Widget _buildQuickActionsStrip(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    final actions = <({IconData icon, String label, VoidCallback onTap, Color? color})>[
+      (
+        icon: Icons.location_on_outlined,
+        label: 'Mapa',
+        onTap: () => _scrollToBottom(context),
+        color: null,
+      ),
+      (
+        icon: Icons.share_outlined,
+        label: 'Compartilhar',
+        onTap: () {
+          final url = property.code != null && property.code!.isNotEmpty
+              ? 'imovel/${property.code}'
+              : 'imovel/${property.id}';
+          Clipboard.setData(ClipboardData(text: url));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Link copiado'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        },
+        color: null,
+      ),
+      if (property.totalOffersCount != null && property.totalOffersCount! > 0)
+        (
+          icon: Icons.request_quote_outlined,
+          label: 'Ofertas',
+          onTap: () => Navigator.of(context).pushNamed(
+            '/properties/offers',
+            arguments: {'propertyId': widget.propertyId},
+          ),
+          color: AppColors.status.warning,
+        ),
+      (
+        icon: Icons.edit_outlined,
+        label: 'Editar',
+        onTap: () => Navigator.of(context).pushNamed(
+          '/properties/${widget.propertyId}/edit',
+        ),
+        color: null,
+      ),
+    ];
+
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final accent = AppColors.primary.primary;
+
+    return SizedBox(
+      height: 56,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: actions.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final a = actions[i];
+          final c = a.color ?? accent;
+          return Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: a.onTap,
+              child: Ink(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: c.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: c.withValues(alpha: 0.28)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(a.icon, size: 16, color: c),
+                    const SizedBox(width: 7),
+                    Text(
+                      a.label,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: a.color != null ? c : muted,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.1,
+                        fontSize: 12.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _scrollToBottom(BuildContext context) {
+    Scrollable.ensureVisible(
+      context,
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeOut,
+    );
+  }
+
+  // ────────────────────────────── TABS ──────────────────────────────
+
+  Widget _buildSectionTabs(BuildContext context, ThemeData theme) {
+    final isDark = theme.brightness == Brightness.dark;
+    final cardBg = isDark
+        ? AppColors.background.cardBackgroundDarkMode
+        : AppColors.background.cardBackground;
+    final borderColor = isDark
+        ? AppColors.border.borderDarkMode
+        : AppColors.border.border;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final accent = isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+      child: Container(
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: cardBg,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: borderColor.withValues(alpha: isDark ? 0.55 : 0.7)),
+        ),
+        child: Row(
+          children: _DetailsTab.values.map((tab) {
+            final active = tab == _activeTab;
+            return Expanded(
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => setState(() => _activeTab = tab),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: active ? accent : null,
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: active
+                          ? [
+                              BoxShadow(
+                                color: accent.withValues(alpha: 0.35),
+                                blurRadius: 10,
+                                offset: const Offset(0, 3),
+                              ),
+                            ]
+                          : null,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          tab.icon,
+                          size: 16,
+                          color: active ? Colors.white : muted,
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            tab.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              color: active ? Colors.white : muted,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 12,
+                              letterSpacing: -0.1,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActiveTabContent(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    switch (_activeTab) {
+      case _DetailsTab.overview:
+        return _buildOverviewTab(context, theme, property);
+      case _DetailsTab.commercial:
+        return _buildCommercialTab(context, theme, property);
+      case _DetailsTab.management:
+        return _buildManagementTab(context, theme, property);
+    }
+  }
+
+  Widget _buildOverviewTab(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader(theme, 'Descrição', Icons.notes_outlined),
+        const SizedBox(height: 10),
+        _buildDescriptionCard(context, theme, property),
+        const SizedBox(height: 22),
+        _buildSectionHeader(theme, 'Características', Icons.tune_rounded),
+        const SizedBox(height: 10),
+        _buildCharacteristicsCard(context, theme, property),
+        if (property.condominiumFee != null || property.iptu != null) ...[
+          const SizedBox(height: 22),
+          _buildSectionHeader(theme, 'Valores adicionais', Icons.account_balance_wallet_outlined),
+          const SizedBox(height: 10),
+          _buildAdditionalValuesCard(context, theme, property),
+        ],
+        if (property.features.isNotEmpty) ...[
+          const SizedBox(height: 22),
+          _buildSectionHeader(theme, 'Recursos e comodidades', Icons.auto_awesome_outlined),
+          const SizedBox(height: 10),
+          _buildFeaturesSection(context, theme, property.features),
+        ],
+        const SizedBox(height: 22),
+        _buildSectionHeader(theme, 'Localização', Icons.map_outlined),
+        const SizedBox(height: 10),
+        _buildMapSection(context, theme, property),
+      ],
+    );
+  }
+
+  Widget _buildCommercialTab(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    final hasOffers = property.hasPendingOffers == true ||
+        (property.totalOffersCount != null && property.totalOffersCount! > 0);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader(theme, 'Status da chave', Icons.vpn_key_outlined),
+        const SizedBox(height: 10),
+        _buildKeyStatusSection(context, theme, property),
+        const SizedBox(height: 22),
+        _buildSectionHeader(theme, 'Clientes vinculados', Icons.people_alt_outlined),
+        const SizedBox(height: 10),
+        _buildClientsSection(context, theme, property),
+        if (hasOffers) ...[
+          const SizedBox(height: 22),
+          _buildSectionHeader(theme, 'Ofertas', Icons.request_quote_outlined),
+          const SizedBox(height: 10),
+          _buildOffersSection(context, theme, property),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildManagementTab(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader(theme, 'Despesas', Icons.payments_outlined),
+        const SizedBox(height: 10),
+        _buildExpensesSection(context, theme, property),
+        const SizedBox(height: 22),
+        _buildSectionHeader(theme, 'Checklists', Icons.checklist_rtl_rounded),
+        const SizedBox(height: 10),
+        _buildChecklistsSection(context, theme, property),
+        const SizedBox(height: 22),
+        _buildSectionHeader(theme, 'Documentos', Icons.folder_open_outlined),
+        const SizedBox(height: 10),
+        _buildDocumentsSection(context, theme, property),
+        const SizedBox(height: 22),
+        _buildSectionHeader(theme, 'Publicação no site', Icons.public_outlined),
+        const SizedBox(height: 10),
+        PropertyPublicToggle(
+          propertyId: property.id,
+          initialValue: property.isAvailableForSite ?? false,
+          propertyStatus: property.status,
+          isActive: property.isActive,
+          imageCount: property.imageCount ?? property.images?.length ?? 0,
+          onSuccess: () => _loadProperty(),
+          onError: (error) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(error),
+                backgroundColor: AppColors.status.error,
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSectionHeader(ThemeData theme, String title, IconData icon) {
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: accent.withValues(alpha: isDark ? 0.16 : 0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: accent.withValues(alpha: 0.24)),
+          ),
+          child: Icon(icon, size: 18, color: accent),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            title,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.25,
+              color: ThemeHelpers.textColor(context),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDescriptionCard(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    final isDark = theme.brightness == Brightness.dark;
+    final cardBg = isDark
+        ? AppColors.background.cardBackgroundDarkMode
+        : AppColors.background.cardBackground;
+    final borderColor = isDark
+        ? AppColors.border.borderDarkMode
+        : AppColors.border.border;
+    final text = property.description.trim().isEmpty
+        ? 'Sem descrição cadastrada para este imóvel.'
+        : property.description;
+    final isEmpty = property.description.trim().isEmpty;
+
+    final accent = isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor.withValues(alpha: isDark ? 0.55 : 0.75)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.14 : 0.05),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+            spreadRadius: -2,
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(15),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(width: 4, color: accent),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 16, 16, 16),
+                  child: Text(
+                    text,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: isEmpty
+                          ? ThemeHelpers.textSecondaryColor(context)
+                          : ThemeHelpers.textColor(context),
+                      height: 1.55,
+                      fontStyle: isEmpty ? FontStyle.italic : null,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1035,95 +2344,131 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     Property property,
   ) {
     final isDark = theme.brightness == Brightness.dark;
+    final cardBg = isDark
+        ? AppColors.background.cardBackgroundDarkMode
+        : AppColors.background.cardBackground;
+    final borderColor = isDark
+        ? AppColors.border.borderDarkMode
+        : AppColors.border.border;
 
-    return Card(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: isDark
-              ? AppColors.border.borderDarkMode
-              : AppColors.border.border,
+    final items = <({IconData icon, String label, String value})>[
+      (icon: _typeIcon(property.type), label: 'Tipo', value: property.type.label),
+      if (property.totalArea > 0)
+        (
+          icon: Icons.square_foot_rounded,
+          label: 'Área total',
+          value: '${property.totalArea.toInt()} m²',
+        ),
+      if (property.builtArea != null && property.builtArea! > 0)
+        (
+          icon: Icons.crop_free_rounded,
+          label: 'Área construída',
+          value: '${property.builtArea!.toInt()} m²',
+        ),
+      if (property.bedrooms != null && property.bedrooms! > 0)
+        (
+          icon: Icons.king_bed_outlined,
+          label: 'Quartos',
+          value: '${property.bedrooms}',
+        ),
+      if (property.bathrooms != null && property.bathrooms! > 0)
+        (
+          icon: Icons.bathtub_outlined,
+          label: 'Banheiros',
+          value: '${property.bathrooms}',
+        ),
+      if (property.parkingSpaces != null && property.parkingSpaces! > 0)
+        (
+          icon: Icons.directions_car_filled_outlined,
+          label: 'Vagas',
+          value: '${property.parkingSpaces}',
+        ),
+    ];
+
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final accent = isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: accent.withValues(alpha: isDark ? 0.28 : 0.2),
         ),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            _buildCharacteristicRow(
-              theme,
-              Icons.home_outlined,
-              'Tipo',
-              property.type.label,
-            ),
-            if (property.totalArea > 0)
-              _buildCharacteristicRow(
-                theme,
-                Icons.square_foot,
-                'Área Total',
-                '${property.totalArea.toInt()} m²',
-              ),
-            if (property.builtArea != null && property.builtArea! > 0)
-              _buildCharacteristicRow(
-                theme,
-                Icons.business,
-                'Área Construída',
-                '${property.builtArea!.toInt()} m²',
-              ),
-            if (property.bedrooms != null)
-              _buildCharacteristicRow(
-                theme,
-                Icons.bed,
-                'Quartos',
-                '${property.bedrooms}',
-              ),
-            if (property.bathrooms != null)
-              _buildCharacteristicRow(
-                theme,
-                Icons.bathtub_outlined,
-                'Banheiros',
-                '${property.bathrooms}',
-              ),
-            if (property.parkingSpaces != null)
-              _buildCharacteristicRow(
-                theme,
-                Icons.local_parking,
-                'Vagas',
-                '${property.parkingSpaces}',
-              ),
-          ],
+      child: GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: items.length,
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          mainAxisExtent: 78,
         ),
-      ),
-    );
-  }
-
-  Widget _buildCharacteristicRow(
-    ThemeData theme,
-    IconData icon,
-    String label,
-    String value,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Row(
-        children: [
-          Icon(icon, size: 20, color: AppColors.primary.primary),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              label,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-                color: ThemeHelpers.textColor(context),
+        itemBuilder: (_, i) {
+          final it = items[i];
+          return Container(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            decoration: BoxDecoration(
+              color: (isDark
+                      ? AppColors.background.backgroundSecondaryDarkMode
+                      : AppColors.background.backgroundSecondary)
+                  .withValues(alpha: isDark ? 0.55 : 0.55),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: borderColor.withValues(alpha: isDark ? 0.45 : 0.55),
               ),
             ),
-          ),
-          Text(
-            value,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
+            child: Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: isDark ? 0.18 : 0.12),
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: Icon(it.icon, size: 18, color: accent),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        it.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: muted,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.4,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        it.value,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: ThemeHelpers.textColor(context),
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.2,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -1133,37 +2478,100 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     ThemeData theme,
     Property property,
   ) {
-    final isDark = theme.brightness == Brightness.dark;
+    final items = <({IconData icon, String label, double value, Color color})>[
+      if (property.condominiumFee != null)
+        (
+          icon: Icons.apartment_rounded,
+          label: 'Condomínio',
+          value: property.condominiumFee!,
+          color: AppColors.status.info,
+        ),
+      if (property.iptu != null)
+        (
+          icon: Icons.receipt_long_outlined,
+          label: 'IPTU anual',
+          value: property.iptu!,
+          color: AppColors.status.warning,
+        ),
+    ];
+    if (items.isEmpty) return const SizedBox.shrink();
 
-    return Card(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: isDark
-              ? AppColors.border.borderDarkMode
-              : AppColors.border.border,
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            if (property.condominiumFee != null)
-              _buildCharacteristicRow(
-                theme,
-                Icons.apartment,
-                'Condomínio',
-                _currencyFormatter.format(property.condominiumFee),
+    final isDark = theme.brightness == Brightness.dark;
+    final cardBg = isDark
+        ? AppColors.background.cardBackgroundDarkMode
+        : AppColors.background.cardBackground;
+    final borderColor = isDark
+        ? AppColors.border.borderDarkMode
+        : AppColors.border.border;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < items.length; i++) ...[
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                decoration: BoxDecoration(
+                  color: cardBg,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: borderColor.withValues(alpha: isDark ? 0.55 : 0.78),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(7),
+                          decoration: BoxDecoration(
+                            color: items[i].color.withValues(alpha: isDark ? 0.18 : 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(items[i].icon, size: 14, color: items[i].color),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            items[i].label.toUpperCase(),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: muted,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.6,
+                              fontSize: 9.5,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        _currencyFormatter.format(items[i].value),
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          color: ThemeHelpers.textColor(context),
+                          fontWeight: FontWeight.w900,
+                          height: 1.05,
+                          letterSpacing: -0.4,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            if (property.iptu != null)
-              _buildCharacteristicRow(
-                theme,
-                Icons.receipt,
-                'IPTU',
-                _currencyFormatter.format(property.iptu),
-              ),
+            ),
+            if (i < items.length - 1) const SizedBox(width: 10),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -4100,5 +5508,395 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         );
       }
     }
+  }
+
+  // ────────────────────────────── BOTTOM BAR & FAB ──────────────────────────────
+
+  Widget _buildBottomActionBar(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    final isDark = theme.brightness == Brightness.dark;
+    final cardBg = isDark
+        ? AppColors.background.cardBackgroundDarkMode
+        : AppColors.background.cardBackground;
+    final borderColor = isDark
+        ? AppColors.border.borderDarkMode
+        : AppColors.border.border;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final accent = AppColors.primary.primary;
+    final hasOffers = property.totalOffersCount != null &&
+        property.totalOffersCount! > 0;
+    final pendingOffers = property.pendingOffersCount ?? 0;
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+          decoration: BoxDecoration(
+            color: cardBg.withValues(alpha: isDark ? 0.94 : 0.96),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: borderColor.withValues(alpha: isDark ? 0.62 : 0.85)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.5 : 0.12),
+                blurRadius: 28,
+                offset: const Offset(0, 12),
+                spreadRadius: -8,
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: _bottomActionPrimary(
+                  context: context,
+                  theme: theme,
+                  icon: Icons.edit_rounded,
+                  label: 'Editar imóvel',
+                  accent: accent,
+                  onTap: () => Navigator.of(context).pushNamed(
+                    '/properties/${property.id}/edit',
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _bottomActionGhost(
+                theme: theme,
+                muted: muted,
+                icon: Icons.share_outlined,
+                tooltip: 'Compartilhar link',
+                onTap: () {
+                  final url = property.code != null && property.code!.isNotEmpty
+                      ? 'imovel/${property.code}'
+                      : 'imovel/${property.id}';
+                  Clipboard.setData(ClipboardData(text: url));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Link copiado'),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(width: 8),
+              _bottomActionGhost(
+                theme: theme,
+                muted: muted,
+                icon: Icons.request_quote_outlined,
+                tooltip: hasOffers ? 'Ofertas' : 'Sem ofertas',
+                badge: pendingOffers > 0 ? pendingOffers : null,
+                badgeColor: AppColors.status.warning,
+                disabled: !hasOffers,
+                onTap: hasOffers
+                    ? () => Navigator.of(context).pushNamed(
+                          '/properties/offers',
+                          arguments: {'propertyId': widget.propertyId},
+                        )
+                    : null,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _bottomActionPrimary({
+    required BuildContext context,
+    required ThemeData theme,
+    required IconData icon,
+    required String label,
+    required Color accent,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: accent,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 14),
+          alignment: Alignment.center,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 17, color: Colors.white),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.2,
+                  fontSize: 13.5,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _bottomActionGhost({
+    required ThemeData theme,
+    required Color muted,
+    required IconData icon,
+    required String tooltip,
+    int? badge,
+    Color? badgeColor,
+    bool disabled = false,
+    VoidCallback? onTap,
+  }) {
+    final c = disabled ? muted.withValues(alpha: 0.4) : muted;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: muted.withValues(alpha: disabled ? 0.04 : 0.08),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Icon(icon, color: c, size: 19),
+                if (badge != null && badge > 0)
+                  Positioned(
+                    top: 6,
+                    right: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: badgeColor ?? AppColors.status.error,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.white, width: 1.2),
+                      ),
+                      constraints: const BoxConstraints(minWidth: 14, minHeight: 14),
+                      child: Text(
+                        '$badge',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w900,
+                          height: 1,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScrollTopButton(BuildContext context, ThemeData theme) {
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = isDark
+        ? AppColors.primary.primaryDarkMode
+        : AppColors.primary.primary;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _detailsScrollController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 420),
+          curve: Curves.easeOutCubic,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            color: accent,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: accent.withValues(alpha: 0.45),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
+                spreadRadius: -2,
+              ),
+            ],
+          ),
+          child: const Icon(
+            Icons.keyboard_arrow_up_rounded,
+            color: Colors.white,
+            size: 24,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Visualizador fullscreen com swipe horizontal e dots; tap fora ou ←/✕ fecha.
+class _FullscreenGallery extends StatefulWidget {
+  const _FullscreenGallery({
+    required this.images,
+    required this.initialIndex,
+    required this.propertyId,
+  });
+
+  final List<PropertyImage> images;
+  final int initialIndex;
+  final String propertyId;
+
+  @override
+  State<_FullscreenGallery> createState() => _FullscreenGalleryState();
+}
+
+class _FullscreenGalleryState extends State<_FullscreenGallery> {
+  late final PageController _controller;
+  late int _index;
+
+  @override
+  void initState() {
+    super.initState();
+    _index = widget.initialIndex.clamp(0, widget.images.length - 1);
+    _controller = PageController(initialPage: _index);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final total = widget.images.length;
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Stack(
+          children: [
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => Navigator.of(context).pop(),
+              child: PageView.builder(
+                controller: _controller,
+                itemCount: total,
+                onPageChanged: (i) => setState(() => _index = i),
+                itemBuilder: (_, i) {
+                  return Center(
+                    child: Hero(
+                      tag: 'property-image-${widget.propertyId}-$i',
+                      child: InteractiveViewer(
+                        minScale: 1,
+                        maxScale: 4,
+                        child: ShimmerImage(
+                          imageUrl: widget.images[i].url,
+                          width: double.infinity,
+                          height: double.infinity,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            Positioned(
+              top: 8,
+              left: 8,
+              child: _GalleryRoundIconButton(
+                icon: Icons.close_rounded,
+                onTap: () => Navigator.of(context).pop(),
+              ),
+            ),
+            Positioned(
+              top: 16,
+              right: 16,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(13),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+                ),
+                child: Text(
+                  '${_index + 1} / $total',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                    height: 1,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+            ),
+            if (total > 1)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 26,
+                child: Center(
+                  child: Wrap(
+                    spacing: 6,
+                    children: List.generate(total, (i) {
+                      final active = i == _index;
+                      return AnimatedContainer(
+                        duration: const Duration(milliseconds: 220),
+                        width: active ? 22 : 7,
+                        height: 7,
+                        decoration: BoxDecoration(
+                          color: active
+                              ? Colors.white
+                              : Colors.white.withValues(alpha: 0.4),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      );
+                    }),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GalleryRoundIconButton extends StatelessWidget {
+  const _GalleryRoundIconButton({required this.icon, required this.onTap});
+
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(22),
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.55),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+          ),
+          child: Icon(icon, color: Colors.white, size: 22),
+        ),
+      ),
+    );
   }
 }

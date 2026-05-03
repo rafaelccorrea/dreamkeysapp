@@ -71,7 +71,7 @@ class BrandWordmarkLogo extends StatelessWidget {
               width: w,
               height: height,
               fit: BoxFit.cover,
-              imageAlignment: Alignment.center,
+              imageAlignment: alignment,
               secondaryPath: secondary,
             ),
           ),

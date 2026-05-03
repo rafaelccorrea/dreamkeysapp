@@ -62,6 +62,94 @@ class _ListedPropertyMetrics {
   final double? avgAreaSqm;
 }
 
+/// Linha do menu ⋯ do card de imóvel: ícone em cápsula + título + subtítulo + chevron.
+class _PropertyActionMenuRow extends StatelessWidget {
+  const _PropertyActionMenuRow({
+    required this.icon,
+    required this.iconBackground,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    this.isDestructive = false,
+  });
+
+  final IconData icon;
+  final Color iconBackground;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+  final bool isDestructive;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final titleColor = ThemeHelpers.textColor(context);
+    final error = theme.colorScheme.error;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: iconBackground,
+            borderRadius: BorderRadius.circular(13),
+            border: Border.all(
+              color: isDestructive
+                  ? error.withValues(alpha: 0.22)
+                  : iconColor.withValues(alpha: 0.16),
+            ),
+          ),
+          child: Icon(icon, size: 21, color: iconColor),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.25,
+                  height: 1.15,
+                  color: isDestructive ? error : titleColor,
+                  fontSize: 14.5,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                subtitle,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontWeight: FontWeight.w500,
+                  height: 1.25,
+                  color: isDestructive
+                      ? error.withValues(alpha: 0.78)
+                      : muted.withValues(alpha: 0.95),
+                  fontSize: 11.5,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 6),
+        Icon(
+          Icons.chevron_right_rounded,
+          size: 22,
+          color: muted.withValues(alpha: 0.38),
+        ),
+      ],
+    );
+  }
+}
+
 class PropertiesPage extends StatefulWidget {
   const PropertiesPage({super.key});
 
@@ -674,7 +762,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
         _buildPortfolioStatTile(
           context,
           value: _compactIntFormatter.format(gs.rented),
-          label: 'Locação (CRM)',
+          label: 'Locação CRM',
           hint: 'Contratos ativos',
           icon: Icons.key_rounded,
           accent: const Color(0xFF818CF8),
@@ -684,7 +772,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
         _buildPortfolioStatTile(
           context,
           value: _compactIntFormatter.format(gs.sold),
-          label: 'Vendas (CRM)',
+          label: 'Vendas CRM',
           hint: 'Encerradas',
           icon: Icons.sell_outlined,
           accent: AppColors.status.info,
@@ -705,7 +793,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
         _buildPortfolioStatTile(
           context,
           value: _compactIntFormatter.format(gs.available),
-          label: 'Disponíveis (CRM)',
+          label: 'Disponíveis CRM',
           hint: 'Mercado',
           icon: Icons.event_available_rounded,
           accent: AppColors.status.success,
@@ -714,7 +802,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
         _buildPortfolioStatTile(
           context,
           value: _compactIntFormatter.format(gs.rented),
-          label: 'Locação (CRM)',
+          label: 'Locação CRM',
           hint: 'Contratos ativos',
           icon: Icons.key_rounded,
           accent: const Color(0xFF818CF8),
@@ -724,7 +812,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
         _buildPortfolioStatTile(
           context,
           value: _compactIntFormatter.format(gs.sold),
-          label: 'Vendas (CRM)',
+          label: 'Vendas CRM',
           hint: 'Encerradas',
           icon: Icons.sell_outlined,
           accent: AppColors.status.info,
@@ -2590,7 +2678,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
     _loadProperties(refresh: true);
   }
 
-  /// Faixa horizontal antes da malha — quebra o ritmo “tudo empilhado”.
+  /// Faixa horizontal antes da grade — quebra o ritmo “tudo empilhado”.
   Widget _buildDiscoverHorizontalStrip(
     BuildContext context,
     ThemeData theme, {
@@ -2626,7 +2714,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Destaques — percorra ao lado',
+                        'Propriedades em destaque — percorra ao lado',
                         style: theme.textTheme.titleSmall?.copyWith(
                           fontWeight: FontWeight.w800,
                           letterSpacing: -0.25,
@@ -2637,7 +2725,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
                 ),
                 const SizedBox(height: 5),
                 Text(
-                  'Abaixo ficam os demais cartões (sem repetir esta faixa).',
+                  'Abaixo ficam as demais propriedades.',
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: muted,
                     height: 1.35,
@@ -2664,6 +2752,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
                         context,
                         theme,
                         _properties[i],
+                        featuredStripLayout: true,
                       ),
                     ),
                   ),
@@ -2676,7 +2765,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
     );
   }
 
-  /// Radar + grade explorável (mobile como galeria; sem fila de cartões largos).
+  /// Radar e grade explorável no mobile, estilo galeria; sem fila larga vertical de propriedades.
   Widget _buildScrollablePropertiesViewport(BuildContext context) {
     final theme = Theme.of(context);
     final w = MediaQuery.sizeOf(context).width;
@@ -2750,6 +2839,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
                   context,
                   theme,
                   _properties[lead + index],
+                  featuredStripLayout: false,
                 );
               },
             ),
@@ -3043,160 +3133,343 @@ class _PropertiesPageState extends State<PropertiesPage> {
     return '${s.substring(0, 36)}…';
   }
 
+  List<BoxShadow> _exploreTileBoxShadows(bool isDark, bool featuredStripLayout) {
+    if (!featuredStripLayout) {
+      return [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: isDark ? 0.42 : 0.08),
+          blurRadius: isDark ? 18 : 12,
+          offset: const Offset(0, 8),
+          spreadRadius: -3,
+        ),
+      ];
+    }
+    final primary = isDark
+        ? AppColors.primary.primaryDarkMode
+        : AppColors.primary.primary;
+    return [
+      BoxShadow(
+        color: primary.withValues(alpha: isDark ? 0.26 : 0.2),
+        blurRadius: 28,
+        offset: const Offset(0, 11),
+        spreadRadius: -7,
+      ),
+      BoxShadow(
+        color: Colors.black.withValues(alpha: isDark ? 0.48 : 0.1),
+        blurRadius: isDark ? 22 : 16,
+        offset: const Offset(0, 12),
+        spreadRadius: -4,
+      ),
+    ];
+  }
+
+  LinearGradient _exploreTileFeaturedRingGradient(bool isDark) {
+    final p = isDark
+        ? AppColors.primary.primaryDarkMode
+        : AppColors.primary.primary;
+    final pLight = isDark
+        ? AppColors.primary.primaryLightDarkMode
+        : AppColors.primary.primaryLight;
+    return LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [
+        pLight.withValues(alpha: 0.85),
+        const Color(0xFFFFB74D).withValues(alpha: 0.55),
+        p.withValues(alpha: 0.75),
+      ],
+      stops: const [0.0, 0.45, 1.0],
+    );
+  }
+
+  Widget _buildPropertyFeaturedChip({required bool stripLayout}) {
+    final compact = !stripLayout;
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 6 : 9,
+        vertical: compact ? 3 : 5,
+      ),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(compact ? 10 : 14),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFFFFE082),
+            Color(0xFFFFA000),
+          ],
+        ),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.55),
+          width: 0.85,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFFFA000).withValues(alpha: 0.38),
+            blurRadius: compact ? 6 : 10,
+            offset: Offset(0, compact ? 2 : 3),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.star_rounded,
+            size: compact ? 12 : 14,
+            color: const Color(0xFF4E342E),
+          ),
+          if (!compact) ...[
+            const SizedBox(width: 4),
+            Text(
+              'Em destaque',
+              style: TextStyle(
+                color: const Color(0xFF3E2723),
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+                height: 1,
+                letterSpacing: -0.15,
+              ),
+            ),
+          ] else
+            Padding(
+              padding: const EdgeInsets.only(left: 1),
+              child: Text(
+                'Destaque',
+                style: TextStyle(
+                  color: const Color(0xFF3E2723),
+                  fontSize: 8.5,
+                  fontWeight: FontWeight.w900,
+                  height: 1,
+                  letterSpacing: -0.1,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   /// Célula da grade: foto cheia + overlay (explorar, não lista linear).
+  /// [featuredStripLayout] ativa moldura luminosa + overlay na faixa de destaques.
   Widget _buildPropertyExploreTile(
     BuildContext context,
     ThemeData theme,
-    Property property,
-  ) {
+    Property property, {
+    bool featuredStripLayout = false,
+  }) {
     final isDark = theme.brightness == Brightness.dark;
     final price = _formatMainPrice(property);
     final specs = _editorialSpecsLine(property);
     final locCompact = _compactLocationLine(property);
     final statusColor = _getStatusColor(property.status);
+    const innerRadius = 20.0;
+    final ringPad = featuredStripLayout ? 1.5 : 0.0;
+    final outerRadius = innerRadius + ringPad;
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.42 : 0.08),
-            blurRadius: isDark ? 18 : 12,
-            offset: const Offset(0, 8),
-            spreadRadius: -3,
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: () =>
-                Navigator.of(context).pushNamed(AppRoutes.propertyDetails(property.id)),
-            child: Ink(
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: ThemeHelpers.borderColor(context)
-                      .withValues(alpha: isDark ? 0.38 : 0.22),
-                ),
+    final inner = ClipRRect(
+      borderRadius: BorderRadius.circular(innerRadius),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () =>
+              Navigator.of(context).pushNamed(AppRoutes.propertyDetails(property.id)),
+          splashColor: AppColors.primary.primary.withValues(alpha: 0.18),
+          highlightColor: Colors.white.withValues(alpha: 0.06),
+          child: Ink(
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: featuredStripLayout
+                    ? Colors.white.withValues(alpha: isDark ? 0.12 : 0.2)
+                    : ThemeHelpers.borderColor(context)
+                        .withValues(alpha: isDark ? 0.42 : 0.26),
+                width: featuredStripLayout ? 0.85 : 1,
               ),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if (property.mainImage != null)
-                    ShimmerImage(
-                      imageUrl: property.mainImage!.url,
-                      width: double.infinity,
-                      height: double.infinity,
-                      fit: BoxFit.cover,
-                      errorWidget: _buildPropertyImageFallback(context, theme),
-                    )
-                  else
-                    _buildPropertyImageFallback(context, theme),
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        stops: const [0.0, 0.32, 1.0],
-                        colors: [
-                          Colors.black.withValues(alpha: 0.52),
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.9),
-                        ],
+            ),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (property.mainImage != null)
+                  ShimmerImage(
+                    imageUrl: property.mainImage!.url,
+                    width: double.infinity,
+                    height: double.infinity,
+                    fit: BoxFit.cover,
+                    errorWidget: _buildPropertyImageFallback(context, theme),
+                  )
+                else
+                  _buildPropertyImageFallback(context, theme),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      stops: featuredStripLayout
+                          ? const [0.0, 0.28, 0.72, 1.0]
+                          : const [0.0, 0.32, 1.0],
+                      colors: featuredStripLayout
+                          ? [
+                              Colors.black.withValues(alpha: 0.5),
+                              Colors.transparent,
+                              Colors.black.withValues(alpha: 0.35),
+                              Colors.black.withValues(alpha: 0.92),
+                            ]
+                          : [
+                              Colors.black.withValues(alpha: 0.52),
+                              Colors.transparent,
+                              Colors.black.withValues(alpha: 0.9),
+                            ],
+                    ),
+                  ),
+                ),
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: RadialGradient(
+                          center: const Alignment(-0.75, -0.9),
+                          radius: 1.15,
+                          colors: [
+                            Colors.white.withValues(
+                              alpha: featuredStripLayout ? 0.09 : 0.05,
+                            ),
+                            Colors.transparent,
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                  Positioned(
-                    top: 7,
-                    left: 7,
-                    right: 7,
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Flexible(
-                                child: Container(
-                                  constraints: const BoxConstraints(maxHeight: 34),
-                                  padding: const EdgeInsets.fromLTRB(6, 4, 8, 4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black.withValues(alpha: 0.36),
-                                    borderRadius: BorderRadius.circular(11),
-                                    border: Border.all(
-                                      color: Colors.white.withValues(alpha: 0.14),
+                ),
+                Positioned(
+                  top: 7,
+                  left: 7,
+                  right: 50,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Flexible(
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: Container(
+                                constraints: const BoxConstraints(maxHeight: 34),
+                                padding: const EdgeInsets.fromLTRB(7, 4, 8, 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.34),
+                                  borderRadius: BorderRadius.circular(11),
+                                  border: Border.all(
+                                    color: Colors.white.withValues(
+                                      alpha: featuredStripLayout ? 0.2 : 0.14,
                                     ),
                                   ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.circle, size: 6, color: statusColor),
-                                      const SizedBox(width: 5),
-                                      Flexible(
-                                        child: Text(
-                                          property.status.label,
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 9.5,
-                                            fontWeight: FontWeight.w800,
-                                            height: 1.05,
+                                  boxShadow: featuredStripLayout
+                                      ? [
+                                          BoxShadow(
+                                            color: Colors.black.withValues(alpha: 0.25),
+                                            blurRadius: 8,
+                                            offset: const Offset(0, 3),
                                           ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
+                                        ]
+                                      : null,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.circle, size: 6, color: statusColor),
+                                    const SizedBox(width: 5),
+                                    Flexible(
+                                      child: Text(
+                                        property.status.label,
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: featuredStripLayout ? 10 : 9.5,
+                                          fontWeight: FontWeight.w800,
+                                          height: 1.05,
+                                          letterSpacing:
+                                              featuredStripLayout ? -0.05 : 0,
                                         ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
                                       ),
-                                    ],
-                                  ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              if (property.isFeatured) ...[
-                                const SizedBox(width: 5),
-                                Container(
-                                  padding: const EdgeInsets.all(5),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black.withValues(alpha: 0.36),
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: Colors.white.withValues(alpha: 0.14),
+                            ),
+                            if (property.isFeatured) ...[
+                              const SizedBox(width: 5),
+                              if (featuredStripLayout)
+                                _buildPropertyFeaturedChip(stripLayout: true)
+                              else
+                                Flexible(
+                                  child: FittedBox(
+                                    alignment: Alignment.centerLeft,
+                                    fit: BoxFit.scaleDown,
+                                    child: _buildPropertyFeaturedChip(
+                                      stripLayout: false,
                                     ),
                                   ),
-                                  child: Icon(
-                                    Icons.star_rounded,
-                                    size: 13,
-                                    color: AppColors.status.warning,
-                                  ),
                                 ),
-                              ],
                             ],
-                          ),
+                          ],
                         ),
-                        Transform.scale(
-                          scale: 0.86,
-                          alignment: Alignment.topRight,
-                          child: _buildPropertyActionsMenu(context, theme, property),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                  Positioned(
-                    left: 8,
-                    right: 8,
-                    bottom: 9,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          price.value,
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w900,
-                            height: 1.05,
-                            letterSpacing: -0.35,
-                            fontSize: 13.5,
+                ),
+                Positioned(
+                  top: 6,
+                  right: 6,
+                  child: _buildPropertyActionsMenu(context, theme, property),
+                ),
+                Positioned(
+                  left: 8,
+                  right: 8,
+                  bottom: 9,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        price.value,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w900,
+                          height: 1.05,
+                          letterSpacing: -0.35,
+                          fontSize: featuredStripLayout ? 14.25 : 13.5,
+                          shadows: const [
+                            Shadow(
+                              offset: Offset(0, 1),
+                              blurRadius: 10,
+                              color: Colors.black87,
+                            ),
+                            Shadow(
+                              offset: Offset(0, 2),
+                              blurRadius: 18,
+                              color: Colors.black54,
+                            ),
+                          ],
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      MatchesBadge(
+                        propertyId: property.id,
+                        onClick: () => Navigator.pushNamed(
+                          context,
+                          AppRoutes.matchesByProperty(property.id),
+                        ),
+                        child: Text(
+                          property.title,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: Colors.white.withValues(alpha: 0.97),
+                            fontWeight: FontWeight.w800,
+                            height: 1.2,
+                            fontSize: featuredStripLayout ? 11.75 : 11.25,
                             shadows: const [
                               Shadow(
                                 offset: Offset(0, 1),
@@ -3208,67 +3481,65 @@ class _PropertiesPageState extends State<PropertiesPage> {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        const SizedBox(height: 4),
-                        MatchesBadge(
-                          propertyId: property.id,
-                          onClick: () => Navigator.pushNamed(
-                            context,
-                            AppRoutes.matchesByProperty(property.id),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        locCompact,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: Colors.white.withValues(
+                            alpha: featuredStripLayout ? 0.76 : 0.72,
                           ),
-                          child: Text(
-                            property.title,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: Colors.white.withValues(alpha: 0.96),
-                              fontWeight: FontWeight.w800,
-                              height: 1.2,
-                              fontSize: 11.25,
-                              shadows: const [
-                                Shadow(
-                                  offset: Offset(0, 1),
-                                  blurRadius: 6,
-                                  color: Colors.black45,
-                                ),
-                              ],
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                          fontWeight: FontWeight.w600,
+                          fontSize: featuredStripLayout ? 9.25 : 9,
                         ),
-                        const SizedBox(height: 2),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (specs != null) ...[
+                        const SizedBox(height: 3),
                         Text(
-                          locCompact,
+                          specs,
                           style: theme.textTheme.labelSmall?.copyWith(
-                            color: Colors.white.withValues(alpha: 0.72),
-                            fontWeight: FontWeight.w600,
-                            fontSize: 9,
+                            color: Colors.white.withValues(
+                              alpha: featuredStripLayout ? 0.66 : 0.62,
+                            ),
+                            fontWeight: FontWeight.w700,
+                            fontSize: featuredStripLayout ? 8.75 : 8.5,
+                            height: 1.05,
+                            fontFeatures: const [FontFeature.tabularFigures()],
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        if (specs != null) ...[
-                          const SizedBox(height: 3),
-                          Text(
-                            specs,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: Colors.white.withValues(alpha: 0.62),
-                              fontWeight: FontWeight.w700,
-                              fontSize: 8.5,
-                              height: 1.05,
-                              fontFeatures: const [FontFeature.tabularFigures()],
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
                       ],
-                    ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ),
       ),
+    );
+
+    if (featuredStripLayout) {
+      return Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(outerRadius),
+          boxShadow: _exploreTileBoxShadows(isDark, true),
+          gradient: _exploreTileFeaturedRingGradient(isDark),
+        ),
+        padding: EdgeInsets.all(ringPad),
+        child: inner,
+      );
+    }
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(innerRadius),
+        boxShadow: _exploreTileBoxShadows(isDark, false),
+      ),
+      child: inner,
     );
   }
 
@@ -3315,7 +3586,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
     Property property,
   ) {
     final brightness = theme.brightness;
-    final pm = AppTheme.styledPopupMenu(brightness);
+    final pm = AppTheme.propertyTileActionsPopupMenu(brightness);
     final base = Theme.of(context);
 
     return Container(
@@ -3331,14 +3602,22 @@ class _PropertiesPageState extends State<PropertiesPage> {
           popupMenuTheme: pm,
           splashColor: AppColors.primary.primary.withValues(alpha: 0.10),
           highlightColor: AppColors.primary.primary.withValues(alpha: 0.05),
+          hoverColor: AppColors.primary.primary.withValues(alpha: 0.06),
         ),
         child: PopupMenuButton<String>(
           clipBehavior: Clip.antiAlias,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 42, minHeight: 42),
           color: pm.color,
           surfaceTintColor: pm.surfaceTintColor,
           elevation: pm.elevation ?? 20,
           shadowColor: pm.shadowColor,
           shape: pm.shape,
+          offset: const Offset(-6, 6),
+          popUpAnimationStyle: AnimationStyle(
+            duration: const Duration(milliseconds: 220),
+            reverseDuration: const Duration(milliseconds: 180),
+          ),
           icon: const Icon(Icons.more_vert_rounded, color: Colors.white, size: 20),
           tooltip: 'Ações do imóvel',
           onSelected: (value) async {
@@ -3349,53 +3628,54 @@ class _PropertiesPageState extends State<PropertiesPage> {
             }
           },
           itemBuilder: (menuCtx) {
-            final pmt = Theme.of(menuCtx).popupMenuTheme;
-            final editStyle =
-                (pmt.textStyle ?? theme.textTheme.bodyMedium)?.copyWith(
-              color: ThemeHelpers.textColor(menuCtx),
-              fontWeight: FontWeight.w600,
-            );
-            final deleteStyle =
-                (pmt.textStyle ?? theme.textTheme.bodyMedium)?.copyWith(
-              color: Colors.red,
-              fontWeight: FontWeight.w600,
-            );
-            final iconMuted =
-                pmt.iconColor ?? ThemeHelpers.textSecondaryColor(menuCtx);
+            final dark = Theme.of(menuCtx).brightness == Brightness.dark;
+            final primary =
+                dark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+            final editBg =
+                primary.withValues(alpha: dark ? 0.16 : 0.11);
+            final err = Theme.of(menuCtx).colorScheme.error;
+
+            // Largura mínima para títulos e subtítulos legíveis no overlay.
+            const panelW = 304.0;
+
             return [
-              PopupMenuItem(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              PopupMenuItem<String>(
                 value: 'edit',
-                child: Text.rich(
-                  TextSpan(
-                    children: [
-                      WidgetSpan(
-                        alignment: PlaceholderAlignment.middle,
-                        child: Icon(
-                          Icons.edit_outlined,
-                          size: 20,
-                          color: iconMuted,
-                        ),
-                      ),
-                      const WidgetSpan(child: SizedBox(width: 12)),
-                      TextSpan(text: 'Editar', style: editStyle),
-                    ],
+                padding: EdgeInsets.zero,
+                height: 86,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(13, 9, 7, 9),
+                  child: SizedBox(
+                    width: panelW,
+                    child: _PropertyActionMenuRow(
+                      icon: Icons.edit_rounded,
+                      iconBackground: editBg,
+                      iconColor: primary,
+                      title: 'Editar imóvel',
+                      subtitle:
+                          'Dados cadastrais, valores, disponibilidade e mídia do anúncio',
+                    ),
                   ),
                 ),
               ),
-              PopupMenuItem(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              const PopupMenuDivider(height: 1, indent: 18, endIndent: 18, thickness: 0.5),
+              PopupMenuItem<String>(
                 value: 'delete',
-                child: Text.rich(
-                  TextSpan(
-                    children: [
-                      const WidgetSpan(
-                        alignment: PlaceholderAlignment.middle,
-                        child: Icon(Icons.delete_outline_rounded, size: 20, color: Colors.red),
-                      ),
-                      const WidgetSpan(child: SizedBox(width: 12)),
-                      TextSpan(text: 'Excluir', style: deleteStyle),
-                    ],
+                padding: EdgeInsets.zero,
+                height: 92,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(13, 10, 7, 11),
+                  child: SizedBox(
+                    width: panelW,
+                    child: _PropertyActionMenuRow(
+                      icon: Icons.delete_outline_rounded,
+                      iconBackground: err.withValues(alpha: dark ? 0.16 : 0.1),
+                      iconColor: err,
+                      title: 'Excluir permanentemente',
+                      subtitle:
+                          'Remove o imóvel do portfólio. Confira o nome na confirmação antes de aceitar.',
+                      isDestructive: true,
+                    ),
                   ),
                 ),
               ),

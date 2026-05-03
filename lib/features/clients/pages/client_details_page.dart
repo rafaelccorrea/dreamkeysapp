@@ -1,19 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../../../core/theme/app_colors.dart';
-import '../../../core/theme/theme_helpers.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 import '../../../core/routes/app_routes.dart';
+import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/shell_visual_tokens.dart';
+import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/utils/masks.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
-import '../../../shared/widgets/custom_button.dart';
-import '../services/client_service.dart';
-import '../models/client_model.dart';
-import '../widgets/transfer_client_modal.dart';
-import '../widgets/client_interactions_panel.dart';
-import '../../../shared/utils/masks.dart';
 import '../../matches/widgets/matches_badge.dart';
+import '../models/client_model.dart';
+import '../services/client_service.dart';
+import '../widgets/client_interactions_panel.dart';
+import '../widgets/transfer_client_modal.dart';
 
-/// Página de detalhes do cliente
+/// Página de detalhes do cliente — painel elevado + ações rápidas.
 class ClientDetailsPage extends StatefulWidget {
   final String clientId;
 
@@ -29,10 +31,19 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
   bool _isLoading = true;
   String? _errorMessage;
 
+  static final NumberFormat _currency =
+      NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$', decimalDigits: 2);
+
   @override
   void initState() {
     super.initState();
     _loadClient();
+  }
+
+  Color _accentColor(BuildContext context) {
+    return Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFFFF4D67)
+        : AppColors.primary.primary;
   }
 
   Future<void> _loadClient() async {
@@ -43,328 +54,960 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
 
     try {
       final response = await _clientService.getClientById(widget.clientId);
+      if (!mounted) return;
 
-      if (mounted) {
-        if (response.success && response.data != null) {
-          setState(() {
-            _client = response.data;
-            _isLoading = false;
-          });
-        } else {
-          setState(() {
-            _errorMessage = response.message ?? 'Erro ao carregar cliente';
-            _isLoading = false;
-          });
-        }
-      }
-    } catch (e) {
-      if (mounted) {
+      if (response.success && response.data != null) {
         setState(() {
-          _errorMessage = 'Erro ao conectar com o servidor';
+          _client = response.data;
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _errorMessage = response.message ?? 'Erro ao carregar cliente';
           _isLoading = false;
         });
       }
-    }
-  }
-
-  Future<void> _showTransferModal() async {
-    if (_client == null || !mounted) return;
-
-    final result = await showDialog(
-      context: context,
-      builder: (context) => TransferClientModal(
-        clientId: _client!.id,
-        clientName: _client!.name,
-        currentResponsibleUserId: _client!.responsibleUserId,
-        currentResponsibleName: _client!.responsibleUser?.name,
-      ),
-    );
-
-    if (result == true) {
-      _loadClient();
-    }
-  }
-
-  Future<void> _deleteClient() async {
-    final confirmed = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      barrierColor: Colors.black54,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      clipBehavior: Clip.antiAlias,
-      builder: (context) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom,
-        ),
-        child: Container(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.warning_amber_rounded,
-                size: 48,
-                color: AppColors.status.error,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Confirmar Exclusão',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Tem certeza que deseja excluir este cliente?',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(context, false),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      child: const Text('Cancelar'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () => Navigator.pop(context, true),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        backgroundColor: AppColors.status.error,
-                        foregroundColor: Colors.white,
-                      ),
-                      child: const Text('Excluir'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    if (confirmed == true && _client != null) {
-      final response = await _clientService.deleteClient(_client!.id);
-
-      if (mounted) {
-        if (response.success) {
-          Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Cliente excluído com sucesso!'),
-              backgroundColor: AppColors.status.success,
-            ),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(response.message ?? 'Erro ao excluir cliente'),
-              backgroundColor: AppColors.status.error,
-            ),
-          );
-        }
-      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = 'Erro ao conectar com o servidor';
+        _isLoading = false;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return AppScaffold(
       title: 'Detalhes do Cliente',
-      actions: [
-        if (_client != null)
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
-            onSelected: (value) {
-              switch (value) {
-                case 'edit':
-                  Navigator.pushNamed(
-                    context,
-                    AppRoutes.clientEdit(_client!.id),
-                  );
-                  break;
-                case 'transfer':
-                  _showTransferModal();
-                  break;
-                case 'delete':
-                  _deleteClient();
-                  break;
-              }
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'edit',
-                child: Row(
-                  children: [
-                    Icon(Icons.edit, size: 20),
-                    SizedBox(width: 8),
-                    Text('Editar'),
+      actions: _client == null
+          ? null
+          : [
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert),
+                onSelected: (value) async {
+                  switch (value) {
+                    case 'edit':
+                      await Navigator.pushNamed(
+                        context,
+                        AppRoutes.clientEdit(_client!.id),
+                      );
+                      _loadClient();
+                      break;
+                    case 'matches':
+                      Navigator.pushNamed(
+                        context,
+                        AppRoutes.matchesByClient(_client!.id),
+                      );
+                      break;
+                    case 'transfer':
+                      _showTransferModal();
+                      break;
+                    case 'delete':
+                      _deleteClient();
+                      break;
+                  }
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(
+                    value: 'edit',
+                    child: Row(children: [
+                      Icon(Icons.edit_outlined, size: 18),
+                      SizedBox(width: 10),
+                      Text('Editar'),
+                    ]),
+                  ),
+                  PopupMenuItem(
+                    value: 'matches',
+                    child: Row(children: [
+                      Icon(Icons.handshake_outlined, size: 18),
+                      SizedBox(width: 10),
+                      Text('Ver matches'),
+                    ]),
+                  ),
+                  PopupMenuItem(
+                    value: 'transfer',
+                    child: Row(children: [
+                      Icon(Icons.swap_horiz_rounded, size: 18),
+                      SizedBox(width: 10),
+                      Text('Transferir'),
+                    ]),
+                  ),
+                  PopupMenuDivider(),
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Row(children: [
+                      Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                      SizedBox(width: 10),
+                      Text('Excluir', style: TextStyle(color: Colors.red)),
+                    ]),
+                  ),
+                ],
+              ),
+            ],
+      body: _isLoading
+          ? _buildSkeleton(context)
+          : _errorMessage != null && _client == null
+              ? _buildErrorState(context)
+              : _client == null
+                  ? _buildErrorState(context)
+                  : RefreshIndicator(
+                      onRefresh: _loadClient,
+                      child: SingleChildScrollView(
+                        physics: const BouncingScrollPhysics(
+                          parent: AlwaysScrollableScrollPhysics(),
+                        ),
+                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildHero(context),
+                            const SizedBox(height: 14),
+                            _buildContactActions(context),
+                            const SizedBox(height: 14),
+                            _buildBasicInfoCard(context),
+                            const SizedBox(height: 14),
+                            _buildAddressCard(context),
+                            if (_hasProfessionalInfo()) ...[
+                              const SizedBox(height: 14),
+                              _buildProfessionalCard(context),
+                            ],
+                            if (_hasFinancialInfo()) ...[
+                              const SizedBox(height: 14),
+                              _buildFinancialCard(context),
+                            ],
+                            if (_hasPreferences()) ...[
+                              const SizedBox(height: 14),
+                              _buildPreferencesCard(context),
+                            ],
+                            if (_client!.spouse != null) ...[
+                              const SizedBox(height: 14),
+                              _buildSpouseCard(context),
+                            ],
+                            if ((_client!.notes ?? '').trim().isNotEmpty) ...[
+                              const SizedBox(height: 14),
+                              _buildNotesCard(context),
+                            ],
+                            const SizedBox(height: 14),
+                            ClientInteractionsPanel(clientId: _client!.id),
+                          ],
+                        ),
+                      ),
+                    ),
+    );
+  }
+
+  // ───────────────────── Hero ─────────────────────
+
+  Widget _buildHero(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final typeColor = _typeColor(_client!.type);
+    final statusColor = _statusColor(_client!.status);
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 22, 20, 20),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: isDark
+              ? [
+                  typeColor.withValues(alpha: 0.18),
+                  typeColor.withValues(alpha: 0.06),
+                ]
+              : [
+                  Colors.white,
+                  typeColor.withValues(alpha: 0.10),
+                ],
+        ),
+        border: Border.all(color: typeColor.withValues(alpha: 0.30)),
+        boxShadow: [
+          BoxShadow(
+            color: typeColor.withValues(alpha: isDark ? 0.18 : 0.10),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+            spreadRadius: -4,
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Stack(
+            children: [
+              Container(
+                width: 96,
+                height: 96,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    colors: [
+                      typeColor.withValues(alpha: 0.95),
+                      typeColor.withValues(alpha: 0.65),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: typeColor.withValues(alpha: 0.40),
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
+                    ),
                   ],
                 ),
-              ),
-              const PopupMenuItem(
-                value: 'transfer',
-                child: Row(
-                  children: [
-                    Icon(Icons.swap_horiz, size: 20),
-                    SizedBox(width: 8),
-                    Text('Transferir'),
-                  ],
+                alignment: Alignment.center,
+                child: Text(
+                  _initials(_client!.name),
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -1.0,
+                  ),
                 ),
               ),
-              const PopupMenuDivider(),
-              const PopupMenuItem(
-                value: 'delete',
-                child: Row(
-                  children: [
-                    Icon(Icons.delete_outline, size: 20, color: Colors.red),
-                    SizedBox(width: 8),
-                    Text('Excluir', style: TextStyle(color: Colors.red)),
-                  ],
+              Positioned(
+                bottom: 0,
+                right: 0,
+                child: Container(
+                  width: 26,
+                  height: 26,
+                  decoration: BoxDecoration(
+                    color: _client!.isActive
+                        ? AppColors.status.success
+                        : AppColors.status.error,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: ThemeHelpers.cardBackgroundColor(context),
+                      width: 3,
+                    ),
+                  ),
+                  child: Icon(
+                    _client!.isActive
+                        ? Icons.check_rounded
+                        : Icons.close_rounded,
+                    size: 14,
+                    color: Colors.white,
+                  ),
                 ),
               ),
             ],
           ),
-      ],
-      body: _isLoading
-          ? _buildSkeleton(context, theme)
-          : _errorMessage != null && _client == null
-          ? _buildErrorState(context, theme)
-          : _client == null
-          ? _buildErrorState(context, theme)
-          : RefreshIndicator(
-              onRefresh: _loadClient,
-              child: SingleChildScrollView(
-                padding: EdgeInsets.all(
-                  MediaQuery.of(context).size.width < 400 ? 16 : 20,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Header
-                    _buildHeader(context, theme),
-                    SizedBox(
-                      height: MediaQuery.of(context).size.width < 400 ? 16 : 24,
-                    ),
-                    // Informações Básicas
-                    _buildBasicInfo(context, theme),
-                    SizedBox(
-                      height: MediaQuery.of(context).size.width < 400 ? 16 : 24,
-                    ),
-                    // Endereço
-                    _buildAddressInfo(context, theme),
-                    SizedBox(
-                      height: MediaQuery.of(context).size.width < 400 ? 16 : 24,
-                    ),
-                    // Informações Profissionais
-                    if (_client!.employmentStatus != null ||
-                        _client!.companyName != null)
-                      _buildProfessionalInfo(context, theme),
-                    if (_client!.employmentStatus != null ||
-                        _client!.companyName != null)
-                      const SizedBox(height: 24),
-                    // Informações Financeiras
-                    if (_client!.monthlyIncome != null ||
-                        _client!.creditScore != null)
-                      _buildFinancialInfo(context, theme),
-                    if (_client!.monthlyIncome != null ||
-                        _client!.creditScore != null)
-                      const SizedBox(height: 24),
-                    // Preferências Imobiliárias
-                    if (_client!.preferredPropertyType != null ||
-                        _client!.minValue != null)
-                      _buildPreferencesInfo(context, theme),
-                    if (_client!.preferredPropertyType != null ||
-                        _client!.minValue != null)
-                      const SizedBox(height: 24),
-                    // Cônjuge
-                    if (_client!.spouse != null)
-                      _buildSpouseInfo(context, theme),
-                    if (_client!.spouse != null) const SizedBox(height: 24),
-                    // Observações
-                    if (_client!.notes != null && _client!.notes!.isNotEmpty)
-                      _buildNotesInfo(context, theme),
-                    if (_client!.notes != null && _client!.notes!.isNotEmpty)
-                      const SizedBox(height: 24),
-                    // Interações
-                    ClientInteractionsPanel(clientId: _client!.id),
-                  ],
-                ),
+          const SizedBox(height: 14),
+          MatchesBadge(
+            clientId: _client!.id,
+            onClick: () => Navigator.pushNamed(
+              context,
+              AppRoutes.matchesByClient(_client!.id),
+            ),
+            child: Text(
+              _client!.name,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.4,
+                color: ThemeHelpers.textColor(context),
               ),
             ),
-    );
-  }
-
-  Widget _buildSkeleton(BuildContext context, ThemeData theme) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Center(
-            child: Column(
-              children: [
-                SkeletonBox(width: 120, height: 120, borderRadius: 60),
-                const SizedBox(height: 20),
-                SkeletonBox(width: 200, height: 24, borderRadius: 8),
-                const SizedBox(height: 8),
-                SkeletonBox(width: 150, height: 16, borderRadius: 8),
-              ],
-            ),
           ),
-          const SizedBox(height: 32),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          const SizedBox(height: 8),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              _heroBadge(
+                context,
+                _client!.type.label,
+                typeColor,
+                icon: _iconForType(_client!.type),
+              ),
+              _heroBadge(context, _client!.status.label, statusColor),
+              if (_client!.leadSource != null)
+                _heroBadge(
+                  context,
+                  _client!.leadSource!.label,
+                  Colors.indigo,
+                  icon: Icons.share_rounded,
+                ),
+              if (_client!.mcmvInterested == true)
+                _heroBadge(
+                  context,
+                  'MCMV',
+                  Colors.deepOrange,
+                  icon: Icons.home_work_rounded,
+                ),
+            ],
+          ),
+          if (_client!.responsibleUser != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: ThemeHelpers.borderColor(context).withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: ThemeHelpers.borderLightColor(context),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  SkeletonBox(width: 180, height: 20, borderRadius: 8),
-                  const SizedBox(height: 16),
-                  ...List.generate(
-                    4,
-                    (index) => Padding(
-                      padding: EdgeInsets.only(bottom: index < 3 ? 16 : 0),
-                      child: Row(
-                        children: [
-                          SkeletonBox(width: 40, height: 40, borderRadius: 10),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                SkeletonBox(
-                                  width: 80,
-                                  height: 14,
-                                  borderRadius: 4,
-                                ),
-                                const SizedBox(height: 4),
-                                SkeletonBox(
-                                  width: 120,
-                                  height: 16,
-                                  borderRadius: 4,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
+                  Icon(
+                    Icons.assignment_ind_outlined,
+                    size: 14,
+                    color: ThemeHelpers.textSecondaryColor(context),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Responsável: ${_client!.responsibleUser!.name}',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: ThemeHelpers.textColor(context),
                     ),
                   ),
                 ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _heroBadge(
+    BuildContext context,
+    String label,
+    Color color, {
+    IconData? icon,
+  }) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.34)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 13, color: color),
+            const SizedBox(width: 5),
+          ],
+          Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w800,
+              fontSize: 11,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ───────────────────── Contact Actions ─────────────────────
+
+  Widget _buildContactActions(BuildContext context) {
+    final accent = _accentColor(context);
+    final whatsapp = (_client!.whatsapp ?? '').trim();
+    final phone = _client!.phone.trim();
+    final email = _client!.email.trim();
+
+    final actions = <Widget>[];
+    if (whatsapp.isNotEmpty) {
+      actions.add(_quickAction(
+        context,
+        icon: Icons.chat_outlined,
+        label: 'WhatsApp',
+        color: const Color(0xFF25D366),
+        onTap: () => _launchUri('https://wa.me/${_onlyDigits(whatsapp)}'),
+      ));
+    }
+    if (phone.isNotEmpty) {
+      actions.add(_quickAction(
+        context,
+        icon: Icons.call_rounded,
+        label: 'Ligar',
+        color: const Color(0xFF3B82F6),
+        onTap: () => _launchUri('tel:${_onlyDigits(phone)}'),
+      ));
+    }
+    if (email.isNotEmpty) {
+      actions.add(_quickAction(
+        context,
+        icon: Icons.alternate_email_rounded,
+        label: 'Email',
+        color: const Color(0xFFF59E0B),
+        onTap: () => _launchUri('mailto:$email'),
+      ));
+    }
+    actions.add(_quickAction(
+      context,
+      icon: Icons.edit_outlined,
+      label: 'Editar',
+      color: accent,
+      onTap: () async {
+        await Navigator.pushNamed(
+          context,
+          AppRoutes.clientEdit(_client!.id),
+        );
+        _loadClient();
+      },
+    ));
+
+    if (actions.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+      decoration: ShellVisualTokens.elevatedPanelDecoration(
+        context,
+        accent,
+        style: ShellElevatedPanelStyle.profile,
+      ),
+      child: Row(
+        children: [
+          for (var i = 0; i < actions.length; i++) ...[
+            if (i > 0)
+              Container(
+                width: 1,
+                height: 36,
+                color: ThemeHelpers.borderLightColor(context)
+                    .withValues(alpha: 0.6),
+              ),
+            Expanded(child: actions[i]),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _quickAction(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(13),
+                border: Border.all(color: color.withValues(alpha: 0.28)),
+              ),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: ThemeHelpers.textColor(context),
+                letterSpacing: -0.1,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ───────────────────── Info Cards ─────────────────────
+
+  Widget _buildBasicInfoCard(BuildContext context) {
+    final c = _client!;
+    return _section(
+      context,
+      icon: Icons.badge_outlined,
+      title: 'Informações básicas',
+      items: [
+        if (c.email.isNotEmpty)
+          _infoEntry(Icons.alternate_email_rounded, 'Email', c.email),
+        if (c.phone.isNotEmpty)
+          _infoEntry(Icons.phone_outlined, 'Telefone', Masks.phone(c.phone)),
+        if ((c.secondaryPhone ?? '').isNotEmpty)
+          _infoEntry(
+            Icons.phone_outlined,
+            'Telefone secundário',
+            Masks.phone(c.secondaryPhone!),
+          ),
+        if ((c.whatsapp ?? '').isNotEmpty)
+          _infoEntry(
+            Icons.chat_outlined,
+            'WhatsApp',
+            Masks.phone(c.whatsapp!),
+          ),
+        if (c.cpf.isNotEmpty)
+          _infoEntry(Icons.fingerprint_rounded, 'CPF', _formatCpf(c.cpf)),
+        if ((c.rg ?? '').isNotEmpty)
+          _infoEntry(Icons.credit_card_outlined, 'RG', c.rg!),
+        if ((c.birthDate ?? '').isNotEmpty)
+          _infoEntry(
+            Icons.cake_outlined,
+            'Nascimento',
+            _formatDate(c.birthDate),
+          ),
+        if (c.maritalStatus != null)
+          _infoEntry(
+            Icons.favorite_outline,
+            'Estado civil',
+            c.maritalStatus!.label,
+          ),
+        if (c.hasDependents == true)
+          _infoEntry(
+            Icons.family_restroom_outlined,
+            'Dependentes',
+            (c.numberOfDependents ?? 0).toString(),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildAddressCard(BuildContext context) {
+    final c = _client!;
+    return _section(
+      context,
+      icon: Icons.location_on_outlined,
+      title: 'Endereço',
+      items: [
+        if (c.address.isNotEmpty)
+          _infoEntry(Icons.location_on_outlined, 'Endereço', c.address),
+        if (c.neighborhood.isNotEmpty)
+          _infoEntry(Icons.place_outlined, 'Bairro', c.neighborhood),
+        if (c.city.isNotEmpty)
+          _infoEntry(
+            Icons.location_city_outlined,
+            'Cidade',
+            c.state.isNotEmpty ? '${c.city} - ${c.state}' : c.city,
+          ),
+        if (c.zipCode.isNotEmpty)
+          _infoEntry(
+            Icons.markunread_mailbox_outlined,
+            'CEP',
+            Masks.cep(c.zipCode),
+          ),
+      ],
+    );
+  }
+
+  bool _hasProfessionalInfo() {
+    final c = _client!;
+    return c.employmentStatus != null ||
+        (c.companyName ?? '').isNotEmpty ||
+        (c.jobPosition ?? '').isNotEmpty ||
+        c.isRetired == true ||
+        (c.contractType ?? '').isNotEmpty;
+  }
+
+  Widget _buildProfessionalCard(BuildContext context) {
+    final c = _client!;
+    return _section(
+      context,
+      icon: Icons.work_outline,
+      title: 'Vida profissional',
+      items: [
+        if (c.employmentStatus != null)
+          _infoEntry(
+            Icons.work_outline,
+            'Situação',
+            c.employmentStatus!.label,
+          ),
+        if ((c.companyName ?? '').isNotEmpty)
+          _infoEntry(Icons.business_outlined, 'Empresa', c.companyName!),
+        if ((c.jobPosition ?? '').isNotEmpty)
+          _infoEntry(Icons.badge_outlined, 'Cargo', c.jobPosition!),
+        if ((c.contractType ?? '').isNotEmpty)
+          _infoEntry(
+            Icons.description_outlined,
+            'Contrato',
+            c.contractType!,
+          ),
+        if (c.isRetired == true)
+          _infoEntry(Icons.work_off_outlined, 'Aposentado', 'Sim'),
+      ],
+    );
+  }
+
+  bool _hasFinancialInfo() {
+    final c = _client!;
+    return c.monthlyIncome != null ||
+        c.familyIncome != null ||
+        c.creditScore != null ||
+        (c.bankName ?? '').isNotEmpty;
+  }
+
+  Widget _buildFinancialCard(BuildContext context) {
+    final c = _client!;
+    return _section(
+      context,
+      icon: Icons.account_balance_wallet_outlined,
+      title: 'Dados financeiros',
+      items: [
+        if (c.monthlyIncome != null)
+          _infoEntry(
+            Icons.attach_money_outlined,
+            'Renda mensal',
+            _currency.format(c.monthlyIncome),
+          ),
+        if (c.familyIncome != null)
+          _infoEntry(
+            Icons.family_restroom_outlined,
+            'Renda familiar',
+            _currency.format(c.familyIncome),
+          ),
+        if (c.creditScore != null)
+          _infoEntry(
+            Icons.credit_score_outlined,
+            'Score de crédito',
+            '${c.creditScore}/1000',
+          ),
+        if ((c.bankName ?? '').isNotEmpty)
+          _infoEntry(
+            Icons.account_balance_outlined,
+            'Banco',
+            c.bankName!,
+          ),
+        if ((c.bankAgency ?? '').isNotEmpty)
+          _infoEntry(
+            Icons.account_balance_outlined,
+            'Agência',
+            c.bankAgency!,
+          ),
+        if (c.hasProperty == true)
+          _infoEntry(Icons.house_outlined, 'Imóvel próprio', 'Sim'),
+        if (c.hasVehicle == true)
+          _infoEntry(
+            Icons.directions_car_outlined,
+            'Veículo',
+            'Sim',
+          ),
+      ],
+    );
+  }
+
+  bool _hasPreferences() {
+    final c = _client!;
+    return (c.preferredPropertyType ?? '').isNotEmpty ||
+        (c.preferredCity ?? '').isNotEmpty ||
+        (c.preferredNeighborhood ?? '').isNotEmpty ||
+        c.minValue != null ||
+        c.maxValue != null ||
+        c.minBedrooms != null ||
+        c.maxBedrooms != null;
+  }
+
+  Widget _buildPreferencesCard(BuildContext context) {
+    final c = _client!;
+    return _section(
+      context,
+      icon: Icons.tune_rounded,
+      title: 'Preferências imobiliárias',
+      items: [
+        if ((c.preferredPropertyType ?? '').isNotEmpty)
+          _infoEntry(
+            Icons.home_outlined,
+            'Tipo preferido',
+            c.preferredPropertyType!,
+          ),
+        if ((c.preferredCity ?? '').isNotEmpty)
+          _infoEntry(
+            Icons.location_city_outlined,
+            'Cidade preferida',
+            c.preferredCity!,
+          ),
+        if ((c.preferredNeighborhood ?? '').isNotEmpty)
+          _infoEntry(
+            Icons.place_outlined,
+            'Bairro preferido',
+            c.preferredNeighborhood!,
+          ),
+        if (c.minValue != null && c.maxValue != null)
+          _infoEntry(
+            Icons.attach_money_outlined,
+            'Faixa de preço',
+            '${_currency.format(c.minValue)} – ${_currency.format(c.maxValue)}',
+          )
+        else if (c.minValue != null)
+          _infoEntry(
+            Icons.attach_money_outlined,
+            'Valor mínimo',
+            _currency.format(c.minValue),
+          )
+        else if (c.maxValue != null)
+          _infoEntry(
+            Icons.attach_money_outlined,
+            'Valor máximo',
+            _currency.format(c.maxValue),
+          ),
+        if (c.minBedrooms != null && c.maxBedrooms != null)
+          _infoEntry(
+            Icons.bed_outlined,
+            'Quartos',
+            '${c.minBedrooms} a ${c.maxBedrooms}',
+          ),
+        if (c.minArea != null && c.maxArea != null)
+          _infoEntry(
+            Icons.square_foot_outlined,
+            'Área',
+            '${c.minArea!.toStringAsFixed(0)} a ${c.maxArea!.toStringAsFixed(0)} m²',
+          ),
+      ],
+    );
+  }
+
+  Widget _buildSpouseCard(BuildContext context) {
+    final spouse = _client!.spouse!;
+    return _section(
+      context,
+      icon: Icons.favorite_outline,
+      title: 'Cônjuge',
+      items: [
+        _infoEntry(Icons.person_outline, 'Nome', spouse.name),
+        if ((spouse.cpf ?? '').isNotEmpty)
+          _infoEntry(
+            Icons.fingerprint_rounded,
+            'CPF',
+            _formatCpf(spouse.cpf!),
+          ),
+        if ((spouse.phone ?? '').isNotEmpty)
+          _infoEntry(
+            Icons.phone_outlined,
+            'Telefone',
+            Masks.phone(spouse.phone!),
+          ),
+        if ((spouse.email ?? '').isNotEmpty)
+          _infoEntry(Icons.alternate_email_rounded, 'Email', spouse.email!),
+      ],
+    );
+  }
+
+  Widget _buildNotesCard(BuildContext context) {
+    final theme = Theme.of(context);
+    final accent = _accentColor(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        color: ThemeHelpers.cardBackgroundColor(context),
+        border: Border.all(
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.42),
+        ),
+        boxShadow: isDark
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 14,
+                  offset: const Offset(0, 4),
+                  spreadRadius: -3,
+                ),
+              ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  color: accent.withValues(alpha: 0.10),
+                  border: Border.all(color: accent.withValues(alpha: 0.22)),
+                ),
+                child: Icon(Icons.sticky_note_2_outlined,
+                    size: 19, color: accent),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Observações',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: ThemeHelpers.textColor(context),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            _client!.notes ?? '',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: ThemeHelpers.textColor(context),
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ───────────────────── Section helper ─────────────────────
+
+  Widget _section(
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    required List<Widget> items,
+  }) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = _accentColor(context);
+
+    final realItems = items.whereType<Widget>().toList();
+    if (realItems.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        color: ThemeHelpers.cardBackgroundColor(context),
+        border: Border.all(
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.42),
+        ),
+        boxShadow: isDark
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 14,
+                  offset: const Offset(0, 4),
+                  spreadRadius: -3,
+                ),
+              ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    color: accent.withValues(alpha: 0.10),
+                    border: Border.all(color: accent.withValues(alpha: 0.22)),
+                  ),
+                  child: Icon(icon, size: 19, color: accent),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: ThemeHelpers.textColor(context),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            ...realItems,
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _infoEntry(IconData icon, String label, String value) {
+    return Builder(builder: (context) {
+      final theme = Theme.of(context);
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: ThemeHelpers.borderColor(context).withValues(alpha: 0.18),
+              ),
+              child: Icon(
+                icon,
+                size: 16,
+                color: ThemeHelpers.textSecondaryColor(context),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: ThemeHelpers.textSecondaryColor(context),
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.2,
+                      fontSize: 11,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    value,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: ThemeHelpers.textColor(context),
+                      fontWeight: FontWeight.w700,
+                      height: 1.25,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    });
+  }
+
+  // ───────────────────── Skeleton / Error ─────────────────────
+
+  Widget _buildSkeleton(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+      child: Column(
+        children: [
+          const SkeletonBox(
+              width: double.infinity, height: 220, borderRadius: 24),
+          const SizedBox(height: 14),
+          const SkeletonBox(
+              width: double.infinity, height: 96, borderRadius: 20),
+          const SizedBox(height: 14),
+          ...List.generate(
+            3,
+            (index) => Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: SkeletonBox(
+                width: double.infinity,
+                height: 200,
+                borderRadius: 20,
               ),
             ),
           ),
@@ -373,22 +1016,36 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
     );
   }
 
-  Widget _buildErrorState(BuildContext context, ThemeData theme) {
+  Widget _buildErrorState(BuildContext context) {
+    final theme = Theme.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.error_outline, size: 64, color: AppColors.status.error),
-            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: AppColors.status.error.withValues(alpha: 0.10),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.cloud_off_outlined,
+                size: 46,
+                color: AppColors.status.error,
+              ),
+            ),
+            const SizedBox(height: 18),
             Text(
-              'Erro ao carregar cliente',
-              style: theme.textTheme.titleLarge?.copyWith(
+              'Não foi possível carregar este cliente',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
                 color: ThemeHelpers.textColor(context),
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
               _errorMessage ?? 'Cliente não encontrado',
               textAlign: TextAlign.center,
@@ -396,11 +1053,24 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
                 color: ThemeHelpers.textSecondaryColor(context),
               ),
             ),
-            const SizedBox(height: 24),
-            CustomButton(
-              text: 'Voltar',
-              icon: Icons.arrow_back,
+            const SizedBox(height: 22),
+            FilledButton.icon(
+              onPressed: _loadClient,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Tentar novamente'),
+              style: FilledButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 22, vertical: 13),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextButton.icon(
               onPressed: () => Navigator.pop(context),
+              icon: const Icon(Icons.arrow_back_rounded),
+              label: const Text('Voltar'),
             ),
           ],
         ),
@@ -408,615 +1078,172 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
     );
   }
 
-  Widget _buildHeader(BuildContext context, ThemeData theme) {
-    final typeColor = _getTypeColor(_client!.type);
-    final isSmallScreen = MediaQuery.of(context).size.width < 400;
+  // ───────────────────── Actions ─────────────────────
 
-    return Container(
-      padding: EdgeInsets.all(isSmallScreen ? 20 : 24),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [typeColor.withOpacity(0.15), typeColor.withOpacity(0.05)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+  Future<void> _showTransferModal() async {
+    if (_client == null) return;
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (_) => Dialog(
+        insetPadding: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
         ),
-        borderRadius: BorderRadius.circular(isSmallScreen ? 16 : 24),
-        border: Border.all(color: typeColor.withOpacity(0.2), width: 1.5),
+        clipBehavior: Clip.antiAlias,
+        child: TransferClientModal(
+          clientId: _client!.id,
+          clientName: _client!.name,
+          currentResponsibleUserId: _client!.responsibleUserId,
+          currentResponsibleName: _client!.responsibleUser?.name,
+        ),
       ),
-      child: Column(
-        children: [
-          // Avatar
-          Container(
-            width: isSmallScreen ? 80 : 100,
-            height: isSmallScreen ? 80 : 100,
-            decoration: BoxDecoration(
-              color: typeColor.withOpacity(0.2),
-              shape: BoxShape.circle,
-            ),
-            child: Center(
-              child: Text(
-                _client!.name.isNotEmpty ? _client!.name[0].toUpperCase() : '?',
-                style: theme.textTheme.headlineMedium?.copyWith(
-                  color: typeColor,
-                  fontWeight: FontWeight.bold,
-                  fontSize: isSmallScreen ? 32 : 40,
-                ),
+    );
+    if (result == true) _loadClient();
+  }
+
+  Future<void> _deleteClient() async {
+    final theme = Theme.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.status.error.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                Icons.warning_amber_rounded,
+                color: AppColors.status.error,
               ),
             ),
+            const SizedBox(width: 12),
+            const Expanded(child: Text('Excluir cliente?')),
+          ],
+        ),
+        content: Text(
+          'Esta ação remove permanentemente o cliente "${_client!.name}". '
+          'Não será possível desfazer.',
+          style: theme.textTheme.bodyMedium,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
           ),
-          SizedBox(height: isSmallScreen ? 12 : 16),
-          // Nome com Badge de Matches
-          MatchesBadge(
-            clientId: _client!.id,
-            onClick: () {
-              Navigator.pushNamed(
-                context,
-                AppRoutes.matchesByClient(_client!.id),
-              );
-            },
-            child: Text(
-              _client!.name,
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: ThemeHelpers.textColor(context),
-                fontSize: isSmallScreen ? 20 : 24,
-              ),
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.status.error,
             ),
-          ),
-          const SizedBox(height: 8),
-          // Badges
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            alignment: WrapAlignment.center,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: typeColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  _client!.type.label,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: typeColor,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: _getStatusColor(_client!.status).withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  _client!.status.label,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: _getStatusColor(_client!.status),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
+            child: const Text('Excluir'),
           ),
         ],
       ),
     );
-  }
 
-  Widget _buildBasicInfo(BuildContext context, ThemeData theme) {
-    return _buildInfoCard(
-      context: context,
-      theme: theme,
-      title: 'Informações Básicas',
-      children: [
-        _buildInfoItem(
-          context: context,
-          theme: theme,
-          icon: Icons.email_outlined,
-          label: 'Email',
-          value: _client!.email,
+    if (confirmed != true || _client == null) return;
+    final response = await _clientService.deleteClient(_client!.id);
+    if (!mounted) return;
+
+    if (response.success) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Cliente excluído com sucesso!'),
+          backgroundColor: AppColors.status.success,
         ),
-        _buildInfoItem(
-          context: context,
-          theme: theme,
-          icon: Icons.phone_outlined,
-          label: 'Telefone',
-          value: _formatPhone(_client!.phone),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(response.message ?? 'Erro ao excluir cliente'),
+          backgroundColor: AppColors.status.error,
         ),
-        if (_client!.secondaryPhone != null)
-          _buildInfoItem(
-            context: context,
-            theme: theme,
-            icon: Icons.phone_outlined,
-            label: 'Telefone Secundário',
-            value: _formatPhone(_client!.secondaryPhone!),
-          ),
-        if (_client!.whatsapp != null)
-          _buildInfoItem(
-            context: context,
-            theme: theme,
-            icon: Icons.chat_outlined,
-            label: 'WhatsApp',
-            value: _formatPhone(_client!.whatsapp!),
-          ),
-        _buildInfoItem(
-          context: context,
-          theme: theme,
-          icon: Icons.badge_outlined,
-          label: 'CPF',
-          value: _formatCpf(_client!.cpf),
-          showDivider: false,
-        ),
-        if (_client!.birthDate != null)
-          _buildInfoItem(
-            context: context,
-            theme: theme,
-            icon: Icons.cake_outlined,
-            label: 'Data de Nascimento',
-            value: _formatDate(_client!.birthDate),
-          ),
-        if (_client!.maritalStatus != null)
-          _buildInfoItem(
-            context: context,
-            theme: theme,
-            icon: Icons.favorite_outline,
-            label: 'Estado Civil',
-            value: _client!.maritalStatus!.label,
-            showDivider: false,
-          ),
-      ],
-    );
-  }
-
-  Widget _buildAddressInfo(BuildContext context, ThemeData theme) {
-    return _buildInfoCard(
-      context: context,
-      theme: theme,
-      title: 'Endereço',
-      children: [
-        _buildInfoItem(
-          context: context,
-          theme: theme,
-          icon: Icons.location_on_outlined,
-          label: 'Endereço',
-          value: _client!.address,
-        ),
-        _buildInfoItem(
-          context: context,
-          theme: theme,
-          icon: Icons.place_outlined,
-          label: 'Bairro',
-          value: _client!.neighborhood,
-        ),
-        _buildInfoItem(
-          context: context,
-          theme: theme,
-          icon: Icons.location_city_outlined,
-          label: 'Cidade',
-          value: '${_client!.city} - ${_client!.state}',
-        ),
-        _buildInfoItem(
-          context: context,
-          theme: theme,
-          icon: Icons.markunread_mailbox_outlined,
-          label: 'CEP',
-          value: Masks.cep(_client!.zipCode),
-          showDivider: false,
-        ),
-      ],
-    );
-  }
-
-  Widget _buildProfessionalInfo(BuildContext context, ThemeData theme) {
-    return _buildInfoCard(
-      context: context,
-      theme: theme,
-      title: 'Informações Profissionais',
-      children: [
-        if (_client!.employmentStatus != null)
-          _buildInfoItem(
-            context: context,
-            theme: theme,
-            icon: Icons.work_outline,
-            label: 'Situação Profissional',
-            value: _client!.employmentStatus!.label,
-          ),
-        if (_client!.companyName != null)
-          _buildInfoItem(
-            context: context,
-            theme: theme,
-            icon: Icons.business_outlined,
-            label: 'Empresa',
-            value: _client!.companyName!,
-          ),
-        if (_client!.jobPosition != null)
-          _buildInfoItem(
-            context: context,
-            theme: theme,
-            icon: Icons.badge_outlined,
-            label: 'Cargo',
-            value: _client!.jobPosition!,
-          ),
-        if (_client!.isRetired == true)
-          _buildInfoItem(
-            context: context,
-            theme: theme,
-            icon: Icons.work_off_outlined,
-            label: 'Aposentado',
-            value: 'Sim',
-            showDivider: false,
-          ),
-      ],
-    );
-  }
-
-  Widget _buildFinancialInfo(BuildContext context, ThemeData theme) {
-    final currencyFormat = NumberFormat.currency(
-      locale: 'pt_BR',
-      symbol: 'R\$',
-    );
-
-    return _buildInfoCard(
-      context: context,
-      theme: theme,
-      title: 'Informações Financeiras',
-      children: [
-        if (_client!.monthlyIncome != null)
-          _buildInfoItem(
-            context: context,
-            theme: theme,
-            icon: Icons.attach_money_outlined,
-            label: 'Renda Mensal',
-            value: currencyFormat.format(_client!.monthlyIncome!),
-          ),
-        if (_client!.familyIncome != null)
-          _buildInfoItem(
-            context: context,
-            theme: theme,
-            icon: Icons.account_balance_wallet_outlined,
-            label: 'Renda Familiar',
-            value: currencyFormat.format(_client!.familyIncome!),
-          ),
-        if (_client!.creditScore != null)
-          _buildInfoItem(
-            context: context,
-            theme: theme,
-            icon: Icons.credit_score_outlined,
-            label: 'Score de Crédito',
-            value: '${_client!.creditScore}/1000',
-          ),
-        if (_client!.bankName != null)
-          _buildInfoItem(
-            context: context,
-            theme: theme,
-            icon: Icons.account_balance_outlined,
-            label: 'Banco',
-            value: _client!.bankName!,
-            showDivider: false,
-          ),
-      ],
-    );
-  }
-
-  Widget _buildPreferencesInfo(BuildContext context, ThemeData theme) {
-    final currencyFormat = NumberFormat.currency(
-      locale: 'pt_BR',
-      symbol: 'R\$',
-    );
-
-    return _buildInfoCard(
-      context: context,
-      theme: theme,
-      title: 'Preferências Imobiliárias',
-      children: [
-        if (_client!.preferredPropertyType != null)
-          _buildInfoItem(
-            context: context,
-            theme: theme,
-            icon: Icons.home_outlined,
-            label: 'Tipo Preferido',
-            value: _client!.preferredPropertyType!,
-          ),
-        if (_client!.preferredCity != null)
-          _buildInfoItem(
-            context: context,
-            theme: theme,
-            icon: Icons.location_city_outlined,
-            label: 'Cidade Preferida',
-            value: _client!.preferredCity!,
-          ),
-        if (_client!.minValue != null && _client!.maxValue != null)
-          _buildInfoItem(
-            context: context,
-            theme: theme,
-            icon: Icons.attach_money_outlined,
-            label: 'Faixa de Preço',
-            value:
-                '${currencyFormat.format(_client!.minValue!)} - ${currencyFormat.format(_client!.maxValue!)}',
-          ),
-        if (_client!.minBedrooms != null && _client!.maxBedrooms != null)
-          _buildInfoItem(
-            context: context,
-            theme: theme,
-            icon: Icons.bed_outlined,
-            label: 'Quartos',
-            value: '${_client!.minBedrooms} - ${_client!.maxBedrooms}',
-          ),
-        if (_client!.minArea != null && _client!.maxArea != null)
-          _buildInfoItem(
-            context: context,
-            theme: theme,
-            icon: Icons.square_foot_outlined,
-            label: 'Área (m²)',
-            value:
-                '${_client!.minArea!.toStringAsFixed(0)} - ${_client!.maxArea!.toStringAsFixed(0)}',
-            showDivider: false,
-          ),
-      ],
-    );
-  }
-
-  Widget _buildSpouseInfo(BuildContext context, ThemeData theme) {
-    final spouse = _client!.spouse!;
-
-    return _buildInfoCard(
-      context: context,
-      theme: theme,
-      title: 'Cônjuge',
-      children: [
-        _buildInfoItem(
-          context: context,
-          theme: theme,
-          icon: Icons.person_outline,
-          label: 'Nome',
-          value: spouse.name,
-        ),
-        if (spouse.cpf != null)
-          _buildInfoItem(
-            context: context,
-            theme: theme,
-            icon: Icons.badge_outlined,
-            label: 'CPF',
-            value: _formatCpf(spouse.cpf!),
-          ),
-        if (spouse.phone != null)
-          _buildInfoItem(
-            context: context,
-            theme: theme,
-            icon: Icons.phone_outlined,
-            label: 'Telefone',
-            value: _formatPhone(spouse.phone!),
-          ),
-        if (spouse.email != null)
-          _buildInfoItem(
-            context: context,
-            theme: theme,
-            icon: Icons.email_outlined,
-            label: 'Email',
-            value: spouse.email!,
-            showDivider: false,
-          ),
-      ],
-    );
-  }
-
-  Widget _buildNotesInfo(BuildContext context, ThemeData theme) {
-    return _buildInfoCard(
-      context: context,
-      theme: theme,
-      title: 'Observações',
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Text(
-            _client!.notes!,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: ThemeHelpers.textColor(context),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildInfoCard({
-    required BuildContext context,
-    required ThemeData theme,
-    required String title,
-    required List<Widget> children,
-  }) {
-    final isSmallScreen = MediaQuery.of(context).size.width < 400;
-
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(isSmallScreen ? 12 : 16),
-        side: BorderSide(
-          color: ThemeHelpers.borderLightColor(context),
-          width: 1,
-        ),
-      ),
-      color: ThemeHelpers.cardBackgroundColor(context),
-      margin: EdgeInsets.symmetric(
-        horizontal: isSmallScreen ? 0 : 4,
-        vertical: isSmallScreen ? 6 : 8,
-      ),
-      child: Padding(
-        padding: EdgeInsets.all(isSmallScreen ? 16 : 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: ThemeHelpers.textColor(context),
-                      fontSize: isSmallScreen ? 16 : 18,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: isSmallScreen ? 12 : 16),
-            ...children,
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInfoItem({
-    required BuildContext context,
-    required ThemeData theme,
-    required IconData icon,
-    required String label,
-    required String value,
-    bool showDivider = true,
-  }) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isSmallScreen = constraints.maxWidth < 400;
-
-        return Column(
-          children: [
-            Padding(
-              padding: EdgeInsets.only(bottom: isSmallScreen ? 12 : 16),
-              child: isSmallScreen
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(6),
-                              decoration: BoxDecoration(
-                                color: AppColors.primary.primary.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Icon(
-                                icon,
-                                size: 16,
-                                color: AppColors.primary.primary,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                label,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: ThemeHelpers.textSecondaryColor(context),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Padding(
-                          padding: const EdgeInsets.only(left: 38),
-                          child: Text(
-                            value,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: ThemeHelpers.textColor(context),
-                              fontWeight: FontWeight.w500,
-                              fontSize: 15,
-                            ),
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    )
-                  : Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: AppColors.primary.primary.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Icon(
-                            icon,
-                            size: 20,
-                            color: AppColors.primary.primary,
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                label,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: ThemeHelpers.textSecondaryColor(context),
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                value,
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: ThemeHelpers.textColor(context),
-                                  fontWeight: FontWeight.w500,
-                                  fontSize: 16,
-                                ),
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-            ),
-            if (showDivider)
-              Divider(
-                height: 1,
-                thickness: 1,
-                color: ThemeHelpers.borderLightColor(context).withOpacity(0.5),
-              ),
-          ],
-        );
-      },
-    );
-  }
-
-  Color _getTypeColor(ClientType type) {
-    switch (type) {
-      case ClientType.buyer:
-        return AppColors.status.success;
-      case ClientType.seller:
-        return AppColors.status.warning;
-      case ClientType.renter:
-        return AppColors.primary.primary;
-      case ClientType.lessor:
-        return AppColors.status.info;
-      case ClientType.investor:
-        return Colors.purple;
-      case ClientType.general:
-        return ThemeHelpers.textSecondaryColor(context);
+      );
     }
   }
 
-  Color _getStatusColor(ClientStatus status) {
+  Future<void> _launchUri(String uri) async {
+    final parsed = Uri.tryParse(uri);
+    if (parsed == null) return;
+    try {
+      await launchUrl(parsed, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Não foi possível abrir esse link')),
+      );
+    }
+  }
+
+  // ───────────────────── Helpers ─────────────────────
+
+  String _initials(String name) {
+    if (name.trim().isEmpty) return '?';
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
+    return (parts.first.substring(0, 1) + parts.last.substring(0, 1))
+        .toUpperCase();
+  }
+
+  String _formatDate(String? value) {
+    if (value == null || value.isEmpty) return '-';
+    try {
+      return DateFormat('dd/MM/yyyy').format(DateTime.parse(value));
+    } catch (_) {
+      return value;
+    }
+  }
+
+  String _formatCpf(String value) {
+    final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length != 11) return value;
+    return Masks.cpf(digits);
+  }
+
+  String _onlyDigits(String value) => value.replaceAll(RegExp(r'[^0-9]'), '');
+
+  Color _typeColor(ClientType type) {
+    switch (type) {
+      case ClientType.buyer:
+        return const Color(0xFF3B82F6);
+      case ClientType.seller:
+        return const Color(0xFFF59E0B);
+      case ClientType.renter:
+        return const Color(0xFF10B981);
+      case ClientType.lessor:
+        return const Color(0xFF06B6D4);
+      case ClientType.investor:
+        return const Color(0xFF8B5CF6);
+      case ClientType.general:
+        return const Color(0xFF64748B);
+    }
+  }
+
+  IconData _iconForType(ClientType type) {
+    switch (type) {
+      case ClientType.buyer:
+        return Icons.shopping_bag_outlined;
+      case ClientType.seller:
+        return Icons.sell_outlined;
+      case ClientType.renter:
+        return Icons.home_outlined;
+      case ClientType.lessor:
+        return Icons.business_outlined;
+      case ClientType.investor:
+        return Icons.trending_up_outlined;
+      case ClientType.general:
+        return Icons.person_outline;
+    }
+  }
+
+  Color _statusColor(ClientStatus status) {
     switch (status) {
       case ClientStatus.active:
         return AppColors.status.success;
@@ -1029,35 +1256,5 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
       case ClientStatus.closed:
         return Colors.grey;
     }
-  }
-
-  String _formatDate(String? dateString) {
-    if (dateString == null || dateString.isEmpty) return '-';
-    try {
-      final date = DateTime.parse(dateString);
-      return DateFormat('dd/MM/yyyy').format(date);
-    } catch (e) {
-      return dateString;
-    }
-  }
-
-  String _formatPhone(String? phone) {
-    if (phone == null || phone.isEmpty) return '-';
-    // Se já está formatado, retorna como está
-    if (phone.contains('(') || phone.contains('-')) {
-      return phone;
-    }
-    // Aplica máscara
-    return Masks.phone(phone);
-  }
-
-  String _formatCpf(String? cpf) {
-    if (cpf == null || cpf.isEmpty) return '-';
-    // Remove qualquer formatação existente
-    final digits = cpf.replaceAll(RegExp(r'[^0-9]'), '');
-    // Se não tem 11 dígitos, retorna como está (pode ser inválido)
-    if (digits.length != 11) return cpf;
-    // Aplica máscara
-    return Masks.cpf(digits);
   }
 }

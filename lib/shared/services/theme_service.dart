@@ -9,7 +9,7 @@ class ThemeService extends ChangeNotifier {
   
   static const String _themeKey = 'app_theme_mode';
   
-  ThemeMode _themeMode = ThemeMode.light;
+  ThemeMode _themeMode = ThemeMode.system;
   
   ThemeMode get themeMode => _themeMode;
   
@@ -23,15 +23,15 @@ class ThemeService extends ChangeNotifier {
         _themeMode = _themeModeFromString(themeModeString);
         debugPrint('✅ [THEME_SERVICE] Tema carregado: $_themeMode');
       } else {
-        // Padrão: light
-        _themeMode = ThemeMode.light;
-        debugPrint('✅ [THEME_SERVICE] Tema padrão (light) aplicado');
+        // Padrão: seguir o tema do sistema (claro/escuro do celular)
+        _themeMode = ThemeMode.system;
+        debugPrint('✅ [THEME_SERVICE] Tema padrão (sistema) aplicado');
       }
       
       notifyListeners();
     } catch (e) {
       debugPrint('❌ [THEME_SERVICE] Erro ao carregar tema: $e');
-      _themeMode = ThemeMode.light;
+      _themeMode = ThemeMode.system;
     }
   }
   

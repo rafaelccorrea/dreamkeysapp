@@ -509,6 +509,73 @@ class ClientService {
     }
   }
 
+  /// Cria uma nova interação
+  Future<ApiResponse<ClientInteraction>> createClientInteraction(
+    String clientId, {
+    required String notes,
+    String? title,
+    String? interactionAt,
+  }) async {
+    try {
+      debugPrint('📝 [CLIENT_SERVICE] Criando interação para cliente $clientId...');
+
+      final body = <String, dynamic>{
+        'notes': notes,
+        if (title != null && title.isNotEmpty) 'title': title,
+        if (interactionAt != null && interactionAt.isNotEmpty)
+          'interactionAt': interactionAt,
+      };
+
+      final response = await _apiService.post<dynamic>(
+        ApiConstants.clientInteractions(clientId),
+        body: body,
+      );
+
+      if (response.success && response.data != null) {
+        try {
+          final raw = response.data is Map<String, dynamic>
+              ? response.data as Map<String, dynamic>
+              : null;
+          if (raw == null) {
+            return ApiResponse.error(
+              message: 'Resposta inválida ao criar interação',
+              statusCode: response.statusCode,
+            );
+          }
+          // Algumas APIs envolvem o item em { data: {...} }
+          final json = raw['data'] is Map<String, dynamic>
+              ? raw['data'] as Map<String, dynamic>
+              : raw;
+          final interaction = ClientInteraction.fromJson(json);
+          return ApiResponse.success(
+            data: interaction,
+            statusCode: response.statusCode,
+          );
+        } catch (e, stackTrace) {
+          debugPrint('❌ [CLIENT_SERVICE] Erro ao parsear interação criada: $e');
+          debugPrint('📚 [CLIENT_SERVICE] StackTrace: $stackTrace');
+          return ApiResponse.error(
+            message: 'Erro ao processar interação criada',
+            statusCode: response.statusCode,
+          );
+        }
+      }
+
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao criar interação',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e, stackTrace) {
+      debugPrint('❌ [CLIENT_SERVICE] Erro ao criar interação: $e');
+      debugPrint('📚 [CLIENT_SERVICE] StackTrace: $stackTrace');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
   /// Exclui uma interação
   Future<ApiResponse<void>> deleteClientInteraction(
     String clientId,
@@ -556,8 +623,8 @@ class ClientService {
       final response = await _apiService.post<Map<String, dynamic>>(
         ApiConstants.clientPropertyAssociate(clientId, propertyId),
         body: {
-          if (interestType != null) 'interestType': interestType,
-          if (notes != null) 'notes': notes,
+          'interestType': ?interestType,
+          'notes': ?notes,
         },
       );
 

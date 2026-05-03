@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../core/theme/shell_visual_tokens.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../../../../shared/services/profile_service.dart';
@@ -12,7 +11,6 @@ import '../widgets/avatar_edit_modal.dart';
 import '../widgets/change_password_modal.dart';
 import '../widgets/sessions_modal.dart';
 
-/// Perfil — hero inspirado no header do dashboard (foto + coluna textual + pills + faixa de insight).
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
 
@@ -35,166 +33,24 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Color _accent(BuildContext context) => AppColors.primary.primary;
 
-  /// Superfície elevada alinhada ao painel do dashboard (gradiente leve + borda accent).
-  BoxDecoration _profilePanelDecoration(BuildContext context) {
-    return ShellVisualTokens.elevatedPanelDecoration(
-      context,
-      _accent(context),
-      style: ShellElevatedPanelStyle.profile,
-    );
-  }
+  static const Color _colorEmail    = Color(0xFF4A90E2);
+  static const Color _colorPhone    = Color(0xFF3FA66B);
+  static const Color _colorRole     = Color(0xFFE6B84C);
+  static const Color _colorName     = Color(0xFFD32F2F);
+  static const Color _colorSessions = Color(0xFF8B5CF6);
+  static const Color _colorCompany  = Color(0xFF3FA66B);
+  static const Color _colorLock     = Color(0xFF4A90E2);
+  static const Color _colorPublic   = Color(0xFF3FA66B);
 
-  Widget _profileSectionCard({
-    required BuildContext context,
-    required ThemeData theme,
-    required IconData headerIcon,
-    required String title,
-    required String subtitle,
-    required Widget child,
-  }) {
-    final accent = _accent(context);
-    return Container(
-      decoration: _profilePanelDecoration(context),
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  color: accent.withValues(alpha: 0.12),
-                  border: Border.all(color: accent.withValues(alpha: 0.14)),
-                ),
-                child: Icon(headerIcon, color: accent, size: 22),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.2,
-                        color: ThemeHelpers.textColor(context),
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      subtitle,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: ThemeHelpers.textSecondaryColor(context),
-                        height: 1.4,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Container(
-            height: 3,
-            width: 46,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(3),
-              gradient: LinearGradient(
-                colors: [accent, accent.withValues(alpha: 0.12)],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          child,
-        ],
-      ),
-    );
-  }
-
-  Widget _detailFieldRow(
-    BuildContext context,
-    ThemeData theme, {
-    required IconData icon,
-    required String label,
-    required String value,
-  }) {
-    final accent = _accent(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              color: accent.withValues(alpha: 0.07),
-              border: Border.all(color: accent.withValues(alpha: 0.11)),
-            ),
-            alignment: Alignment.center,
-            child: Icon(icon, size: 21, color: accent),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  label,
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.2,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                SelectableText(
-                  value,
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    color: ThemeHelpers.textColor(context),
-                    fontWeight: FontWeight.w600,
-                    height: 1.35,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _detailSeparator(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 52, top: 4, bottom: 4),
-      child: Divider(
-        height: 1,
-        thickness: 1,
-        color: ThemeHelpers.borderLightColor(context).withValues(alpha: 0.45),
-      ),
-    );
-  }
+  // ─── Lógica ──────────────────────────────────────────────────────────────
 
   Future<void> _loadProfile() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
+    setState(() { _isLoading = true; _errorMessage = null; });
     try {
       final response = await ProfileService.instance.getProfile();
-
       if (mounted) {
         if (response.success && response.data != null) {
-          setState(() {
-            _profile = response.data;
-            _isLoading = false;
-          });
+          setState(() { _profile = response.data; _isLoading = false; });
           _loadSessionCount();
         } else {
           setState(() {
@@ -205,10 +61,7 @@ class _ProfilePageState extends State<ProfilePage> {
       }
     } catch (e) {
       if (mounted) {
-        setState(() {
-          _errorMessage = 'Erro ao conectar com o servidor';
-          _isLoading = false;
-        });
+        setState(() { _errorMessage = 'Erro ao conectar com o servidor'; _isLoading = false; });
       }
     }
   }
@@ -217,11 +70,7 @@ class _ProfilePageState extends State<ProfilePage> {
     try {
       final r = await SessionService.instance.getSessions();
       if (!mounted) return;
-      if (r.success && r.data != null) {
-        setState(() {
-          _sessionCount = r.data!.length;
-        });
-      }
+      if (r.success && r.data != null) setState(() => _sessionCount = r.data!.length);
     } catch (_) {
       if (mounted) setState(() => _sessionCount = null);
     }
@@ -232,94 +81,66 @@ class _ProfilePageState extends State<ProfilePage> {
       final response = await ProfileService.instance.removeAvatar();
       if (mounted) {
         if (response.success && response.data != null) {
-          setState(() {
-            _profile = response.data;
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Avatar removido com sucesso'),
-              backgroundColor: AppColors.status.success,
-            ),
-          );
+          setState(() { _profile = response.data; });
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: const Text('Avatar removido com sucesso'),
+            backgroundColor: AppColors.status.success,
+          ));
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(response.message ?? 'Erro ao remover avatar'),
-              backgroundColor: AppColors.status.error,
-            ),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(response.message ?? 'Erro ao remover avatar'),
+            backgroundColor: AppColors.status.error,
+          ));
         }
       }
     } else {
       final imageFile = File(avatarUrlOrPath);
       if (!await imageFile.exists()) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Arquivo não encontrado'),
-            backgroundColor: AppColors.status.error,
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: const Text('Arquivo não encontrado'),
+          backgroundColor: AppColors.status.error,
+        ));
         return;
       }
-
-      setState(() {
-        _isLoading = true;
-      });
-
+      setState(() { _isLoading = true; });
       try {
         final response = await ProfileService.instance.uploadAvatar(imageFile);
-
         if (mounted) {
           if (response.success && response.data != null) {
             await _loadProfile();
             if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: const Text('Avatar atualizado com sucesso!'),
-                backgroundColor: AppColors.status.success,
-              ),
-            );
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: const Text('Avatar atualizado com sucesso!'),
+              backgroundColor: AppColors.status.success,
+            ));
           } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(response.message ?? 'Erro ao fazer upload do avatar'),
-                backgroundColor: AppColors.status.error,
-              ),
-            );
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(response.message ?? 'Erro ao fazer upload do avatar'),
+              backgroundColor: AppColors.status.error,
+            ));
           }
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Erro: ${e.toString()}'),
-              backgroundColor: AppColors.status.error,
-            ),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Erro: ${e.toString()}'),
+            backgroundColor: AppColors.status.error,
+          ));
         }
       } finally {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-          });
-        }
+        if (mounted) setState(() { _isLoading = false; });
       }
     }
   }
 
   Future<void> _togglePublicVisibility() async {
     if (_profile == null) return;
-
-    setState(() {
-      _isUpdatingVisibility = true;
-    });
-
+    setState(() { _isUpdatingVisibility = true; });
     try {
       final response = await ProfileService.instance.updatePublicVisibility(
         !_profile!.isAvailableForPublicSite,
       );
-
       if (mounted) {
         if (response.success) {
           final newVisibility = response.data ?? _profile!.isAvailableForPublicSite;
@@ -342,138 +163,351 @@ class _ProfilePageState extends State<ProfilePage> {
             );
           });
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(response.message ?? 'Erro ao atualizar visibilidade'),
-              backgroundColor: AppColors.status.error,
-            ),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(response.message ?? 'Erro ao atualizar visibilidade'),
+            backgroundColor: AppColors.status.error,
+          ));
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro: ${e.toString()}'),
-            backgroundColor: AppColors.status.error,
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Erro: ${e.toString()}'),
+          backgroundColor: AppColors.status.error,
+        ));
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _isUpdatingVisibility = false;
-        });
-      }
+      if (mounted) setState(() { _isUpdatingVisibility = false; });
     }
   }
+
+  // ─── Formatação ──────────────────────────────────────────────────────────
 
   String _formatDate(String dateString) {
     try {
-      final date = DateTime.parse(dateString);
-      return DateFormat('dd/MM/yyyy', 'pt_BR').format(date);
-    } catch (e) {
-      return dateString;
-    }
+      return DateFormat('dd/MM/yyyy', 'pt_BR').format(DateTime.parse(dateString));
+    } catch (e) { return dateString; }
   }
 
-  String _formatLongDate(String dateString) {
-    try {
-      final date = DateTime.parse(dateString);
-      return DateFormat("d 'de' MMMM 'de' yyyy", 'pt_BR').format(date);
-    } catch (e) {
-      return dateString;
-    }
-  }
-
-  String _formatTodayLine() {
-    return DateFormat("EEEE · d 'de' MMMM", 'pt_BR').format(DateTime.now());
-  }
+  String _formatTodayLine() =>
+      DateFormat("EEEE · d 'de' MMMM", 'pt_BR').format(DateTime.now());
 
   String _getRoleLabel(String role) {
     switch (role.toLowerCase()) {
-      case 'admin':
-        return 'Administrador';
-      case 'master':
-        return 'Master';
-      case 'manager':
-        return 'Gerente';
-      case 'user':
-      default:
-        return 'Usuário';
+      case 'admin':   return 'Administrador';
+      case 'master':  return 'Master';
+      case 'manager': return 'Gerente';
+      default:        return 'Usuário';
     }
   }
 
-  Widget _buildFilterPill(BuildContext context, IconData icon, String label) {
-    final accent = _accent(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        color: ShellVisualTokens.profileGlassFill(context),
-        border: Border.all(color: ShellVisualTokens.profileSectionBorder(context)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+  // ─── Componentes de layout flat ──────────────────────────────────────────
+
+  /// Cabeçalho de seção: rótulo pequeno + linha full-width.
+  Widget _sectionHeader(BuildContext context, ThemeData theme, String label, {Color? color}) {
+    final c = color ?? _accent(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 32, 20, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 15, color: accent),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              label,
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: ThemeHelpers.textColor(context),
-                  ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
+          Row(
+            children: [
+              Container(
+                width: 3,
+                height: 13,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(2),
+                  color: c,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: c,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.6,
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Divider(
+            height: 1,
+            thickness: 1,
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildQuickChip({
-    required BuildContext context,
+  /// Linha de informação flat: ícone colorido + label + valor.
+  Widget _infoRow(
+    BuildContext context,
+    ThemeData theme, {
     required IconData icon,
+    required Color iconColor,
     required String label,
-    required VoidCallback onTap,
-    bool primary = false,
+    required String value,
+    bool last = false,
   }) {
-    final accent = _accent(context);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: primary ? accent : ShellVisualTokens.profileGlassFill(context),
-          border: Border.all(color: primary ? accent : ShellVisualTokens.profileSectionBorder(context)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 18, color: primary ? Colors.white : accent),
-            const SizedBox(width: 8),
-            Text(
-              label,
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: primary ? Colors.white : ThemeHelpers.textColor(context),
-                    fontWeight: FontWeight.w800,
+    final isDark = theme.brightness == Brightness.dark;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  color: iconColor.withValues(alpha: isDark ? 0.18 : 0.10),
+                  border: Border.all(
+                    color: iconColor.withValues(alpha: isDark ? 0.26 : 0.18),
                   ),
+                ),
+                alignment: Alignment.center,
+                child: Icon(icon, size: 21, color: iconColor),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: iconColor.withValues(alpha: isDark ? 0.80 : 0.70),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 10.5,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    SelectableText(
+                      value,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: ThemeHelpers.textColor(context),
+                        fontWeight: FontWeight.w600,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (!last)
+          Padding(
+            padding: const EdgeInsets.only(left: 80),
+            child: Divider(
+              height: 1,
+              thickness: 0.8,
+              color: ThemeHelpers.borderLightColor(context).withValues(alpha: 0.6),
             ),
-          ],
+          ),
+      ],
+    );
+  }
+
+  /// Linha de ação flat: ícone + título + subtítulo + chevron.
+  Widget _actionRow(
+    BuildContext context,
+    ThemeData theme, {
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+    Widget? trailing,
+    bool last = false,
+  }) {
+    final isDark = theme.brightness == Brightness.dark;
+    return Column(
+      children: [
+        InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    color: iconColor.withValues(alpha: isDark ? 0.18 : 0.10),
+                    border: Border.all(
+                      color: iconColor.withValues(alpha: isDark ? 0.26 : 0.18),
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(icon, size: 21, color: iconColor),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: ThemeHelpers.textColor(context),
+                          letterSpacing: -0.1,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: ThemeHelpers.textSecondaryColor(context),
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                trailing ??
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 22,
+                      color: ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.55),
+                    ),
+              ],
+            ),
+          ),
+        ),
+        if (!last)
+          Padding(
+            padding: const EdgeInsets.only(left: 80),
+            child: Divider(
+              height: 1,
+              thickness: 0.8,
+              color: ThemeHelpers.borderLightColor(context).withValues(alpha: 0.6),
+            ),
+          ),
+      ],
+    );
+  }
+
+  // ─── Avatar ──────────────────────────────────────────────────────────────
+
+  Widget _avatarRing(BuildContext context, ThemeData theme, Profile p) {
+    final isDark = theme.brightness == Brightness.dark;
+    const size = 108.0;
+    const ringSize = 116.0;
+
+    return Material(
+      color: Colors.transparent,
+      child: Semantics(
+        label: 'Alterar foto de perfil',
+        button: true,
+        child: InkWell(
+          onTap: () => AvatarEditModal.show(
+            context: context,
+            onSave: _handleAvatarChange,
+            currentAvatar: p.avatar,
+          ),
+          borderRadius: BorderRadius.circular(ringSize / 2),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // Anel na paleta da marca: vermelho → vinho → vermelho escuro
+              Container(
+                width: ringSize,
+                height: ringSize,
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: SweepGradient(
+                    colors: [
+                      Color(0xFFD32F2F),
+                      Color(0xFFE53935),
+                      Color(0xFF592722),
+                      Color(0xFFB71C1C),
+                      Color(0xFF8B1515),
+                      Color(0xFFD32F2F),
+                    ],
+                  ),
+                ),
+              ),
+              // Separador
+              Container(
+                width: size + 5,
+                height: size + 5,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isDark ? AppColors.background.backgroundDarkMode : Colors.white,
+                ),
+              ),
+              // Foto
+              Container(
+                width: size,
+                height: size,
+                clipBehavior: Clip.antiAlias,
+                decoration: const BoxDecoration(shape: BoxShape.circle),
+                child: p.avatar != null && p.avatar!.isNotEmpty
+                    ? Image.network(
+                        p.avatar!,
+                        fit: BoxFit.cover,
+                        width: size,
+                        height: size,
+                        errorBuilder: (_, _, _) => _avatarFallback(context, isDark),
+                      )
+                    : _avatarFallback(context, isDark),
+              ),
+              // Botão câmera
+              Positioned(
+                bottom: 3,
+                right: 3,
+                child: Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.primary,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isDark ? AppColors.background.backgroundDarkMode : Colors.white,
+                      width: 2.5,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.primary.primary.withValues(alpha: 0.45),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(Icons.photo_camera_rounded, color: Colors.white, size: 15),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
+  Widget _avatarFallback(BuildContext context, bool isDark) {
+    return Container(
+      color: isDark ? AppColors.background.backgroundSecondaryDarkMode : const Color(0xFFF0F4F8),
+      child: Icon(Icons.person_rounded, size: 50, color: AppColors.primary.primary.withValues(alpha: 0.45)),
+    );
+  }
+
+  // ─── Build ────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
 
     return AppScaffold(
       title: 'Meu Perfil',
@@ -485,10 +519,7 @@ class _ProfilePageState extends State<ProfilePage> {
       actions: [
         IconButton(
           icon: const Icon(Icons.refresh),
-          onPressed: () {
-            _loadProfile();
-            _loadSessionCount();
-          },
+          onPressed: () { _loadProfile(); _loadSessionCount(); },
           tooltip: 'Atualizar',
         ),
       ],
@@ -517,15 +548,15 @@ class _ProfilePageState extends State<ProfilePage> {
                     },
                     child: SingleChildScrollView(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(22, 10, 22, 40),
+                      padding: EdgeInsets.zero,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          _buildHero(context, theme, isDark),
-                          const SizedBox(height: 26),
-                          _buildPersonalBlock(context, theme),
-                          const SizedBox(height: 22),
-                          _buildSecurityPresenceSurface(context, theme),
+                          _buildHero(context, theme),
+                          _buildActionsSection(context, theme),
+                          _buildDetailsSection(context, theme),
+                          _buildPrivacySection(context, theme),
+                          const SizedBox(height: 48),
                         ],
                       ),
                     ),
@@ -534,38 +565,36 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  // ─── Skeleton ─────────────────────────────────────────────────────────────
+
   Widget _buildSkeleton(BuildContext context, ThemeData theme) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SkeletonBox(width: 100, height: 100, borderRadius: 50),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SkeletonBox(width: 120, height: 12, borderRadius: 4),
-                  const SizedBox(height: 12),
-                  SkeletonBox(width: double.infinity, height: 20, borderRadius: 6),
-                  const SizedBox(height: 10),
-                  SkeletonBox(width: double.infinity, height: 14, borderRadius: 4),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 18),
-        SkeletonBox(width: double.infinity, height: 44, borderRadius: 12),
+        Center(child: SkeletonBox(width: 116, height: 116, borderRadius: 58)),
+        const SizedBox(height: 16),
+        Center(child: SkeletonBox(width: 160, height: 22, borderRadius: 6)),
+        const SizedBox(height: 10),
+        Center(child: SkeletonBox(width: 220, height: 14, borderRadius: 4)),
+        const SizedBox(height: 28),
+        SkeletonBox(width: double.infinity, height: 56, borderRadius: 12),
+        const SizedBox(height: 12),
+        SkeletonBox(width: double.infinity, height: 56, borderRadius: 12),
+        const SizedBox(height: 24),
+        SkeletonBox(width: 120, height: 12, borderRadius: 4),
+        const SizedBox(height: 14),
+        SkeletonBox(width: double.infinity, height: 56, borderRadius: 12),
+        const SizedBox(height: 8),
+        SkeletonBox(width: double.infinity, height: 56, borderRadius: 12),
+        const SizedBox(height: 8),
+        SkeletonBox(width: double.infinity, height: 56, borderRadius: 12),
       ],
     );
   }
 
-  Widget _buildErrorState(BuildContext context, ThemeData theme) {
-    final primary = AppColors.primary.primary;
+  // ─── Error ────────────────────────────────────────────────────────────────
 
+  Widget _buildErrorState(BuildContext context, ThemeData theme) {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -593,576 +622,467 @@ class _ProfilePageState extends State<ProfilePage> {
           onPressed: _loadProfile,
           icon: const Icon(Icons.refresh),
           label: const Text('Tentar de novo'),
-          style: TextButton.styleFrom(foregroundColor: primary),
+          style: TextButton.styleFrom(foregroundColor: AppColors.primary.primary),
         ),
       ],
     );
   }
 
-  Widget _avatarStack(BuildContext context, ThemeData theme, bool isDark, Profile p) {
-    final primary = _accent(context);
-    const size = 104.0;
+  // ─── Hero ─────────────────────────────────────────────────────────────────
 
-    return Material(
-      color: Colors.transparent,
-      child: Semantics(
-        label: 'Alterar foto de perfil',
-        button: true,
-        child: InkWell(
-          onTap: () {
-            AvatarEditModal.show(
-              context: context,
-              onSave: _handleAvatarChange,
-              currentAvatar: p.avatar,
-            );
-          },
-          borderRadius: BorderRadius.circular(22),
-          child: Stack(
-            clipBehavior: Clip.none,
+  Widget _buildHero(BuildContext context, ThemeData theme) {
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = _accent(context);
+    final amber  = AppColors.status.warning;
+    final wine   = AppColors.secondary.secondary;
+    final p = _profile!;
+    final nameParts  = p.name.trim().split(' ');
+    final firstName  = nameParts.isNotEmpty ? nameParts.first : 'Usuário';
+    final lastName   = nameParts.length > 1 ? nameParts.sublist(1).join(' ') : '';
+
+    final content = Padding(
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Avatar + info lado a lado
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Container(
-                width: size,
-                height: size,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(22),
-                  gradient: LinearGradient(
-                    colors: [primary, AppColors.secondary.secondary.withValues(alpha: 0.92)],
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: primary.withValues(alpha: 0.35),
-                      blurRadius: 16,
-                      offset: const Offset(0, 8),
+              _avatarRing(context, theme, p),
+              const SizedBox(width: 20),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Badge de perfil
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(999),
+                        gradient: LinearGradient(colors: [accent, AppColors.secondary.secondary]),
+                      ),
+                      child: Text(
+                        'PERFIL DA CONTA',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.5,
+                          fontSize: 9.5,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    // Nome em duas linhas se necessário
+                    RichText(
+                      text: TextSpan(
+                        children: [
+                          TextSpan(
+                            text: '$firstName ',
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              color: ThemeHelpers.textColor(context),
+                              height: 1.1,
+                            ),
+                          ),
+                          if (lastName.isNotEmpty)
+                            TextSpan(
+                              text: lastName,
+                              style: theme.textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.w400,
+                                color: ThemeHelpers.textColor(context),
+                                height: 1.1,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    // E-mail
+                    Row(
+                      children: [
+                        Icon(Icons.mail_rounded, size: 13, color: _colorEmail),
+                        const SizedBox(width: 5),
+                        Flexible(
+                          child: Text(
+                            p.email,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: ThemeHelpers.textSecondaryColor(context),
+                              height: 1.3,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    // Status ativo
+                    Row(
+                      children: [
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: AppColors.status.success,
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppColors.status.success.withValues(alpha: 0.5),
+                                blurRadius: 4,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            'Ativo · membro desde ${_formatDate(p.createdAt)}',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: ThemeHelpers.textSecondaryColor(context),
+                              fontWeight: FontWeight.w500,
+                              fontSize: 11,
+                            ),
+                            maxLines: 2,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
-                ),
-                padding: const EdgeInsets.all(3),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(18),
-                  child: p.avatar != null && p.avatar!.isNotEmpty
-                      ? Image.network(
-                          p.avatar!,
-                          fit: BoxFit.cover,
-                          width: size,
-                          height: size,
-                          errorBuilder: (_, _, _) => _avatarFallback(context, isDark),
-                        )
-                      : _avatarFallback(context, isDark),
-                ),
-              ),
-              Positioned(
-                bottom: -2,
-                right: -2,
-                child: Container(
-                  padding: const EdgeInsets.all(7),
-                  decoration: BoxDecoration(
-                    color: primary,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: ThemeHelpers.cardBackgroundColor(context), width: 2),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.25),
-                        blurRadius: 6,
-                      ),
-                    ],
-                  ),
-                  child: const Icon(Icons.photo_camera_rounded, color: Colors.white, size: 16),
                 ),
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _avatarFallback(BuildContext context, bool isDark) {
-    return ColoredBox(
-      color: isDark
-          ? AppColors.background.backgroundSecondaryDarkMode
-          : AppColors.background.backgroundSecondary,
-      child: Icon(
-        Icons.person_rounded,
-        size: 52,
-        color: ThemeHelpers.textSecondaryColor(context),
-      ),
-    );
-  }
-
-  Widget _buildSessionsInsight(BuildContext context, ThemeData theme) {
-    final primary = _accent(context);
-    final count = _sessionCount;
-
-    return InkWell(
-      onTap: () {
-        SessionsModal.show(context: context).then((_) => _loadSessionCount());
-      },
-      borderRadius: BorderRadius.circular(18),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          color: ShellVisualTokens.profileGlassFill(context),
-          border: Border.all(color: ShellVisualTokens.profileSectionBorder(context)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(11),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: primary.withValues(alpha: 0.14),
+          const SizedBox(height: 22),
+          // Linha separadora
+          Divider(
+            height: 1,
+            thickness: 0.8,
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.40),
+          ),
+          const SizedBox(height: 18),
+          // Pills de contexto
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _heroPill(context, theme, Icons.badge_outlined, _getRoleLabel(p.role), _colorName),
+              _heroPill(context, theme, Icons.calendar_month_outlined,
+                  'Desde ${_formatDate(p.createdAt)}', _colorEmail),
+              if (p.companyName != null && p.companyName!.trim().isNotEmpty)
+                _heroPill(context, theme, Icons.apartment_rounded, p.companyName!.trim(), _colorCompany),
+              _heroPill(
+                context, theme,
+                Icons.devices_outlined,
+                _sessionCount != null ? '$_sessionCount sessões ativas' : 'Sessões…',
+                _colorSessions,
               ),
-              child: Icon(Icons.devices_rounded, color: primary, size: 22),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Sessões e dispositivos',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w900,
-                      color: ThemeHelpers.textColor(context),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    count != null
-                        ? '$count sessão${count == 1 ? '' : 'ões'} ativa${count == 1 ? '' : 's'} neste momento.'
-                        : 'Carregando visão das sessões…',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
-                      height: 1.4,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'Gerenciar sessões →',
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: primary,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Icon(Icons.chevron_right_rounded, color: ThemeHelpers.textSecondaryColor(context)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHero(BuildContext context, ThemeData theme, bool isDark) {
-    final accent = _accent(context);
-    final p = _profile!;
-    final firstName = p.name.trim().isEmpty ? 'Usuário' : p.name.trim().split(' ').first;
-
-    final titlesColumn = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'PERFIL DA CONTA',
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: accent,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 2.2,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          firstName,
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w900,
-            color: ThemeHelpers.textColor(context),
-            height: 1.05,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          p.email,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(context),
-            height: 1.35,
-          ),
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Conta ativa · ${_formatLongDate(p.createdAt)}',
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(context),
-            height: 1.3,
-          ),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        const SizedBox(height: 4),
-        Text(
-          _formatTodayLine(),
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.85),
-            fontSize: 12,
-          ),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ],
-    );
-
-    final pills = Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        _buildFilterPill(context, Icons.badge_outlined, _getRoleLabel(p.role)),
-        _buildFilterPill(context, Icons.calendar_month_outlined, 'Membro desde ${_formatDate(p.createdAt)}'),
-        if (p.companyName != null && p.companyName!.trim().isNotEmpty)
-          _buildFilterPill(context, Icons.apartment_rounded, p.companyName!.trim()),
-        _buildFilterPill(
-          context,
-          Icons.devices_outlined,
-          _sessionCount != null ? '$_sessionCount sessões' : 'Sessões…',
-        ),
-      ],
-    );
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final narrow = constraints.maxWidth < 520;
-
-        final headerRow = Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _avatarStack(context, theme, isDark, p),
-            const SizedBox(width: 14),
-            Expanded(child: titlesColumn),
-          ],
-        );
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (narrow)
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  headerRow,
-                  const SizedBox(height: 16),
-                  pills,
-                ],
-              )
-            else
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _avatarStack(context, theme, isDark, p),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        titlesColumn,
-                        const SizedBox(height: 14),
-                        pills,
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            const SizedBox(height: 16),
-            _buildSessionsInsight(context, theme),
-            const SizedBox(height: 18),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                _buildQuickChip(
-                  context: context,
-                  icon: Icons.tune_rounded,
-                  label: 'Editar dados',
-                  primary: true,
-                  onTap: () => Navigator.pushNamed(context, AppRoutes.profileEdit),
-                ),
-                _buildQuickChip(
-                  context: context,
-                  icon: Icons.devices_rounded,
-                  label: 'Sessões',
-                  primary: false,
-                  onTap: () {
-                    SessionsModal.show(context: context).then((_) => _loadSessionCount());
-                  },
-                ),
-              ],
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildPersonalBlock(BuildContext context, ThemeData theme) {
-    final p = _profile!;
-    String? phoneLabel;
-    String? phoneValue;
-    final hasPhone = p.phone != null && p.phone!.trim().isNotEmpty;
-    final hasCell = p.cellphone != null && p.cellphone!.trim().isNotEmpty;
-    if (hasPhone && hasCell) {
-      phoneLabel = 'Telefone / celular';
-      phoneValue = '${p.phone!.trim()} · ${p.cellphone!.trim()}';
-    } else if (hasPhone) {
-      phoneLabel = 'Telefone';
-      phoneValue = p.phone!.trim();
-    } else if (hasCell) {
-      phoneLabel = 'Celular';
-      phoneValue = p.cellphone!.trim();
-    }
-
-    final tiles = <Widget>[
-      _detailFieldRow(context, theme, icon: Icons.person_outline_rounded, label: 'Nome completo', value: p.name),
-      _detailSeparator(context),
-      _detailFieldRow(context, theme, icon: Icons.mail_outline_rounded, label: 'E-mail', value: p.email),
-    ];
-
-    if (phoneValue != null) {
-      tiles.add(_detailSeparator(context));
-      tiles.add(_detailFieldRow(
-        context,
-        theme,
-        icon: Icons.phone_iphone_rounded,
-        label: phoneLabel!,
-        value: phoneValue,
-      ));
-    }
-
-    tiles.add(_detailSeparator(context));
-    tiles.add(_detailFieldRow(context, theme, icon: Icons.workspace_premium_outlined, label: 'Cargo', value: _getRoleLabel(p.role)));
-
-    return _profileSectionCard(
-      context: context,
-      theme: theme,
-      headerIcon: Icons.badge_outlined,
-      title: 'Detalhes do cadastro',
-      subtitle: 'Identificação e contato vinculados à sua conta.',
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: tiles),
-    );
-  }
-
-  /// Faixa única neutra (sem glow accent): prioriza leitura horizontal; em telas largas senha | presença lado a lado.
-  Widget _buildSecurityPresenceSurface(BuildContext context, ThemeData theme) {
-    final primary = _accent(context);
-    final cs = theme.colorScheme;
-    final isDark = theme.brightness == Brightness.dark;
-    final borderCol = ThemeHelpers.borderLightColor(context).withValues(alpha: 0.65);
-    final stripeColor = isDark
-        ? borderCol.withValues(alpha: 0.85)
-        : ThemeHelpers.borderColor(context).withValues(alpha: 0.44);
-    final subtleBg = isDark
-        ? Color.alphaBlend(
-            cs.surfaceTint.withValues(alpha: 0.06),
-            cs.surfaceContainerHighest.withValues(alpha: 0.42),
-          )
-        : Color.alphaBlend(
-            cs.surfaceTint.withValues(alpha: 0.024),
-            const Color(0xFFEEF0F5),
-          );
-
-    EdgeInsets padWide() =>
-        const EdgeInsets.symmetric(horizontal: 18, vertical: 18);
-
-    Widget passwordLane({required EdgeInsets pad}) {
-      return Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () => ChangePasswordModal.show(context: context),
-          child: Padding(
-            padding: pad,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.lock_outline_rounded,
-                  size: 22,
-                  color: ThemeHelpers.textSecondaryColor(context),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Senha',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.2,
-                          color: ThemeHelpers.textColor(context),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Fluxo seguro · sessões antigas podem ser invalidadas.',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                          height: 1.38,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 10),
-                TextButton(
-                  onPressed: () => ChangePasswordModal.show(context: context),
-                  style: TextButton.styleFrom(
-                    foregroundColor: ThemeHelpers.textColor(context),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Alterar',
-                        style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w900),
-                      ),
-                      const SizedBox(width: 4),
-                      Icon(Icons.arrow_forward_rounded, size: 18, color: ThemeHelpers.textSecondaryColor(context)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    Widget visibilityLane({required EdgeInsets pad}) {
-      return Padding(
-        padding: pad,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.public_rounded,
-              size: 22,
-              color: ThemeHelpers.textSecondaryColor(context),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Presença no site público',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.2,
-                      color: ThemeHelpers.textColor(context),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Lista de corretores · visível para novos contatos.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
-                      height: 1.38,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 10),
-            if (_isUpdatingVisibility)
-              SizedBox(
-                width: 28,
-                height: 28,
-                child: CircularProgressIndicator(strokeWidth: 2.5, color: primary),
-              )
-            else
-              SwitchTheme(
-                data: SwitchThemeData(
-                  thumbColor: WidgetStateProperty.resolveWith((states) {
-                    if (states.contains(WidgetState.selected)) return Colors.white;
-                    return ThemeHelpers.textSecondaryColor(context);
-                  }),
-                  trackColor: WidgetStateProperty.resolveWith((states) {
-                    if (states.contains(WidgetState.selected)) {
-                      return primary.withValues(alpha: 0.62);
-                    }
-                    return ThemeHelpers.borderLightColor(context).withValues(alpha: 0.88);
-                  }),
-                  trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
-                ),
-                child: Switch.adaptive(
-                  value: _profile?.isAvailableForPublicSite ?? false,
-                  onChanged: (_) => _togglePublicVisibility(),
-                ),
-              ),
-          ],
-        ),
-      );
-    }
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: subtleBg,
-        border: Border(
-          top: BorderSide(color: stripeColor),
-          bottom: BorderSide(color: stripeColor),
-        ),
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.28 : 0.075),
-            blurRadius: 14,
-            offset: const Offset(0, 6),
+              _heroPill(context, theme, Icons.today_outlined, _formatTodayLine(), accent),
+            ],
           ),
         ],
       ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final wide = constraints.maxWidth >= 560;
+    );
 
-          if (wide) {
-              return IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(
-                      flex: 52,
-                      child: passwordLane(pad: padWide()),
-                    ),
-                    VerticalDivider(
-                      width: 1,
-                      thickness: 1,
-                      indent: 14,
-                      endIndent: 14,
-                      color: borderCol.withValues(alpha: 0.75),
-                    ),
-                    Expanded(
-                      flex: 48,
-                      child: visibilityLane(pad: padWide()),
-                    ),
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        // Base quente neutra — bege/creme no light, charcoal quente no dark
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: isDark
+              ? const [Color(0xFF14100F), Color(0xFF0E0A0A)]
+              : const [Color(0xFFFCF9F7), Color(0xFFF5EFEB)],
+        ),
+        border: Border(
+          bottom: BorderSide(
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
+          ),
+        ),
+      ),
+      child: Stack(
+        clipBehavior: Clip.hardEdge,
+        children: [
+          // Glow vermelho radial atrás do avatar (canto superior esquerdo)
+          Positioned(
+            left: -80,
+            top: -80,
+            child: Container(
+              width: 280,
+              height: 280,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    accent.withValues(alpha: isDark ? 0.32 : 0.18),
+                    accent.withValues(alpha: 0.0),
                   ],
                 ),
-              );
-            }
+              ),
+            ),
+          ),
+          // Glow âmbar/dourado no canto superior direito (calor + premium)
+          Positioned(
+            right: -100,
+            top: -60,
+            child: Container(
+              width: 240,
+              height: 240,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    amber.withValues(alpha: isDark ? 0.18 : 0.16),
+                    amber.withValues(alpha: 0.0),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          // Glow vinho profundo no canto inferior direito (ancoragem da paleta)
+          Positioned(
+            right: -120,
+            bottom: -90,
+            child: Container(
+              width: 300,
+              height: 300,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    wine.withValues(alpha: isDark ? 0.26 : 0.10),
+                    wine.withValues(alpha: 0.0),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          // Conteúdo
+          content,
+        ],
+      ),
+    );
+  }
 
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                passwordLane(pad: padWide()),
-                Divider(height: 1, thickness: 1, color: borderCol.withValues(alpha: 0.65)),
-                visibilityLane(pad: padWide()),
-              ],
-            );
-          },
+  Widget _heroPill(BuildContext context, ThemeData theme, IconData icon, String label, Color color) {
+    final isDark = theme.brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: color.withValues(alpha: isDark ? 0.15 : 0.09),
+        border: Border.all(color: color.withValues(alpha: isDark ? 0.30 : 0.22)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: ThemeHelpers.textColor(context),
+                fontSize: 11.5,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Seção de ações ───────────────────────────────────────────────────────
+
+  Widget _buildActionsSection(BuildContext context, ThemeData theme) {
+    final accent = _accent(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _sectionHeader(context, theme, 'AÇÕES', color: accent),
+        _actionRow(
+          context, theme,
+          icon: Icons.tune_rounded,
+          iconColor: accent,
+          title: 'Editar dados do perfil',
+          subtitle: 'Nome, telefone, foto e informações pessoais.',
+          onTap: () => Navigator.pushNamed(context, AppRoutes.profileEdit),
         ),
+        _actionRow(
+          context, theme,
+          icon: Icons.devices_rounded,
+          iconColor: _colorSessions,
+          title: 'Sessões e dispositivos',
+          subtitle: _sessionCount != null
+              ? '$_sessionCount sessão${_sessionCount == 1 ? '' : 'ões'} ativa${_sessionCount == 1 ? '' : 's'} neste momento.'
+              : 'Gerencie onde sua conta está conectada.',
+          onTap: () => SessionsModal.show(context: context).then((_) => _loadSessionCount()),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_sessionCount != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(999),
+                    color: _colorSessions.withValues(alpha: 0.15),
+                  ),
+                  child: Text(
+                    '$_sessionCount',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: _colorSessions,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              const SizedBox(width: 4),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 22,
+                color: ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.55),
+              ),
+            ],
+          ),
+          last: true,
+        ),
+      ],
+    );
+  }
+
+  // ─── Seção de detalhes ────────────────────────────────────────────────────
+
+  Widget _buildDetailsSection(BuildContext context, ThemeData theme) {
+    final p = _profile!;
+    final hasPhone = p.phone != null && p.phone!.trim().isNotEmpty;
+    final hasCell  = p.cellphone != null && p.cellphone!.trim().isNotEmpty;
+
+    String? phoneLabel;
+    String? phoneValue;
+    if (hasPhone && hasCell) {
+      phoneLabel = 'TELEFONE / CELULAR';
+      phoneValue = '${p.phone!.trim()}  ·  ${p.cellphone!.trim()}';
+    } else if (hasPhone) {
+      phoneLabel = 'TELEFONE';
+      phoneValue = p.phone!.trim();
+    } else if (hasCell) {
+      phoneLabel = 'CELULAR';
+      phoneValue = p.cellphone!.trim();
+    }
+
+    final hasCompany = p.companyName != null && p.companyName!.trim().isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _sectionHeader(context, theme, 'DETALHES DO CADASTRO', color: _colorEmail),
+        _infoRow(context, theme,
+          icon: Icons.person_rounded,
+          iconColor: _colorName,
+          label: 'NOME COMPLETO',
+          value: p.name,
+        ),
+        _infoRow(context, theme,
+          icon: Icons.mail_rounded,
+          iconColor: _colorEmail,
+          label: 'E-MAIL',
+          value: p.email,
+        ),
+        if (phoneValue != null)
+          _infoRow(context, theme,
+            icon: Icons.phone_iphone_rounded,
+            iconColor: _colorPhone,
+            label: phoneLabel!,
+            value: phoneValue,
+          ),
+        _infoRow(context, theme,
+          icon: Icons.workspace_premium_rounded,
+          iconColor: _colorRole,
+          label: 'CARGO / FUNÇÃO',
+          value: _getRoleLabel(p.role),
+          last: !hasCompany,
+        ),
+        if (hasCompany)
+          _infoRow(context, theme,
+            icon: Icons.apartment_rounded,
+            iconColor: _colorCompany,
+            label: 'EMPRESA',
+            value: p.companyName!.trim(),
+            last: true,
+          ),
+      ],
+    );
+  }
+
+  // ─── Seção de segurança e privacidade ────────────────────────────────────
+
+  Widget _buildPrivacySection(BuildContext context, ThemeData theme) {
+    final isDark = theme.brightness == Brightness.dark;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _sectionHeader(context, theme, 'SEGURANÇA E PRIVACIDADE', color: _colorLock),
+        // Alterar senha
+        _actionRow(
+          context, theme,
+          icon: Icons.lock_rounded,
+          iconColor: _colorLock,
+          title: 'Alterar senha',
+          subtitle: 'Fluxo seguro · sessões antigas podem ser invalidadas.',
+          onTap: () => ChangePasswordModal.show(context: context),
+          trailing: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              color: _colorLock.withValues(alpha: isDark ? 0.18 : 0.10),
+              border: Border.all(color: _colorLock.withValues(alpha: 0.22)),
+            ),
+            child: Text(
+              'Alterar',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: _colorLock,
+                fontWeight: FontWeight.w900,
+                fontSize: 11.5,
+              ),
+            ),
+          ),
+        ),
+        // Visibilidade pública
+        _actionRow(
+          context, theme,
+          icon: Icons.public_rounded,
+          iconColor: _colorPublic,
+          title: 'Presença no site público',
+          subtitle: 'Lista de corretores · visível para novos contatos.',
+          onTap: _togglePublicVisibility,
+          trailing: _isUpdatingVisibility
+              ? SizedBox(
+                  width: 26,
+                  height: 26,
+                  child: CircularProgressIndicator(strokeWidth: 2.5, color: _colorPublic),
+                )
+              : SwitchTheme(
+                  data: SwitchThemeData(
+                    thumbColor: WidgetStateProperty.resolveWith((states) =>
+                        states.contains(WidgetState.selected) ? Colors.white : ThemeHelpers.textSecondaryColor(context)),
+                    trackColor: WidgetStateProperty.resolveWith((states) =>
+                        states.contains(WidgetState.selected)
+                            ? _colorPublic.withValues(alpha: 0.70)
+                            : ThemeHelpers.borderLightColor(context).withValues(alpha: 0.88)),
+                    trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
+                  ),
+                  child: Switch.adaptive(
+                    value: _profile?.isAvailableForPublicSite ?? false,
+                    onChanged: (_) => _togglePublicVisibility(),
+                  ),
+                ),
+          last: true,
+        ),
+      ],
     );
   }
 }

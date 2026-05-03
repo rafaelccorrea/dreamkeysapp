@@ -54,6 +54,29 @@ class AppTheme {
     );
   }
 
+  /// Variante refinada para ações ⋯ sobre um card de imóvel (lista/grade/carrossel).
+  static PopupMenuThemeData propertyTileActionsPopupMenu(Brightness brightness) {
+    final isDark = brightness == Brightness.dark;
+    final base = _popupMenuTheme(brightness);
+    final accent =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    final borderTone =
+        isDark ? AppColors.border.borderDarkMode : AppColors.border.border;
+    return base.copyWith(
+      elevation: 28,
+      menuPadding: const EdgeInsets.fromLTRB(5, 8, 5, 10),
+      shadowColor: Colors.black.withValues(alpha: isDark ? 0.62 : 0.2),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: BorderSide(
+          width: 1.2,
+          color: Color.lerp(borderTone, accent, isDark ? 0.52 : 0.42)!
+              .withValues(alpha: isDark ? 0.94 : 0.92),
+        ),
+      ),
+    );
+  }
+
   static ThemeData lightTheme = ThemeData(
     useMaterial3: true,
     brightness: Brightness.light,
