@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import '../../../../shared/services/property_service.dart';
+import '../../../../shared/services/profile_service.dart';
 import '../../../../shared/services/gallery_service.dart';
 import '../../../../shared/services/cep_service.dart';
 import '../../../../shared/services/ai_service.dart';
@@ -100,10 +101,13 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
 
   bool _isLoading = false;
   bool _isLoadingProperty = false;
+  /// ID do usuário logado (`capturedById` obrigatório no POST `/properties` do backend).
+  String? _currentUserId;
 
   @override
   void initState() {
     super.initState();
+    _loadCurrentUserId();
     if (widget.propertyId != null) {
       _loadProperty();
     }
@@ -125,6 +129,20 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     _ownerPhoneController.addListener(_onFieldChanged);
     _ownerDocumentController.addListener(_onFieldChanged);
     _ownerAddressController.addListener(_onFieldChanged);
+  }
+
+  Future<void> _loadCurrentUserId() async {
+    try {
+      final response = await ProfileService.instance.getProfile();
+      if (response.success &&
+          response.data != null &&
+          response.data!.id.isNotEmpty &&
+          mounted) {
+        setState(() => _currentUserId = response.data!.id);
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar ID do usuário: $e');
+    }
   }
 
   void _onFieldChanged() {
@@ -568,203 +586,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     }
   }
 
-  bool _canAdvanceToNextStep() {
-    // Verifica se pode avançar sem mostrar mensagens de erro
-    switch (_currentStep) {
-      case 0: // Etapa 1: Informações Básicas
-        // Título e descrição só são obrigatórios se a IA estiver desativada
-        if (!_autoGenerateOnReview) {
-          if (_titleController.text.trim().isEmpty ||
-              _titleController.text.trim().length < 3 ||
-              _titleController.text.trim().length > 255) {
-            return false;
-          }
-          if (_descriptionController.text.trim().isEmpty ||
-              _descriptionController.text.trim().length < 10 ||
-              _descriptionController.text.trim().length > 5000) {
-            return false;
-          }
-        } else {
-          // Se IA ativada, valida apenas se preenchido manualmente
-          if (_titleController.text.trim().isNotEmpty) {
-            if (_titleController.text.trim().length < 3 ||
-                _titleController.text.trim().length > 255) {
-              return false;
-            }
-          }
-          if (_descriptionController.text.trim().isNotEmpty) {
-            if (_descriptionController.text.trim().length < 10 ||
-                _descriptionController.text.trim().length > 5000) {
-              return false;
-            }
-          }
-        }
-        return true;
-
-      case 1: // Etapa 2: Localização
-        if (_streetController.text.trim().isEmpty ||
-            _numberController.text.trim().isEmpty ||
-            _neighborhoodController.text.trim().isEmpty ||
-            _cityController.text.trim().isEmpty ||
-            _stateController.text.trim().isEmpty ||
-            _stateController.text.trim().length != 2) {
-          return false;
-        }
-        // Validar tamanhos mínimos e máximos
-        if (_cityController.text.trim().length < 2 ||
-            _cityController.text.trim().length > 100) {
-          return false;
-        }
-        if (_neighborhoodController.text.trim().length < 2 ||
-            _neighborhoodController.text.trim().length > 100) {
-          return false;
-        }
-        // Validar formato do estado (maiúsculas)
-        final state = _stateController.text.trim().toUpperCase();
-        if (!RegExp(r'^[A-Z]{2}$').hasMatch(state)) {
-          return false;
-        }
-        final cep = _zipCodeController.text.replaceAll(RegExp(r'[^0-9]'), '');
-        if (cep.isEmpty || cep.length != 8) {
-          return false;
-        }
-        return true;
-
-      case 2: // Etapa 3: Características
-        if (_totalAreaController.text.trim().isEmpty) {
-          return false;
-        }
-        final totalArea = double.tryParse(_totalAreaController.text);
-        if (totalArea == null || totalArea <= 0 || totalArea >= 1000000) {
-          return false;
-        }
-        // Validar área construída se preenchida
-        if (_builtAreaController.text.trim().isNotEmpty) {
-          final builtArea = double.tryParse(_builtAreaController.text);
-          if (builtArea != null) {
-            if (builtArea <= 0 || builtArea >= 1000000) {
-              return false;
-            }
-            if (builtArea > totalArea) {
-              return false;
-            }
-          }
-        }
-        // Validar quartos, banheiros e vagas (inteiros e limites)
-        if (_bedroomsController.text.trim().isNotEmpty) {
-          final bedrooms = int.tryParse(_bedroomsController.text);
-          if (bedrooms == null || bedrooms < 0 || bedrooms >= 50) {
-            return false;
-          }
-        }
-        if (_bathroomsController.text.trim().isNotEmpty) {
-          final bathrooms = int.tryParse(_bathroomsController.text);
-          if (bathrooms == null || bathrooms < 0 || bathrooms >= 20) {
-            return false;
-          }
-        }
-        if (_parkingSpacesController.text.trim().isNotEmpty) {
-          final parking = int.tryParse(_parkingSpacesController.text);
-          if (parking == null || parking < 0 || parking >= 20) {
-            return false;
-          }
-        }
-        return true;
-
-      case 3: // Etapa 4: Valores
-        // Se aceita negociação, deve ter preço mínimo de venda OU aluguel
-        if (_acceptsNegotiation) {
-          final hasSalePrice = _salePriceController.text.trim().isNotEmpty;
-          final hasRentPrice = _rentPriceController.text.trim().isNotEmpty;
-          final hasMinSalePrice = _minSalePriceController.text
-              .trim()
-              .isNotEmpty;
-          final hasMinRentPrice = _minRentPriceController.text
-              .trim()
-              .isNotEmpty;
-
-          if (hasSalePrice && !hasMinSalePrice) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: const Text(
-                  'Ao aceitar negociação, é obrigatório informar o preço mínimo de venda quando há preço de venda',
-                ),
-                backgroundColor: AppColors.status.error,
-              ),
-            );
-            return false;
-          }
-
-          if (hasRentPrice && !hasMinRentPrice) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: const Text(
-                  'Ao aceitar negociação, é obrigatório informar o preço mínimo de aluguel quando há preço de aluguel',
-                ),
-                backgroundColor: AppColors.status.error,
-              ),
-            );
-            return false;
-          }
-        }
-        return true;
-
-      case 4: // Etapa 5: Galeria
-        final totalImages = _selectedImages.length + _uploadedImages.length;
-        if (totalImages < 5) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'É necessário adicionar no mínimo 5 imagens. Você adicionou $totalImages de 5.',
-              ),
-              backgroundColor: AppColors.status.error,
-            ),
-          );
-          return false;
-        }
-        return true;
-
-      case 5: // Etapa 6: Clientes e Proprietário
-        if (_ownerNameController.text.trim().isEmpty ||
-            _ownerNameController.text.trim().length < 3 ||
-            _ownerNameController.text.trim().length > 255) {
-          return false;
-        }
-        if (_ownerEmailController.text.trim().isEmpty ||
-            _ownerEmailController.text.trim().length > 255) {
-          return false;
-        }
-        // Validação de email mais robusta
-        final emailRegex = RegExp(
-          r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
-        );
-        if (!emailRegex.hasMatch(_ownerEmailController.text.trim())) {
-          return false;
-        }
-        if (_ownerPhoneController.text.trim().isEmpty ||
-            _ownerPhoneController.text.trim().length < 10 ||
-            _ownerPhoneController.text.trim().length > 20) {
-          return false;
-        }
-        if (_ownerDocumentController.text.trim().isEmpty ||
-            _ownerDocumentController.text.trim().length < 11 ||
-            _ownerDocumentController.text.trim().length > 18) {
-          return false;
-        }
-        if (_ownerAddressController.text.trim().isEmpty ||
-            _ownerAddressController.text.trim().length < 10) {
-          return false;
-        }
-        return true;
-
-      case 6: // Etapa 7: Revisão (não pode avançar, é a última)
-        return false;
-
-      default:
-        return true;
-    }
-  }
-
   bool _validateCurrentStep() {
     switch (_currentStep) {
       case 0: // Etapa 1: Informações Básicas
@@ -812,6 +633,56 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             );
             return false;
           }
+          if (_titleController.text.trim().length > 255) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text(
+                    'Título não pode ultrapassar 255 caracteres'),
+                backgroundColor: AppColors.status.error,
+              ),
+            );
+            return false;
+          }
+          if (_descriptionController.text.trim().length > 5000) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text(
+                    'Descrição não pode ultrapassar 5000 caracteres'),
+                backgroundColor: AppColors.status.error,
+              ),
+            );
+            return false;
+          }
+        } else {
+          // Geração com IA na revisão: valida apenas trechos já preenchidos
+          final t = _titleController.text.trim();
+          if (t.isNotEmpty) {
+            if (t.length < 3 || t.length > 255) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: const Text(
+                    'Título deve ter entre 3 e 255 caracteres',
+                  ),
+                  backgroundColor: AppColors.status.error,
+                ),
+              );
+              return false;
+            }
+          }
+          final d = _descriptionController.text.trim();
+          if (d.isNotEmpty) {
+            if (d.length < 10 || d.length > 5000) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: const Text(
+                      'Descrição deve ter entre 10 e 5000 caracteres',
+                  ),
+                  backgroundColor: AppColors.status.error,
+                ),
+              );
+              return false;
+            }
+          }
         }
         return true;
 
@@ -852,12 +723,48 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           );
           return false;
         }
+        if (_cityController.text.trim().length < 2 ||
+            _cityController.text.trim().length > 100) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                'Cidade deve ter entre 2 e 100 caracteres',
+              ),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+          return false;
+        }
+        if (_neighborhoodController.text.trim().length < 2 ||
+            _neighborhoodController.text.trim().length > 100) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                'Bairro deve ter entre 2 e 100 caracteres',
+              ),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+          return false;
+        }
         if (_stateController.text.trim().isEmpty ||
             _stateController.text.trim().length != 2) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: const Text(
                 'Por favor, preencha o estado (UF) com 2 letras',
+              ),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+          return false;
+        }
+        final stateForUf = _stateController.text.trim().toUpperCase();
+        if (!RegExp(r'^[A-Z]{2}$').hasMatch(stateForUf)) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                'UF inválido: use 2 letras (ex.: SP, RJ)',
               ),
               backgroundColor: AppColors.status.error,
             ),
@@ -898,15 +805,77 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           );
           return false;
         }
+        if (totalArea >= 1000000) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                  'Área total deve ser menor que 1.000.000 m²'),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+          return false;
+        }
         // Validar área construída se preenchida
         if (_builtAreaController.text.trim().isNotEmpty) {
           final builtArea = double.tryParse(_builtAreaController.text);
-          if (builtArea != null && builtArea > totalArea) {
+          if (builtArea != null) {
+            if (builtArea <= 0 || builtArea >= 1000000) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: const Text(
+                      'Área construída inválida (verifique valor e máximo permitido)',
+                  ),
+                  backgroundColor: AppColors.status.error,
+                ),
+              );
+              return false;
+            }
+            if (builtArea > totalArea) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: const Text(
+                    'Área construída não pode ser maior que área total',
+                  ),
+                  backgroundColor: AppColors.status.error,
+                ),
+              );
+              return false;
+            }
+          }
+        }
+        if (_bedroomsController.text.trim().isNotEmpty) {
+          final bedrooms = int.tryParse(_bedroomsController.text);
+          if (bedrooms == null || bedrooms < 0 || bedrooms >= 50) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content:
+                    const Text('Quartos: informe um número entre 0 e 49'),
+                backgroundColor: AppColors.status.error,
+              ),
+            );
+            return false;
+          }
+        }
+        if (_bathroomsController.text.trim().isNotEmpty) {
+          final bathrooms = int.tryParse(_bathroomsController.text);
+          if (bathrooms == null || bathrooms < 0 || bathrooms >= 20) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: const Text(
-                  'Área construída não pode ser maior que área total',
-                ),
+                    'Banheiros: informe um número entre 0 e 19'),
+                backgroundColor: AppColors.status.error,
+              ),
+            );
+            return false;
+          }
+        }
+        if (_parkingSpacesController.text.trim().isNotEmpty) {
+          final parking = int.tryParse(_parkingSpacesController.text);
+          if (parking == null || parking < 0 || parking >= 20) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text(
+                    'Vagas: informe um número entre 0 e 19'),
                 backgroundColor: AppColors.status.error,
               ),
             );
@@ -1210,23 +1179,74 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       _isLoading = true;
     });
 
+    var navigatingAwayAfterSave = false;
+
     try {
+      final isEditing = widget.propertyId != null;
+      String? userId = _currentUserId;
+      if (!isEditing && (userId == null || userId.isEmpty)) {
+        final prof = await ProfileService.instance.getProfile();
+        if (!mounted) return;
+        if (prof.success &&
+            prof.data != null &&
+            prof.data!.id.isNotEmpty) {
+          userId = prof.data!.id;
+          setState(() => _currentUserId = userId);
+        }
+      }
+
+      if (!isEditing && (userId == null || userId.isEmpty)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                  'Não foi possível identificar o usuário logado. Tente atualizar ou fazer login novamente.'),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+        }
+        return;
+      }
+
+      final street = _streetController.text.trim();
+      final number = _numberController.text.trim();
+      final comp = _complementController.text.trim();
+      final fullAddress = [
+        street,
+        number,
+        if (comp.isNotEmpty) comp,
+      ].join(', ');
+
+      final totalAreaText =
+          _totalAreaController.text.trim().replaceAll(',', '.');
+      final totalAreaParsed = double.tryParse(totalAreaText);
+
+      final builtText =
+          _builtAreaController.text.trim().replaceAll(',', '.');
+      final builtParsed =
+          builtText.isEmpty ? null : double.tryParse(builtText);
+
+      final ownerPhoneDigits =
+          _ownerPhoneController.text.replaceAll(RegExp(r'\D'), '');
+
       final data = <String, dynamic>{
         'title': _titleController.text.trim(),
         'description': _descriptionController.text.trim(),
         'type': _selectedType.value,
         'status': _selectedStatus.value,
-        'street': _streetController.text.trim(),
-        'number': _numberController.text.trim(),
-        if (_complementController.text.trim().isNotEmpty)
-          'complement': _complementController.text.trim(),
+        // Obrigatório no Nest (`CreatePropertyDto.address`).
+        'address': fullAddress,
+        'street': street,
+        'number': number,
+        if (comp.isNotEmpty) 'complement': comp,
         'neighborhood': _neighborhoodController.text.trim(),
         'city': _cityController.text.trim(),
         'state': _stateController.text.trim(),
         'zipCode': _zipCodeController.text.trim(),
-        'totalArea': double.tryParse(_totalAreaController.text) ?? 0.0,
-        if (_builtAreaController.text.trim().isNotEmpty)
-          'builtArea': double.tryParse(_builtAreaController.text),
+        // Enviar só se ≥ 0,01 m² (@Min evita valor 0 inválido quando presente).
+        if (totalAreaParsed != null && totalAreaParsed >= 0.01)
+          'totalArea': totalAreaParsed,
+        'builtArea': builtParsed ?? 0,
         if (_bedroomsController.text.trim().isNotEmpty)
           'bedrooms': int.tryParse(_bedroomsController.text),
         if (_bathroomsController.text.trim().isNotEmpty)
@@ -1254,15 +1274,25 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           'offerBelowMinSaleAction': _offerBelowMinSaleAction,
         if (_offerBelowMinRentAction != null)
           'offerBelowMinRentAction': _offerBelowMinRentAction,
-        // Proprietário (obrigatórios)
+        // Proprietário (obrigatórios no Nest: nome + telefone)
         'ownerName': _ownerNameController.text.trim(),
         'ownerEmail': _ownerEmailController.text.trim(),
-        'ownerPhone': _ownerPhoneController.text.trim(),
-        'ownerDocument': _ownerDocumentController.text.trim(),
-        'ownerAddress': _ownerAddressController.text.trim(),
+        'ownerPhone':
+            ownerPhoneDigits.isNotEmpty ? ownerPhoneDigits : _ownerPhoneController.text.trim(),
+        if (_ownerDocumentController.text.trim().isNotEmpty)
+          'ownerDocument': _ownerDocumentController.text.trim(),
+        if (_ownerAddressController.text.trim().isNotEmpty)
+          'ownerAddress': _ownerAddressController.text.trim(),
       };
 
-      final response = widget.propertyId != null
+      if (!isEditing) {
+        final uid = userId!;
+        data['capturedById'] = uid;
+        data['capturedByIds'] = [uid];
+        data['responsibleUserIds'] = [uid];
+      }
+
+      final response = isEditing
           ? await _propertyService.updateProperty(widget.propertyId!, data)
           : await _propertyService.createProperty(data);
 
@@ -1271,7 +1301,11 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           // Fazer upload das imagens se houver
           if (_selectedImages.isNotEmpty) {
             await _uploadImages(response.data!.id);
+            if (!mounted) return;
           }
+          if (!mounted) return;
+
+          navigatingAwayAfterSave = true;
 
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -1283,7 +1317,10 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
               backgroundColor: AppColors.status.success,
             ),
           );
-          Navigator.of(context).pop(true);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!context.mounted) return;
+            Navigator.of(context).pop(true);
+          });
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -1304,7 +1341,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         );
       }
     } finally {
-      if (mounted) {
+      if (mounted && !navigatingAwayAfterSave) {
         setState(() {
           _isLoading = false;
         });
@@ -3030,7 +3067,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
               child: _currentStep < _totalSteps - 1
                   ? CustomButton(
                       text: 'Próximo',
-                      onPressed: _canAdvanceToNextStep() ? _nextStep : null,
+                      onPressed: _nextStep,
                       icon: Icons.arrow_forward,
                     )
                   : CustomButton(

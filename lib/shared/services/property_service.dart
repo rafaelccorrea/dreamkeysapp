@@ -5,6 +5,23 @@ import 'api_service.dart';
 import '../../core/constants/api_constants.dart';
 import 'secure_storage_service.dart';
 
+/// Resposta pode ser o próprio objeto da propriedade ou envelope `{ data: { ... } }`.
+Map<String, dynamic>? _extractPropertyPayload(Map<String, dynamic>? raw) {
+  if (raw == null) return null;
+
+  Map<String, dynamic>? pick(Map<String, dynamic> m) {
+    if (m['id'] != null) return m;
+    final nested = m['data'];
+    if (nested is Map<String, dynamic> && nested['id'] != null) return nested;
+    if (nested is Map && nested['id'] != null) {
+      return Map<String, dynamic>.from(nested);
+    }
+    return null;
+  }
+
+  return pick(raw);
+}
+
 /// Tipos de propriedade
 enum PropertyType {
   house('house', 'Casa'),
@@ -627,7 +644,14 @@ class PropertyService {
 
       if (response.success && response.data != null) {
         try {
-          final property = Property.fromJson(response.data!);
+          final root = _extractPropertyPayload(response.data!);
+          if (root == null) {
+            return ApiResponse.error(
+              message: 'Resposta inválida do servidor.',
+              statusCode: response.statusCode,
+            );
+          }
+          final property = Property.fromJson(root);
           debugPrint('✅ [PROPERTY_SERVICE] Propriedade encontrada: ${property.title}');
           return ApiResponse.success(
             data: property,
@@ -669,7 +693,14 @@ class PropertyService {
 
       if (response.success && response.data != null) {
         try {
-          final property = Property.fromJson(response.data!);
+          final root = _extractPropertyPayload(response.data!);
+          if (root == null) {
+            return ApiResponse.error(
+              message: 'Resposta inválida ao criar propriedade.',
+              statusCode: response.statusCode,
+            );
+          }
+          final property = Property.fromJson(root);
           debugPrint('✅ [PROPERTY_SERVICE] Propriedade criada: ${property.id}');
           return ApiResponse.success(
             data: property,
@@ -711,7 +742,14 @@ class PropertyService {
 
       if (response.success && response.data != null) {
         try {
-          final property = Property.fromJson(response.data!);
+          final root = _extractPropertyPayload(response.data!);
+          if (root == null) {
+            return ApiResponse.error(
+              message: 'Resposta inválida ao atualizar propriedade.',
+              statusCode: response.statusCode,
+            );
+          }
+          final property = Property.fromJson(root);
           debugPrint('✅ [PROPERTY_SERVICE] Propriedade atualizada: ${property.id}');
           return ApiResponse.success(
             data: property,
