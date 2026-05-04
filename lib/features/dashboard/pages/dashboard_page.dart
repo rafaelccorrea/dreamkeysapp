@@ -1212,9 +1212,12 @@ class _DashboardPageState extends State<DashboardPage> {
           ),
           boxShadow: [
             BoxShadow(
-              color: isDark ? accent.withOpacity(0.35) : Colors.black.withValues(alpha: 0.14),
-              blurRadius: isDark ? 14 : 10,
-              offset: Offset(0, isDark ? 8 : 5),
+              color: isDark
+                  ? accent.withOpacity(0.35)
+                  : accent.withValues(alpha: 0.22),
+              blurRadius: isDark ? 14 : 11,
+              offset: Offset(0, isDark ? 8 : 4),
+              spreadRadius: isDark ? 0 : -1,
             ),
           ],
         ),
@@ -1713,9 +1716,9 @@ class _DashboardPageState extends State<DashboardPage> {
         border: Border.all(color: accent.withValues(alpha: 0.5)),
         boxShadow: [
           BoxShadow(
-            color: accent.withValues(alpha: 0.2),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
+            color: accent.withValues(alpha: isDark ? 0.2 : 0.11),
+            blurRadius: isDark ? 10 : 7,
+            offset: Offset(0, isDark ? 3 : 2),
             spreadRadius: -2,
           ),
         ],
@@ -2001,8 +2004,11 @@ class _DashboardPageState extends State<DashboardPage> {
                           color: tone.tone,
                           boxShadow: [
                             BoxShadow(
-                              color: tone.tone.withValues(alpha: 0.5),
-                              blurRadius: 4,
+                              color: tone.tone.withValues(
+                                alpha: isDark ? 0.5 : 0.28,
+                              ),
+                              blurRadius: isDark ? 4 : 3,
+                              spreadRadius: isDark ? 0 : -0.5,
                             ),
                           ],
                         ),
@@ -2092,9 +2098,11 @@ class _DashboardPageState extends State<DashboardPage> {
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: tone.tone.withValues(alpha: 0.32),
-                              blurRadius: 6,
-                              offset: const Offset(0, 2),
+                              color: tone.tone.withValues(
+                                alpha: isDark ? 0.32 : 0.18,
+                              ),
+                              blurRadius: isDark ? 6 : 5,
+                              offset: Offset(0, isDark ? 2 : 1),
                               spreadRadius: -2,
                             ),
                           ],
@@ -2314,9 +2322,9 @@ class _DashboardPageState extends State<DashboardPage> {
         border: Border.all(color: color.withValues(alpha: 0.5)),
         boxShadow: [
           BoxShadow(
-            color: color.withValues(alpha: 0.22),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
+            color: color.withValues(alpha: isDark ? 0.22 : 0.11),
+            blurRadius: isDark ? 10 : 7,
+            offset: Offset(0, isDark ? 3 : 2),
             spreadRadius: -2,
           ),
         ],
@@ -2457,8 +2465,9 @@ class _DashboardPageState extends State<DashboardPage> {
                 color: accent,
                 boxShadow: [
                   BoxShadow(
-                    color: accent.withValues(alpha: 0.6),
-                    blurRadius: 6,
+                    color: accent.withValues(alpha: isDark ? 0.6 : 0.32),
+                    blurRadius: isDark ? 6 : 5,
+                    spreadRadius: isDark ? 0 : -1,
                   ),
                 ],
               ),
@@ -2597,9 +2606,11 @@ class _DashboardPageState extends State<DashboardPage> {
                             boxShadow: highlighted
                                 ? [
                                     BoxShadow(
-                                      color: color.withValues(alpha: 0.34),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 2),
+                                      color: color.withValues(
+                                        alpha: isDark ? 0.34 : 0.2,
+                                      ),
+                                      blurRadius: isDark ? 8 : 6,
+                                      offset: Offset(0, isDark ? 2 : 1),
                                       spreadRadius: -2,
                                     ),
                                   ]
@@ -2736,10 +2747,16 @@ class _DashboardPageState extends State<DashboardPage> {
             ? null
             : [
                 BoxShadow(
-                  color: color.withValues(alpha: 0.12),
-                  blurRadius: 14,
-                  offset: const Offset(0, 6),
-                  spreadRadius: -8,
+                  color: color.withValues(alpha: 0.065),
+                  blurRadius: 12,
+                  offset: const Offset(0, 3),
+                  spreadRadius: -4,
+                ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.025),
+                  blurRadius: 6,
+                  offset: const Offset(0, 1),
+                  spreadRadius: -2,
                 ),
               ],
       ),
@@ -2754,7 +2771,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 height: 52,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: color.withValues(alpha: isDark ? 0.1 : 0.09),
+                  color: color.withValues(alpha: isDark ? 0.1 : 0.07),
                 ),
               ),
             ),
@@ -3021,8 +3038,11 @@ class _DashboardPageState extends State<DashboardPage> {
                   ? null
                   : [
                       BoxShadow(
-                        color: color.withValues(alpha: 0.4),
-                        blurRadius: 5,
+                        color: color.withValues(
+                          alpha: isDark ? 0.4 : 0.22,
+                        ),
+                        blurRadius: isDark ? 5 : 4,
+                        spreadRadius: isDark ? 0 : -0.5,
                       ),
                     ],
             ),
@@ -3241,10 +3261,10 @@ class _DashboardPageState extends State<DashboardPage> {
                   ? null
                   : [
                       BoxShadow(
-                        color: accent.withValues(alpha: 0.12),
-                        blurRadius: 14,
-                        offset: const Offset(0, 6),
-                        spreadRadius: -8,
+                        color: accent.withValues(alpha: 0.07),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                        spreadRadius: -4,
                       ),
                     ],
             ),
@@ -3327,10 +3347,10 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: accent.withValues(alpha: 0.32),
-                      blurRadius: 14,
-                      offset: const Offset(0, 6),
-                      spreadRadius: -4,
+                      color: accent.withValues(alpha: isDark ? 0.32 : 0.2),
+                      blurRadius: isDark ? 14 : 10,
+                      offset: Offset(0, isDark ? 6 : 3),
+                      spreadRadius: isDark ? -4 : -3,
                     ),
                   ],
                 ),
@@ -3531,15 +3551,15 @@ class _DashboardPageState extends State<DashboardPage> {
             ? null
             : [
                 BoxShadow(
-                  color: color.withValues(alpha: 0.16),
-                  blurRadius: 14,
-                  offset: const Offset(0, 6),
-                  spreadRadius: -8,
+                  color: color.withValues(alpha: 0.08),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                  spreadRadius: -4,
                 ),
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.04),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2),
+                  color: Colors.black.withValues(alpha: 0.022),
+                  blurRadius: 4,
+                  offset: const Offset(0, 1),
                 ),
               ],
       ),
@@ -3647,15 +3667,17 @@ class _DashboardPageState extends State<DashboardPage> {
                   ? null
                   : [
                       BoxShadow(
-                        color: color.withValues(alpha: isToday ? 0.18 : 0.10),
-                        blurRadius: 18,
-                        offset: const Offset(0, 8),
-                        spreadRadius: -10,
+                        color: color.withValues(
+                          alpha: isToday ? 0.12 : 0.065,
+                        ),
+                        blurRadius: isToday ? 14 : 12,
+                        offset: const Offset(0, 5),
+                        spreadRadius: -8,
                       ),
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.03),
-                        blurRadius: 8,
-                        offset: const Offset(0, 3),
+                        color: Colors.black.withValues(alpha: 0.02),
+                        blurRadius: 5,
+                        offset: const Offset(0, 2),
                       ),
                     ],
             ),
@@ -3691,7 +3713,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         height: 64,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: color.withValues(alpha: 0.07),
+                          color: color.withValues(alpha: 0.06),
                         ),
                       ),
                     ),
@@ -3874,9 +3896,12 @@ class _DashboardPageState extends State<DashboardPage> {
         boxShadow: elevated
             ? [
                 BoxShadow(
-                  color: color.withValues(alpha: 0.32),
-                  blurRadius: 10,
-                  offset: const Offset(0, 3),
+                  color: color.withValues(
+                    alpha: isDark ? 0.32 : 0.14,
+                  ),
+                  blurRadius: isDark ? 10 : 6,
+                  offset: Offset(0, isDark ? 3 : 2),
+                  spreadRadius: isDark ? 0 : -1,
                 ),
               ]
             : null,
@@ -4188,9 +4213,9 @@ class _DashboardPageState extends State<DashboardPage> {
         border: Border.all(color: tone.withValues(alpha: 0.5)),
         boxShadow: [
           BoxShadow(
-            color: tone.withValues(alpha: 0.22),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
+            color: tone.withValues(alpha: isDark ? 0.22 : 0.1),
+            blurRadius: isDark ? 10 : 6,
+            offset: Offset(0, isDark ? 3 : 2),
             spreadRadius: -2,
           ),
         ],
@@ -4262,10 +4287,16 @@ class _DashboardPageState extends State<DashboardPage> {
             ? null
             : [
                 BoxShadow(
-                  color: base.withValues(alpha: 0.1),
-                  blurRadius: 14,
-                  offset: const Offset(0, 6),
-                  spreadRadius: -8,
+                  color: base.withValues(alpha: 0.055),
+                  blurRadius: 12,
+                  offset: const Offset(0, 3),
+                  spreadRadius: -4,
+                ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.022),
+                  blurRadius: 5,
+                  offset: const Offset(0, 1),
+                  spreadRadius: -1,
                 ),
               ],
       ),
@@ -4281,7 +4312,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 height: 56,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: base.withValues(alpha: isDark ? 0.1 : 0.08),
+                  color: base.withValues(alpha: isDark ? 0.1 : 0.065),
                 ),
               ),
             ),
@@ -4386,8 +4417,11 @@ class _DashboardPageState extends State<DashboardPage> {
                       color: tone,
                       boxShadow: [
                         BoxShadow(
-                          color: tone.withValues(alpha: 0.55),
-                          blurRadius: 5,
+                          color: tone.withValues(
+                            alpha: isDark ? 0.55 : 0.32,
+                          ),
+                          blurRadius: isDark ? 5 : 4,
+                          spreadRadius: isDark ? 0 : -0.5,
                         ),
                       ],
                     ),
@@ -4446,10 +4480,16 @@ class _DashboardPageState extends State<DashboardPage> {
             ? null
             : [
                 BoxShadow(
-                  color: base.withValues(alpha: 0.12),
-                  blurRadius: 14,
-                  offset: const Offset(0, 6),
-                  spreadRadius: -8,
+                  color: base.withValues(alpha: 0.06),
+                  blurRadius: 12,
+                  offset: const Offset(0, 3),
+                  spreadRadius: -4,
+                ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.022),
+                  blurRadius: 5,
+                  offset: const Offset(0, 1),
+                  spreadRadius: -1,
                 ),
               ],
       ),
@@ -4463,7 +4503,7 @@ class _DashboardPageState extends State<DashboardPage> {
               child: Icon(
                 Icons.favorite_rounded,
                 size: 96,
-                color: base.withValues(alpha: isDark ? 0.06 : 0.05),
+                color: base.withValues(alpha: isDark ? 0.06 : 0.045),
               ),
             ),
           ),
@@ -4617,8 +4657,10 @@ class _DashboardPageState extends State<DashboardPage> {
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: base.withValues(alpha: 0.4),
-                              blurRadius: 6,
+                              color: base.withValues(
+                                alpha: isDark ? 0.4 : 0.2,
+                              ),
+                              blurRadius: isDark ? 6 : 4,
                               spreadRadius: -2,
                             ),
                           ],
@@ -4846,15 +4888,16 @@ class _DashboardPageState extends State<DashboardPage> {
             ? null
             : [
                 BoxShadow(
-                  color: color.withValues(alpha: 0.14),
-                  blurRadius: 22,
-                  offset: const Offset(0, 9),
-                  spreadRadius: -12,
+                  color: color.withValues(alpha: 0.08),
+                  blurRadius: 15,
+                  offset: const Offset(0, 5),
+                  spreadRadius: -8,
                 ),
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.04),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
+                  color: Colors.black.withValues(alpha: 0.028),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                  spreadRadius: -2,
                 ),
               ],
       ),
@@ -4886,7 +4929,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 height: 72,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: color.withValues(alpha: isDark ? 0.12 : 0.1),
+                  color: color.withValues(alpha: isDark ? 0.12 : 0.085),
                 ),
               ),
             ),
@@ -4912,9 +4955,12 @@ class _DashboardPageState extends State<DashboardPage> {
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: color.withValues(alpha: 0.22),
-                            blurRadius: 10,
-                            offset: const Offset(0, 4),
+                            color: color.withValues(
+                              alpha: isDark ? 0.22 : 0.12,
+                            ),
+                            blurRadius: isDark ? 10 : 7,
+                            offset: Offset(0, isDark ? 4 : 2),
+                            spreadRadius: isDark ? 0 : -1,
                           ),
                         ],
                       ),
@@ -4993,9 +5039,10 @@ class _DashboardPageState extends State<DashboardPage> {
         ),
         boxShadow: [
           BoxShadow(
-            color: isDark ? color.withOpacity(0.24) : Colors.black.withValues(alpha: 0.12),
-            blurRadius: isDark ? 16 : 10,
+            color: isDark ? color.withOpacity(0.24) : color.withValues(alpha: 0.18),
+            blurRadius: isDark ? 16 : 11,
             offset: Offset(0, isDark ? 8 : 4),
+            spreadRadius: isDark ? 0 : -1,
           ),
         ],
       ),

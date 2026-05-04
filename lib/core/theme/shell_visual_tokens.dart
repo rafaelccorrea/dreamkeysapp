@@ -24,7 +24,7 @@ class ShellVisualTokens {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return isDark
         ? Colors.white.withValues(alpha: 0.08)
-        : ThemeHelpers.borderColor(context).withValues(alpha: 0.52);
+        : ThemeHelpers.borderColor(context).withValues(alpha: 0.44);
   }
 
   static Color profileGlassFill(BuildContext context) {
@@ -59,16 +59,22 @@ class ShellVisualTokens {
       border: Border.all(
         color: isDark
             ? accent.withValues(alpha: 0.12)
-            : ThemeHelpers.borderColor(context).withValues(alpha: 0.48),
+            : ThemeHelpers.borderColor(context).withValues(alpha: 0.42),
       ),
       boxShadow: isDark
           ? null
           : [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.06),
-                blurRadius: 14,
+                color: const Color(0xFF334155).withValues(alpha: 0.05),
+                blurRadius: 18,
                 offset: const Offset(0, 4),
-                spreadRadius: -2,
+                spreadRadius: -5,
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.02),
+                blurRadius: 6,
+                offset: const Offset(0, 1),
+                spreadRadius: -1,
               ),
             ],
     );
@@ -128,18 +134,20 @@ class ShellVisualTokens {
         ],
       ),
       border: Border.all(
-        color: edge.withValues(alpha: 0.58),
+        color: edge.withValues(alpha: 0.5),
       ),
       boxShadow: [
         BoxShadow(
-          color: Colors.black.withValues(alpha: 0.09),
-          blurRadius: accentBlur,
-          offset: Offset(0, accentDy),
+          color: const Color(0xFF475569).withValues(alpha: 0.07),
+          blurRadius: accentBlur * 0.78,
+          offset: Offset(0, accentDy * 0.72),
+          spreadRadius: -6,
         ),
         BoxShadow(
-          color: Colors.black.withValues(alpha: 0.04),
-          blurRadius: neutralBlur * 0.55,
-          offset: Offset(0, neutralDy * 0.5),
+          color: Colors.black.withValues(alpha: 0.028),
+          blurRadius: neutralBlur * 0.45,
+          offset: Offset(0, neutralDy * 0.42),
+          spreadRadius: -2,
         ),
       ],
     );
