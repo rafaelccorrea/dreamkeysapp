@@ -132,17 +132,24 @@ class DashboardStats {
 
   factory DashboardStats.fromJson(Map<String, dynamic> json) {
     return DashboardStats(
-      myProperties: json['myProperties'] as int? ?? 0,
-      myClients: json['myClients'] as int? ?? 0,
-      myInspections: json['myInspections'] as int? ?? 0,
-      myAppointments: json['myAppointments'] as int? ?? 0,
+      myProperties: _dashboardJsonInt(json['myProperties']),
+      myClients: _dashboardJsonInt(json['myClients']),
+      myInspections: _dashboardJsonInt(json['myInspections']),
+      myAppointments: _dashboardJsonInt(json['myAppointments']),
       myCommissions: (json['myCommissions'] as num?)?.toDouble() ?? 0.0,
-      myTasks: json['myTasks'] as int? ?? 0,
-      myKeys: json['myKeys'] as int? ?? 0,
-      myNotes: json['myNotes'] as int? ?? 0,
-      myMatches: json['myMatches'] as int? ?? 0,
+      myTasks: _dashboardJsonInt(json['myTasks']),
+      myKeys: _dashboardJsonInt(json['myKeys']),
+      myNotes: _dashboardJsonInt(json['myNotes']),
+      myMatches: _dashboardJsonInt(json['myMatches']),
     );
   }
+}
+
+int _dashboardJsonInt(dynamic value) {
+  if (value == null) return 0;
+  if (value is int) return value;
+  if (value is num) return value.round();
+  return int.tryParse(value.toString()) ?? 0;
 }
 
 class DashboardPerformance {

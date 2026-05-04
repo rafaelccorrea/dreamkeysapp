@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:lucide_icons/lucide_icons.dart';
 import '../../../../shared/services/property_service.dart';
+import '../../../../shared/services/module_access_service.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
 import '../../../../shared/widgets/shimmer_image.dart';
@@ -11,9 +14,11 @@ import '../../../../core/theme/theme_helpers.dart';
 import '../widgets/property_filters_drawer.dart';
 import '../widgets/intelligent_search_modal.dart';
 import '../widgets/export_import_dialog.dart';
+import '../services/property_local_draft_storage.dart';
 import '../../../../shared/services/ai_service.dart';
 import '../../matches/widgets/matches_badge.dart';
 import '../../../../core/routes/app_routes.dart';
+import '../models/property_wizard_pop_result.dart';
 
 // Formatter de moeda
 final _currencyFormatter = NumberFormat.currency(
@@ -200,10 +205,13 @@ class _PropertiesPageState extends State<PropertiesPage> {
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
+  int _localDraftCount = 0;
+
   @override
   void initState() {
     super.initState();
     _loadProperties();
+    _refreshLocalDraftCount();
     _scrollController.addListener(_onScroll);
   }
 
@@ -213,6 +221,58 @@ class _PropertiesPageState extends State<PropertiesPage> {
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _refreshLocalDraftCount() async {
+    final n =
+        (await PropertyLocalDraftStorage.instance.loadAllForCurrentCompany())
+            .length;
+    if (mounted) setState(() => _localDraftCount = n);
+  }
+
+  Future<void> _onPropertyWizardReturned(Object? result) async {
+    await _refreshLocalDraftCount();
+    if (!mounted || result == null) return;
+
+    await _loadProperties(refresh: true);
+    if (result is PropertyWizardPopResult) {
+      final r = result;
+      if (r.showApprovalShortcut &&
+          r.propertyId != null &&
+          r.propertyId!.isNotEmpty) {
+        final id = r.propertyId!;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: const Text(
+              'Imóvel na fila de aprovação ou autorização — o backend aplicou o mesmo fluxo do CRM web.',
+            ),
+            action: SnackBarAction(
+              label: 'Abrir imóvel',
+              onPressed: () {
+                Navigator.of(context).pushNamed(AppRoutes.propertyDetails(id));
+              },
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    // Compat: rotas mais antigas retornavam apenas `true`
+    if (result == true) {
+      return;
+    }
+  }
+
+  Future<void> _openPropertyCreateThenRefreshDrafts() async {
+    final r = await Navigator.of(context).pushNamed(AppRoutes.propertyCreate);
+    await _onPropertyWizardReturned(r);
+  }
+
+  Future<void> _openLocalDrafts() async {
+    await Navigator.of(context).pushNamed(AppRoutes.propertyDraftsLocal);
+    await _refreshLocalDraftCount();
   }
 
   void _onScroll() {
@@ -914,7 +974,15 @@ class _PropertiesPageState extends State<PropertiesPage> {
         icon: Icons.add_business_rounded,
         label: 'Novo imóvel',
         isPrimary: true,
-        onPressed: () => Navigator.of(context).pushNamed(AppRoutes.propertyCreate),
+        onPressed: _openPropertyCreateThenRefreshDrafts,
+      ),
+      _buildQuickActionButton(
+        context,
+        icon: Icons.folder_special_rounded,
+        label:
+            _localDraftCount > 0 ? 'Rascunhos ($_localDraftCount)' : 'Rascunhos',
+        highlight: _localDraftCount > 0,
+        onPressed: _openLocalDrafts,
       ),
       _buildQuickActionButton(
         context,
@@ -1369,7 +1437,6 @@ class _PropertiesPageState extends State<PropertiesPage> {
   /// Cartões KPI do **hero** — alinhados às pills / glass do cabeçalho (sem gradiente forte).
   BoxDecoration _portfolioHeroKpiDecoration(BuildContext context, Color accent) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final borderCol = ThemeHelpers.borderColor(context);
     return BoxDecoration(
       borderRadius: BorderRadius.circular(16),
       color: isDark
@@ -1378,15 +1445,15 @@ class _PropertiesPageState extends State<PropertiesPage> {
       border: Border.all(
         color: isDark
             ? accent.withValues(alpha: 0.14)
-            : borderCol.withValues(alpha: 0.52),
+            : ShellVisualTokens.dashboardGlassBorder(context),
       ),
       boxShadow: isDark
           ? null
           : [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
-                blurRadius: 12,
-                offset: const Offset(0, 3),
+                color: Colors.black.withValues(alpha: 0.065),
+                blurRadius: 14,
+                offset: const Offset(0, 4),
                 spreadRadius: -2,
               ),
             ],
@@ -1435,7 +1502,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
       border: Border.all(color: ShellVisualTokens.portfolioGlassBorder(context)),
       boxShadow: [
         BoxShadow(
-          color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.06),
+          color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.075),
           blurRadius: isDark ? 14 : 14,
           offset: Offset(0, isDark ? 7 : 4),
           spreadRadius: isDark ? -3 : -2,
@@ -3017,8 +3084,13 @@ class _PropertiesPageState extends State<PropertiesPage> {
                     ),
                     const SizedBox(height: 20),
                     FilledButton.icon(
-                      onPressed: () => Navigator.of(context)
-                          .pushNamed(AppRoutes.propertyCreate),
+                      onPressed: () async {
+                        final r = await Navigator.of(context)
+                            .pushNamed(AppRoutes.propertyCreate);
+                        if (context.mounted) {
+                          await _onPropertyWizardReturned(r);
+                        }
+                      },
                       icon: Icon(
                         obstructed ? Icons.add_rounded : Icons.add_home_rounded,
                         size: 20,
@@ -3262,7 +3334,6 @@ class _PropertiesPageState extends State<PropertiesPage> {
     final price = _formatMainPrice(property);
     final specs = _editorialSpecsLine(property);
     final locCompact = _compactLocationLine(property);
-    final statusColor = _getStatusColor(property.status);
     const innerRadius = 20.0;
     final ringPad = featuredStripLayout ? 1.5 : 0.0;
     final outerRadius = innerRadius + ringPad;
@@ -3274,15 +3345,18 @@ class _PropertiesPageState extends State<PropertiesPage> {
         child: InkWell(
           onTap: () =>
               Navigator.of(context).pushNamed(AppRoutes.propertyDetails(property.id)),
+          onLongPress: () {
+            HapticFeedback.mediumImpact();
+            _showPropertyQuickActionsSheet(context, theme, property);
+          },
           splashColor: AppColors.primary.primary.withValues(alpha: 0.18),
           highlightColor: Colors.white.withValues(alpha: 0.06),
           child: Ink(
             decoration: BoxDecoration(
               border: Border.all(
                 color: featuredStripLayout
-                    ? Colors.white.withValues(alpha: isDark ? 0.12 : 0.2)
-                    : ThemeHelpers.borderColor(context)
-                        .withValues(alpha: isDark ? 0.42 : 0.26),
+                    ? Colors.white.withValues(alpha: isDark ? 0.12 : 0.24)
+                    : ShellVisualTokens.propertyListCardBorder(context),
                 width: featuredStripLayout ? 0.85 : 1,
               ),
             ),
@@ -3347,75 +3421,20 @@ class _PropertiesPageState extends State<PropertiesPage> {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Flexible(
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Flexible(
-                              child: Container(
-                                constraints: const BoxConstraints(maxHeight: 34),
-                                padding: const EdgeInsets.fromLTRB(7, 4, 8, 4),
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: 0.34),
-                                  borderRadius: BorderRadius.circular(11),
-                                  border: Border.all(
-                                    color: Colors.white.withValues(
-                                      alpha: featuredStripLayout ? 0.2 : 0.14,
-                                    ),
-                                  ),
-                                  boxShadow: featuredStripLayout
-                                      ? [
-                                          BoxShadow(
-                                            color: Colors.black.withValues(alpha: 0.25),
-                                            blurRadius: 8,
-                                            offset: const Offset(0, 3),
-                                          ),
-                                        ]
-                                      : null,
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.circle, size: 6, color: statusColor),
-                                    const SizedBox(width: 5),
-                                    Flexible(
-                                      child: Text(
-                                        property.status.label,
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: featuredStripLayout ? 10 : 9.5,
-                                          fontWeight: FontWeight.w800,
-                                          height: 1.05,
-                                          letterSpacing:
-                                              featuredStripLayout ? -0.05 : 0,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                      if (property.isFeatured) ...[
+                        if (featuredStripLayout)
+                          _buildPropertyFeaturedChip(stripLayout: true)
+                        else
+                          Flexible(
+                            child: FittedBox(
+                              alignment: Alignment.centerLeft,
+                              fit: BoxFit.scaleDown,
+                              child: _buildPropertyFeaturedChip(
+                                stripLayout: false,
                               ),
                             ),
-                            if (property.isFeatured) ...[
-                              const SizedBox(width: 5),
-                              if (featuredStripLayout)
-                                _buildPropertyFeaturedChip(stripLayout: true)
-                              else
-                                Flexible(
-                                  child: FittedBox(
-                                    alignment: Alignment.centerLeft,
-                                    fit: BoxFit.scaleDown,
-                                    child: _buildPropertyFeaturedChip(
-                                      stripLayout: false,
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ],
-                        ),
-                      ),
+                          ),
+                      ],
                     ],
                   ),
                 ),
@@ -3580,107 +3599,298 @@ class _PropertiesPageState extends State<PropertiesPage> {
     );
   }
 
+  /// Menu contextual estilo Pinterest: bottom sheet com ações conforme permissões (`property:*`, `match:view`).
+  Future<void> _showPropertyQuickActionsSheet(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) async {
+    final access = ModuleAccessService.instance;
+    final canEdit = access.hasPermission('property:update');
+    final canDelete = access.hasPermission('property:delete');
+    final canMatches = access.hasPermission('match:view') &&
+        access.isModuleAvailableForCompany('match_system');
+
+    // O menu abre para todos (igual ao toque no cartão). Cada ação continua
+    // condicionada a permissões abaixo (ex.: excluir só com property:delete).
+
+    final parentContext = context;
+    final isDark = theme.brightness == Brightness.dark;
+    final primary =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    final err = theme.colorScheme.error;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.45),
+      builder: (sheetContext) {
+        final padBottom = MediaQuery.paddingOf(sheetContext).bottom;
+
+        Widget sheetTile({
+          required _PropertyActionMenuRow row,
+          required VoidCallback onTap,
+        }) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onTap,
+                borderRadius: BorderRadius.circular(20),
+                child: Ink(
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? theme.colorScheme.surfaceContainerHighest
+                            .withValues(alpha: 0.55)
+                        : ShellVisualTokens.dashboardGlassFill(context),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: isDark
+                          ? ThemeHelpers.borderColor(context)
+                              .withValues(alpha: 0.35)
+                          : ShellVisualTokens.dashboardGlassBorder(context),
+                    ),
+                  ),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+                  child: row,
+                ),
+              ),
+            ),
+          );
+        }
+
+        return DraggableScrollableSheet(
+          initialChildSize: 0.46,
+          minChildSize: 0.3,
+          maxChildSize: 0.9,
+          expand: false,
+          builder: (ctx, scrollController) {
+            return DecoratedBox(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surface,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(28)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.2),
+                    blurRadius: 28,
+                    offset: const Offset(0, -6),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  const SizedBox(height: 10),
+                  Center(
+                    child: Container(
+                      width: 42,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.onSurface
+                            .withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 16, 8, 10),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: SizedBox(
+                            width: 58,
+                            height: 58,
+                            child: property.mainImage != null
+                                ? ShimmerImage(
+                                    imageUrl: property.mainImage!.url,
+                                    width: 58,
+                                    height: 58,
+                                    fit: BoxFit.cover,
+                                  )
+                                : ColoredBox(
+                                    color: theme
+                                        .colorScheme.surfaceContainerHighest,
+                                    child: Icon(
+                                      LucideIcons.building2,
+                                      color: primary,
+                                      size: 28,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                property.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.2,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                _compactLocationLine(property),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: ThemeHelpers.textSecondaryColor(
+                                    sheetContext,
+                                  ),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.of(sheetContext).pop(),
+                          icon: const Icon(Icons.close_rounded),
+                          tooltip: 'Fechar',
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView(
+                      controller: scrollController,
+                      padding: EdgeInsets.fromLTRB(16, 0, 16, 18 + padBottom),
+                      children: [
+                        // Sempre disponível: alinhado ao onTap do tile (sem checagem extra).
+                        sheetTile(
+                          row: _PropertyActionMenuRow(
+                            icon: LucideIcons.layoutGrid,
+                            iconBackground:
+                                primary.withValues(alpha: isDark ? 0.2 : 0.12),
+                            iconColor: primary,
+                            title: 'Abrir ficha',
+                            subtitle:
+                                'Detalhes, fotos, documentos e histórico do imóvel',
+                          ),
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            Future.microtask(() {
+                              if (!mounted || !parentContext.mounted) return;
+                              Navigator.of(parentContext).pushNamed(
+                                AppRoutes.propertyDetails(property.id),
+                              );
+                            });
+                          },
+                        ),
+                        if (canMatches)
+                          sheetTile(
+                            row: _PropertyActionMenuRow(
+                              icon: LucideIcons.sparkles,
+                              iconBackground:
+                                  primary.withValues(alpha: isDark ? 0.2 : 0.12),
+                              iconColor: primary,
+                              title: 'Matches',
+                              subtitle:
+                                  'Clientes compatíveis com este imóvel',
+                            ),
+                            onTap: () {
+                              Navigator.of(sheetContext).pop();
+                              Future.microtask(() {
+                                if (!mounted || !parentContext.mounted) return;
+                                Navigator.of(parentContext).pushNamed(
+                                  AppRoutes.matchesByProperty(property.id),
+                                );
+                              });
+                            },
+                          ),
+                        if (canEdit)
+                          sheetTile(
+                            row: _PropertyActionMenuRow(
+                              icon: LucideIcons.pencil,
+                              iconBackground:
+                                  primary.withValues(alpha: isDark ? 0.2 : 0.12),
+                              iconColor: primary,
+                              title: 'Editar imóvel',
+                              subtitle:
+                                  'Dados, valores, proprietário e galeria',
+                            ),
+                            onTap: () {
+                              Navigator.of(sheetContext).pop();
+                              Future.microtask(() {
+                                if (!mounted || !parentContext.mounted) return;
+                                Navigator.of(parentContext).pushNamed(
+                                  '/properties/${property.id}/edit',
+                                );
+                              });
+                            },
+                          ),
+                        if (canDelete)
+                          sheetTile(
+                            row: _PropertyActionMenuRow(
+                              icon: LucideIcons.trash2,
+                              iconBackground:
+                                  err.withValues(alpha: isDark ? 0.18 : 0.12),
+                              iconColor: err,
+                              title: 'Excluir permanentemente',
+                              subtitle:
+                                  'Remove o imóvel do portfólio da empresa',
+                              isDestructive: true,
+                            ),
+                            onTap: () async {
+                              Navigator.of(sheetContext).pop();
+                              await Future<void>.delayed(Duration.zero);
+                              if (!mounted || !parentContext.mounted) return;
+                              await _confirmAndDeleteProperty(
+                                parentContext,
+                                property,
+                              );
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _buildPropertyActionsMenu(
     BuildContext context,
     ThemeData theme,
     Property property,
   ) {
-    final brightness = theme.brightness;
-    final pm = AppTheme.propertyTileActionsPopupMenu(brightness);
-    final base = Theme.of(context);
-
-    return Container(
-      width: 42,
-      height: 42,
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.45),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          _showPropertyQuickActionsSheet(context, theme, property);
+        },
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
-      ),
-      child: Theme(
-        data: base.copyWith(
-          popupMenuTheme: pm,
-          splashColor: AppColors.primary.primary.withValues(alpha: 0.10),
-          highlightColor: AppColors.primary.primary.withValues(alpha: 0.05),
-          hoverColor: AppColors.primary.primary.withValues(alpha: 0.06),
-        ),
-        child: PopupMenuButton<String>(
-          clipBehavior: Clip.antiAlias,
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(minWidth: 42, minHeight: 42),
-          color: pm.color,
-          surfaceTintColor: pm.surfaceTintColor,
-          elevation: pm.elevation ?? 20,
-          shadowColor: pm.shadowColor,
-          shape: pm.shape,
-          offset: const Offset(-6, 6),
-          popUpAnimationStyle: AnimationStyle(
-            duration: const Duration(milliseconds: 220),
-            reverseDuration: const Duration(milliseconds: 180),
+        child: Tooltip(
+          message: 'Opções do imóvel',
+          child: Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.45),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+            ),
+            child: const Icon(
+              Icons.more_horiz_rounded,
+              color: Colors.white,
+              size: 22,
+            ),
           ),
-          icon: const Icon(Icons.more_vert_rounded, color: Colors.white, size: 20),
-          tooltip: 'Ações do imóvel',
-          onSelected: (value) async {
-            if (value == 'edit' && mounted) {
-              Navigator.of(context).pushNamed('/properties/${property.id}/edit');
-            } else if (value == 'delete') {
-              await _confirmAndDeleteProperty(context, property);
-            }
-          },
-          itemBuilder: (menuCtx) {
-            final dark = Theme.of(menuCtx).brightness == Brightness.dark;
-            final primary =
-                dark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
-            final editBg =
-                primary.withValues(alpha: dark ? 0.16 : 0.11);
-            final err = Theme.of(menuCtx).colorScheme.error;
-
-            // Largura mínima para títulos e subtítulos legíveis no overlay.
-            const panelW = 304.0;
-
-            return [
-              PopupMenuItem<String>(
-                value: 'edit',
-                padding: EdgeInsets.zero,
-                height: 86,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(13, 9, 7, 9),
-                  child: SizedBox(
-                    width: panelW,
-                    child: _PropertyActionMenuRow(
-                      icon: Icons.edit_rounded,
-                      iconBackground: editBg,
-                      iconColor: primary,
-                      title: 'Editar imóvel',
-                      subtitle:
-                          'Dados cadastrais, valores, disponibilidade e mídia do anúncio',
-                    ),
-                  ),
-                ),
-              ),
-              const PopupMenuDivider(height: 1, indent: 18, endIndent: 18, thickness: 0.5),
-              PopupMenuItem<String>(
-                value: 'delete',
-                padding: EdgeInsets.zero,
-                height: 92,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(13, 10, 7, 11),
-                  child: SizedBox(
-                    width: panelW,
-                    child: _PropertyActionMenuRow(
-                      icon: Icons.delete_outline_rounded,
-                      iconBackground: err.withValues(alpha: dark ? 0.16 : 0.1),
-                      iconColor: err,
-                      title: 'Excluir permanentemente',
-                      subtitle:
-                          'Remove o imóvel do portfólio. Confira o nome na confirmação antes de aceitar.',
-                      isDestructive: true,
-                    ),
-                  ),
-                ),
-              ),
-            ];
-          },
         ),
       ),
     );
@@ -4118,24 +4328,6 @@ class _PropertiesPageState extends State<PropertiesPage> {
     if (cityState.isNotEmpty) parts.add(cityState);
 
     return parts.isNotEmpty ? parts.join(' • ') : 'Localização não informada';
-  }
-
-  Color _getStatusColor(PropertyStatus status) {
-    switch (status) {
-      case PropertyStatus.available:
-        return AppColors.status.success;
-      case PropertyStatus.sold:
-        return AppColors.status.info;
-      case PropertyStatus.rented:
-        return AppColors.status.warning;
-      case PropertyStatus.maintenance:
-        return AppColors.status.warning;
-      case PropertyStatus.draft:
-        return AppColors.text.textSecondary;
-      case PropertyStatus.pendingApproval:
-      case PropertyStatus.pendingOwnerAuthorization:
-        return AppColors.status.warning;
-    }
   }
 
   Widget _buildPagination(BuildContext context) {

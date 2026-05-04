@@ -14,10 +14,87 @@ class KanbanService {
   static final KanbanService instance = KanbanService._();
   final ApiService _apiService = ApiService.instance;
 
+  /// Lista funis acessíveis (mesma fonte que o front: `/kanban/my-boards`).
+  Future<ApiResponse<KanbanMyBoardsPageDto>> getMyBoardsPage({
+    int page = 1,
+    int limit = 24,
+  }) async {
+    try {
+      final response = await _apiService.get<Map<String, dynamic>>(
+        ApiConstants.kanbanMyBoards,
+        queryParameters: {
+          'page': '$page',
+          'limit': '$limit',
+        },
+      );
+      if (response.success && response.data != null) {
+        return ApiResponse.success(
+          data: KanbanMyBoardsPageDto.fromJson(response.data!),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao listar funis',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      return ApiResponse.error(
+        message: 'Erro ao listar funis: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Agrega **todas** as páginas (até teto). Evite no caminho quente do app;
+  /// use [getMyBoardsPage] + paginação sob demanda no seletor de funis.
+  Future<ApiResponse<List<KanbanAccessibleFunnelSlot>>>
+      getAllAccessibleFunnelSlots() async {
+    final aggregated = <KanbanAccessibleFunnelSlot>[];
+    var page = 1;
+    const limit = 100;
+    ApiResponse<KanbanMyBoardsPageDto>? lastResponse;
+
+    for (var i = 0; i < 50; i++) {
+      final r = await getMyBoardsPage(page: page, limit: limit);
+      lastResponse = r;
+
+      if (!r.success || r.data == null) {
+        break;
+      }
+
+      aggregated.addAll(r.data!.boards);
+
+      if (page >= r.data!.totalPages) {
+        return ApiResponse.success(
+          data: aggregated,
+          statusCode: r.statusCode,
+        );
+      }
+      page++;
+    }
+
+    if (aggregated.isNotEmpty) {
+      return ApiResponse.success(data: aggregated, statusCode: 200);
+    }
+
+    return ApiResponse.error(
+      message:
+          lastResponse?.message ?? 'Não foi possível carregar os funis disponíveis',
+      statusCode: lastResponse?.statusCode ?? 0,
+    );
+  }
+
   /// Busca quadro Kanban completo
+  ///
+  /// [perColumnLimit] alinhado ao `useKanban` do front (12 na primeira carga).
   Future<ApiResponse<KanbanBoard>> getBoard(
     String teamId, {
     String? projectId,
+    int perColumnLimit = 12,
+    String? search,
+    KanbanPriority? priority,
+    String? assignedToId,
   }) async {
     try {
       debugPrint('🔍 [KANBAN_SERVICE] Iniciando busca do quadro Kanban');
@@ -27,16 +104,27 @@ class KanbanService {
       debugPrint('🔍 [KANBAN_SERVICE] - projectId é null? ${projectId == null}');
       debugPrint('🔍 [KANBAN_SERVICE] - projectId está vazio? ${projectId?.isEmpty ?? true}');
 
-      final params = <String, String>{};
+      final params = <String, String>{
+        'perColumnLimit': '${perColumnLimit > 0 ? perColumnLimit : 12}',
+      };
       if (projectId != null && projectId.isNotEmpty) {
         params['projectId'] = projectId;
         debugPrint('🔍 [KANBAN_SERVICE] ✅ projectId adicionado aos query parameters: $projectId');
       } else {
         debugPrint('🔍 [KANBAN_SERVICE] ⚠️ projectId NÃO será enviado (null ou vazio)');
       }
+      if (search != null && search.trim().isNotEmpty) {
+        params['search'] = search.trim();
+      }
+      if (priority != null) {
+        params['priority'] = priority.name;
+      }
+      if (assignedToId != null && assignedToId.isNotEmpty) {
+        params['assignedToId'] = assignedToId;
+      }
 
       final url = ApiConstants.kanbanBoard(teamId);
-      final fullUrl = params.isEmpty 
+      final fullUrl = params.isEmpty
           ? '${ApiConstants.baseApiUrl}$url'
           : '${ApiConstants.baseApiUrl}$url?${params.entries.map((e) => '${e.key}=${e.value}').join('&')}';
       
@@ -48,7 +136,7 @@ class KanbanService {
 
       final response = await _apiService.get<Map<String, dynamic>>(
         url,
-        queryParameters: params.isEmpty ? null : params,
+        queryParameters: params,
       );
 
       debugPrint('🔍 [KANBAN_SERVICE] Resposta recebida:');

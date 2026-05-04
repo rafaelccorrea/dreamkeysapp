@@ -12,6 +12,7 @@ import '../../features/properties/pages/properties_page.dart';
 import '../../features/notifications/pages/notifications_page.dart';
 import '../../features/properties/pages/property_details_page.dart';
 import '../../features/properties/pages/create_property_page.dart';
+import '../../features/properties/pages/property_drafts_list_page.dart';
 import '../../features/properties/pages/property_offers_page.dart';
 import '../../features/properties/pages/offer_details_page.dart';
 import '../../features/appointments/pages/calendar_page.dart';
@@ -55,6 +56,8 @@ class AppRoutes {
   static const String profileEdit = '/profile/edit';
   static const String properties = '/properties';
   static const String propertyCreate = '/properties/create';
+  /// Rascunhos de cadastro armazenados só no dispositivo.
+  static const String propertyDraftsLocal = '/properties/drafts-local';
   static const String propertyOffers = '/properties/offers';
   static const String notifications = '/notifications';
   static const String calendar = '/calendar';
@@ -181,8 +184,15 @@ class AppRoutes {
           );
         }
       }
+    } else if (routeName == AppRoutes.propertyDraftsLocal) {
+      return _buildRoute(const PropertyDraftsListPage(), settings);
     } else if (routeName == AppRoutes.propertyCreate) {
-      return _buildRoute(const CreatePropertyPage(), settings);
+      final args = settings.arguments as Map<String, dynamic>?;
+      final localDraftId = args != null ? args['localDraftId'] as String? : null;
+      return _buildRoute(
+        CreatePropertyPage(localDraftId: localDraftId),
+        settings,
+      );
     } else if (routeName == AppRoutes.propertyOffers) {
       // IMPORTANTE: Esta rota deve vir ANTES da verificação genérica de /properties/
       debugPrint('🛣️ [ROUTES] Navegando para PropertyOffersPage');
@@ -206,6 +216,9 @@ class AppRoutes {
         } else if (segments.length == 4 && segments[3] == 'edit') {
           // Edição: /properties/:id/edit
           return _buildRoute(CreatePropertyPage(propertyId: id), settings);
+        } else if (segments.length == 4 && segments[3] == 'matches') {
+          // Matches filtrados por imóvel
+          return _buildRoute(MatchesPage(propertyId: id), settings);
         }
       }
       // Se não correspondeu aos padrões acima, retornar página não encontrada
@@ -288,13 +301,6 @@ class AppRoutes {
           return _buildRoute(CreateDocumentPage(documentId: id), settings);
         }
       }
-    } else if (routeName != null && routeName.startsWith('/properties/')) {
-      // Matches de propriedade: /properties/:propertyId/matches
-      final segments = routeName.split('/');
-      if (segments.length == 4 && segments[3] == 'matches') {
-        final propertyId = segments[2];
-        return _buildRoute(MatchesPage(propertyId: propertyId), settings);
-      }
     } else if (routeName != null && routeName.startsWith('/clients/')) {
       // Matches de cliente: /clients/:clientId/matches
       final segments = routeName.split('/');
@@ -311,12 +317,18 @@ class AppRoutes {
     );
   }
 
-  /// Cria uma rota com transição suave customizada
-  static PageRouteBuilder<T> _buildRoute<T extends Widget>(
+  /// Transição suave entre telas.
+  ///
+  /// O tipo genérico das rotas ([PageRouteBuilder]/[ModalRoute]) refere-se ao
+  /// **valor opcional** retornado por `Navigator.pop(result)` — não ao widget da
+  /// página. Usar `T extends Widget` quebrava `pop(true)` / `pop(false)` com
+  /// `type 'bool' is not a subtype of type 'Widget?'` e leave o navigator num
+  /// estado inconsistente (`!_debugLocked`).
+  static Route<dynamic> _buildRoute(
     Widget page,
     RouteSettings settings,
   ) {
-    return PageRouteBuilder<T>(
+    return PageRouteBuilder<dynamic>(
       settings: settings,
       pageBuilder: (context, animation, secondaryAnimation) => page,
       transitionsBuilder: (context, animation, secondaryAnimation, child) {

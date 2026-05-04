@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/theme/shell_visual_tokens.dart';
 import '../../core/theme/theme_helpers.dart';
 import 'brand_wordmark_logo.dart';
 
@@ -195,7 +196,6 @@ class _ToolbarActionCluster extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final edge = ThemeHelpers.borderColor(context);
 
     return Container(
@@ -203,8 +203,8 @@ class _ToolbarActionCluster extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: edge.withValues(alpha: isDark ? 0.42 : 0.52)),
-        color: isDark ? Colors.white.withValues(alpha: 0.07) : const Color(0xFFF5F6FA),
+        border: Border.all(color: ShellVisualTokens.toolbarClusterBorder(context)),
+        color: ShellVisualTokens.toolbarClusterFill(context),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

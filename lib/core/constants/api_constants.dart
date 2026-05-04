@@ -270,26 +270,26 @@ class ApiConstants {
   static String matchView(String id) => '/matches/$id/view';
   static String matchStatus(String id) => '/matches/$id/status';
 
-  // Endpoints de Notificações
+  // Endpoints de Notificações (paridade com imobx/Nest: hífens, não /unread/count)
   static const String notifications = '/notifications';
-  static String notificationsUnreadList([int? page, int? limit]) {
-    final params = <String>[];
-    if (page != null) params.add('page=$page');
-    if (limit != null) params.add('limit=$limit');
-    return '/notifications/unread${params.isNotEmpty ? '?${params.join('&')}' : ''}';
-  }
-
-  static const String notificationsUnreadCount = '/notifications/unread/count';
+  /// Todas as empresas do utilizador — necessário no mobile quando não há X-Company-ID
+  /// ou para ver o mesmo universo que o web para utilizadores com várias empresas.
+  static const String notificationsAllCompanies = '/notifications/all-companies';
+  static const String notificationsUnreadList = '/notifications/unread/list';
+  static const String notificationsUnreadCount = '/notifications/unread-count';
   static const String notificationsUnreadCountByCompany =
-      '/notifications/unread/count/by-company';
+      '/notifications/unread-count-by-company';
   static String notificationById(String id) => '/notifications/$id';
   static String markNotificationRead(String id) => '/notifications/$id/read';
   static String markNotificationUnread(String id) =>
       '/notifications/$id/unread';
   static const String markNotificationsReadBulk = '/notifications/read/bulk';
   static const String markNotificationsReadAll = '/notifications/read/all';
+  /// Registo do token FCM do app (POST / DELETE com body `{ token }`).
+  static const String notificationsMobileDevices = '/notifications/mobile-devices';
 
   // Endpoints de Kanban
+  static const String kanbanMyBoards = '/kanban/my-boards';
   static String kanbanBoard(String teamId) => '/kanban/board/$teamId';
   static const String kanbanColumns = '/kanban/columns';
   static String kanbanColumnById(String id) => '/kanban/columns/$id';

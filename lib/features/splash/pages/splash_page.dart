@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'dart:async';
 import '../../../../core/routes/app_routes.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../shared/widgets/brand_wordmark_logo.dart'
@@ -10,6 +9,7 @@ import '../../../../shared/services/api_service.dart';
 import '../../../../shared/services/token_refresh_service.dart';
 import '../../../../shared/services/company_service.dart';
 import '../../../../shared/services/module_access_service.dart';
+import '../../../../core/push/app_push_service.dart';
 import '../../chat/controllers/chat_unread_controller.dart';
 import '../../notifications/controllers/notification_controller.dart';
 
@@ -59,11 +59,12 @@ class _SplashPageState extends State<SplashPage> {
         await ChatUnreadController.instance.initialize();
         debugPrint('✅ [SPLASH] ChatUnreadController inicializado');
 
-        debugPrint('🔄 [SPLASH] Inicializando NotificationController em background...');
-        unawaited(
-          NotificationController.instance.initialize().catchError((e) {
-            debugPrint('⚠️ [SPLASH] Erro ao iniciar NotificationController: $e');
-          }),
+        debugPrint('🔄 [SPLASH] Inicializando NotificationController...');
+        await NotificationController.instance.initialize().catchError((e) {
+          debugPrint('⚠️ [SPLASH] Erro ao iniciar NotificationController: $e');
+        });
+        await AppPushService.instance.syncWithBackendIfAuthenticated().catchError(
+          (e) => debugPrint('⚠️ [SPLASH] Push/sync: $e'),
         );
 
         debugPrint(

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../../core/constants/api_constants.dart';
+import '../../core/push/app_push_service.dart';
 import 'api_service.dart';
 import 'secure_storage_service.dart';
 
@@ -411,6 +412,8 @@ class AuthService {
   Future<ApiResponse<void>> logout() async {
     try {
       debugPrint('🚪 [AUTH_SERVICE] Iniciando logout...');
+
+      await AppPushService.instance.unregisterFromBackendIfNeeded();
       
       // Tentar fazer logout na API (mesmo que falhe, continuar limpando localmente)
       ApiResponse<void> response;

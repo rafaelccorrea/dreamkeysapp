@@ -10,7 +10,8 @@ const Map<String, List<String>> routeToNotificationTypes = {
   '/properties': ['property', 'property_match', 'document'],
   '/matches': ['property_match'],
   '/tasks': ['task'],
-  '/calendar': ['appointment', 'appointment_invite'], // Agenda usa /calendar
+  '/kanban': ['task', 'task_assigned', 'task_due', 'task_overdue'],
+  '/calendar': ['appointment', 'appointment_invite'], // Agenda uses /calendar
   '/notes': ['note'],
   '/messages': ['message'],
   '/subscriptions': ['subscription'],

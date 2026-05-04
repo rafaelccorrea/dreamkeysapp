@@ -650,7 +650,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       slivers: [
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            padding: const EdgeInsets.only(top: 10),
             child: _buildDetailsHero(context, theme, property),
           ),
         ),
@@ -762,11 +762,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   ),
                 ),
               ),
-            ),
-            Positioned(
-              top: 14,
-              left: 14,
-              child: _buildStatusPill(theme, property),
             ),
             if (property.isFeatured)
               Positioned(
@@ -912,55 +907,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             color: AppColors.primary.primary,
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildStatusPill(ThemeData theme, Property property) {
-    final color = _getStatusColor(property.status);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.42),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.35),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 7,
-            height: 7,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: color,
-              boxShadow: [
-                BoxShadow(
-                  color: color.withValues(alpha: 0.7),
-                  blurRadius: 8,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 7),
-          Text(
-            property.status.label,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w800,
-              fontSize: 11.5,
-              height: 1,
-              letterSpacing: -0.1,
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -4064,24 +4010,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return iconMap[feature] ?? Icons.check_circle_outline;
   }
 
-  Color _getStatusColor(PropertyStatus status) {
-    switch (status) {
-      case PropertyStatus.available:
-        return AppColors.status.success;
-      case PropertyStatus.sold:
-        return AppColors.status.info;
-      case PropertyStatus.rented:
-        return AppColors.status.warning;
-      case PropertyStatus.maintenance:
-        return AppColors.status.warning;
-      case PropertyStatus.draft:
-        return AppColors.text.textSecondary;
-      case PropertyStatus.pendingApproval:
-      case PropertyStatus.pendingOwnerAuthorization:
-        return AppColors.status.warning;
-    }
-  }
-
   Future<void> _showLinkClientModal(
     BuildContext context,
     Property property,
@@ -5793,17 +5721,17 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
                 itemCount: total,
                 onPageChanged: (i) => setState(() => _index = i),
                 itemBuilder: (_, i) {
-                  return Center(
-                    child: Hero(
-                      tag: 'property-image-${widget.propertyId}-$i',
-                      child: InteractiveViewer(
-                        minScale: 1,
-                        maxScale: 4,
+                  return Hero(
+                    tag: 'property-image-${widget.propertyId}-$i',
+                    child: InteractiveViewer(
+                      minScale: 1,
+                      maxScale: 4,
+                      child: SizedBox.expand(
                         child: ShimmerImage(
                           imageUrl: widget.images[i].url,
                           width: double.infinity,
                           height: double.infinity,
-                          fit: BoxFit.contain,
+                          fit: BoxFit.cover,
                         ),
                       ),
                     ),

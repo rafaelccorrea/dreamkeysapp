@@ -87,7 +87,11 @@ class ThemeHelpers {
         stops: const [0.0, 0.42, 1.0],
         colors: isDark
             ? const [Color(0xFF06060C), Color(0xFF0C0A12), Color(0xFF141018)]
-            : const [Color(0xFFF0F2F6), Color(0xFFFAFAFA), Color(0xFFF2F5FA)],
+            : const [
+                Color(0xFFF4F6F9),
+                Color(0xFFFBFCFE),
+                Color(0xFFEEF2F7),
+              ],
       ),
     );
   }

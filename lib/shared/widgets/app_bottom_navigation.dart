@@ -76,16 +76,16 @@ class AppBottomNavigation extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 16),
-                  // Agenda (próximo ao centro)
+                  // Funís / CRM — mesmo conceito que o Kanban Intellisys (substitui Agenda na barra)
                   _buildNavItem(
                     context: context,
-                    icon: LucideIcons.calendar,
-                    label: 'Agenda',
+                    icon: LucideIcons.squareKanban,
+                    label: 'Funís',
                     isSelected: currentIndex == 2,
                     color: currentIndex == 2 ? primaryColor : unselectedColor,
                     backgroundColor: backgroundColor,
                     onTap: () => onTap(2),
-                    route: AppRoutes.calendar,
+                    route: AppRoutes.kanban,
                   ),
                   // Espaço para o botão central (reduzido)
                   SizedBox(width: centerButtonSpace),
@@ -246,7 +246,7 @@ class AppBottomNavigation extends StatelessWidget {
     if (routeName == AppRoutes.properties || routeName.startsWith('/properties')) {
       return 1;
     }
-    if (routeName == AppRoutes.calendar || routeName.startsWith('/calendar')) {
+    if (routeName == AppRoutes.kanban || routeName.startsWith('/kanban')) {
       return 2;
     }
     if (routeName == AppRoutes.clients || routeName.startsWith('/clients')) {
@@ -287,11 +287,11 @@ class AppBottomNavigation extends StatelessWidget {
         );
         break;
       case 2:
-        // Se já está na tela de agenda, não navega novamente
-        if (currentRoute == AppRoutes.calendar) return;
+        // Funís / CRM Kanban — substituiu a Agenda neste slot
+        if (currentRoute == AppRoutes.kanban) return;
         Navigator.of(context).pushNamedAndRemoveUntil(
-          AppRoutes.calendar,
-          (route) => route.settings.name == AppRoutes.calendar,
+          AppRoutes.kanban,
+          (route) => route.settings.name == AppRoutes.kanban,
         );
         break;
       case 3:

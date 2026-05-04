@@ -39,7 +39,7 @@ class _EditTaskModalState extends State<EditTaskModal> {
     _selectedPriority = widget.task.priority;
     _selectedDueDate = widget.task.dueDate;
     _selectedAssignedToId = widget.task.assignedToId;
-    _selectedTags = List<String>.from(widget.task.tags ?? []);
+    _selectedTags = KanbanUiTagFilter.visible(widget.task.tags ?? []);
     _loadTags();
     _loadProjectMembers();
   }
@@ -56,7 +56,7 @@ class _EditTaskModalState extends State<EditTaskModal> {
       final response = await _kanbanService.listTags(controller.teamId!);
       if (response.success && response.data != null) {
         setState(() {
-          _availableTags = response.data!;
+          _availableTags = KanbanUiTagFilter.visible(response.data!);
           _loadingTags = false;
         });
       } else {

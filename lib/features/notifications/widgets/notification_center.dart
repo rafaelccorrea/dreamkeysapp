@@ -83,50 +83,109 @@ class _NotificationCenterState extends State<NotificationCenter> {
         final dim = compact ? 40.0 : 46.0;
         final iconSize = compact ? 20.0 : 22.0;
 
+        final hasUnread = unreadCount > 0;
+        const accentRed = Color(0xFFEF4444);
+
         return Stack(
           clipBehavior: Clip.none,
           alignment: Alignment.center,
           children: [
             Tooltip(
               message: 'Notificações',
-              child: InkWell(
-                key: _buttonKey,
-                onTap: _toggleOverlay,
-                customBorder:
-                    compact ? const CircleBorder() : RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                child: SizedBox(
-                  width: dim,
-                  height: dim,
-                  child: Icon(
-                    Icons.notifications_outlined,
-                    size: iconSize,
-                    color: ThemeHelpers.textColor(context),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  key: _buttonKey,
+                  onTap: _toggleOverlay,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    width: dim,
+                    height: dim,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.07)
+                          : theme.colorScheme.surfaceContainerHighest.withValues(
+                              alpha: 0.65,
+                            ),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        width: 1.5,
+                        color: hasUnread
+                            ? accentRed.withValues(alpha: 0.5)
+                            : (isDark
+                                ? Colors.white.withValues(alpha: 0.12)
+                                : AppColors.border.border),
+                      ),
+                      boxShadow: [
+                        if (hasUnread) ...[
+                          BoxShadow(
+                            color: accentRed.withValues(alpha: 0.12),
+                            blurRadius: 8,
+                            spreadRadius: 0,
+                            offset: const Offset(0, 2),
+                          ),
+                        ] else
+                          BoxShadow(
+                            color: Colors.black.withValues(
+                              alpha: isDark ? 0.2 : 0.04,
+                            ),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
+                          ),
+                      ],
+                    ),
+                    child: Icon(
+                      hasUnread
+                          ? Icons.notifications_active_rounded
+                          : Icons.notifications_outlined,
+                      size: iconSize,
+                      color: hasUnread
+                          ? accentRed
+                          : ThemeHelpers.textColor(context),
+                    ),
                   ),
                 ),
               ),
             ),
             if (unreadCount > 0)
               Positioned(
-                right: compact ? 4 : 2,
-                top: compact ? 4 : 2,
+                right: -4,
+                top: -4,
                 child: Container(
-                  padding: const EdgeInsets.all(4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                   decoration: BoxDecoration(
-                    color: isDark
-                        ? AppColors.status.errorDarkMode
-                        : AppColors.status.error,
-                    shape: BoxShape.circle,
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFFEF4444), Color(0xFFDC2626)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isDark
+                          ? AppColors.background.backgroundDarkMode
+                          : theme.scaffoldBackgroundColor,
+                      width: 2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: accentRed.withValues(alpha: 0.45),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
                   constraints: const BoxConstraints(
-                    minWidth: 16,
-                    minHeight: 16,
+                    minWidth: 18,
+                    minHeight: 18,
                   ),
                   child: Text(
                     unreadCount > 99 ? '99+' : unreadCount.toString(),
-                    style: TextStyle(
+                    style: const TextStyle(
                       color: Colors.white,
                       fontSize: 10,
-                      fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.w700,
                     ),
                     textAlign: TextAlign.center,
                   ),

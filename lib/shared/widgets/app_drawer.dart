@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:provider/provider.dart';
-import '../../../main.dart';
+import '../../../core/navigation/app_navigator.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
@@ -77,6 +77,7 @@ class _AppDrawerState extends State<AppDrawer> {
         activeRoute == AppRoutes.clients ||
         activeRoute == AppRoutes.matches ||
         activeRoute == AppRoutes.calendar ||
+        activeRoute == AppRoutes.kanban ||
         activeRoute.startsWith('/clients')) {
       setState(() {
         _gestaoExpanded = true;
@@ -867,6 +868,7 @@ class _AppDrawerState extends State<AppDrawer> {
         activeRoute == AppRoutes.clients ||
         activeRoute == AppRoutes.matches ||
         activeRoute == AppRoutes.calendar ||
+        activeRoute == AppRoutes.kanban ||
         activeRoute.startsWith('/clients');
 
     final documentosGroupActive =
@@ -1536,8 +1538,8 @@ class _AppDrawerState extends State<AppDrawer> {
 
         // Navegar para login usando o navigatorKey global
         // Isso funciona mesmo se o contexto foi perdido
-        if (navigatorKey.currentState != null) {
-          navigatorKey.currentState!.pushNamedAndRemoveUntil(
+        if (appNavigatorKey.currentState != null) {
+          appNavigatorKey.currentState!.pushNamedAndRemoveUntil(
             AppRoutes.login,
             (route) => false,
           );
@@ -1559,8 +1561,8 @@ class _AppDrawerState extends State<AppDrawer> {
 
         // Mesmo com erro, tentar navegar para login usando navigatorKey
         try {
-          if (navigatorKey.currentState != null) {
-            navigatorKey.currentState!.pushNamedAndRemoveUntil(
+          if (appNavigatorKey.currentState != null) {
+            appNavigatorKey.currentState!.pushNamedAndRemoveUntil(
               AppRoutes.login,
               (route) => false,
             );

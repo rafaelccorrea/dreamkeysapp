@@ -22,6 +22,55 @@ Map<String, dynamic>? _extractPropertyPayload(Map<String, dynamic>? raw) {
   return pick(raw);
 }
 
+/// Resposta de `GET /properties/approval-settings/active` — paridade com `imobx-front` / `imobx`.
+class PropertyApprovalSettingsActive {
+  final bool requireApprovalToBeAvailable;
+  final bool requireApprovalToPublishOnSite;
+  final bool requireOwnerAuthorizationToBeAvailable;
+  final bool preservePublicationOnEdit;
+  final bool applyWatermarkToImages;
+
+  const PropertyApprovalSettingsActive({
+    this.requireApprovalToBeAvailable = false,
+    this.requireApprovalToPublishOnSite = false,
+    this.requireOwnerAuthorizationToBeAvailable = false,
+    this.preservePublicationOnEdit = true,
+    this.applyWatermarkToImages = true,
+  });
+
+  factory PropertyApprovalSettingsActive.fromJson(Map<String, dynamic> json) {
+    bool readBool(dynamic v, [bool fallback = false]) {
+      if (v is bool) return v;
+      if (v is String) return v.toLowerCase() == 'true';
+      return fallback;
+    }
+
+    return PropertyApprovalSettingsActive(
+      requireApprovalToBeAvailable: readBool(
+        json['requireApprovalToBeAvailable'] ??
+            json['require_approval_to_be_available'],
+      ),
+      requireApprovalToPublishOnSite: readBool(
+        json['requireApprovalToPublishOnSite'] ??
+            json['require_approval_to_publish_on_site'],
+      ),
+      requireOwnerAuthorizationToBeAvailable: readBool(
+        json['requireOwnerAuthorizationToBeAvailable'] ??
+            json['require_owner_authorization_to_be_available'],
+      ),
+      preservePublicationOnEdit: readBool(
+        json['preservePublicationOnEdit'] ??
+            json['preserve_publication_on_edit'],
+        true,
+      ),
+      applyWatermarkToImages: readBool(
+        json['applyWatermarkToImages'] ?? json['apply_watermark_to_images'],
+        true,
+      ),
+    );
+  }
+}
+
 /// Tipos de propriedade
 enum PropertyType {
   house('house', 'Casa'),
@@ -628,6 +677,37 @@ class PropertyService {
       );
     } catch (e) {
       debugPrint('❌ [PROPERTY_SERVICE] Erro de conexão: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Configuração de aprovação/publicação (qualquer usuário com `property:view`).
+  Future<ApiResponse<PropertyApprovalSettingsActive>>
+      getPropertyApprovalSettingsActive() async {
+    try {
+      final response = await _apiService.get<Map<String, dynamic>>(
+        '/properties/approval-settings/active',
+      );
+      if (response.success && response.data != null) {
+        final root = response.data!;
+        final map = root['data'] is Map<String, dynamic>
+            ? root['data'] as Map<String, dynamic>
+            : root;
+        return ApiResponse.success(
+          data: PropertyApprovalSettingsActive.fromJson(map),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao carregar configuração de aprovação',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [PROPERTY_SERVICE] approval-settings: $e');
       return ApiResponse.error(
         message: 'Erro de conexão: ${e.toString()}',
         statusCode: 0,

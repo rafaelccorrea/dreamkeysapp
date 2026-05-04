@@ -137,6 +137,86 @@ class KanbanColumn {
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
+
+  bool get isSyntheticKanbanPlaceholder =>
+      id.startsWith(KanbanSyntheticColumns.idPrefix);
+}
+
+/// Três etapas padrão (somente UI) quando o backend ainda não devolve colunas —
+/// mesmo desenho usado como funil inicial no CRM web.
+class KanbanSyntheticColumns {
+  KanbanSyntheticColumns._();
+
+  static const String idPrefix = 'kanban_ph_';
+
+  static bool isSynthetic(KanbanColumn column) =>
+      column.id.startsWith(idPrefix);
+
+  static bool isSyntheticId(String columnId) =>
+      columnId.startsWith(idPrefix);
+
+  static List<KanbanColumn> triple({required String seedTeamKey}) {
+    final now = DateTime.now();
+    final base = '${seedTeamKey.hashCode.abs()}';
+    KanbanColumn one(
+      int pos,
+      String title,
+      String description,
+      String colorHex,
+    ) {
+      return KanbanColumn(
+        id: '$idPrefix${base}_$pos',
+        title: title,
+        description: description,
+        color: colorHex,
+        position: pos,
+        isActive: true,
+        teamId: seedTeamKey.isNotEmpty ? seedTeamKey : '—',
+        createdById: '',
+        createdAt: now,
+        updatedAt: now,
+      );
+    }
+
+    return [
+      one(
+        0,
+        'Novos',
+        'Primeiro contato · leads entrando',
+        '#3B82F6',
+      ),
+      one(
+        1,
+        'Em andamento',
+        'Qualificação, visitas e propostas',
+        '#F59E0B',
+      ),
+      one(
+        2,
+        'Concluídos',
+        'Ganhos, perdas arquivadas e follow-up',
+        '#10B981',
+      ),
+    ];
+  }
+}
+
+/// Remove da interface tags legadas de migração (ex.: importação de sistemas antigos).
+abstract final class KanbanUiTagFilter {
+  KanbanUiTagFilter._();
+
+  static bool isHidden(String raw) {
+    final t = raw.trim().toLowerCase();
+    if (t.isEmpty) return false;
+    if (t.contains('imobzi')) return true;
+    if (t.contains('imobiz')) return true;
+    return false;
+  }
+
+  static List<String> visible(List<String>? tags) {
+    if (tags == null || tags.isEmpty) return const [];
+    return tags.where((t) => !isHidden(t)).toList();
+  }
 }
 
 /// Tarefa do Kanban
@@ -182,6 +262,13 @@ class KanbanTask {
     this.project,
     this.commentsCount,
   });
+
+  /// Tags exibíveis nos cards e modais (sem marcadores ocultados por [KanbanUiTagFilter]).
+  List<String>? get displayTags {
+    final list = KanbanUiTagFilter.visible(tags);
+    if (list.isEmpty) return null;
+    return list;
+  }
 
   factory KanbanTask.fromJson(Map<String, dynamic> json) {
     return KanbanTask(
@@ -506,6 +593,82 @@ class KanbanTeam {
     return KanbanTeam(
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
+    );
+  }
+}
+
+/// Item de GET `/kanban/my-boards`: funil (quadro por equipe) com permissões resolvidas.
+class KanbanAccessibleFunnelSlot {
+  final String teamId;
+  final KanbanTeam team;
+  final KanbanPermissions? permissions;
+
+  KanbanAccessibleFunnelSlot({
+    required this.teamId,
+    required this.team,
+    this.permissions,
+  });
+
+  factory KanbanAccessibleFunnelSlot.fromJson(Map<String, dynamic> json) {
+    final teamRaw = json['team'];
+    KanbanTeam team;
+    if (teamRaw is Map<String, dynamic>) {
+      team = KanbanTeam.fromJson(teamRaw);
+    } else {
+      team = KanbanTeam(id: '', name: '');
+    }
+    final tid = (json['teamId']?.toString().isNotEmpty == true)
+        ? json['teamId'].toString()
+        : team.id;
+    return KanbanAccessibleFunnelSlot(
+      teamId: tid,
+      team: KanbanTeam(
+        id: team.id.isNotEmpty ? team.id : tid,
+        name: team.name,
+      ),
+      permissions: json['permissions'] is Map<String, dynamic>
+          ? KanbanPermissions.fromJson(
+              json['permissions'] as Map<String, dynamic>,
+            )
+          : null,
+    );
+  }
+}
+
+/// Página paginada de `/kanban/my-boards`.
+class KanbanMyBoardsPageDto {
+  final List<KanbanAccessibleFunnelSlot> boards;
+  final int total;
+  final int page;
+  final int limit;
+  final int totalPages;
+
+  KanbanMyBoardsPageDto({
+    required this.boards,
+    required this.total,
+    required this.page,
+    required this.limit,
+    required this.totalPages,
+  });
+
+  factory KanbanMyBoardsPageDto.fromJson(Map<String, dynamic> json) {
+    final raw = json['data'];
+    final list = raw is List
+        ? raw
+            .map(
+              (e) => KanbanAccessibleFunnelSlot.fromJson(
+                e as Map<String, dynamic>,
+              ),
+            )
+            .toList()
+        : <KanbanAccessibleFunnelSlot>[];
+    return KanbanMyBoardsPageDto(
+      boards: list,
+      total: (json['total'] as num?)?.toInt() ?? list.length,
+      page: (json['page'] as num?)?.toInt() ?? 1,
+      limit: (json['limit'] as num?)?.toInt() ?? 20,
+      totalPages: (json['totalPages'] as num?)?.toInt() ??
+          (list.isEmpty ? 1 : 1),
     );
   }
 }

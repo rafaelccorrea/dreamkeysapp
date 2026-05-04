@@ -299,6 +299,7 @@ class ApiService {
   Future<ApiResponse<T>> delete<T>(
     String endpoint, {
     Map<String, String>? headers,
+    Map<String, dynamic>? body,
     bool retryOn401 = true,
   }) async {
     return _executeRequest<T>(
@@ -306,10 +307,16 @@ class ApiService {
         final uri = Uri.parse('${ApiConstants.baseApiUrl}$endpoint');
 
         final defaultHeaders = await _getDefaultHeaders(endpoint);
+        final merged = <String, String>{...defaultHeaders, ...?headers};
+        if (body != null) {
+          merged['Content-Type'] = 'application/json';
+        }
+
         final response = await http
             .delete(
               uri,
-              headers: {...defaultHeaders, ...?headers},
+              headers: merged,
+              body: body != null ? jsonEncode(body) : null,
             )
             .timeout(ApiConstants.connectTimeout);
 

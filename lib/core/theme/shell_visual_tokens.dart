@@ -17,21 +17,35 @@ class ShellVisualTokens {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return isDark
         ? Colors.white.withValues(alpha: 0.045)
-        : Colors.white;
+        : const Color(0xFFFAFBFC);
   }
 
   static Color dashboardGlassBorder(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return isDark
         ? Colors.white.withValues(alpha: 0.08)
-        : ThemeHelpers.borderColor(context).withValues(alpha: 0.44);
+        : ThemeHelpers.borderColor(context).withValues(alpha: 0.40);
+  }
+
+  /// Cápsula da toolbar (MinimalBodyChrome) — claro mais legível sobre o gradiente do shell.
+  static Color toolbarClusterFill(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark
+        ? Colors.white.withValues(alpha: 0.07)
+        : const Color(0xFFFAFBFC);
+  }
+
+  static Color toolbarClusterBorder(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final edge = ThemeHelpers.borderColor(context);
+    return isDark ? edge.withValues(alpha: 0.42) : edge.withValues(alpha: 0.38);
   }
 
   static Color profileGlassFill(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return isDark
         ? Colors.white.withValues(alpha: 0.055)
-        : const Color(0xFFF7F8FB);
+        : const Color(0xFFF8F9FC);
   }
 
   static Color profileSectionBorder(BuildContext context) {
@@ -42,7 +56,13 @@ class ShellVisualTokens {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return isDark
         ? Colors.white.withValues(alpha: 0.085)
-        : ThemeHelpers.borderColor(context).withValues(alpha: 0.32);
+        : ThemeHelpers.borderColor(context).withValues(alpha: 0.38);
+  }
+
+  /// Borda de cartões de lista/grid (Imóveis) no claro — contraste sobre o shell.
+  static Color propertyListCardBorder(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return ThemeHelpers.borderColor(context).withValues(alpha: isDark ? 0.42 : 0.34);
   }
 
   static BoxDecoration inlineTileDecoration(
@@ -55,11 +75,11 @@ class ShellVisualTokens {
       borderRadius: BorderRadius.circular(radius),
       color: isDark
           ? Colors.white.withValues(alpha: 0.042)
-          : Colors.white,
+          : const Color(0xFFFCFCFD),
       border: Border.all(
         color: isDark
             ? accent.withValues(alpha: 0.12)
-            : ThemeHelpers.borderColor(context).withValues(alpha: 0.42),
+            : ThemeHelpers.borderColor(context).withValues(alpha: 0.40),
       ),
       boxShadow: isDark
           ? null
@@ -129,12 +149,13 @@ class ShellVisualTokens {
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
         colors: [
-          Color(0xFFFFFFFF),
-          Color(0xFFEEF1F6),
+          Color(0xFFFFFCFB),
+          Color(0xFFE9EEF5),
         ],
+        stops: [0.0, 1.0],
       ),
       border: Border.all(
-        color: edge.withValues(alpha: 0.5),
+        color: edge.withValues(alpha: 0.48),
       ),
       boxShadow: [
         BoxShadow(

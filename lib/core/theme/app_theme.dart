@@ -9,6 +9,42 @@ class AppTheme {
   // Fonte Poppins
   static final _textTheme = GoogleFonts.poppinsTextTheme();
 
+  static SnackBarThemeData _snackBarTheme(Brightness brightness) {
+    final isDark = brightness == Brightness.dark;
+    final onSurface = isDark ? AppColors.text.textDarkMode : AppColors.text.text;
+    final card = isDark
+        ? AppColors.background.cardBackgroundDarkMode
+        : AppColors.background.cardBackground;
+    final primary =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    final border =
+        isDark ? AppColors.border.borderDarkMode : AppColors.border.border;
+
+    return SnackBarThemeData(
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: card,
+      elevation: 16,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(
+          color: Color.lerp(border, primary, isDark ? 0.4 : 0.5)!
+              .withValues(alpha: isDark ? 0.85 : 0.65),
+          width: 1.1,
+        ),
+      ),
+      insetPadding: const EdgeInsets.fromLTRB(16, 12, 16, 22),
+      contentTextStyle: GoogleFonts.poppins(
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+        height: 1.32,
+        letterSpacing: -0.1,
+        color: onSurface,
+      ),
+      actionTextColor: primary,
+      showCloseIcon: false,
+    );
+  }
+
   /// Overlay dos menus ⋯ — repita em [PopupMenuButton] (color/shape/elevation) se o tema global não aparecer no overlay.
   static PopupMenuThemeData styledPopupMenu(Brightness brightness) =>
       _popupMenuTheme(brightness);
@@ -217,6 +253,7 @@ class AppTheme {
       space: 1,
     ),
     popupMenuTheme: _popupMenuTheme(Brightness.light),
+    snackBarTheme: _snackBarTheme(Brightness.light),
     progressIndicatorTheme: ProgressIndicatorThemeData(
       color: AppColors.primary.primary,
       linearTrackColor: AppColors.primary.primary.withOpacity(0.2),
@@ -367,6 +404,7 @@ class AppTheme {
       space: 1,
     ),
     popupMenuTheme: _popupMenuTheme(Brightness.dark),
+    snackBarTheme: _snackBarTheme(Brightness.dark),
     progressIndicatorTheme: ProgressIndicatorThemeData(
       color: AppColors.primary.primaryDarkMode,
       linearTrackColor: AppColors.primary.primaryDarkMode.withOpacity(0.2),

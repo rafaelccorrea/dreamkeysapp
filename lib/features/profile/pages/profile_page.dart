@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/shell_visual_tokens.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../../../../shared/services/profile_service.dart';
@@ -550,15 +551,53 @@ class _ProfilePageState extends State<ProfilePage> {
                       physics: const AlwaysScrollableScrollPhysics(),
                       padding: EdgeInsets.zero,
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _buildHero(context, theme),
-                          _buildActionsSection(context, theme),
-                          _buildDetailsSection(context, theme),
-                          _buildPrivacySection(context, theme),
-                          const SizedBox(height: 48),
-                        ],
-                      ),
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildHero(context, theme),
+                        if (theme.brightness == Brightness.dark)
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _buildActionsSection(context, theme),
+                              _buildDetailsSection(context, theme),
+                              _buildPrivacySection(context, theme),
+                              const SizedBox(height: 48),
+                            ],
+                          )
+                        else
+                          Container(
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: ShellVisualTokens.profileGlassFill(context),
+                              borderRadius:
+                                  const BorderRadius.vertical(top: Radius.circular(22)),
+                              border: Border(
+                                top: BorderSide(
+                                  color: ThemeHelpers.borderColor(context)
+                                      .withValues(alpha: 0.42),
+                                ),
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.045),
+                                  blurRadius: 24,
+                                  offset: const Offset(0, -8),
+                                  spreadRadius: -10,
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                _buildActionsSection(context, theme),
+                                _buildDetailsSection(context, theme),
+                                _buildPrivacySection(context, theme),
+                                const SizedBox(height: 48),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
                     ),
                   ),
       ),

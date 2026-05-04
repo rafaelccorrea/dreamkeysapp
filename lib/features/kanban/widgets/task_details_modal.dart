@@ -521,7 +521,13 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
                         ),
                       ),
                       const SizedBox(width: 8),
-                      Text(_getPriorityLabel(task.priority!.name)),
+                      Expanded(
+                        child: Text(
+                          _getPriorityLabel(task.priority!.name),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                     ],
                   )
                 : const Text('Não definida'),
@@ -547,7 +553,13 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
                       ),
                     ),
                   const SizedBox(width: 8),
-                  Text(task.assignedTo!.name),
+                  Expanded(
+                    child: Text(
+                      task.assignedTo!.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -573,7 +585,13 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
                       ),
                     ),
                   const SizedBox(width: 8),
-                  Text(task.createdBy!.name),
+                  Expanded(
+                    child: Text(
+                      task.createdBy!.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -593,15 +611,19 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
                         : ThemeHelpers.textSecondaryColor(context),
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    DateFormat('dd/MM/yyyy').format(task.dueDate!),
-                    style: TextStyle(
-                      color: task.dueDate!.isBefore(DateTime.now())
-                          ? Colors.red
-                          : null,
-                      fontWeight: task.dueDate!.isBefore(DateTime.now())
-                          ? FontWeight.w600
-                          : null,
+                  Expanded(
+                    child: Text(
+                      DateFormat('dd/MM/yyyy').format(task.dueDate!),
+                      style: TextStyle(
+                        color: task.dueDate!.isBefore(DateTime.now())
+                            ? Colors.red
+                            : null,
+                        fontWeight: task.dueDate!.isBefore(DateTime.now())
+                            ? FontWeight.w600
+                            : null,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
@@ -616,7 +638,7 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
               Text(task.project!.name),
             ),
           ],
-          if (task.tags != null && task.tags!.isNotEmpty) ...[
+          if (task.displayTags != null && task.displayTags!.isNotEmpty) ...[
             const SizedBox(height: 16),
             Text(
               'Tags',
@@ -628,7 +650,7 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: task.tags!.map((tag) {
+              children: task.displayTags!.map((tag) {
                 return Chip(
                   label: Text(tag),
                   labelStyle: const TextStyle(fontSize: 12),

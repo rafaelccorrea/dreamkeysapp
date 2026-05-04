@@ -1,8 +1,7 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../models/kanban_models.dart';
 import '../services/kanban_service.dart';
-import '../services/team_service.dart';
-import '../../../shared/services/secure_storage_service.dart';
 
 /// Controller para gerenciar estado do Kanban
 class KanbanController extends ChangeNotifier {
@@ -11,7 +10,8 @@ class KanbanController extends ChangeNotifier {
   static final KanbanController instance = KanbanController._();
 
   final KanbanService _kanbanService = KanbanService.instance;
-  final TeamService _teamService = TeamService.instance;
+
+  Timer? _boardFilterDebounce;
 
   // Estado
   KanbanBoard? _board;
@@ -23,16 +23,27 @@ class KanbanController extends ChangeNotifier {
   bool _loadingProjects = false;
   List<KanbanTeam> _teams = [];
   bool _loadingTeams = false;
+  /// Paginação de GET `/kanban/my-boards` (não baixamos todos os funis de uma vez).
+  static const int _myBoardsPageSize = 24;
+  int _myBoardsLastPageLoaded = 0;
+  int _myBoardsTotalPages = 1;
+  bool _loadingMoreTeams = false;
   KanbanTeam? _selectedTeam;
 
   // Filtros
   String? _searchQuery;
   KanbanPriority? _filterPriority;
   String? _filterAssigneeId;
+  int _filterClearGeneration = 0;
 
   // Getters
   KanbanBoard? get board => _board;
   bool get loading => _loading;
+
+  /// Exibe skeleton enquanto o quadro inicial não existe (inclui `loadTeams()` antes da API do board).
+  bool get shouldShowKanbanSkeleton =>
+      _loading || (_board == null && _error == null);
+
   String? get error => _error;
   String? get teamId => _teamId;
   String? get projectId => _projectId;
@@ -40,6 +51,11 @@ class KanbanController extends ChangeNotifier {
   bool get loadingProjects => _loadingProjects;
   List<KanbanTeam> get teams => _teams;
   bool get loadingTeams => _loadingTeams;
+  /// Ainda há páginas de funis em `/kanban/my-boards` para carregar sob demanda.
+  bool get teamsHasMore =>
+      _myBoardsLastPageLoaded > 0 &&
+      _myBoardsLastPageLoaded < _myBoardsTotalPages;
+  bool get loadingMoreTeams => _loadingMoreTeams;
   KanbanTeam? get selectedTeam => _selectedTeam;
 
   List<KanbanColumn> get columns {
@@ -49,50 +65,104 @@ class KanbanController extends ChangeNotifier {
     return sorted;
   }
 
+  /// Colunas exibidas: API ou três etapas padrão refinadas até o servidor enviar o quadro.
+  List<KanbanColumn> get displayColumns {
+    if (_board == null) return const [];
+    final fromApi = columns;
+    if (fromApi.isNotEmpty) return fromApi;
+    final seed =
+        (_teamId != null && _teamId!.isNotEmpty)
+            ? _teamId!
+            : (_board!.team?.id ?? '');
+    return KanbanSyntheticColumns.triple(seedTeamKey: seed);
+  }
+
+  KanbanTeam? _pickPreferredDefaultTeam(List<KanbanTeam> teams) {
+    if (teams.isEmpty) return null;
+    KanbanTeam? exactWorkspace;
+    KanbanTeam? fuzzy;
+    for (final t in teams) {
+      final n = t.name.toLowerCase().trim();
+      if (n == 'meu workspace') {
+        exactWorkspace = t;
+        break;
+      }
+    }
+    if (exactWorkspace != null) return exactWorkspace;
+
+    for (final t in teams) {
+      final n = t.name.toLowerCase().trim();
+      if (n.contains('meu workspace') ||
+          (n.contains('workspace') && n.contains('meu'))) {
+        return t;
+      }
+      if (n.contains('pessoal') || n.contains('workspace')) {
+        fuzzy ??= t;
+      }
+    }
+    return fuzzy ?? teams.first;
+  }
+
+  List<KanbanTeam> _dedupeTeamsKeepingOrder(Iterable<KanbanTeam> source) {
+    final seen = <String>{};
+    return source.where((t) => t.id.isNotEmpty && seen.add(t.id)).toList();
+  }
+
+  /// Coloca o funil preferido (ex.: Meu Workspace) no topo só entre os já carregados.
+  void _orderTeamsPreferredFirst(List<KanbanTeam> teams) {
+    final pick = _pickPreferredDefaultTeam(teams);
+    if (pick == null) return;
+    final i = teams.indexWhere((t) => t.id == pick.id);
+    if (i > 0) {
+      teams.removeAt(i);
+      teams.insert(0, pick);
+    }
+  }
+
   List<KanbanTask> get tasks {
     return _board?.tasks ?? [];
   }
 
+  /// Estado de filtros (espelho do que vai para `getBoard`) — uso no hero / UI.
+  String? get searchQuery => _searchQuery;
+  KanbanPriority? get filterPriority => _filterPriority;
+  String? get filterAssigneeId => _filterAssigneeId;
+
+  bool get hasActiveBoardFilters =>
+      (_searchQuery != null && _searchQuery!.trim().isNotEmpty) ||
+      _filterPriority != null ||
+      (_filterAssigneeId != null && _filterAssigneeId!.trim().isNotEmpty);
+
+  /// Incrementado em [clearFilters]; permite reset estável dos campos locais em [KanbanFilters].
+  int get filterClearGeneration => _filterClearGeneration;
+
   List<KanbanTask> getTasksForColumn(String columnId) {
-    var filteredTasks = tasks
+    final filteredTasks = tasks
         .where((task) => task.columnId == columnId)
-        .toList();
-
-    // Aplicar filtro de busca
-    if (_searchQuery != null && _searchQuery!.isNotEmpty) {
-      final query = _searchQuery!.toLowerCase();
-      filteredTasks = filteredTasks.where((task) {
-        final titleMatch = task.title.toLowerCase().contains(query);
-        final descriptionMatch =
-            task.description?.toLowerCase().contains(query) ?? false;
-        return titleMatch || descriptionMatch;
-      }).toList();
-    }
-
-    // Aplicar filtro de prioridade
-    if (_filterPriority != null) {
-      filteredTasks = filteredTasks
-          .where((task) => task.priority == _filterPriority)
-          .toList();
-    }
-
-    // Aplicar filtro de responsável
-    if (_filterAssigneeId != null && _filterAssigneeId!.isNotEmpty) {
-      filteredTasks = filteredTasks
-          .where((task) => task.assignedToId == _filterAssigneeId)
-          .toList();
-    }
-
-    // Ordenar por posição
-    filteredTasks.sort((a, b) => a.position.compareTo(b.position));
+        .toList()
+      ..sort((a, b) => a.position.compareTo(b.position));
     return filteredTasks;
   }
 
   KanbanPermissions? get permissions => _board?.permissions;
   KanbanTeam? get team => _board?.team;
 
-  /// Carrega o quadro Kanban
-  Future<void> loadBoard({String? teamId, String? projectId}) async {
+  /// Ao abrir a página: primeiro frame já mostra skeleton se ainda não há quadro nem erro.
+  void markKanbanEnteringIfNeeded() {
+    if (_board != null || _error != null) return;
+    if (!_loading) {
+      _loading = true;
+      notifyListeners();
+    }
+  }
+
+  /// Carrega o quadro Kanban (teamId vindo de `/kanban/my-boards` quando possível;
+  /// filtros e `perColumnLimit` alinhados ao front Intellisys).
+  Future<void> loadBoard({
+    String? teamId,
+    String? projectId,
+    bool recovery404 = false,
+  }) async {
     debugPrint('🚀 [KANBAN_CTRL] ========== INICIANDO loadBoard ==========');
     debugPrint('🚀 [KANBAN_CTRL] Parâmetros recebidos:');
     debugPrint('🚀 [KANBAN_CTRL] - teamId: $teamId');
@@ -100,152 +170,140 @@ class KanbanController extends ChangeNotifier {
     debugPrint('🚀 [KANBAN_CTRL] - Estado atual:');
     debugPrint('🚀 [KANBAN_CTRL]   - _teamId: $_teamId');
     debugPrint('🚀 [KANBAN_CTRL]   - _projectId: $_projectId');
-    debugPrint('🚀 [KANBAN_CTRL]   - _loading: $_loading');
 
-    _updateState(loading: true, error: null);
+    _updateState(loading: true, clearError: true);
 
     try {
-      // Se não fornecido, tentar obter times primeiro
-      if (teamId == null) {
+      String? resolvedTeamId = teamId ?? _teamId;
+
+      // Descobrir equipe usando a mesma regra que o sistema web (funis permitidos).
+      if (resolvedTeamId == null || resolvedTeamId.isEmpty) {
         debugPrint(
-          '📋 [KANBAN_CTRL] ⚠️ teamId não fornecido, tentando obter times...',
+          '📋 [KANBAN_CTRL] ⚠️ teamId não definido — usando caches /fallbacks…',
         );
-
-        // Primeiro, tentar listar times disponíveis
-        debugPrint('📋 [KANBAN_CTRL] Chamando getTeams()...');
-        final teamsResponse = await _teamService.getTeams();
-        debugPrint('📋 [KANBAN_CTRL] Resposta getTeams:');
-        debugPrint('📋 [KANBAN_CTRL]   - success: ${teamsResponse.success}');
-        debugPrint(
-          '📋 [KANBAN_CTRL]   - statusCode: ${teamsResponse.statusCode}',
-        );
-        debugPrint(
-          '📋 [KANBAN_CTRL]   - data: ${teamsResponse.data?.length ?? 0} times',
-        );
-
-        if (teamsResponse.success &&
-            teamsResponse.data != null &&
-            teamsResponse.data!.isNotEmpty) {
-          // Usar o primeiro time disponível
-          final firstTeam = teamsResponse.data!.first;
-          teamId = firstTeam.id;
-          _selectedTeam = firstTeam;
-          _teams = teamsResponse.data!;
-          debugPrint('📋 [KANBAN_CTRL] ✅ Time encontrado!');
+        if (_teams.isEmpty) {
+          await loadTeams();
+        }
+        if (_teams.isNotEmpty) {
+          _selectedTeam ??= _pickPreferredDefaultTeam(_teams);
+          resolvedTeamId = (_selectedTeam ?? _teams.first).id;
           debugPrint(
-            '📋 [KANBAN_CTRL]   - Time: ${firstTeam.name} (${firstTeam.id})',
+            '📋 [KANBAN_CTRL] ✅ Time definido pelo my-boards: ${_selectedTeam?.name}',
           );
-          debugPrint(
-            '📋 [KANBAN_CTRL]   - Total de times: ${teamsResponse.data!.length}',
-          );
-        } else {
-          // Se não tiver times, tentar workspace pessoal
-          debugPrint(
-            '📋 [KANBAN_CTRL] ⚠️ Nenhum time encontrado, tentando workspace pessoal...',
-          );
-          final personalResponse = await _kanbanService.getPersonalWorkspace();
-          debugPrint('📋 [KANBAN_CTRL] Resposta getPersonalWorkspace:');
-          debugPrint(
-            '📋 [KANBAN_CTRL]   - success: ${personalResponse.success}',
-          );
-          debugPrint(
-            '📋 [KANBAN_CTRL]   - statusCode: ${personalResponse.statusCode}',
-          );
-          debugPrint(
-            '📋 [KANBAN_CTRL]   - data: ${personalResponse.data?.length ?? 0} projetos',
-          );
-
-          if (personalResponse.success &&
-              personalResponse.data != null &&
-              personalResponse.data!.isNotEmpty) {
-            // Usar o primeiro projeto pessoal como referência para obter teamId
-            final personalProject = personalResponse.data!.first;
-            teamId = personalProject.teamId;
-            debugPrint('📋 [KANBAN_CTRL] ✅ Workspace pessoal encontrado!');
-            debugPrint(
-              '📋 [KANBAN_CTRL]   - Projeto: ${personalProject.name} (${personalProject.id})',
-            );
-            debugPrint('📋 [KANBAN_CTRL]   - teamId: $teamId');
-          } else {
-            // Se não tiver workspace pessoal, tentar usar companyId
-            debugPrint(
-              '📋 [KANBAN_CTRL] ⚠️ Workspace pessoal não encontrado, tentando companyId...',
-            );
-            final companyId = await SecureStorageService.instance
-                .getCompanyId();
-            debugPrint('📋 [KANBAN_CTRL] companyId obtido: $companyId');
-
-            if (companyId == null || companyId.isEmpty) {
-              debugPrint(
-                '📋 [KANBAN_CTRL] ❌ Nenhuma equipe ou empresa encontrada',
-              );
-              _updateState(
-                error:
-                    'Nenhuma equipe ou empresa selecionada. Crie um workspace pessoal primeiro.',
-                loading: false,
-              );
-              return;
-            }
-            teamId = companyId;
-            debugPrint(
-              '📋 [KANBAN_CTRL] ⚠️ Usando companyId como teamId: $teamId',
-            );
-          }
         }
       }
 
-      _teamId = teamId;
-      _projectId = projectId;
+      if (resolvedTeamId == null || resolvedTeamId.isEmpty) {
+        debugPrint(
+          '📋 [KANBAN_CTRL] ⚠️ Nenhum funil listado — tentando workspace pessoal...',
+        );
+        final personalResponse = await _kanbanService.getPersonalWorkspace();
+        if (personalResponse.success &&
+            personalResponse.data != null &&
+            personalResponse.data!.isNotEmpty) {
+          final personalProject = personalResponse.data!.first;
+          resolvedTeamId = personalProject.teamId;
+          debugPrint(
+            '📋 [KANBAN_CTRL] ✅ Workspace pessoal: $resolvedTeamId',
+          );
+        } else {
+          debugPrint(
+            '📋 [KANBAN_CTRL] ⚠️ Sem funil listado nem workspace pessoal.',
+          );
+          _updateState(
+            error:
+                'Nenhum funil (equipe) disponível nesta empresa ou sem workspace pessoal. '
+                'Peça inclusão nas equipes ou crie/use um funil pessoal pelo CRM web.',
+            loading: false,
+          );
+          return;
+        }
+      }
+
+      _teamId = resolvedTeamId;
+      if (projectId != null) {
+        _projectId = projectId;
+      }
 
       debugPrint(
         '📋 [KANBAN_CTRL] ========== CHAMANDO API getBoard ==========',
       );
-      debugPrint('📋 [KANBAN_CTRL] Parâmetros finais:');
       debugPrint('📋 [KANBAN_CTRL] - teamId: $_teamId');
       debugPrint('📋 [KANBAN_CTRL] - projectId: $_projectId');
-      debugPrint('📋 [KANBAN_CTRL] - projectId é null? ${_projectId == null}');
-      debugPrint(
-        '📋 [KANBAN_CTRL] - projectId está vazio? ${_projectId?.isEmpty ?? true}',
-      );
+      debugPrint('📋 [KANBAN_CTRL] - search: $_searchQuery');
+      debugPrint('📋 [KANBAN_CTRL] - priority: $_filterPriority');
 
       final response = await _kanbanService.getBoard(
         _teamId!,
         projectId: _projectId,
+        search: _searchQuery,
+        priority: _filterPriority,
+        assignedToId: _filterAssigneeId,
       );
 
       debugPrint('📋 [KANBAN_CTRL] ========== RESPOSTA getBoard ==========');
       debugPrint('📋 [KANBAN_CTRL] - success: ${response.success}');
       debugPrint('📋 [KANBAN_CTRL] - statusCode: ${response.statusCode}');
-      debugPrint('📋 [KANBAN_CTRL] - message: ${response.message}');
-      debugPrint('📋 [KANBAN_CTRL] - data é null? ${response.data == null}');
 
       if (response.success && response.data != null) {
         final board = response.data!;
-        debugPrint('📋 [KANBAN_CTRL] ✅ Quadro carregado com sucesso!');
-        debugPrint('📋 [KANBAN_CTRL]   - Colunas: ${board.columns.length}');
-        debugPrint('📋 [KANBAN_CTRL]   - Tarefas: ${board.tasks.length}');
+        debugPrint('📋 [KANBAN_CTRL] ✅ Quadro carregado');
         debugPrint(
-          '📋 [KANBAN_CTRL]   - Projetos: ${board.projects?.length ?? 0}',
-        );
-        debugPrint(
-          '📋 [KANBAN_CTRL]   - Equipe: ${board.team?.name ?? "não informada"} (${board.team?.id ?? "sem ID"})',
-        );
-        debugPrint(
-          '📋 [KANBAN_CTRL]   - Permissões: ${board.permissions != null ? "sim" : "não"}',
+          '📋 [KANBAN_CTRL]   - Colunas: ${board.columns.length}, Tarefas: ${board.tasks.length}',
         );
 
         _updateState(board: board, loading: false);
 
-        // Carregar projetos após carregar o quadro
         if (_teamId != null) {
-          debugPrint('📋 [KANBAN_CTRL] Carregando projetos da equipe...');
           await loadProjects(teamId: _teamId);
         }
       } else {
-        // Se erro 403, tentar workspace pessoal
+        if (response.statusCode == 404 && !recovery404) {
+          debugPrint(
+            '📋 [KANBAN_CTRL] ⚠️ 404 Equipe não encontrada — re-sincronizando funis (/my-boards)...',
+          );
+          final badTeamId = _teamId;
+          await loadTeams();
+          KanbanTeam? pick;
+          for (final t in _teams) {
+            if (t.id != badTeamId) {
+              pick = t;
+              break;
+            }
+          }
+          if (pick != null) {
+            _selectedTeam = pick;
+            await loadBoard(
+              teamId: pick.id,
+              projectId: projectId ?? _projectId,
+              recovery404: true,
+            );
+            return;
+          }
+          final personalResponse = await _kanbanService.getPersonalWorkspace();
+          if (personalResponse.success &&
+              personalResponse.data != null &&
+              personalResponse.data!.isNotEmpty) {
+            final pid = personalResponse.data!.first.teamId;
+            if (pid != badTeamId && pid.isNotEmpty) {
+              await loadBoard(
+                teamId: pid,
+                projectId: projectId ?? _projectId,
+                recovery404: true,
+              );
+              return;
+            }
+          }
+        }
+
+        final is403Project =
+            response.statusCode == 403 &&
+            _projectId != null &&
+            _projectId!.isNotEmpty;
+
         if (response.statusCode == 403) {
           debugPrint(
-            '📋 [KANBAN_CTRL] ⚠️ Erro 403: Sem acesso à equipe. Tentando workspace pessoal...',
+            '📋 [KANBAN_CTRL] ⚠️ 403 — tentando workspace pessoal...',
           );
           final personalResponse = await _kanbanService.getPersonalWorkspace();
           if (personalResponse.success &&
@@ -253,34 +311,29 @@ class KanbanController extends ChangeNotifier {
               personalResponse.data!.isNotEmpty) {
             final personalProject = personalResponse.data!.first;
             final personalTeamId = personalProject.teamId;
-            debugPrint(
-              '📋 [KANBAN_CTRL] ✅ Tentando com workspace pessoal, teamId: $personalTeamId',
-            );
-
             final personalBoardResponse = await _kanbanService.getBoard(
               personalTeamId,
               projectId: _projectId,
+              search: _searchQuery,
+              priority: _filterPriority,
+              assignedToId: _filterAssigneeId,
             );
-
             if (personalBoardResponse.success &&
                 personalBoardResponse.data != null) {
               _teamId = personalTeamId;
               _updateState(board: personalBoardResponse.data!, loading: false);
-              debugPrint(
-                '📋 [KANBAN_CTRL] ✅ Quadro pessoal carregado com sucesso!',
-              );
+              await loadProjects(teamId: _teamId);
               return;
             }
           }
         }
 
-        debugPrint(
-          '📋 [KANBAN_CTRL] ❌ Erro ao carregar quadro: ${response.message}',
-        );
-        _updateState(
-          error: response.message ?? 'Erro ao carregar quadro Kanban',
-          loading: false,
-        );
+        final fallbackMsg = is403Project
+            ? 'Você não tem acesso a este funil. Peça a um líder para incluir você numa das equipes vinculadas a ele.'
+            : (response.message ?? 'Erro ao carregar quadro Kanban');
+
+        debugPrint('📋 [KANBAN_CTRL] ❌ $fallbackMsg');
+        _updateState(error: fallbackMsg, loading: false);
       }
 
       debugPrint('📋 [KANBAN_CTRL] ========== FIM loadBoard ==========');
@@ -708,38 +761,61 @@ class KanbanController extends ChangeNotifier {
     }
   }
 
-  /// Carrega times disponíveis
-  Future<void> loadTeams() async {
-    debugPrint('🚀 [KANBAN_CTRL] ========== INICIANDO loadTeams ==========');
+  /// Carrega apenas a **primeira página** de funis (`/kanban/my-boards`).
+  /// Use [loadMoreTeams] no seletor para páginas seguintes — evita puxar centenas de funis de uma vez.
+  Future<void> loadTeams({bool reset = true}) async {
+    debugPrint('🚀 [KANBAN_CTRL] ========== INICIANDO loadTeams (my-boards pg1) ==========');
 
     _loadingTeams = true;
+    final previousSelectionId =
+        reset ? (_selectedTeam?.id ?? _teamId) : null;
+    if (reset) {
+      _myBoardsLastPageLoaded = 0;
+      _myBoardsTotalPages = 1;
+      _teams = [];
+    }
     notifyListeners();
 
     try {
-      debugPrint('🚀 [KANBAN_CTRL] Chamando getTeams()...');
-      final response = await _teamService.getTeams();
-
-      debugPrint('🚀 [KANBAN_CTRL] Resposta getTeams:');
-      debugPrint('🚀 [KANBAN_CTRL]   - success: ${response.success}');
-      debugPrint('🚀 [KANBAN_CTRL]   - statusCode: ${response.statusCode}');
-      debugPrint(
-        '🚀 [KANBAN_CTRL]   - data: ${response.data?.length ?? 0} times',
+      final response = await _kanbanService.getMyBoardsPage(
+        page: 1,
+        limit: _myBoardsPageSize,
       );
 
+      debugPrint('🚀 [KANBAN_CTRL] my-boards pg1 — success: ${response.success}');
+
       if (response.success && response.data != null) {
-        _teams = response.data!;
-        debugPrint('📋 [KANBAN_CTRL] ✅ ${_teams.length} times carregados');
-        for (var i = 0; i < _teams.length; i++) {
-          final t = _teams[i];
-          debugPrint('📋 [KANBAN_CTRL]   [$i] ${t.name} (${t.id})');
+        final dto = response.data!;
+        final fromSlots =
+            dto.boards.map((s) => s.team).where((t) => t.id.isNotEmpty);
+        _teams = _dedupeTeamsKeepingOrder(fromSlots);
+        _orderTeamsPreferredFirst(_teams);
+
+        _myBoardsLastPageLoaded = dto.page;
+        _myBoardsTotalPages = dto.totalPages < 1 ? 1 : dto.totalPages;
+
+        _selectedTeam = null;
+        if (previousSelectionId != null) {
+          for (final t in _teams) {
+            if (t.id == previousSelectionId) {
+              _selectedTeam = t;
+              break;
+            }
+          }
         }
+        _selectedTeam ??=
+            _teams.isNotEmpty ? _pickPreferredDefaultTeam(_teams) : null;
+        debugPrint(
+          '📋 [KANBAN_CTRL] ✅ ${_teams.length} funis (página $_myBoardsLastPageLoaded/$_myBoardsTotalPages)',
+        );
       } else {
         _teams = [];
-        debugPrint('📋 [KANBAN_CTRL] ⚠️ Nenhum time encontrado');
+        debugPrint(
+          '📋 [KANBAN_CTRL] ⚠️ my-boards vazio ou erro: ${response.message}',
+        );
       }
     } catch (e, stackTrace) {
-      debugPrint('❌ [KANBAN_CTRL] ========== EXCEÇÃO em loadTeams ==========');
-      debugPrint('❌ [KANBAN_CTRL] Erro: $e');
+      debugPrint('❌ [KANBAN_CTRL] EXCEÇÃO em loadTeams: $e');
       debugPrint('📚 [KANBAN_CTRL] StackTrace: $stackTrace');
       _teams = [];
     } finally {
@@ -749,7 +825,46 @@ class KanbanController extends ChangeNotifier {
     }
   }
 
-  /// Seleciona um time
+  /// Próxima página de funis (chamado ao rolar o seletor ou em “carregar mais”).
+  Future<void> loadMoreTeams() async {
+    if (!teamsHasMore || _loadingMoreTeams || _loadingTeams) return;
+
+    final nextPage = _myBoardsLastPageLoaded + 1;
+    if (nextPage > _myBoardsTotalPages) return;
+
+    _loadingMoreTeams = true;
+    notifyListeners();
+
+    try {
+      final response = await _kanbanService.getMyBoardsPage(
+        page: nextPage,
+        limit: _myBoardsPageSize,
+      );
+
+      if (response.success && response.data != null) {
+        final dto = response.data!;
+        final incoming =
+            dto.boards.map((s) => s.team).where((t) => t.id.isNotEmpty);
+        for (final t in incoming) {
+          if (_teams.every((x) => x.id != t.id)) {
+            _teams.add(t);
+          }
+        }
+        _myBoardsLastPageLoaded = dto.page;
+        _myBoardsTotalPages = dto.totalPages < 1 ? 1 : dto.totalPages;
+        debugPrint(
+          '📋 [KANBAN_CTRL] ✅ +funis página $nextPage → total ${_teams.length}',
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ [KANBAN_CTRL] loadMoreTeams: $e');
+    } finally {
+      _loadingMoreTeams = false;
+      notifyListeners();
+    }
+  }
+
+  /// Seleciona um funil (equipe). Zera o projeto para evitar 403 ao misturar equipes.
   Future<void> selectTeam(KanbanTeam? team) async {
     debugPrint('🚀 [KANBAN_CTRL] ========== selectTeam ==========');
     debugPrint(
@@ -759,128 +874,97 @@ class KanbanController extends ChangeNotifier {
       '🚀 [KANBAN_CTRL] Time anterior: ${_selectedTeam?.name} (${_selectedTeam?.id})',
     );
 
-    _selectedTeam = team;
-
-    // Recarregar projetos e quadro com o novo time
-    if (team != null) {
-      debugPrint(
-        '🚀 [KANBAN_CTRL] Recarregando projetos e quadro com novo time...',
-      );
-      await loadProjects(teamId: team.id);
-      await loadBoard(teamId: team.id, projectId: _projectId);
-    } else {
+    if (team == null) {
+      _selectedTeam = null;
       debugPrint('🚀 [KANBAN_CTRL] Time desmarcado');
+      debugPrint('🚀 [KANBAN_CTRL] ========== FIM selectTeam ==========');
+      notifyListeners();
+      return;
     }
+
+    final same = _selectedTeam?.id == team.id;
+    _selectedTeam = team;
+    if (same) {
+      debugPrint('🚀 [KANBAN_CTRL] Mesmo funil — ignorando recarga');
+      debugPrint('🚀 [KANBAN_CTRL] ========== FIM selectTeam ==========');
+      return;
+    }
+
+    _projectId = null;
+    debugPrint(
+      '🚀 [KANBAN_CTRL] Recarregando projetos e quadro com novo funil…',
+    );
+    await loadProjects(teamId: team.id);
+    await loadBoard(teamId: team.id, projectId: null);
 
     debugPrint('🚀 [KANBAN_CTRL] ========== FIM selectTeam ==========');
   }
 
-  /// Carrega projetos disponíveis
+  /// Carrega projetos só do funil atual — evita N requisições (uma por equipe).
   Future<void> loadProjects({String? teamId}) async {
     debugPrint('🚀 [KANBAN_CTRL] ========== INICIANDO loadProjects ==========');
     debugPrint('🚀 [KANBAN_CTRL] Parâmetro teamId: $teamId');
     debugPrint('🚀 [KANBAN_CTRL] _teamId atual: $_teamId');
 
-    if (teamId == null) {
-      teamId = _teamId;
-      debugPrint('🚀 [KANBAN_CTRL] Usando _teamId: $teamId');
-    }
+    teamId ??= _teamId ?? _selectedTeam?.id;
+    debugPrint('🚀 [KANBAN_CTRL] teamId efetivo: $teamId');
 
     _loadingProjects = true;
     notifyListeners();
     debugPrint('🚀 [KANBAN_CTRL] Estado _loadingProjects: true');
 
     try {
-      final List<KanbanProject> allProjects = [];
-
-      // SEMPRE carregar projetos pessoais primeiro (sempre existe)
-      debugPrint(
-        '📋 [KANBAN_CTRL] Carregando projetos pessoais (sempre existe)...',
-      );
-      final personalResponse = await _kanbanService.getPersonalWorkspace();
-      debugPrint('📋 [KANBAN_CTRL] Resposta getPersonalWorkspace:');
-      debugPrint('📋 [KANBAN_CTRL]   - success: ${personalResponse.success}');
-      debugPrint(
-        '📋 [KANBAN_CTRL]   - data: ${personalResponse.data?.length ?? 0} projetos',
-      );
-
-      if (personalResponse.success && personalResponse.data != null) {
-        allProjects.addAll(personalResponse.data!);
-        debugPrint(
-          '📋 [KANBAN_CTRL] ✅ ${personalResponse.data!.length} projetos pessoais carregados',
-        );
-        for (var i = 0; i < personalResponse.data!.length; i++) {
-          final p = personalResponse.data![i];
-          debugPrint(
-            '📋 [KANBAN_CTRL]   [Pessoal $i] ${p.name} (${p.id}) - Status: ${p.status.name} - Tarefas: ${p.taskCount}',
-          );
-        }
+      if (teamId == null || teamId.isEmpty) {
+        _projects = [];
+        debugPrint('📋 [KANBAN_CTRL] Sem teamId — lista de projetos vazia');
+        return;
       }
 
-      // Carregar projetos de TODAS as equipes (não apenas do time selecionado)
-      // Primeiro, garantir que os times estão carregados
-      if (_teams.isEmpty) {
-        debugPrint('📋 [KANBAN_CTRL] Times não carregados, carregando...');
-        await loadTeams();
-      }
-
-      // Carregar projetos de cada equipe
-      for (final team in _teams) {
-        // Pular o time "Pessoal" pois já carregamos projetos pessoais
-        if (team.name.toLowerCase().contains('pessoal')) {
-          debugPrint(
-            '📋 [KANBAN_CTRL] Pulando time "Pessoal" (já carregado projetos pessoais)',
-          );
-          continue;
+      KanbanTeam? team;
+      for (final t in _teams) {
+        if (t.id == teamId) {
+          team = t;
+          break;
         }
+      }
+      team ??= _board?.team?.id == teamId ? _board!.team : _selectedTeam;
 
+      final nameLower = (team?.name ?? '').toLowerCase();
+      final usePersonalList =
+          nameLower.contains('pessoal') && !nameLower.contains('workspace');
+
+      if (usePersonalList) {
         debugPrint(
-          '🚀 [KANBAN_CTRL] Carregando projetos da equipe: ${team.name} (${team.id})...',
+          '📋 [KANBAN_CTRL] Funil pessoal — getPersonalWorkspace()',
         );
-        final response = await _kanbanService.getProjectsByTeam(team.id);
-
-        debugPrint('🚀 [KANBAN_CTRL] Resposta getProjectsByTeam:');
-        debugPrint('🚀 [KANBAN_CTRL]   - success: ${response.success}');
-        debugPrint('🚀 [KANBAN_CTRL]   - statusCode: ${response.statusCode}');
-        debugPrint('🚀 [KANBAN_CTRL]   - message: ${response.message}');
+        final personalResponse = await _kanbanService.getPersonalWorkspace();
+        if (personalResponse.success && personalResponse.data != null) {
+          _projects = List<KanbanProject>.from(personalResponse.data!);
+          debugPrint(
+            '📋 [KANBAN_CTRL] ✅ ${_projects.length} projetos (pessoal)',
+          );
+        } else {
+          _projects = [];
+          debugPrint(
+            '📋 [KANBAN_CTRL] ⚠️ Pessoal vazio: ${personalResponse.message}',
+          );
+        }
+      } else {
         debugPrint(
-          '🚀 [KANBAN_CTRL]   - data: ${response.data?.length ?? 0} projetos',
+          '📋 [KANBAN_CTRL] getProjectsByTeam($teamId)…',
         );
-
+        final response = await _kanbanService.getProjectsByTeam(teamId);
         if (response.success && response.data != null) {
-          allProjects.addAll(response.data!);
+          _projects = List<KanbanProject>.from(response.data!);
           debugPrint(
-            '📋 [KANBAN_CTRL] ✅ ${response.data!.length} projetos da equipe "${team.name}" carregados',
+            '📋 [KANBAN_CTRL] ✅ ${_projects.length} projetos do funil atual',
           );
-          for (var i = 0; i < response.data!.length; i++) {
-            final p = response.data![i];
-            debugPrint(
-              '📋 [KANBAN_CTRL]   [${team.name} $i] ${p.name} (${p.id}) - Status: ${p.status.name} - Tarefas: ${p.taskCount}',
-            );
-          }
+        } else {
+          _projects = [];
+          debugPrint(
+            '📋 [KANBAN_CTRL] ⚠️ Projetos: ${response.message}',
+          );
         }
-      }
-
-      // Remover duplicatas (caso algum projeto apareça em ambos)
-      final uniqueProjects = <String, KanbanProject>{};
-      for (final project in allProjects) {
-        if (!uniqueProjects.containsKey(project.id)) {
-          uniqueProjects[project.id] = project;
-        }
-      }
-
-      _projects = uniqueProjects.values.toList();
-      debugPrint(
-        '📋 [KANBAN_CTRL] ✅ Total de ${_projects.length} projetos únicos carregados (pessoais + equipe)',
-      );
-
-      // Selecionar automaticamente o primeiro projeto se não houver projeto selecionado
-      if (_projectId == null && _projects.isNotEmpty) {
-        final firstProject = _projects.first;
-        _projectId = firstProject.id;
-        debugPrint(
-          '📋 [KANBAN_CTRL] ✅ Projeto selecionado automaticamente: ${firstProject.name} (${firstProject.id})',
-        );
       }
     } catch (e, stackTrace) {
       debugPrint(
@@ -909,14 +993,13 @@ class KanbanController extends ChangeNotifier {
     // Encontrar o projeto selecionado para obter o teamId correto
     String? projectTeamId;
     if (projectId != null) {
-      final selectedProject = _projects.firstWhere(
-        (p) => p.id == projectId,
-        orElse: () => _projects.first,
-      );
-      projectTeamId = selectedProject.teamId;
-      debugPrint(
-        '🚀 [KANBAN_CTRL] Projeto encontrado: ${selectedProject.name} (teamId: $projectTeamId)',
-      );
+      final idx = _projects.indexWhere((p) => p.id == projectId);
+      if (idx != -1) {
+        projectTeamId = _projects[idx].teamId;
+        debugPrint(
+          '🚀 [KANBAN_CTRL] Projeto encontrado: ${_projects[idx].name} (teamId: $projectTeamId)',
+        );
+      }
     }
 
     // Usar o teamId do projeto, ou o teamId atual como fallback
@@ -937,24 +1020,38 @@ class KanbanController extends ChangeNotifier {
     debugPrint('🚀 [KANBAN_CTRL] ========== FIM selectProject ==========');
   }
 
-  /// Aplica filtros nas tarefas
+  /// Filtros reenviados à API (`KanbanBoardFiltersDto`) como no Intellisys.
   void applyFilters({
     String? searchQuery,
     KanbanPriority? priority,
     String? assigneeId,
   }) {
-    _searchQuery = searchQuery;
+    final trimmed = searchQuery?.trim();
+    _searchQuery = trimmed == null || trimmed.isEmpty ? null : trimmed;
     _filterPriority = priority;
-    _filterAssigneeId = assigneeId;
+    _filterAssigneeId =
+        assigneeId != null && assigneeId.isEmpty ? null : assigneeId;
     notifyListeners();
+
+    _boardFilterDebounce?.cancel();
+    final delayMs =
+        (_searchQuery != null && _searchQuery!.trim().isNotEmpty) ? 420 : 0;
+    _boardFilterDebounce = Timer(Duration(milliseconds: delayMs), () {
+      if (_teamId == null) return;
+      loadBoard(teamId: _teamId, projectId: _projectId);
+    });
   }
 
-  /// Limpa todos os filtros
   void clearFilters() {
+    _boardFilterDebounce?.cancel();
     _searchQuery = null;
     _filterPriority = null;
     _filterAssigneeId = null;
+    _filterClearGeneration++;
     notifyListeners();
+    if (_teamId != null) {
+      loadBoard(teamId: _teamId, projectId: _projectId);
+    }
   }
 
   /// Atualiza estado interno
@@ -964,9 +1061,11 @@ class KanbanController extends ChangeNotifier {
     String? error,
     String? teamId,
     String? projectId,
+    bool clearError = false,
   }) {
     if (board != null) _board = board;
     if (loading != null) _loading = loading;
+    if (clearError) _error = null;
     if (error != null) _error = error;
     if (teamId != null) _teamId = teamId;
     if (projectId != null) _projectId = projectId;
@@ -980,6 +1079,10 @@ class KanbanController extends ChangeNotifier {
     _error = null;
     _teamId = null;
     _projectId = null;
+    _teams = [];
+    _myBoardsLastPageLoaded = 0;
+    _myBoardsTotalPages = 1;
+    _loadingMoreTeams = false;
     notifyListeners();
   }
 }

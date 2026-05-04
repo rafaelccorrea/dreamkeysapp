@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../../../../../shared/services/auth_service.dart';
 import '../../../../../shared/services/login_flow_service.dart';
 import '../../../../../shared/services/biometric_service.dart';
+import '../../../../../core/push/app_push_service.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../shared/widgets/image_curve_clipper.dart';
 import '../../../../../shared/widgets/loading_overlay.dart';
@@ -142,6 +143,8 @@ class _TwoFactorPageState extends State<TwoFactorPage> {
         );
 
         if (mounted) {
+          await AppPushService.instance.syncWithBackendIfAuthenticated();
+          if (!mounted) return;
           Navigator.of(context).pushNamedAndRemoveUntil(
             result.route!,
             (route) => false,

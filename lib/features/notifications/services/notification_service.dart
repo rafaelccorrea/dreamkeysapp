@@ -19,16 +19,22 @@ class NotificationService {
     int limit = 20,
   }) async {
     try {
+      final scopedByCompany =
+          companyId != null && companyId.isNotEmpty;
       final params = NotificationQueryParams(
         read: read,
         type: type,
-        companyId: companyId,
+        companyId: scopedByCompany ? companyId : null,
         page: page,
         limit: limit,
       ).toQueryMap();
 
+      final endpoint = scopedByCompany
+          ? ApiConstants.notifications
+          : ApiConstants.notificationsAllCompanies;
+
       final response = await _apiService.get<Map<String, dynamic>>(
-        ApiConstants.notifications,
+        endpoint,
         queryParameters: params,
       );
 
@@ -73,21 +79,26 @@ class NotificationService {
     int limit = 20,
   }) async {
     try {
-      final params = <String, String>{};
+      final params = <String, String>{
+        'page': page.toString(),
+        'limit': limit.toString(),
+      };
+
+      final ApiResponse<Map<String, dynamic>> response;
+
       if (companyId != null && companyId.isNotEmpty) {
         params['companyId'] = companyId;
+        response = await _apiService.get<Map<String, dynamic>>(
+          ApiConstants.notificationsUnreadList,
+          queryParameters: params,
+        );
+      } else {
+        params['read'] = 'false';
+        response = await _apiService.get<Map<String, dynamic>>(
+          ApiConstants.notificationsAllCompanies,
+          queryParameters: params,
+        );
       }
-      if (page > 1) {
-        params['page'] = page.toString();
-      }
-      if (limit != 20) {
-        params['limit'] = limit.toString();
-      }
-
-      final response = await _apiService.get<Map<String, dynamic>>(
-        ApiConstants.notificationsUnreadList(page, limit),
-        queryParameters: params.isEmpty ? null : params,
-      );
 
       if (response.success && response.data != null) {
         try {
@@ -168,38 +179,53 @@ class NotificationService {
     String? companyId,
   }) async {
     try {
-      final params = <String, String>{};
       if (companyId != null && companyId.isNotEmpty) {
-        params['companyId'] = companyId;
-      }
+        final response = await _apiService.get<Map<String, dynamic>>(
+          ApiConstants.notificationsUnreadCount,
+          queryParameters: {'companyId': companyId},
+        );
 
-      final response = await _apiService.get<Map<String, dynamic>>(
-        ApiConstants.notificationsUnreadCount,
-        queryParameters: params.isEmpty ? null : params,
-      );
-
-      if (response.success && response.data != null) {
-        try {
-          final countResponse = UnreadCountResponse.fromJson(response.data!);
-          return ApiResponse.success(
-            data: countResponse,
-            statusCode: response.statusCode,
-          );
-        } catch (e, stackTrace) {
-          debugPrint('❌ [NOTIFICATION_SERVICE] Erro ao fazer parse: $e');
-          debugPrint('📚 [NOTIFICATION_SERVICE] StackTrace: $stackTrace');
-          return ApiResponse.error(
-            message: 'Erro ao processar resposta',
-            statusCode: response.statusCode,
-            data: response.error,
-          );
+        if (response.success && response.data != null) {
+          try {
+            final countResponse = UnreadCountResponse.fromJson(response.data!);
+            return ApiResponse.success(
+              data: countResponse,
+              statusCode: response.statusCode,
+            );
+          } catch (e, stackTrace) {
+            debugPrint('❌ [NOTIFICATION_SERVICE] Erro ao fazer parse: $e');
+            debugPrint('📚 [NOTIFICATION_SERVICE] StackTrace: $stackTrace');
+            return ApiResponse.error(
+              message: 'Erro ao processar resposta',
+              statusCode: response.statusCode,
+              data: response.error,
+            );
+          }
         }
+
+        return ApiResponse.error(
+          message: response.message ?? 'Erro ao obter contador',
+          statusCode: response.statusCode,
+          data: response.error,
+        );
       }
 
-      return ApiResponse.error(
-        message: response.message ?? 'Erro ao obter contador',
-        statusCode: response.statusCode,
-        data: response.error,
+      final aggregated = await getUnreadCountByCompany();
+      if (!aggregated.success || aggregated.data == null) {
+        return ApiResponse.error(
+          message: aggregated.message ?? 'Erro ao obter contador',
+          statusCode: aggregated.statusCode,
+          data: aggregated.error,
+        );
+      }
+
+      final sum = aggregated.data!.countByCompany.values.fold<int>(
+        0,
+        (a, b) => a + b,
+      );
+      return ApiResponse.success(
+        data: UnreadCountResponse(count: sum),
+        statusCode: aggregated.statusCode,
       );
     } catch (e, stackTrace) {
       debugPrint('❌ [NOTIFICATION_SERVICE] Exceção ao obter contador: $e');

@@ -36,7 +36,7 @@ class AppScaffold extends StatelessWidget {
 
     return routeName == AppRoutes.home ||
         routeName == AppRoutes.properties ||
-        routeName == AppRoutes.calendar ||
+        routeName == AppRoutes.kanban ||
         routeName == AppRoutes.clients ||
         routeName == AppRoutes.profile ||
         routeName == AppRoutes.documents ||

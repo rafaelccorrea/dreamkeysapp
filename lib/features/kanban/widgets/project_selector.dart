@@ -5,9 +5,181 @@ import '../../../shared/widgets/skeleton_box.dart';
 import '../models/kanban_models.dart';
 import '../controllers/kanban_controller.dart';
 
-/// Widget para selecionar projeto no Kanban
+/// Widget para selecionar funil (equipe) e projeto no Kanban.
 class ProjectSelector extends StatelessWidget {
-  const ProjectSelector({super.key});
+  /// Quando [true], omiti o cartão externo (uso dentro do painel agrupado na [KanbanPage]).
+  final bool embedded;
+
+  const ProjectSelector({super.key, this.embedded = false});
+
+  void _openFunnelPickerSheet(BuildContext context) {
+    final ctrl = context.read<KanbanController>();
+    final scrollController = ScrollController();
+
+    void onScroll() {
+      if (!scrollController.hasClients) return;
+      final pos = scrollController.position;
+      if (pos.maxScrollExtent <= 0) return;
+      if (pos.pixels >= pos.maxScrollExtent - 120) {
+        ctrl.loadMoreTeams();
+      }
+    }
+
+    scrollController.addListener(onScroll);
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
+            ),
+            child: SizedBox(
+              height: MediaQuery.sizeOf(sheetContext).height * 0.62,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 12, 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Trocar funil',
+                            style: Theme.of(sheetContext)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.pop(sheetContext),
+                          icon: const Icon(Icons.close_rounded),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Text(
+                      'Mais funis são carregados ao chegar ao fim da lista.',
+                      style: Theme.of(sheetContext).textTheme.bodySmall?.copyWith(
+                            color:
+                                ThemeHelpers.textSecondaryColor(sheetContext),
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: Consumer<KanbanController>(
+                      builder: (context, c, _) {
+                        if (c.loadingTeams && c.teams.isEmpty) {
+                          return const Center(
+                            child: Padding(
+                              padding: EdgeInsets.all(24),
+                              child: CircularProgressIndicator(),
+                            ),
+                          );
+                        }
+                        if (c.teams.isEmpty) {
+                          return Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Text(
+                                'Nenhum funil disponível.',
+                                style: Theme.of(sheetContext).textTheme.bodyMedium,
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          );
+                        }
+                        return ListView.builder(
+                          controller: scrollController,
+                          padding: const EdgeInsets.only(bottom: 16),
+                          itemCount:
+                              c.teams.length + (c.teamsHasMore || c.loadingMoreTeams ? 1 : 0),
+                          itemBuilder: (context, i) {
+                            if (i >= c.teams.length) {
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 12,
+                                  horizontal: 16,
+                                ),
+                                child: Center(
+                                  child: c.loadingMoreTeams
+                                      ? const SizedBox(
+                                          width: 24,
+                                          height: 24,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : Text(
+                                          'Role para carregar mais funis',
+                                          style: Theme.of(sheetContext)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(
+                                                color: ThemeHelpers
+                                                    .textSecondaryColor(
+                                                  sheetContext,
+                                                ),
+                                              ),
+                                        ),
+                                ),
+                              );
+                            }
+                            final team = c.teams[i];
+                            final selected = c.team?.id == team.id ||
+                                c.selectedTeam?.id == team.id;
+                            return ListTile(
+                              leading: Icon(
+                                selected
+                                    ? Icons.check_circle_rounded
+                                    : Icons.arrow_right_rounded,
+                                color: selected
+                                    ? Theme.of(sheetContext).colorScheme.primary
+                                    : ThemeHelpers.textSecondaryColor(
+                                        sheetContext,
+                                      ),
+                              ),
+                              title: Text(
+                                team.name,
+                                style: TextStyle(
+                                  fontWeight: selected
+                                      ? FontWeight.w800
+                                      : FontWeight.w600,
+                                ),
+                              ),
+                              onTap: () async {
+                                Navigator.pop(sheetContext);
+                                await c.selectTeam(team);
+                              },
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    ).whenComplete(() {
+      scrollController.removeListener(onScroll);
+      scrollController.dispose();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -33,51 +205,112 @@ class ProjectSelector extends StatelessWidget {
             })
             .toList();
 
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          decoration: BoxDecoration(
-            color: ThemeHelpers.cardBackgroundColor(context),
-            border: Border(
-              bottom: BorderSide(
-                color: ThemeHelpers.borderColor(context),
-              ),
-            ),
-          ),
-          child: Column(
+        final primary = theme.colorScheme.primary;
+        final cool = const Color(0xFF0891B2);
+
+        final body = Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Linha com nome da equipe
-              if (controller.team != null) ...[
-                Row(
-                  children: [
-                    Icon(
-                      Icons.group_outlined,
-                      size: 18,
-                      color: theme.colorScheme.primary,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.primary.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          controller.team!.name,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.primary,
-                            fontWeight: FontWeight.w600,
+              // Funil atual + troca (lista paginada em bottom sheet)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.account_tree_rounded,
+                    size: 18,
+                    color: primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Funil',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: ThemeHelpers.textSecondaryColor(context),
                           ),
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 1,
                         ),
-                      ),
+                        const SizedBox(height: 6),
+                        InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: controller.loadingTeams && controller.teams.isEmpty
+                              ? null
+                              : () => _openFunnelPickerSheet(context),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              gradient: embedded
+                                  ? LinearGradient(
+                                      colors: [
+                                        primary.withValues(alpha: 0.09),
+                                        cool.withValues(alpha: 0.07),
+                                      ],
+                                    )
+                                  : null,
+                              color: embedded
+                                  ? null
+                                  : primary.withValues(alpha: 0.10),
+                              border: embedded
+                                  ? Border.all(
+                                      color: primary.withValues(alpha: 0.22),
+                                    )
+                                  : null,
+                            ),
+                            child: controller.loadingTeams &&
+                                    controller.teams.isEmpty
+                                ? SkeletonBox(
+                                    height: 22,
+                                    borderRadius: 8,
+                                  )
+                                : Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          controller.team?.name ??
+                                              (controller.teams.isEmpty
+                                                  ? 'Carregando funis…'
+                                                  : 'Escolher funil'),
+                                          style: theme.textTheme.bodyMedium
+                                              ?.copyWith(
+                                            color: primary,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                          maxLines: 2,
+                                        ),
+                                      ),
+                                      Icon(
+                                        Icons.swap_vert_rounded,
+                                        size: 20,
+                                        color: primary.withValues(alpha: 0.75),
+                                      ),
+                                    ],
+                                  ),
+                          ),
+                        ),
+                        if (controller.teamsHasMore)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              'Lista parcial — toque para carregar mais ao rolar.',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: ThemeHelpers.textSecondaryColor(context),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-              ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
               // Seletor de projeto - título e select em coluna
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -107,17 +340,29 @@ class ProjectSelector extends StatelessWidget {
                       Expanded(
                         child: isLoading
                             ? SkeletonBox(
-                                height: 40,
-                                borderRadius: 8,
+                                height: 46,
+                                borderRadius: 16,
                               )
                             : Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                 decoration: BoxDecoration(
-                                  color: ThemeHelpers.cardBackgroundColor(context),
+                                  gradient: embedded
+                                      ? LinearGradient(
+                                          colors: [
+                                            primary.withValues(alpha: 0.05),
+                                            cool.withValues(alpha: 0.04),
+                                          ],
+                                        )
+                                      : null,
+                                  color: embedded
+                                      ? null
+                                      : ThemeHelpers.cardBackgroundColor(context),
                                   border: Border.all(
-                                    color: ThemeHelpers.borderColor(context),
+                                    color: embedded
+                                        ? primary.withValues(alpha: 0.2)
+                                        : ThemeHelpers.borderColor(context),
                                   ),
-                                  borderRadius: BorderRadius.circular(8),
+                                  borderRadius: BorderRadius.circular(16),
                                 ),
                                 child: DropdownButtonHideUnderline(
                                   child: DropdownButton<String?>(
@@ -167,7 +412,7 @@ class ProjectSelector extends StatelessWidget {
                                                   ),
                                                   decoration: BoxDecoration(
                                                     color: theme.colorScheme.primary
-                                                        .withOpacity(0.1),
+                                                        .withValues(alpha: 0.1),
                                                     borderRadius: BorderRadius.circular(12),
                                                   ),
                                                   child: Text(
@@ -225,7 +470,23 @@ class ProjectSelector extends StatelessWidget {
                 ],
               ),
             ],
+          );
+
+        if (embedded) {
+          return body;
+        }
+
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          decoration: BoxDecoration(
+            color: ThemeHelpers.cardBackgroundColor(context),
+            border: Border(
+              bottom: BorderSide(
+                color: ThemeHelpers.borderColor(context),
+              ),
+            ),
           ),
+          child: body,
         );
       },
     );

@@ -1,7 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
 import 'core/constants/api_constants.dart';
+import 'core/push/app_push_service.dart';
+import 'core/navigation/app_navigator.dart';
 import 'core/theme/app_theme.dart';
 import 'core/routes/app_routes.dart';
 import 'shared/services/theme_service.dart';
@@ -9,9 +14,6 @@ import 'features/notifications/controllers/notification_controller.dart';
 import 'features/appointments/controllers/appointment_controller.dart';
 import 'features/kanban/controllers/kanban_controller.dart';
 import 'features/chat/controllers/chat_unread_controller.dart';
-
-// GlobalKey para o Navigator - permite navegação sem contexto
-final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,6 +26,8 @@ void main() async {
 
   // Inicializar serviço de tema
   await ThemeService.instance.init();
+
+  await AppPushService.setupFirebaseBeforeRunApp();
 
   runApp(const MyApp());
 }
@@ -39,8 +43,10 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
-    // Escutar mudanças no tema
     ThemeService.instance.addListener(_onThemeChanged);
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      unawaited(AppPushService.instance.initListenersAndLocalNotifications());
+    });
   }
 
   @override
@@ -72,7 +78,7 @@ class _MyAppState extends State<MyApp> {
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
         themeMode: ThemeService.instance.themeMode,
-        navigatorKey: navigatorKey,
+        navigatorKey: appNavigatorKey,
         initialRoute: AppRoutes.splash,
         onGenerateRoute: AppRoutes.generateRoute,
       ),

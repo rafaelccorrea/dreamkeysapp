@@ -45,7 +45,7 @@ class _PropertyPublicToggleState extends State<PropertyPublicToggle> {
     if (!widget.isActive) return false;
     if (widget.propertyStatus != PropertyStatus.available) return false;
     final validImages = widget.imageCount ?? 0;
-    if (validImages < 5) return false;
+    if (validImages < 2) return false;
     return true;
   }
 
@@ -57,8 +57,8 @@ class _PropertyPublicToggleState extends State<PropertyPublicToggle> {
       return 'Status deve ser "Disponível"';
     }
     final validImages = widget.imageCount ?? 0;
-    if (validImages < 5) {
-      return 'Necessário ter 5 imagens (atualmente: $validImages)';
+    if (validImages < 2) {
+      return 'Necessário ter 2 imagens (atualmente: $validImages)';
     }
     return null;
   }

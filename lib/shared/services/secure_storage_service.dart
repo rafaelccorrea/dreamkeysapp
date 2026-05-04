@@ -21,6 +21,7 @@ class SecureStorageService {
   static const String _keyAccessToken = 'access_token';
   static const String _keyRefreshToken = 'refresh_token';
   static const String _keyCompanyId = 'intellisys_selected_company_id';
+  static const String _keyFcmRegisteredToken = 'fcm_registered_token';
 
   /// Salva as credenciais do usuário
   Future<void> saveCredentials({
@@ -226,12 +227,37 @@ class SecureStorageService {
     }
   }
 
+  Future<void> saveFcmTokenRegistered(String token) async {
+    try {
+      await _storage.write(key: _keyFcmRegisteredToken, value: token);
+    } catch (e) {
+      debugPrint('⚠️ [SECURE_STORAGE] Erro ao guardar token FCM: $e');
+    }
+  }
+
+  Future<String?> getFcmTokenRegistered() async {
+    try {
+      return await _storage.read(key: _keyFcmRegisteredToken);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<void> clearFcmTokenRegistered() async {
+    try {
+      await _storage.delete(key: _keyFcmRegisteredToken);
+    } catch (e) {
+      debugPrint('⚠️ [SECURE_STORAGE] Erro ao limpar token FCM: $e');
+    }
+  }
+
   /// Limpa todos os dados de autenticação (tokens, credenciais e Company ID)
   Future<void> clearAllAuthData() async {
     try {
       await clearTokens();
       await clearCredentials();
       await clearCompanyId();
+      await clearFcmTokenRegistered();
       debugPrint('✅ [SECURE_STORAGE] Todos os dados de autenticação removidos');
     } catch (e) {
       debugPrint('⚠️ [SECURE_STORAGE] Erro ao limpar dados de autenticação: $e');

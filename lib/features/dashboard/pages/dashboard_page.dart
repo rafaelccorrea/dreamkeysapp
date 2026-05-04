@@ -407,13 +407,15 @@ class _DashboardPageState extends State<DashboardPage> {
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
                               SkeletonText(
-                                width: min(212, w * 0.38),
+                                width: min(280, w * 0.44),
                                 height: 12,
+                                borderRadius: 4,
                               ),
-                              const SizedBox(height: 6),
+                              const SizedBox(height: 5),
                               SkeletonText(
-                                width: min(188, w * 0.34),
+                                width: min(220, w * 0.38),
                                 height: 12,
+                                borderRadius: 4,
                               ),
                             ],
                           ),
@@ -484,7 +486,6 @@ class _DashboardPageState extends State<DashboardPage> {
     return Container(
       height: 128,
       clipBehavior: Clip.antiAlias,
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
@@ -493,23 +494,43 @@ class _DashboardPageState extends State<DashboardPage> {
         color: ThemeHelpers.cardBackgroundColor(context).withValues(alpha: 0.42),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              SkeletonBox(width: 40, height: 40, borderRadius: 12),
-              SkeletonBox(width: 18, height: 18, borderRadius: 6),
-            ],
+          SkeletonBox(
+            width: double.infinity,
+            height: 3,
+            borderRadius: 3,
           ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SkeletonText(width: 96, height: 28, borderRadius: 6),
-              const SizedBox(height: 8),
-              SkeletonText(width: 72, height: 14, borderRadius: 4),
-            ],
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 11, 14, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonBox(width: 44, height: 44, borderRadius: 14),
+                      const Spacer(),
+                      SkeletonBox(width: 18, height: 18, borderRadius: 6),
+                    ],
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonText(
+                        width: double.infinity,
+                        height: 28,
+                        borderRadius: 6,
+                      ),
+                      const SizedBox(height: 6),
+                      SkeletonText(width: 92, height: 15, borderRadius: 4),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
@@ -547,6 +568,101 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  /// Espelha `_buildPointsCompositionRibbon` (faixa 14px + grelha de legenda).
+  Widget _dashboardSkeletonPointsComposition(
+    BuildContext context,
+    double maxW,
+  ) {
+    final track = Container(
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(99),
+        border: Border.all(
+          color: ShellVisualTokens.dashboardGlassBorder(context),
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(99),
+        child: SkeletonBox(
+          width: double.infinity,
+          height: 14,
+          borderRadius: 99,
+        ),
+      ),
+    );
+
+    Widget legendRow() {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
+          ),
+        ),
+        child: Row(
+          children: [
+            SkeletonBox(width: 10, height: 10, borderRadius: 99),
+            const SizedBox(width: 8),
+            Expanded(
+              child: SkeletonText(height: 12, borderRadius: 4),
+            ),
+            const SizedBox(width: 6),
+            SkeletonText(width: 36, height: 12, borderRadius: 4),
+          ],
+        ),
+      );
+    }
+
+    const rowCount = 6;
+    final twoCols = maxW >= 360;
+    if (!twoCols) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          track,
+          const SizedBox(height: 14),
+          for (var i = 0; i < rowCount; i++) ...[
+            if (i > 0) const SizedBox(height: 8),
+            legendRow(),
+          ],
+        ],
+      );
+    }
+
+    final rows = List<Widget>.generate(rowCount, (_) => legendRow());
+    final left = <Widget>[];
+    final right = <Widget>[];
+    for (var i = 0; i < rows.length; i++) {
+      (i.isEven ? left : right).add(rows[i]);
+    }
+    Widget col(List<Widget> items) => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var i = 0; i < items.length; i++) ...[
+              if (i > 0) const SizedBox(height: 8),
+              items[i],
+            ],
+          ],
+        );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        track,
+        const SizedBox(height: 14),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: col(left)),
+            const SizedBox(width: 10),
+            Expanded(child: col(right)),
+          ],
+        ),
+      ],
+    );
+  }
+
   Widget _dashboardSkeletonPerformancePanel(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
@@ -562,13 +678,13 @@ class _DashboardPageState extends State<DashboardPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SkeletonText(width: 156, height: 10),
+                    SkeletonText(width: 182, height: 10),
                     const SizedBox(height: 4),
-                    SkeletonText(width: 178, height: 16),
+                    SkeletonText(width: 196, height: 16),
                   ],
                 ),
               ),
-              SkeletonBox(width: 84, height: 30, borderRadius: 999),
+              SkeletonBox(width: 102, height: 32, borderRadius: 999),
             ],
           ),
           const SizedBox(height: 12),
@@ -620,15 +736,17 @@ class _DashboardPageState extends State<DashboardPage> {
             ],
           ),
           const SizedBox(height: 12),
-          // KPI rail (3 tiles)
-          Row(
-            children: [
-              Expanded(child: SkeletonBox(height: 86, borderRadius: 16)),
-              const SizedBox(width: 10),
-              Expanded(child: SkeletonBox(height: 86, borderRadius: 16)),
-              const SizedBox(width: 10),
-              Expanded(child: SkeletonBox(height: 86, borderRadius: 16)),
-            ],
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: SkeletonBox(height: 102, borderRadius: 16)),
+                const SizedBox(width: 10),
+                Expanded(child: SkeletonBox(height: 102, borderRadius: 16)),
+                const SizedBox(width: 10),
+                Expanded(child: SkeletonBox(height: 102, borderRadius: 16)),
+              ],
+            ),
           ),
           const SizedBox(height: 18),
           Row(
@@ -643,26 +761,9 @@ class _DashboardPageState extends State<DashboardPage> {
             ],
           ),
           const SizedBox(height: 12),
-          SkeletonBox(
-            width: double.infinity,
-            height: 18,
-            borderRadius: 99,
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(child: SkeletonBox(height: 36, borderRadius: 12)),
-              const SizedBox(width: 10),
-              Expanded(child: SkeletonBox(height: 36, borderRadius: 12)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(child: SkeletonBox(height: 36, borderRadius: 12)),
-              const SizedBox(width: 10),
-              Expanded(child: SkeletonBox(height: 36, borderRadius: 12)),
-            ],
+          LayoutBuilder(
+            builder: (context, c) =>
+                _dashboardSkeletonPointsComposition(context, c.maxWidth),
           ),
         ],
       ),
@@ -697,9 +798,90 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _dashboardSkeletonOperationsMiniChip(BuildContext context) {
     return SkeletonBox(
-      height: 52,
+      height: 54,
       borderRadius: 12,
       width: double.infinity,
+    );
+  }
+
+  /// Espelha `_buildOperationsPulseBlock` (tile com borda, não caixa sólida).
+  Widget _dashboardSkeletonPulseBlock(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.42),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              SkeletonBox(width: 32, height: 32, borderRadius: 11),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonText(width: 154, height: 10),
+                    const SizedBox(height: 4),
+                    SkeletonText(width: double.infinity, height: 12),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  SkeletonText(width: 48, height: 18),
+                  const SizedBox(height: 4),
+                  SkeletonText(width: 40, height: 10),
+                ],
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: SkeletonBox(
+              width: double.infinity,
+              height: 1,
+              borderRadius: 1,
+            ),
+          ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              SkeletonBox(width: 32, height: 32, borderRadius: 11),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonText(width: 172, height: 10),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        SkeletonBox(width: 6, height: 6, borderRadius: 99),
+                        const SizedBox(width: 6),
+                        SkeletonText(width: 72, height: 10),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              SkeletonText(width: 52, height: 22),
+            ],
+          ),
+          const SizedBox(height: 10),
+          SkeletonBox(
+            height: 8,
+            width: double.infinity,
+            borderRadius: 99,
+          ),
+        ],
+      ),
     );
   }
 
@@ -713,26 +895,25 @@ class _DashboardPageState extends State<DashboardPage> {
             context,
             innerW,
             titleW: 168,
-            trailing: SkeletonBox(width: 84, height: 26, borderRadius: 999),
+            trailing: SkeletonBox(width: 100, height: 30, borderRadius: 999),
           ),
           const SizedBox(height: 10),
           SkeletonBox(width: 44, height: 3, borderRadius: 3),
           const SizedBox(height: 14),
-          // KPI rail (3 tiles ~86px) — espelha _buildPerformanceKpiTile
           IntrinsicHeight(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Expanded(
-                  child: SkeletonBox(height: 86, borderRadius: 16),
+                  child: SkeletonBox(height: 102, borderRadius: 16),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: SkeletonBox(height: 86, borderRadius: 16),
+                  child: SkeletonBox(height: 102, borderRadius: 16),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: SkeletonBox(height: 86, borderRadius: 16),
+                  child: SkeletonBox(height: 102, borderRadius: 16),
                 ),
               ],
             ),
@@ -758,12 +939,7 @@ class _DashboardPageState extends State<DashboardPage> {
             ],
           ),
           const SizedBox(height: 10),
-          // Pulso block (~110px: 2 linhas + divider + barra)
-          SkeletonBox(
-            width: double.infinity,
-            height: 110,
-            borderRadius: 16,
-          ),
+          _dashboardSkeletonPulseBlock(context),
         ],
       ),
     );
@@ -807,14 +983,10 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _dashboardSkeletonGoalTile(BuildContext context) {
+    final accent = _dashboardAccentColor(context);
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.42),
-        ),
-      ),
+      decoration: ShellVisualTokens.inlineTileDecoration(context, accent, radius: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -870,21 +1042,16 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _dashboardSkeletonGaugeTile(BuildContext context) {
+    final accent = _dashboardAccentColor(context);
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.42),
-        ),
-        color: ThemeHelpers.cardBackgroundColor(context).withValues(alpha: 0.42),
-      ),
+      decoration: ShellVisualTokens.inlineTileDecoration(context, accent, radius: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
-              SkeletonBox(width: 24, height: 24, borderRadius: 9),
+              SkeletonBox(width: 28, height: 28, borderRadius: 9),
               const SizedBox(width: 8),
               Expanded(child: SkeletonText(width: double.infinity, height: 10)),
             ],
@@ -913,15 +1080,10 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _dashboardSkeletonMatchesTile(BuildContext context) {
+    final accent = const Color(0xFF10B981);
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.42),
-        ),
-        color: ThemeHelpers.cardBackgroundColor(context).withValues(alpha: 0.42),
-      ),
+      decoration: ShellVisualTokens.inlineTileDecoration(context, accent, radius: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -970,7 +1132,7 @@ class _DashboardPageState extends State<DashboardPage> {
             context,
             innerW,
             titleW: 206,
-            trailing: SkeletonBox(width: 96, height: 26, borderRadius: 999),
+            trailing: SkeletonBox(width: 108, height: 30, borderRadius: 999),
           ),
           const SizedBox(height: 10),
           SkeletonBox(width: 44, height: 3, borderRadius: 3),
@@ -1015,6 +1177,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _dashboardSkeletonAchievements(BuildContext context, double w) {
     final itemW = w >= 900 ? (w - 60) / 4 : w >= 620 ? (w - 40) / 3 : (w - 12) / 2;
+    final accent = _dashboardAccentColor(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
       child: Column(
@@ -1031,7 +1194,39 @@ class _DashboardPageState extends State<DashboardPage> {
               6,
               (_) => SizedBox(
                 width: itemW.clamp(120.0, 420.0),
-                child: SkeletonBox(height: 66, borderRadius: 16),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: ShellVisualTokens.inlineTileDecoration(
+                    context,
+                    accent,
+                    radius: 16,
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonBox(width: 30, height: 30, borderRadius: 8),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SkeletonText(
+                              width: double.infinity,
+                              height: 14,
+                              borderRadius: 4,
+                            ),
+                            const SizedBox(height: 6),
+                            SkeletonText(
+                              width: double.infinity,
+                              height: 14,
+                              borderRadius: 4,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
@@ -1050,15 +1245,15 @@ class _DashboardPageState extends State<DashboardPage> {
             context,
             innerW,
             titleW: 206,
-            trailing: SkeletonBox(width: 108, height: 32, borderRadius: 999),
+            trailing: SkeletonBox(width: 124, height: 34, borderRadius: 999),
           ),
           const SizedBox(height: 10),
           SkeletonBox(width: 44, height: 3, borderRadius: 3),
           const SizedBox(height: 14),
           ...List.generate(
-            3,
+            4,
             (i) => Padding(
-              padding: EdgeInsets.only(bottom: i == 2 ? 0 : 8),
+              padding: EdgeInsets.only(bottom: i == 3 ? 0 : 8),
               child: Container(
                 padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
                 decoration: BoxDecoration(
@@ -3543,7 +3738,9 @@ class _DashboardPageState extends State<DashboardPage> {
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
-        color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.white,
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.05)
+            : ShellVisualTokens.dashboardGlassFill(context),
         border: Border.all(
           color: color.withValues(alpha: isDark ? 0.42 : 0.36),
         ),
