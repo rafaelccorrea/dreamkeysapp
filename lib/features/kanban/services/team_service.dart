@@ -104,6 +104,70 @@ class TeamService {
       );
     }
   }
+
+  /// Membros (`GET /teams/:id/members`) — papel na equipe (ex.: `leader`) conforme CRM web.
+  Future<ApiResponse<List<TeamMemberBrief>>> getTeamMembers(
+    String teamId,
+  ) async {
+    if (teamId.trim().isEmpty) {
+      return ApiResponse.success(data: [], statusCode: 200);
+    }
+    try {
+      final response = await _apiService.get<List<dynamic>>(
+        ApiConstants.teamMembers(teamId),
+      );
+      if (response.success && response.data != null) {
+        final list = response.data!
+            .map((e) => TeamMemberBrief.fromDynamic(e))
+            .toList();
+        return ApiResponse.success(
+          data: list,
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao listar membros',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [TEAM_SERVICE] Exceção em getTeamMembers: $e');
+      return ApiResponse.error(
+        message: 'Erro ao listar membros: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+}
+
+/// Entrada minimalista para checagem de líder (`useCanBulkDeleteCards`).
+class TeamMemberBrief {
+  final String memberUserId;
+  final String role;
+
+  TeamMemberBrief({
+    required this.memberUserId,
+    required this.role,
+  });
+
+  factory TeamMemberBrief.fromDynamic(dynamic raw) {
+    if (raw is! Map) {
+      return TeamMemberBrief(memberUserId: '', role: '');
+    }
+    final m = Map<String, dynamic>.from(raw);
+    final user = m['user'];
+    String uid = '';
+    if (user is Map) {
+      uid = user['id']?.toString() ?? '';
+    }
+    uid = uid.isNotEmpty ? uid : (m['userId']?.toString() ?? '');
+    if (uid.isEmpty) {
+      uid = m['id']?.toString() ?? '';
+    }
+    return TeamMemberBrief(
+      memberUserId: uid,
+      role: m['role']?.toString() ?? '',
+    );
+  }
 }
 
 

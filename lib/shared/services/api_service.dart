@@ -497,8 +497,20 @@ class ApiService {
     debugPrint('   - rawBody length: ${rawBody.length}');
     debugPrint('   - rawBody: $rawBody');
     
-    final body = rawBody.isNotEmpty ? jsonDecode(rawBody) : null;
-    
+    dynamic body;
+    if (rawBody.isNotEmpty) {
+      try {
+        body = jsonDecode(rawBody);
+      } catch (e) {
+        debugPrint(
+          '⚠️ [API_SERVICE] jsonDecode ignorado ($statusCode): $e',
+        );
+        body = null;
+      }
+    } else {
+      body = null;
+    }
+
     debugPrint('   - parsed body type: ${body?.runtimeType}');
     if (body is Map) {
       debugPrint('   - parsed body keys: ${body.keys.toList()}');
@@ -512,7 +524,7 @@ class ApiService {
       if (body is Map && body is! Map<String, dynamic>) {
         normalized = Map<String, dynamic>.from(body);
       }
-      final data = normalized is T ? normalized as T : null;
+      final data = normalized is T ? normalized : null;
       return ApiResponse.success(data: data, statusCode: statusCode);
     } else {
       debugPrint('❌ [API_SERVICE] Status code de erro');

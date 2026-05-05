@@ -401,6 +401,8 @@ class KanbanProject {
   final double? progress;
   final KanbanUser? createdBy;
   final KanbanUser? completedBy;
+  /// Equipes extras do funil (multi-equipe), quando a API envia `teamIds` — mesmo critério do web.
+  final List<String>? teamIds;
 
   KanbanProject({
     required this.id,
@@ -421,6 +423,7 @@ class KanbanProject {
     this.progress,
     this.createdBy,
     this.completedBy,
+    this.teamIds,
   });
 
   factory KanbanProject.fromJson(Map<String, dynamic> json) {
@@ -452,6 +455,11 @@ class KanbanProject {
           : null,
       completedBy: json['completedBy'] != null
           ? KanbanUser.fromJson(json['completedBy'] as Map<String, dynamic>)
+          : null,
+      teamIds: json['teamIds'] != null
+          ? List<String>.from(
+              (json['teamIds'] as List).map((e) => e.toString()),
+            )
           : null,
     );
   }
@@ -673,6 +681,100 @@ class KanbanMyBoardsPageDto {
   }
 }
 
+/// Cliente disponível para vincular a uma negociação (`GET /kanban/projects/:id/clients`).
+class KanbanProjectLinkedClient {
+  final String id;
+  final String name;
+  final String? email;
+  final String? phone;
+
+  KanbanProjectLinkedClient({
+    required this.id,
+    required this.name,
+    this.email,
+    this.phone,
+  });
+
+  factory KanbanProjectLinkedClient.fromJson(Map<String, dynamic> json) {
+    return KanbanProjectLinkedClient(
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      email: json['email']?.toString(),
+      phone: json['phone']?.toString(),
+    );
+  }
+}
+
+/// Imóvel disponível para vincular (`GET /kanban/projects/:id/properties`).
+class KanbanProjectLinkedProperty {
+  final String id;
+  final String title;
+  final String? code;
+  final String? city;
+
+  KanbanProjectLinkedProperty({
+    required this.id,
+    required this.title,
+    this.code,
+    this.city,
+  });
+
+  factory KanbanProjectLinkedProperty.fromJson(Map<String, dynamic> json) {
+    final title =
+        json['title']?.toString() ?? json['name']?.toString() ?? '';
+    return KanbanProjectLinkedProperty(
+      id: json['id']?.toString() ?? '',
+      title: title,
+      code: json['code']?.toString(),
+      city: json['city']?.toString(),
+    );
+  }
+}
+
+/// Contato da negociação (payload de criação — paridade com `KanbanTaskContactDto` do backend).
+class KanbanTaskContactInput {
+  String? name;
+  String? phone;
+  String? email;
+  String? jobTitle;
+  String? birthDate;
+
+  KanbanTaskContactInput({
+    this.name,
+    this.phone,
+    this.email,
+    this.jobTitle,
+    this.birthDate,
+  });
+
+  Map<String, dynamic> toJson() {
+    final m = <String, dynamic>{};
+    if (name != null && name!.trim().isNotEmpty) {
+      m['name'] = name!.trim();
+    }
+    if (phone != null && phone!.trim().isNotEmpty) {
+      m['phone'] = phone!.trim();
+    }
+    if (email != null && email!.trim().isNotEmpty) {
+      m['email'] = email!.trim();
+    }
+    if (jobTitle != null && jobTitle!.trim().isNotEmpty) {
+      m['jobTitle'] = jobTitle!.trim();
+    }
+    if (birthDate != null && birthDate!.trim().isNotEmpty) {
+      m['birthDate'] = birthDate!.trim();
+    }
+    return m;
+  }
+
+  bool get hasAny =>
+      (name != null && name!.trim().isNotEmpty) ||
+      (phone != null && phone!.trim().isNotEmpty) ||
+      (email != null && email!.trim().isNotEmpty) ||
+      (jobTitle != null && jobTitle!.trim().isNotEmpty) ||
+      (birthDate != null && birthDate!.trim().isNotEmpty);
+}
+
 /// DTOs para criação/atualização
 
 class CreateColumnDto {
@@ -729,7 +831,19 @@ class CreateTaskDto {
   final String? assignedToId;
   final DateTime? dueDate;
   final String? projectId;
-  final List<String>? tags;
+  /// IDs de tags (UUID) — ver `CreateKanbanTaskDto.tagIds` no backend.
+  final List<String>? tagIds;
+  final double? totalValue;
+  final String? clientId;
+  final String? propertyId;
+  final String? source;
+  final String? mediaSource;
+  final String? campaign;
+  final String? metaCampaignId;
+  final String? systemCampaignId;
+  final String? metaFormId;
+  final String? internalNotes;
+  final List<KanbanTaskContactInput>? contacts;
 
   CreateTaskDto({
     required this.title,
@@ -739,7 +853,18 @@ class CreateTaskDto {
     this.assignedToId,
     this.dueDate,
     this.projectId,
-    this.tags,
+    this.tagIds,
+    this.totalValue,
+    this.clientId,
+    this.propertyId,
+    this.source,
+    this.mediaSource,
+    this.campaign,
+    this.metaCampaignId,
+    this.systemCampaignId,
+    this.metaFormId,
+    this.internalNotes,
+    this.contacts,
   });
 
   Map<String, dynamic> toJson() {
@@ -747,44 +872,92 @@ class CreateTaskDto {
       'title': title,
       'columnId': columnId,
     };
-    
-    if (description != null && description!.isNotEmpty) {
-      json['description'] = description;
+
+    if (description != null && description!.trim().isNotEmpty) {
+      json['description'] = description!.trim();
     }
-    
+
     if (priority != null) {
       json['priority'] = priority!.name;
     }
-    
-    if (assignedToId != null && assignedToId!.isNotEmpty) {
-      json['assignedToId'] = assignedToId;
+
+    if (assignedToId != null && assignedToId!.trim().isNotEmpty) {
+      json['assignedToId'] = assignedToId!.trim();
     }
-    
+
     if (dueDate != null) {
-      // Formato ISO 8601: apenas data com hora 00:00:00 em UTC
-      // Exemplo: "2024-01-25T00:00:00Z"
       final utcDate = DateTime.utc(
         dueDate!.year,
         dueDate!.month,
         dueDate!.day,
-        0, // hora
-        0, // minuto
-        0, // segundo
+        0,
+        0,
+        0,
       );
       json['dueDate'] = utcDate.toIso8601String();
     }
-    
-    // IMPORTANTE: Não enviar projectId se for null ou vazio
-    // A API valida que projectId deve ser UUID válido se fornecido
-    // Se não fornecido, não deve estar no JSON
-    if (projectId != null && projectId!.isNotEmpty && projectId!.trim().isNotEmpty) {
-      json['projectId'] = projectId;
+
+    if (projectId != null &&
+        projectId!.isNotEmpty &&
+        projectId!.trim().isNotEmpty) {
+      json['projectId'] = projectId!.trim();
     }
-    
-    if (tags != null && tags!.isNotEmpty) {
-      json['tags'] = tags;
+
+    if (tagIds != null && tagIds!.isNotEmpty) {
+      json['tagIds'] = tagIds;
     }
-    
+
+    if (totalValue != null) {
+      json['totalValue'] = totalValue;
+    }
+
+    if (clientId != null && clientId!.trim().isNotEmpty) {
+      json['clientId'] = clientId!.trim();
+    }
+
+    if (propertyId != null && propertyId!.trim().isNotEmpty) {
+      json['propertyId'] = propertyId!.trim();
+    }
+
+    if (source != null && source!.trim().isNotEmpty) {
+      json['source'] = source!.trim();
+    }
+
+    if (mediaSource != null && mediaSource!.trim().isNotEmpty) {
+      json['mediaSource'] = mediaSource!.trim();
+    }
+
+    if (campaign != null && campaign!.trim().isNotEmpty) {
+      json['campaign'] = campaign!.trim();
+    }
+
+    if (metaCampaignId != null && metaCampaignId!.trim().isNotEmpty) {
+      json['metaCampaignId'] = metaCampaignId!.trim();
+    }
+
+    if (systemCampaignId != null && systemCampaignId!.trim().isNotEmpty) {
+      json['systemCampaignId'] = systemCampaignId!.trim();
+    }
+
+    if (metaFormId != null && metaFormId!.trim().isNotEmpty) {
+      json['metaFormId'] = metaFormId!.trim();
+    }
+
+    if (internalNotes != null && internalNotes!.trim().isNotEmpty) {
+      json['internalNotes'] = internalNotes!.trim();
+    }
+
+    if (contacts != null && contacts!.isNotEmpty) {
+      final list = contacts!
+          .where((c) => c.hasAny)
+          .map((c) => c.toJson())
+          .where((m) => m.isNotEmpty)
+          .toList();
+      if (list.isNotEmpty) {
+        json['contacts'] = list;
+      }
+    }
+
     return json;
   }
 }

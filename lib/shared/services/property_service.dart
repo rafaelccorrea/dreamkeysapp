@@ -22,6 +22,25 @@ Map<String, dynamic>? _extractPropertyPayload(Map<String, dynamic>? raw) {
   return pick(raw);
 }
 
+List<NamedEntityOption> parseNamedEntityListFromPage(Map<String, dynamic> root) {
+  final raw = root['data'];
+  if (raw is! List) return [];
+  final out = <NamedEntityOption>[];
+  for (final e in raw) {
+    if (e is Map<String, dynamic>) {
+      final id = e['id']?.toString() ?? '';
+      final name = e['name']?.toString() ?? '';
+      if (id.isNotEmpty) out.add(NamedEntityOption(id: id, name: name));
+    } else if (e is Map) {
+      final m = Map<String, dynamic>.from(e);
+      final id = m['id']?.toString() ?? '';
+      final name = m['name']?.toString() ?? '';
+      if (id.isNotEmpty) out.add(NamedEntityOption(id: id, name: name));
+    }
+  }
+  return out;
+}
+
 /// Resposta de `GET /properties/approval-settings/active` — paridade com `imobx-front` / `imobx`.
 class PropertyApprovalSettingsActive {
   final bool requireApprovalToBeAvailable;
@@ -69,6 +88,77 @@ class PropertyApprovalSettingsActive {
       ),
     );
   }
+}
+
+/// Opção de equipe em `GET /properties/form-settings`.
+class PropertyFormTeamOption {
+  final String id;
+  final String name;
+  final String color;
+
+  const PropertyFormTeamOption({
+    required this.id,
+    required this.name,
+    required this.color,
+  });
+
+  factory PropertyFormTeamOption.fromJson(Map<String, dynamic> json) {
+    return PropertyFormTeamOption(
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      color: json['color']?.toString() ?? '#888888',
+    );
+  }
+}
+
+/// Bundle retornado por `GET /properties/form-settings` (sem `approvalQueueTeamFilter` usado no wizard).
+class PropertyFormSettingsBundle {
+  final List<String> propertyFormRequiredFields;
+  final List<PropertyFormTeamOption> teams;
+
+  const PropertyFormSettingsBundle({
+    required this.propertyFormRequiredFields,
+    required this.teams,
+  });
+
+  factory PropertyFormSettingsBundle.fromJson(Map<String, dynamic> json) {
+    final req = json['propertyFormRequiredFields'] ??
+        json['property_form_required_fields'];
+    final teamsRaw = json['teams'];
+    final List<String> requiredList = [];
+    if (req is List) {
+      for (final x in req) {
+        final s = x?.toString().trim() ?? '';
+        if (s.isNotEmpty) requiredList.add(s);
+      }
+    }
+    final List<PropertyFormTeamOption> teams = [];
+    if (teamsRaw is List) {
+      for (final e in teamsRaw) {
+        if (e is Map<String, dynamic>) {
+          teams.add(PropertyFormTeamOption.fromJson(e));
+        } else if (e is Map) {
+          teams.add(
+            PropertyFormTeamOption.fromJson(
+              Map<String, dynamic>.from(e),
+            ),
+          );
+        }
+      }
+    }
+    return PropertyFormSettingsBundle(
+      propertyFormRequiredFields: requiredList,
+      teams: teams,
+    );
+  }
+}
+
+/// Item mínimo para seletores (condomínio / empreendimento).
+class NamedEntityOption {
+  final String id;
+  final String name;
+
+  const NamedEntityOption({required this.id, required this.name});
 }
 
 /// Tipos de propriedade
@@ -140,9 +230,15 @@ class Property {
   final String state;
   final String zipCode;
   final String neighborhood;
+  final String? internalNotes;
+  final String? sector;
+  final String? teamId;
+  final String? condominiumId;
+  final String? empreendimentoId;
   final double totalArea;
   final double? builtArea;
   final int? bedrooms;
+  final int? suites;
   final int? bathrooms;
   final int? parkingSpaces;
   final double? salePrice;
@@ -198,9 +294,15 @@ class Property {
     required this.state,
     required this.zipCode,
     required this.neighborhood,
+    this.internalNotes,
+    this.sector,
+    this.teamId,
+    this.condominiumId,
+    this.empreendimentoId,
     required this.totalArea,
     this.builtArea,
     this.bedrooms,
+    this.suites,
     this.bathrooms,
     this.parkingSpaces,
     this.salePrice,
@@ -278,9 +380,18 @@ class Property {
       state: json['state']?.toString() ?? '',
       zipCode: json['zipCode']?.toString() ?? json['zip_code']?.toString() ?? '',
       neighborhood: json['neighborhood']?.toString() ?? '',
+      internalNotes: json['internalNotes']?.toString() ??
+          json['internal_notes']?.toString(),
+      sector: json['sector']?.toString(),
+      teamId: json['teamId']?.toString() ?? json['team_id']?.toString(),
+      condominiumId:
+          json['condominiumId']?.toString() ?? json['condominium_id']?.toString(),
+      empreendimentoId: json['empreendimentoId']?.toString() ??
+          json['empreendimento_id']?.toString(),
       totalArea: parseDouble(json['totalArea'] ?? json['total_area']) ?? 0.0,
       builtArea: parseDouble(json['builtArea'] ?? json['built_area']),
       bedrooms: parseInt(json['bedrooms']),
+      suites: parseInt(json['suites']),
       bathrooms: parseInt(json['bathrooms']),
       parkingSpaces: parseInt(json['parkingSpaces'] ?? json['parking_spaces']),
       salePrice: parseDouble(json['salePrice'] ?? json['sale_price']),
@@ -708,6 +819,105 @@ class PropertyService {
       );
     } catch (e) {
       debugPrint('❌ [PROPERTY_SERVICE] approval-settings: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// `GET /properties/form-settings` — equipes e campos obrigatórios (mesma regra do web).
+  Future<ApiResponse<PropertyFormSettingsBundle>> getPropertyFormSettings() async {
+    try {
+      final response = await _apiService.get<Map<String, dynamic>>(
+        '/properties/form-settings',
+      );
+      if (response.success && response.data != null) {
+        final root = response.data!;
+        final map = root['data'] is Map<String, dynamic>
+            ? root['data'] as Map<String, dynamic>
+            : root;
+        return ApiResponse.success(
+          data: PropertyFormSettingsBundle.fromJson(map),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message:
+            response.message ?? 'Erro ao carregar configuração do formulário',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [PROPERTY_SERVICE] form-settings: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Lista mínima para o seletor do wizard (requer `condominium:view`).
+  Future<ApiResponse<List<NamedEntityOption>>> listCondominiumsBrief({
+    int page = 1,
+    int limit = 100,
+  }) async {
+    try {
+      final response = await _apiService.get<Map<String, dynamic>>(
+        '/condominiums',
+        queryParameters: {
+          'page': '$page',
+          'limit': '$limit',
+          'isActive': 'true',
+        },
+      );
+      if (response.success && response.data != null) {
+        return ApiResponse.success(
+          data: parseNamedEntityListFromPage(response.data!),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao listar condomínios',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [PROPERTY_SERVICE] condominiums: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Lista mínima para o seletor do wizard (requer permissão de empreendimentos).
+  Future<ApiResponse<List<NamedEntityOption>>> listEmpreendimentosBrief({
+    int page = 1,
+    int limit = 100,
+  }) async {
+    try {
+      final response = await _apiService.get<Map<String, dynamic>>(
+        '/empreendimentos',
+        queryParameters: {
+          'page': '$page',
+          'limit': '$limit',
+          'isActive': 'true',
+        },
+      );
+      if (response.success && response.data != null) {
+        return ApiResponse.success(
+          data: parseNamedEntityListFromPage(response.data!),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao listar empreendimentos',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [PROPERTY_SERVICE] empreendimentos: $e');
       return ApiResponse.error(
         message: 'Erro de conexão: ${e.toString()}',
         statusCode: 0,

@@ -23,6 +23,7 @@ import '../models/property_local_draft.dart';
 import '../models/property_wizard_pop_result.dart';
 import '../services/property_local_draft_storage.dart';
 import 'package:intl/intl.dart';
+import '../../../../shared/utils/property_form_config.dart';
 
 /// Página de criação/edição de propriedade com formulário multi-etapas
 class CreatePropertyPage extends StatefulWidget {
@@ -74,6 +75,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   // Etapa 1: Informações Básicas
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
+  final _internalNotesController = TextEditingController();
   PropertyType _selectedType = PropertyType.house;
 
   // Etapa 2: Localização
@@ -84,6 +86,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   final _cityController = TextEditingController();
   final _stateController = TextEditingController();
   final _zipCodeController = TextEditingController();
+  final _sectorController = TextEditingController();
 
   // Etapa 3: Características
   final _totalAreaController = TextEditingController();
@@ -91,6 +94,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   final _bedroomsController = TextEditingController();
   final _bathroomsController = TextEditingController();
   final _parkingSpacesController = TextEditingController();
+  final _suitesController = TextEditingController();
   final List<String> _selectedFeatures = [];
 
   // Etapa 4: Valores
@@ -145,6 +149,20 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   bool _requireOwnerAuthorizationToBeAvailable = false;
   bool _preservePublicationOnEdit = true;
   bool _approvalSettingsLoaded = false;
+  /// `true` somente após `GET /properties/approval-settings/active` com sucesso.
+  bool _approvalSettingsFetchOk = false;
+  Future<void>? _approvalSettingsLoadFuture;
+
+  /// `GET /properties/form-settings` — espelha `assertConfigurableRequiredFieldsMet` do backend.
+  List<String> _formRequiredKeys = [];
+  List<PropertyFormTeamOption> _formTeams = [];
+  List<NamedEntityOption> _condominiumOptions = [];
+  List<NamedEntityOption> _empreendimentoOptions = [];
+  bool _formSettingsFetchOk = false;
+  Future<void>? _formSettingsLoadFuture;
+  String? _selectedTeamId;
+  String? _selectedCondominiumId;
+  String? _selectedEmpreendimentoId;
 
   /// Formulário: default web `getDefaultFormData().isAvailableForSite === false`.
   bool _publishToSite = false;
@@ -157,6 +175,8 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   bool? _loadedPropertyIsAvailableForSite;
   int _serverImageCountAtLoad = 0;
 
+  String? _loadedCapturedById;
+
   final PropertyLocalDraftStorage _draftStorage =
       PropertyLocalDraftStorage.instance;
   /// ID do rascunho local em edição (novo ou reaberto da lista).
@@ -167,7 +187,8 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   @override
   void initState() {
     super.initState();
-    _loadApprovalSettings();
+    _approvalSettingsLoadFuture = _loadApprovalSettings();
+    _formSettingsLoadFuture = _loadFormSettings();
     _loadCurrentUserId();
     if (widget.propertyId != null) {
       _loadProperty();
@@ -195,6 +216,9 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     _ownerPhoneController.addListener(_onFieldChanged);
     _ownerDocumentController.addListener(_onFieldChanged);
     _ownerAddressController.addListener(_onFieldChanged);
+    _sectorController.addListener(_onFieldChanged);
+    _internalNotesController.addListener(_onFieldChanged);
+    _suitesController.addListener(_onFieldChanged);
   }
 
   Future<void> _loadCurrentUserId() async {
@@ -224,13 +248,107 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
               s.requireOwnerAuthorizationToBeAvailable;
           _preservePublicationOnEdit = s.preservePublicationOnEdit;
           _approvalSettingsLoaded = true;
+          _approvalSettingsFetchOk = true;
         });
       } else {
-        setState(() => _approvalSettingsLoaded = true);
+        setState(() {
+          _approvalSettingsLoaded = true;
+          _approvalSettingsFetchOk = false;
+        });
       }
     } catch (e) {
       debugPrint('Erro ao carregar approval-settings: $e');
-      if (mounted) setState(() => _approvalSettingsLoaded = true);
+      if (mounted) {
+        setState(() {
+          _approvalSettingsLoaded = true;
+          _approvalSettingsFetchOk = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadFormSettings() async {
+    try {
+      final r = await _propertyService.getPropertyFormSettings();
+      if (!mounted) return;
+      if (r.success && r.data != null) {
+        final b = r.data!;
+        setState(() {
+          _formRequiredKeys = List<String>.from(b.propertyFormRequiredFields);
+          _formTeams = b.teams;
+          _formSettingsFetchOk = true;
+        });
+        final needCondo = _formRequiredKeys.contains('condominiumId');
+        final needEmp = _formRequiredKeys.contains('empreendimentoId');
+        if (needCondo) {
+          final c = await _propertyService.listCondominiumsBrief();
+          if (mounted && c.success && c.data != null) {
+            setState(() => _condominiumOptions = c.data!);
+          }
+        }
+        if (needEmp) {
+          final e = await _propertyService.listEmpreendimentosBrief();
+          if (mounted && e.success && e.data != null) {
+            setState(() => _empreendimentoOptions = e.data!);
+          }
+        }
+        if (widget.propertyId == null &&
+            _selectedTeamId == null &&
+            _formTeams.length == 1 &&
+            mounted) {
+          setState(() => _selectedTeamId = _formTeams.first.id);
+        }
+      } else {
+        if (mounted) {
+          setState(() => _formSettingsFetchOk = false);
+        }
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar form-settings: $e');
+      if (mounted) setState(() => _formSettingsFetchOk = false);
+    }
+  }
+
+  Future<void> _ensureFormSettingsBeforeSave() async {
+    await (_formSettingsLoadFuture ??= _loadFormSettings());
+    if (!_formSettingsFetchOk && mounted) {
+      debugPrint('↻ Retry: form-settings antes de salvar');
+      _formSettingsLoadFuture = _loadFormSettings();
+      await _formSettingsLoadFuture;
+    }
+  }
+
+  Future<void> _ensurePreSubmitConfigLoaded() async {
+    await _ensureApprovalSettingsBeforeSave();
+    await _ensureFormSettingsBeforeSave();
+  }
+
+  /// Ao editar, carrega listas para exibir nomes nos seletores.
+  void _scheduleLoadPickerListsIfNeeded() {
+    if (_selectedCondominiumId != null && _condominiumOptions.isEmpty) {
+      _propertyService.listCondominiumsBrief().then((r) {
+        if (!mounted || !r.success || r.data == null) return;
+        setState(() => _condominiumOptions = r.data!);
+      });
+    }
+    if (_selectedEmpreendimentoId != null && _empreendimentoOptions.isEmpty) {
+      _propertyService.listEmpreendimentosBrief().then((r) {
+        if (!mounted || !r.success || r.data == null) return;
+        setState(() => _empreendimentoOptions = r.data!);
+      });
+    }
+  }
+
+  /// Garante que as flags de aprovação estão atualizadas antes de montar o payload
+  /// (evita `Company ID` ainda indisponível na 1ª requisição ou falha transitória).
+  Future<void> _ensureApprovalSettingsBeforeSave() async {
+    await (_approvalSettingsLoadFuture ??= _loadApprovalSettings());
+    if (!_approvalSettingsFetchOk && mounted) {
+      debugPrint(
+        '↻ Retry: approval-settings antes de salvar (primeira carga indisponível)',
+      );
+      _approvalSettingsLoadFuture = _loadApprovalSettings();
+      await _approvalSettingsLoadFuture;
     }
   }
 
@@ -292,10 +410,14 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     _ownerPhoneController.removeListener(_onFieldChanged);
     _ownerDocumentController.removeListener(_onFieldChanged);
     _ownerAddressController.removeListener(_onFieldChanged);
+    _sectorController.removeListener(_onFieldChanged);
+    _internalNotesController.removeListener(_onFieldChanged);
+    _suitesController.removeListener(_onFieldChanged);
 
     _pageController.dispose();
     _titleController.dispose();
     _descriptionController.dispose();
+    _internalNotesController.dispose();
     _streetController.dispose();
     _numberController.dispose();
     _complementController.dispose();
@@ -303,11 +425,13 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     _cityController.dispose();
     _stateController.dispose();
     _zipCodeController.dispose();
+    _sectorController.dispose();
     _totalAreaController.dispose();
     _builtAreaController.dispose();
     _bedroomsController.dispose();
     _bathroomsController.dispose();
     _parkingSpacesController.dispose();
+    _suitesController.dispose();
     _salePriceController.dispose();
     _rentPriceController.dispose();
     _condominiumFeeController.dispose();
@@ -362,6 +486,14 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     _stateController.text = property.state;
     _zipCodeController.text = property.zipCode;
 
+    _sectorController.text = property.sector ?? '';
+    _internalNotesController.text = property.internalNotes ?? '';
+    _selectedTeamId = property.teamId;
+    _selectedCondominiumId = property.condominiumId;
+    _selectedEmpreendimentoId = property.empreendimentoId;
+    _loadedCapturedById =
+        property.capturedById ?? property.capturedBy?.id;
+
     _totalAreaController.text = property.totalArea > 0
         ? property.totalArea.toString()
         : '';
@@ -371,6 +503,8 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     _parkingSpacesController.text = property.parkingSpaces?.toString() ?? '';
     _selectedFeatures.clear();
     _selectedFeatures.addAll(property.features);
+
+    _suitesController.text = property.suites?.toString() ?? '';
 
     _salePriceController.text = property.salePrice != null
         ? Masks.money((property.salePrice! * 100).toStringAsFixed(0))
@@ -420,6 +554,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       // Converter PropertyImage para GalleryImage (aproximação)
       // Em produção, você pode buscar as imagens completas via GalleryService
     }
+    _scheduleLoadPickerListsIfNeeded();
   }
 
   Future<void> _searchCep() async {
@@ -1295,6 +1430,12 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       'bedrooms': _bedroomsController.text,
       'bathrooms': _bathroomsController.text,
       'parkingSpaces': _parkingSpacesController.text,
+      'suites': _suitesController.text,
+      'sector': _sectorController.text,
+      'internalNotes': _internalNotesController.text,
+      'selectedTeamId': _selectedTeamId,
+      'selectedCondominiumId': _selectedCondominiumId,
+      'selectedEmpreendimentoId': _selectedEmpreendimentoId,
       'salePrice': _salePriceController.text,
       'rentPrice': _rentPriceController.text,
       'condominiumFee': _condominiumFeeController.text,
@@ -1348,11 +1489,14 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     setIfPresent(_cityController, 'city');
     setIfPresent(_stateController, 'state');
     setIfPresent(_zipCodeController, 'zipCode');
+    setIfPresent(_sectorController, 'sector');
+    setIfPresent(_internalNotesController, 'internalNotes');
     setIfPresent(_totalAreaController, 'totalArea');
     setIfPresent(_builtAreaController, 'builtArea');
     setIfPresent(_bedroomsController, 'bedrooms');
     setIfPresent(_bathroomsController, 'bathrooms');
     setIfPresent(_parkingSpacesController, 'parkingSpaces');
+    setIfPresent(_suitesController, 'suites');
     setIfPresent(_salePriceController, 'salePrice');
     setIfPresent(_rentPriceController, 'rentPrice');
     setIfPresent(_condominiumFeeController, 'condominiumFee');
@@ -1392,6 +1536,10 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
 
     final or = raw['offerBelowMinRentAction']?.toString();
     if (or != null && or.isNotEmpty) _offerBelowMinRentAction = or;
+
+    _selectedTeamId = raw['selectedTeamId']?.toString();
+    _selectedCondominiumId = raw['selectedCondominiumId']?.toString();
+    _selectedEmpreendimentoId = raw['selectedEmpreendimentoId']?.toString();
 
     _generatedVariants.clear();
     final variants = raw['aiVariants'];
@@ -1815,7 +1963,28 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       return;
     }
 
+    await _ensurePreSubmitConfigLoaded();
+    if (!mounted) return;
+
     final isEditing = widget.propertyId != null;
+
+    if (!saveAsDraft &&
+        !isEditing &&
+        (!_approvalSettingsFetchOk || !_formSettingsFetchOk)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Não foi possível carregar as regras de aprovação e o formulário '
+              'da empresa. Verifique a ligação e tente novamente.',
+            ),
+            backgroundColor: AppColors.status.error,
+          ),
+        );
+      }
+      return;
+    }
+
     final resolvedStatus = _resolvedApiStatus(saveAsDraft);
     if (!_validatePublicationRules(
       saveAsDraft: saveAsDraft,
@@ -1886,6 +2055,10 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
               ? ownerDocDigits.substring(0, 18)
               : ownerDocDigits);
 
+      final suitesParsed = int.tryParse(_suitesController.text.trim());
+      final sectorTrim = _sectorController.text.trim();
+      final internalTrim = _internalNotesController.text.trim();
+
       final omitStatusPatch = isEditing &&
           _preservePublicationOnEdit &&
           _loadedPropertyStatus != null &&
@@ -1899,13 +2072,14 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       final data = <String, dynamic>{
         'title': _titleController.text.trim(),
         'description': _descriptionController.text.trim(),
+        'internalNotes': internalTrim.isEmpty ? null : internalTrim,
         'type': _selectedType.value,
         'address': fullAddress,
         'street': street,
         'number': number,
         if (comp.isNotEmpty) 'complement': comp,
         'neighborhood': _neighborhoodController.text.trim(),
-        'sector': null,
+        'sector': sectorTrim.isEmpty ? null : sectorTrim,
         'city': _cityController.text.trim(),
         'state': _stateController.text.trim().toUpperCase(),
         'zipCode': _zipCodeController.text.trim(),
@@ -1913,7 +2087,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           'totalArea': totalAreaParsed,
         'builtArea': builtParsed ?? 0,
         'bedrooms': beds ?? 0,
-        'suites': 0,
+        'suites': suitesParsed ?? 0,
         'bathrooms': baths ?? 0,
         'parkingSpaces': park ?? 0,
         'salePrice': _salePriceController.text.trim().isNotEmpty
@@ -1949,7 +2123,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         'ownerPhone': ownerPhoneDigits.isNotEmpty
             ? ownerPhoneDigits
             : _ownerPhoneController.text.trim(),
-        if (ownerDocApi != null) 'ownerDocument': ownerDocApi,
+        ...(ownerDocApi != null ? {'ownerDocument': ownerDocApi} : {}),
         if (_ownerAddressController.text.trim().isNotEmpty)
           'ownerAddress': _ownerAddressController.text.trim(),
         // Campos extras alinhados a `buildCreatePropertyApiPayload.ts`
@@ -1977,6 +2151,40 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         data['capturedById'] = uid;
         data['capturedByIds'] = [uid];
         data['responsibleUserIds'] = [uid];
+      } else {
+        final cap = _loadedCapturedById;
+        if (cap != null && cap.isNotEmpty) {
+          data['capturedById'] = cap;
+          data['capturedByIds'] = [cap];
+        }
+      }
+
+      final tid = _selectedTeamId?.trim();
+      if (tid != null && tid.isNotEmpty) {
+        data['teamId'] = tid;
+      }
+
+      final cid = _selectedCondominiumId?.trim();
+      if (cid != null && cid.isNotEmpty) {
+        data['condominiumId'] = cid;
+      }
+
+      final eid = _selectedEmpreendimentoId?.trim();
+      if (eid != null && eid.isNotEmpty) {
+        data['empreendimentoId'] = eid;
+      }
+
+      final cfgErr = configurableFieldsErrorPt(_formRequiredKeys, data);
+      if (cfgErr != null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(cfgErr),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+        }
+        return;
       }
 
       final response = isEditing
@@ -2003,7 +2211,8 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
 
           final needsApprovalQueue =
               _requireApprovalToBeAvailable ||
-                  _requireOwnerAuthorizationToBeAvailable;
+                  _requireOwnerAuthorizationToBeAvailable ||
+                  _requireApprovalToPublishOnSite;
           final queuedForApprovals =
               !isEditing && !saveAsDraft && needsApprovalQueue;
           ScaffoldMessenger.of(context).showSnackBar(
@@ -2744,6 +2953,86 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
               ),
             ),
           ),
+          if (_formRequiredKeys.contains('teamId') || _formTeams.isNotEmpty) ...[
+            SizedBox(height: _wizGapBetweenSections),
+            _wizardSection(
+              theme,
+              title: _formRequiredKeys.contains('teamId')
+                  ? 'Equipe *'
+                  : 'Equipe',
+              subtitle:
+                  'Opções vindas do CRM (`/properties/form-settings`), mesma regra do cadastro web.',
+              child: _formRequiredKeys.contains('teamId') && _formTeams.isEmpty
+                  ? Text(
+                      'Nenhuma equipe disponível para sua conta. Ajuste as '
+                      'configurações de cadastro no CRM.',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: AppColors.status.error,
+                      ),
+                    )
+                  : DropdownButtonFormField<String?>(
+                      value: _selectedTeamId,
+                      decoration: InputDecoration(
+                        labelText: 'Selecionar equipe',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      isExpanded: true,
+                      items: [
+                        if (!_formRequiredKeys.contains('teamId'))
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('— Não vincular —'),
+                          ),
+                        ..._formTeams.map(
+                          (t) => DropdownMenuItem<String?>(
+                            value: t.id,
+                            child: Text(
+                              t.name,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                      ],
+                      onChanged: _formTeams.isEmpty
+                          ? null
+                          : (v) => setState(() => _selectedTeamId = v),
+                      validator: _formRequiredKeys.contains('teamId')
+                          ? (v) => (v == null || v.isEmpty)
+                              ? 'Selecione uma equipe'
+                              : null
+                          : null,
+                    ),
+            ),
+          ],
+          SizedBox(height: _wizGapBetweenSections),
+          _wizardSection(
+            theme,
+            title: _formRequiredKeys.contains('internalNotes')
+                ? 'Observações internas *'
+                : 'Observações internas',
+            subtitle:
+                'Uso da equipe; não são publicadas no site (como no CRM web).',
+            child: CustomTextField(
+              controller: _internalNotesController,
+              label: 'Observações internas',
+              hint: 'Notas internas para a equipe…',
+              maxLines: 4,
+              maxLength: 10000,
+              validator: (value) {
+                if (_formRequiredKeys.contains('internalNotes')) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Campo obrigatório (configuração da empresa)';
+                  }
+                }
+                if (value != null && value.trim().length > 10000) {
+                  return 'Máximo 10.000 caracteres';
+                }
+                return null;
+              },
+            ),
+          ),
         ],
       ),
     );
@@ -2848,8 +3137,18 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                 const SizedBox(height: 16),
                 CustomTextField(
                   controller: _complementController,
-                  label: 'Complemento',
+                  label: _formRequiredKeys.contains('complement')
+                      ? 'Complemento *'
+                      : 'Complemento',
                   hint: 'Apartamento, bloco, sala…',
+                  validator: (value) {
+                    if (_formRequiredKeys.contains('complement')) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Complemento obrigatório (configuração da empresa)';
+                      }
+                    }
+                    return null;
+                  },
                 ),
               ],
             ),
@@ -2858,22 +3157,44 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           _wizardSection(
             theme,
             title: 'Bairro e região',
-            child: CustomTextField(
-              controller: _neighborhoodController,
-              label: 'Bairro *',
-              hint: 'Nome do bairro',
-              validator: (value) {
-                if (value == null || value.trim().isEmpty) {
-                  return 'Bairro é obrigatório';
-                }
-                if (value.trim().length < 2) {
-                  return 'Bairro deve ter pelo menos 2 caracteres';
-                }
-                if (value.trim().length > 100) {
-                  return 'Bairro deve ter no máximo 100 caracteres';
-                }
-                return null;
-              },
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                CustomTextField(
+                  controller: _neighborhoodController,
+                  label: 'Bairro *',
+                  hint: 'Nome do bairro',
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Bairro é obrigatório';
+                    }
+                    if (value.trim().length < 2) {
+                      return 'Bairro deve ter pelo menos 2 caracteres';
+                    }
+                    if (value.trim().length > 100) {
+                      return 'Bairro deve ter no máximo 100 caracteres';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+                CustomTextField(
+                  controller: _sectorController,
+                  label: _formRequiredKeys.contains('sector')
+                      ? 'Setor *'
+                      : 'Setor',
+                  hint: 'Região administrativa, zona…',
+                  maxLength: 100,
+                  validator: (value) {
+                    if (_formRequiredKeys.contains('sector')) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Setor obrigatório (configuração da empresa)';
+                      }
+                    }
+                    return null;
+                  },
+                ),
+              ],
             ),
           ),
           SizedBox(height: _wizGapBetweenSections),
@@ -2938,6 +3259,138 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
               ],
             ),
           ),
+          if (_formRequiredKeys.contains('condominiumId') ||
+              _formRequiredKeys.contains('empreendimentoId') ||
+              _condominiumOptions.isNotEmpty ||
+              _empreendimentoOptions.isNotEmpty ||
+              (_selectedCondominiumId != null &&
+                  _selectedCondominiumId!.isNotEmpty) ||
+              (_selectedEmpreendimentoId != null &&
+                  _selectedEmpreendimentoId!.isNotEmpty)) ...[
+            SizedBox(height: _wizGapBetweenSections),
+            _wizardSection(
+              theme,
+              title: 'Condomínio e empreendimento',
+              subtitle:
+                  'Mesma configuração obrigatória opcional do CRM (`propertyFormRequiredFields`).',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (_formRequiredKeys.contains('condominiumId') &&
+                      _condominiumOptions.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Text(
+                        'Não foi possível listar condomínios (permissão ou rede). '
+                        'Tente no CRM ou verifique `condominium:view`.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: AppColors.status.error,
+                        ),
+                      ),
+                    ),
+                  if (_formRequiredKeys.contains('condominiumId') ||
+                      _condominiumOptions.isNotEmpty ||
+                      (_selectedCondominiumId != null &&
+                          _selectedCondominiumId!.isNotEmpty))
+                    DropdownButtonFormField<String?>(
+                      value: _selectedCondominiumId,
+                      decoration: InputDecoration(
+                        labelText: _formRequiredKeys.contains('condominiumId')
+                            ? 'Condomínio *'
+                            : 'Condomínio',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      isExpanded: true,
+                      items: [
+                        if (!_formRequiredKeys.contains('condominiumId'))
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('— Nenhum —'),
+                          ),
+                        ..._condominiumOptions.map(
+                          (c) => DropdownMenuItem<String?>(
+                            value: c.id,
+                            child: Text(
+                              c.name.isNotEmpty ? c.name : c.id,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                      ],
+                      onChanged:
+                          _condominiumOptions.isEmpty && !_formRequiredKeys.contains('condominiumId')
+                              ? null
+                              : (v) =>
+                                  setState(() => _selectedCondominiumId = v),
+                      validator: _formRequiredKeys.contains('condominiumId')
+                          ? (v) => (v == null || v.isEmpty)
+                              ? 'Selecione um condomínio'
+                              : null
+                          : null,
+                    ),
+                  if (_formRequiredKeys.contains('empreendimentoId') &&
+                      _empreendimentoOptions.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 16, bottom: 10),
+                      child: Text(
+                        'Não foi possível listar empreendimentos. Verifique permissões ou CRM.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: AppColors.status.error,
+                        ),
+                      ),
+                    ),
+                  if (_formRequiredKeys.contains('empreendimentoId') ||
+                      _empreendimentoOptions.isNotEmpty ||
+                      (_selectedEmpreendimentoId != null &&
+                          _selectedEmpreendimentoId!.isNotEmpty)) ...[
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String?>(
+                      value: _selectedEmpreendimentoId,
+                      decoration: InputDecoration(
+                        labelText:
+                            _formRequiredKeys.contains('empreendimentoId')
+                                ? 'Empreendimento *'
+                                : 'Empreendimento',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      isExpanded: true,
+                      items: [
+                        if (!_formRequiredKeys.contains('empreendimentoId'))
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('— Nenhum —'),
+                          ),
+                        ..._empreendimentoOptions.map(
+                          (c) => DropdownMenuItem<String?>(
+                            value: c.id,
+                            child: Text(
+                              c.name.isNotEmpty ? c.name : c.id,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                      ],
+                      onChanged: _empreendimentoOptions.isEmpty &&
+                              !_formRequiredKeys.contains('empreendimentoId')
+                          ? null
+                          : (v) =>
+                              setState(() => _selectedEmpreendimentoId = v),
+                      validator:
+                          _formRequiredKeys.contains('empreendimentoId')
+                              ? (v) => (v == null || v.isEmpty)
+                                  ? 'Selecione um empreendimento'
+                                  : null
+                              : null,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -3032,76 +3485,120 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             theme,
             title: 'Cômodos e vagas',
             subtitle: 'Use zero nos campos que não se aplicam.',
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: _buildFormField(
-                    theme,
-                    controller: _bedroomsController,
-                    label: 'Quartos',
-                    hint: '0',
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    validator: (value) {
-                      if (value != null && value.trim().isNotEmpty) {
-                        final bedrooms = int.tryParse(value);
-                        if (bedrooms != null && bedrooms < 0) {
-                          return 'Valor inválido';
-                        }
-                        if (bedrooms != null && bedrooms >= 50) {
-                          return 'Menor que 50';
-                        }
-                      }
-                      return null;
-                    },
-                  ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: _buildFormField(
+                        theme,
+                        controller: _bedroomsController,
+                        label: 'Quartos',
+                        hint: '0',
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                        validator: (value) {
+                          if (value != null && value.trim().isNotEmpty) {
+                            final bedrooms = int.tryParse(value);
+                            if (bedrooms != null && bedrooms < 0) {
+                              return 'Valor inválido';
+                            }
+                            if (bedrooms != null && bedrooms >= 50) {
+                              return 'Menor que 50';
+                            }
+                          }
+                          return null;
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildFormField(
+                        theme,
+                        controller: _bathroomsController,
+                        label: 'Banheiros',
+                        hint: '0',
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                        validator: (value) {
+                          if (value != null && value.trim().isNotEmpty) {
+                            final bathrooms = int.tryParse(value);
+                            if (bathrooms != null && bathrooms < 0) {
+                              return 'Valor inválido';
+                            }
+                            if (bathrooms != null && bathrooms >= 20) {
+                              return 'Menor que 20';
+                            }
+                          }
+                          return null;
+                        },
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildFormField(
-                    theme,
-                    controller: _bathroomsController,
-                    label: 'Banheiros',
-                    hint: '0',
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    validator: (value) {
-                      if (value != null && value.trim().isNotEmpty) {
-                        final bathrooms = int.tryParse(value);
-                        if (bathrooms != null && bathrooms < 0) {
-                          return 'Valor inválido';
-                        }
-                        if (bathrooms != null && bathrooms >= 20) {
-                          return 'Menor que 20';
-                        }
-                      }
-                      return null;
-                    },
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildFormField(
-                    theme,
-                    controller: _parkingSpacesController,
-                    label: 'Vagas',
-                    hint: '0',
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    validator: (value) {
-                      if (value != null && value.trim().isNotEmpty) {
-                        final parking = int.tryParse(value);
-                        if (parking != null && parking < 0) {
-                          return 'Valor inválido';
-                        }
-                        if (parking != null && parking >= 20) {
-                          return 'Menor que 20';
-                        }
-                      }
-                      return null;
-                    },
-                  ),
+                const SizedBox(height: 12),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: _buildFormField(
+                        theme,
+                        controller: _suitesController,
+                        label: _formRequiredKeys.contains('suites')
+                            ? 'Suítes *'
+                            : 'Suítes',
+                        hint: '0',
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                        validator: (value) {
+                          if (_formRequiredKeys.contains('suites')) {
+                            if (value == null || value.trim().isEmpty) {
+                              return 'Informe suítes (config. da empresa)';
+                            }
+                          }
+                          if (value != null && value.trim().isNotEmpty) {
+                            final s = int.tryParse(value);
+                            if (s != null && s < 0) return 'Valor inválido';
+                            if (s != null && s >= 50) return 'Menor que 50';
+                          }
+                          return null;
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildFormField(
+                        theme,
+                        controller: _parkingSpacesController,
+                        label: 'Vagas',
+                        hint: '0',
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                        validator: (value) {
+                          if (value != null && value.trim().isNotEmpty) {
+                            final parking = int.tryParse(value);
+                            if (parking != null && parking < 0) {
+                              return 'Valor inválido';
+                            }
+                            if (parking != null && parking >= 20) {
+                              return 'Menor que 20';
+                            }
+                          }
+                          return null;
+                        },
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

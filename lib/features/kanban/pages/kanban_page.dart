@@ -12,7 +12,6 @@ import '../../../shared/widgets/app_scaffold.dart';
 import '../models/kanban_models.dart';
 import '../controllers/kanban_controller.dart';
 import '../widgets/create_task_modal.dart';
-import '../widgets/create_column_modal.dart';
 import '../widgets/edit_task_modal.dart';
 import '../widgets/edit_column_modal.dart';
 import '../widgets/kanban_filters.dart';
@@ -54,6 +53,7 @@ class KanbanPage extends StatefulWidget {
 class _KanbanPageState extends State<KanbanPage> {
   static const double _kHeaderPadVTop = 10;
   static const double _kKanbanColumnGap = 8;
+  static const double _kKanbanColumnRadius = 14;
   /// Coluna estreita demais prejudica legibilidade; abaixo disso liberamos scroll horizontal.
   static const double _kKanbanMinStretchColumnWidth = 220;
   static const double _kKanbanScrollColumnWidth = 300;
@@ -72,10 +72,11 @@ class _KanbanPageState extends State<KanbanPage> {
   @override
   void initState() {
     super.initState();
-    final c = context.read<KanbanController>();
-    c.markKanbanEnteringIfNeeded();
+    // Não chamar notifyListeners durante o build do Consumer pai: adiar para o pós-frame.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      final c = context.read<KanbanController>();
+      c.markKanbanEnteringIfNeeded();
       c.loadBoard();
     });
   }
@@ -221,9 +222,7 @@ class _KanbanPageState extends State<KanbanPage> {
   ) {
     final theme = Theme.of(context);
     final accent = _kanbanAccentColor(context);
-    final msg = controller.loadingTeams
-        ? 'Sincronizando funis disponíveis…'
-        : 'Carregando projetos (equipes)…';
+    final msg = 'Carregando funis disponíveis…';
     return Padding(
       padding: EdgeInsets.fromLTRB(gutterH, 6, gutterH, 2),
       child: Container(
@@ -342,66 +341,80 @@ class _KanbanPageState extends State<KanbanPage> {
             .clamp(400.0, 860.0)
             .toDouble();
 
+        final bulkDockOverlap =
+            controller.bulkSelectionActive ? 108.0 : 0.0;
+
         return ScrollConfiguration(
           behavior: NoScrollbarScrollBehavior(),
-          child: CustomScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            slivers: [
-              if ((controller.loadingProjects || controller.loadingTeams) &&
-                  controller.board != null)
-                SliverToBoxAdapter(
-                  child: _kanbanSecondaryLoadBanner(
-                    context,
-                    controller,
-                    gutterH,
-                  ),
-                ),
-              SliverToBoxAdapter(
-                child: _buildKanbanHero(
-                  context,
-                  controller,
-                  gutterH,
-                  compact,
-                  w,
-                  toolsContinuation:
-                      _kanbanToolsContinuation(context, controller),
-                ),
-              ),
-              SliverToBoxAdapter(
-                child: SizedBox(height: compact ? 16 : 22),
-              ),
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    gutterH,
-                    0,
-                    gutterH,
-                    bottomInset,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _kanbanBoardChromeHeader(context, controller),
-                      SizedBox(
-                        height: boardViewportH,
-                        child: ClipRect(
-                          child: LayoutBuilder(
-                            builder: (context, inner) {
-                              return _buildKanbanHorizontalScroll(
-                                context,
-                                controller,
-                                inner.maxWidth,
-                                boardViewportH,
-                              );
-                            },
-                          ),
-                        ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              CustomScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                slivers: [
+                  if (controller.loadingProjects && controller.board != null)
+                    SliverToBoxAdapter(
+                      child: _kanbanSecondaryLoadBanner(
+                        context,
+                        controller,
+                        gutterH,
                       ),
-                    ],
+                    ),
+                  SliverToBoxAdapter(
+                    child: _buildKanbanHero(
+                      context,
+                      controller,
+                      gutterH,
+                      compact,
+                      w,
+                      toolsContinuation:
+                          _kanbanToolsContinuation(context, controller),
+                    ),
                   ),
-                ),
+                  SliverToBoxAdapter(
+                    child: SizedBox(height: compact ? 16 : 22),
+                  ),
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        gutterH,
+                        0,
+                        gutterH,
+                        bottomInset + bulkDockOverlap,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _kanbanBoardChromeHeader(context, controller),
+                          SizedBox(
+                            height: boardViewportH,
+                            child: ClipRect(
+                              child: LayoutBuilder(
+                                builder: (context, inner) {
+                                  return _buildKanbanHorizontalScroll(
+                                    context,
+                                    controller,
+                                    inner.maxWidth,
+                                    boardViewportH,
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
+              if (controller.bulkSelectionActive)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: _buildBulkSelectionDock(context, controller),
+                ),
             ],
           ),
         );
@@ -690,100 +703,6 @@ class _KanbanPageState extends State<KanbanPage> {
     ];
   }
 
-  Widget _kanbanHeroInsight(
-    BuildContext context,
-    KanbanController controller, {
-    required bool hasSearch,
-    required bool hasFilters,
-  }) {
-    final theme = Theme.of(context);
-    final accent = _kanbanAccentColor(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    late final IconData insightIcon;
-    late final Color iconBg;
-    late final Color iconFg;
-    late final String body;
-
-    final projName = _kanbanSelectedProjectLabel(controller);
-
-    if (hasSearch) {
-      insightIcon = Icons.manage_search_rounded;
-      iconBg = ThemeHelpers.borderColor(context).withValues(alpha: 0.20);
-      iconFg = ThemeHelpers.textSecondaryColor(context);
-      body =
-          'Resultados combinam texto com prioridade/responsável. Use “Limpar” nos filtros para ampliar o funil.';
-    } else if (hasFilters) {
-      insightIcon = Icons.tune_rounded;
-      iconBg = accent.withValues(alpha: 0.14);
-      iconFg = accent;
-      body =
-          'Você está enxergando um recorte — os cards nesta tela são filtrados no servidor.';
-    } else {
-      insightIcon = Icons.auto_awesome_motion_rounded;
-      iconFg = AppColors.status.success;
-      iconBg = AppColors.status.success.withValues(alpha: 0.14);
-      body =
-          '${_compactIntFormatter.format(controller.tasks.length)} cards distribuídos em '
-          '${controller.displayColumns.length} etapas · equipe '
-          '${controller.team?.name ?? '—'} · $projName.';
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: iconBg,
-              border: Border.all(
-                color: iconFg.withValues(alpha: isDark ? 0.28 : 0.18),
-              ),
-            ),
-            child: Icon(insightIcon, color: iconFg, size: 22),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'INSIGHT PIPELINE',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.65,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  body,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    fontWeight: FontWeight.w600,
-                    height: 1.45,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _kanbanSelectedProjectLabel(KanbanController controller) {
-    final id = controller.projectId;
-    if (id == null) return 'todos os projetos';
-    for (final p in controller.projects) {
-      if (p.id == id) return p.name;
-    }
-    return 'projeto selecionado';
-  }
-
   Widget _kanbanQuickAction(
     BuildContext context, {
     required IconData icon,
@@ -933,7 +852,7 @@ class _KanbanPageState extends State<KanbanPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Equipe e projeto',
+                    'Funil',
                     style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w900,
                       letterSpacing: -0.35,
@@ -1032,22 +951,40 @@ class _KanbanPageState extends State<KanbanPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _kanbanFluidToolsRail(context),
-          const SizedBox(height: 18),
           ProjectSelector(
             key: ValueKey(controller.team?.id ?? 't'),
             embedded: true,
           ),
-          const SizedBox(height: 20),
-          Text(
-            'Refinar lista',
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: accent.withValues(alpha: isDark ? 0.94 : 0.86),
-              fontWeight: FontWeight.w900,
-              letterSpacing: 1.85,
+          if (controller.showBulkSelectionEntry &&
+              (controller.board?.columns.isNotEmpty ?? false)) ...[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: controller.bulkDeleteEligibilityLoading
+                    ? null
+                    : () {
+                        if (controller.bulkSelectionActive) {
+                          controller.exitBulkSelectionMode();
+                        } else {
+                          controller.setBulkSelectionActive(true);
+                        }
+                      },
+                icon: Icon(
+                  controller.bulkSelectionActive
+                      ? Icons.close_rounded
+                      : Icons.checklist_rounded,
+                  size: 20,
+                ),
+                label: Text(
+                  controller.bulkSelectionActive
+                      ? 'Sair da seleção em massa'
+                      : 'Seleção em massa',
+                ),
+              ),
             ),
-          ),
-          const SizedBox(height: 10),
+          ],
+          const SizedBox(height: 16),
           KanbanFilters(
             key: ValueKey(controller.filterClearGeneration),
             embedded: true,
@@ -1092,19 +1029,20 @@ class _KanbanPageState extends State<KanbanPage> {
 
     final spread = width >= 480;
     final actionsTop = width >= 640;
-    final pillsBesideInsight = width >= 520;
+    final pillsBesideFunil = width >= 520;
 
-    final canCreateCol =
-        controller.permissions?.canCreateColumns ?? true;
+    final canCreateTask =
+        controller.permissions?.canCreateTasks ?? true;
 
     final quickActions = <Widget>[
-      if (canCreateCol)
+      if (canCreateTask)
         _kanbanQuickAction(
           context,
-          icon: Icons.view_column_rounded,
-          label: 'Nova coluna',
+          icon: Icons.add_rounded,
+          label: 'Cria',
           isPrimary: true,
-          onPressed: () => _showCreateColumnModal(context),
+          onPressed: () =>
+              _openHeroCreateNegotiationModal(context, controller),
         ),
       _kanbanQuickAction(
         context,
@@ -1155,12 +1093,7 @@ class _KanbanPageState extends State<KanbanPage> {
           ),
         );
 
-    Widget insightBlock() => _kanbanHeroInsight(
-          context,
-          controller,
-          hasSearch: hasSearch,
-          hasFilters: hasFilters,
-        );
+    Widget funilSection() => _kanbanFluidToolsRail(context);
 
     Widget actionsBar() => Wrap(
           spacing: 10,
@@ -1195,7 +1128,7 @@ class _KanbanPageState extends State<KanbanPage> {
           const SizedBox(height: 18),
           pillRow(),
           const SizedBox(height: 18),
-          insightBlock(),
+          funilSection(),
           const SizedBox(height: 18),
           Align(alignment: Alignment.centerRight, child: actionsBar()),
         ],
@@ -1232,19 +1165,19 @@ class _KanbanPageState extends State<KanbanPage> {
             ],
           ),
           const SizedBox(height: 18),
-          if (pillsBesideInsight)
+          if (pillsBesideFunil)
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(flex: 42, child: pillRow()),
                 const SizedBox(width: 12),
-                Expanded(flex: 58, child: insightBlock()),
+                Expanded(flex: 58, child: funilSection()),
               ],
             )
           else ...[
             pillRow(),
             const SizedBox(height: 18),
-            insightBlock(),
+            funilSection(),
           ],
           if (!actionsTop) ...[
             const SizedBox(height: 18),
@@ -1327,12 +1260,54 @@ class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
-  void _showCreateColumnModal(BuildContext context) {
-    showModalBottomSheet(
+  /// Nova negociação (card) — primeira etapa real do funil, mesmo fluxo do botão por coluna / CRM web.
+  void _openHeroCreateNegotiationModal(
+    BuildContext context,
+    KanbanController controller,
+  ) {
+    final teamId = controller.teamId;
+    if (teamId == null || teamId.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Selecione um funil antes de criar um card.'),
+        ),
+      );
+      return;
+    }
+
+    final cols = controller.displayColumns;
+    KanbanColumn? target;
+    for (final c in cols) {
+      if (!KanbanSyntheticColumns.isSyntheticId(c.id)) {
+        target = c;
+        break;
+      }
+    }
+    if (target == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Aguarde o quadro sincronizar para poder criar um card.',
+          ),
+        ),
+      );
+      return;
+    }
+    final createInColumn = target;
+
+    showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => const CreateColumnModal(),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(ctx).viewInsets.bottom,
+        ),
+        child: CreateTaskModal(
+          columnId: createInColumn.id,
+          teamId: teamId,
+        ),
+      ),
     );
   }
 
@@ -1378,332 +1353,465 @@ class _KanbanPageState extends State<KanbanPage> {
         : 'Nenhuma tarefa';
 
     final borderLine = ThemeHelpers.borderColor(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final surface = ThemeHelpers.cardBackgroundColor(context);
+    final tintTop = columnColor.withValues(alpha: synth ? 0.045 : (isDark ? 0.13 : 0.085));
+    final tintMid = columnColor.withValues(alpha: synth ? 0.02 : (isDark ? 0.055 : 0.035));
+    final borderTint = Color.alphaBlend(
+      columnColor.withValues(alpha: synth ? 0.12 : (isDark ? 0.38 : 0.18)),
+      borderLine,
+    );
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(0, 0, 0, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _columnStageGlyph(column, columnColor),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (synth)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 4),
-                            child: Text(
-                              'Funil padrão',
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: columnColor,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 0.8,
-                              ),
-                            ),
-                          ),
-                        Text(
-                          column.title,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.35,
-                            height: 1.08,
-                          ),
-                        ),
-                        if (column.description != null &&
-                            column.description!.trim().isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            column.description!,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: ThemeHelpers.textSecondaryColor(context),
-                              fontWeight: FontWeight.w600,
-                              height: 1.35,
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Text(
-                          '${tasks.length}',
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            color: columnColor,
-                            fontWeight: FontWeight.w900,
-                            height: 1,
-                          ),
-                        ),
-                      ),
-                      if (canEditCols && !synth)
-                        PopupMenuButton<String>(
-                          icon: Icon(
-                            Icons.more_vert_rounded,
-                            size: 22,
-                            color: ThemeHelpers.textSecondaryColor(context),
-                          ),
-                          itemBuilder: (context) => [
-                            if (controller.permissions?.canEditColumns ?? true)
-                              const PopupMenuItem(
-                                value: 'edit',
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.edit, size: 18),
-                                    SizedBox(width: 8),
-                                    Text('Editar'),
-                                  ],
-                                ),
-                              ),
-                            if (controller.permissions?.canDeleteColumns ?? true)
-                              const PopupMenuItem(
-                                value: 'delete',
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.delete,
-                                        size: 18, color: Colors.red),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      'Deletar',
-                                      style: TextStyle(color: Colors.red),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                          ],
-                          onSelected: (value) {
-                            if (value == 'edit') {
-                              showModalBottomSheet(
-                                context: context,
-                                isScrollControlled: true,
-                                backgroundColor: Colors.transparent,
-                                builder: (context) =>
-                                    EditColumnModal(column: column),
-                              );
-                            } else if (value == 'delete') {
-                              _confirmDeleteColumn(context, controller, column);
-                            }
-                          },
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Divider(
-                height: 1,
-                thickness: 1,
-                color: Color.alphaBlend(
-                  columnColor.withValues(alpha: 0.22),
-                  borderLine.withValues(alpha: 0.45),
-                ),
-              ),
-            ],
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(_kKanbanColumnRadius),
+        border: Border.all(color: borderTint),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.28 : 0.06),
+            blurRadius: isDark ? 14 : 10,
+            offset: const Offset(0, 3),
           ),
-        ),
-        Expanded(
-          child: tasks.isEmpty
-              ? Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 16,
-                  ),
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.inbox_outlined,
-                          size: 42,
-                          color: ThemeHelpers.textSecondaryColor(context)
-                              .withValues(alpha: 0.45),
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          emptyCaption,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: ThemeHelpers.textSecondaryColor(context),
-                            fontWeight: FontWeight.w600,
-                            height: 1.4,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              : DragTarget<KanbanTask>(
-                  onWillAcceptWithDetails: synth
-                      ? (_) => false
-                      : (details) => details.data.columnId != column.id,
-                  onAcceptWithDetails: (details) {
-                    _handleTaskDrop(
-                      context,
-                      controller,
-                      details.data,
-                      column.id,
-                    );
-                  },
-                  builder: (context, candidateData, rejectedData) {
-                    final isTargeting = candidateData.isNotEmpty;
-                    return AnimatedContainer(
-                      duration: const Duration(milliseconds: 160),
-                      curve: Curves.easeOut,
-                      decoration: BoxDecoration(
-                        color: isTargeting
-                            ? columnColor.withValues(alpha: 0.07)
-                            : Colors.transparent,
-                        borderRadius: BorderRadius.circular(8),
+          if (!isDark)
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.035),
+              blurRadius: 2,
+              offset: const Offset(0, 1),
+            ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(_kKanbanColumnRadius),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    stops: const [0.0, 0.22, 0.52, 1.0],
+                    colors: [
+                      tintTop,
+                      tintMid,
+                      Color.alphaBlend(columnColor.withValues(alpha: synth ? 0.03 : (isDark ? 0.06 : 0.045)), surface),
+                      Color.alphaBlend(
+                        theme.colorScheme.surface.withValues(alpha: isDark ? 0.12 : 0.06),
+                        surface,
                       ),
-                      child: ScrollConfiguration(
-                        behavior: NoScrollbarScrollBehavior(),
-                        child: ListView.builder(
-                          shrinkWrap: false,
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          padding: const EdgeInsets.fromLTRB(0, 4, 0, 8),
-                          itemCount: tasks.length,
-                          itemBuilder: (context, index) {
-                            final task = tasks[index];
-                            return DragTarget<KanbanTask>(
-                              onWillAcceptWithDetails: synth
-                                  ? (_) => false
-                                  : (details) {
-                                      return details.data.id != task.id;
-                                    },
-                              onAcceptWithDetails: (details) {
-                                final draggedTask = details.data;
-                                debugPrint(
-                                  '🎯 [KANBAN_PAGE] DragTarget onAccept:',
-                                );
-                                debugPrint(
-                                  '   - Tarefa arrastada: ${draggedTask.title}',
-                                );
-                                debugPrint(
-                                  '   - Coluna da tarefa: ${draggedTask.columnId}',
-                                );
-                                debugPrint('   - Coluna alvo: ${column.id}');
-                                debugPrint('   - Índice alvo: $index');
-
-                                if (draggedTask.columnId == column.id) {
-                                  final oldIndex = tasks.indexWhere(
-                                    (t) => t.id == draggedTask.id,
-                                  );
-                                  debugPrint(
-                                      '   - Índice antigo: $oldIndex');
-                                  if (oldIndex != -1 && oldIndex != index) {
-                                    _handleTaskReorder(
-                                      context,
-                                      controller,
-                                      draggedTask,
-                                      column.id,
-                                      oldIndex,
-                                      index,
-                                    );
-                                  } else {
-                                    debugPrint(
-                                      '   - ⚠️ Não foi possível reordenar (oldIndex: $oldIndex, newIndex: $index)',
-                                    );
-                                  }
-                                } else {
-                                  debugPrint(
-                                    '   - Movendo tarefa de outra coluna',
-                                  );
-                                  _handleTaskDrop(
-                                    context,
-                                    controller,
-                                    draggedTask,
-                                    column.id,
-                                  );
-                                }
-                              },
-                              builder: (context, candidateData, rejectedData) {
-                                final isTargeting =
-                                    candidateData.isNotEmpty;
-                                final isSameColumn =
-                                    candidateData.isNotEmpty &&
-                                    candidateData.first?.columnId ==
-                                        column.id;
-                                return Container(
-                                  margin: EdgeInsets.only(
-                                    bottom: 8,
-                                    top: isTargeting ? 4 : 0,
-                                  ),
-                                  decoration: isTargeting
-                                      ? BoxDecoration(
-                                          border: Border.all(
-                                            color: isSameColumn
-                                                ? Colors.blue
-                                                : Colors.green,
-                                            width: 2,
-                                          ),
-                                          borderRadius:
-                                              BorderRadius.circular(8),
-                                        )
-                                      : null,
-                                  child: _buildDraggableTaskForReorder(
-                                    context,
-                                    controller,
-                                    task,
-                                    column.id,
-                                  ),
-                                );
-                              },
-                            );
-                          },
-                        ),
-                      ),
-                    );
-                  },
-                ),
-        ),
-        if ((controller.permissions?.canCreateTasks ?? true) && !synth)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(0, 4, 0, 0),
-            child: SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () {
-                  showModalBottomSheet(
-                    context: context,
-                    isScrollControlled: true,
-                    backgroundColor: Colors.transparent,
-                    builder: (context) => Padding(
-                      padding: EdgeInsets.only(
-                        bottom: MediaQuery.of(context).viewInsets.bottom,
-                      ),
-                      child: CreateTaskModal(
-                        columnId: column.id,
-                        teamId: controller.teamId ?? '',
-                      ),
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Nova tarefa'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
+                    ],
                   ),
                 ),
               ),
             ),
-          ),
-      ],
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 3,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      columnColor,
+                      Color.alphaBlend(
+                        columnColor.withValues(alpha: 0.72),
+                        surface,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned.fill(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: ThemeHelpers.cardBackgroundColor(context),
+                      border: Border(
+                        bottom: BorderSide(
+                          color: Color.alphaBlend(
+                            columnColor.withValues(alpha: 0.2),
+                            borderLine,
+                          ),
+                        ),
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 11, 8, 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _columnStageGlyph(column, columnColor),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (synth)
+                                      Padding(
+                                        padding:
+                                            const EdgeInsets.only(bottom: 4),
+                                        child: Text(
+                                          'Funil padrão',
+                                          style: theme.textTheme.labelSmall
+                                              ?.copyWith(
+                                            color: columnColor,
+                                            fontWeight: FontWeight.w800,
+                                            letterSpacing: 0.8,
+                                          ),
+                                        ),
+                                      ),
+                                    Text(
+                                      column.title,
+                                      style: theme.textTheme.titleMedium
+                                          ?.copyWith(
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: -0.35,
+                                        height: 1.08,
+                                      ),
+                                    ),
+                                    if (column.description != null &&
+                                        column.description!
+                                            .trim()
+                                            .isNotEmpty) ...[
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        column.description!,
+                                        style: theme.textTheme.bodySmall
+                                            ?.copyWith(
+                                          color:
+                                              ThemeHelpers.textSecondaryColor(
+                                            context,
+                                          ),
+                                          fontWeight: FontWeight.w600,
+                                          height: 1.35,
+                                        ),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 2),
+                                    child: Text(
+                                      '${tasks.length}',
+                                      style:
+                                          theme.textTheme.titleSmall?.copyWith(
+                                        color: columnColor,
+                                        fontWeight: FontWeight.w900,
+                                        height: 1,
+                                      ),
+                                    ),
+                                  ),
+                                  if (canEditCols && !synth)
+                                    PopupMenuButton<String>(
+                                      icon: Icon(
+                                        Icons.more_vert_rounded,
+                                        size: 22,
+                                        color: ThemeHelpers.textSecondaryColor(
+                                          context,
+                                        ),
+                                      ),
+                                      itemBuilder: (context) => [
+                                        if (controller.permissions
+                                                ?.canEditColumns ??
+                                            true)
+                                          const PopupMenuItem(
+                                            value: 'edit',
+                                            child: Row(
+                                              children: [
+                                                Icon(Icons.edit, size: 18),
+                                                SizedBox(width: 8),
+                                                Text('Editar'),
+                                              ],
+                                            ),
+                                          ),
+                                        if (controller.permissions
+                                                ?.canDeleteColumns ??
+                                            true)
+                                          const PopupMenuItem(
+                                            value: 'delete',
+                                            child: Row(
+                                              children: [
+                                                Icon(
+                                                  Icons.delete,
+                                                  size: 18,
+                                                  color: Colors.red,
+                                                ),
+                                                SizedBox(width: 8),
+                                                Text(
+                                                  'Deletar',
+                                                  style: TextStyle(
+                                                    color: Colors.red,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                      ],
+                                      onSelected: (value) {
+                                        if (value == 'edit') {
+                                          showModalBottomSheet(
+                                            context: context,
+                                            isScrollControlled: true,
+                                            backgroundColor: Colors.transparent,
+                                            builder: (context) =>
+                                                EditColumnModal(column: column),
+                                          );
+                                        } else if (value == 'delete') {
+                                          _confirmDeleteColumn(
+                                            context,
+                                            controller,
+                                            column,
+                                          );
+                                        }
+                                      },
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: tasks.isEmpty
+                        ? Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 16,
+                            ),
+                            child: Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.inbox_outlined,
+                                    size: 42,
+                                    color: ThemeHelpers.textSecondaryColor(
+                                      context,
+                                    ).withValues(alpha: 0.45),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    emptyCaption,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color:
+                                          ThemeHelpers.textSecondaryColor(
+                                        context,
+                                      ),
+                                      fontWeight: FontWeight.w600,
+                                      height: 1.4,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : DragTarget<KanbanTask>(
+                            onWillAcceptWithDetails: synth ||
+                                    controller.bulkSelectionActive
+                                ? (_) => false
+                                : (details) =>
+                                    details.data.columnId != column.id,
+                            onAcceptWithDetails: (details) {
+                              _handleTaskDrop(
+                                context,
+                                controller,
+                                details.data,
+                                column.id,
+                              );
+                            },
+                            builder: (context, candidateData, rejectedData) {
+                              final isTargeting = candidateData.isNotEmpty;
+                              return AnimatedContainer(
+                                duration: const Duration(milliseconds: 160),
+                                curve: Curves.easeOut,
+                                decoration: BoxDecoration(
+                                  color: isTargeting
+                                      ? columnColor.withValues(alpha: 0.07)
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: ScrollConfiguration(
+                                  behavior: NoScrollbarScrollBehavior(),
+                                  child: ListView.builder(
+                                    shrinkWrap: false,
+                                    physics:
+                                        const AlwaysScrollableScrollPhysics(),
+                                    padding: const EdgeInsets.fromLTRB(
+                                      8,
+                                      10,
+                                      8,
+                                      8,
+                                    ),
+                                    itemCount: tasks.length,
+                                    itemBuilder: (context, index) {
+                                      final task = tasks[index];
+                                      return DragTarget<KanbanTask>(
+                                        onWillAcceptWithDetails: synth ||
+                                                controller.bulkSelectionActive
+                                            ? (_) => false
+                                            : (details) {
+                                                return details.data.id !=
+                                                    task.id;
+                                              },
+                                        onAcceptWithDetails: (details) {
+                                          final draggedTask = details.data;
+                                          debugPrint(
+                                            '🎯 [KANBAN_PAGE] DragTarget onAccept:',
+                                          );
+                                          debugPrint(
+                                            '   - Tarefa arrastada: ${draggedTask.title}',
+                                          );
+                                          debugPrint(
+                                            '   - Coluna da tarefa: ${draggedTask.columnId}',
+                                          );
+                                          debugPrint(
+                                            '   - Coluna alvo: ${column.id}',
+                                          );
+                                          debugPrint(
+                                            '   - Índice alvo: $index',
+                                          );
+
+                                          if (draggedTask.columnId ==
+                                              column.id) {
+                                            final oldIndex =
+                                                tasks.indexWhere(
+                                              (t) => t.id == draggedTask.id,
+                                            );
+                                            debugPrint(
+                                              '   - Índice antigo: $oldIndex',
+                                            );
+                                            if (oldIndex != -1 &&
+                                                oldIndex != index) {
+                                              _handleTaskReorder(
+                                                context,
+                                                controller,
+                                                draggedTask,
+                                                column.id,
+                                                oldIndex,
+                                                index,
+                                              );
+                                            } else {
+                                              debugPrint(
+                                                '   - ⚠️ Não foi possível reordenar (oldIndex: $oldIndex, newIndex: $index)',
+                                              );
+                                            }
+                                          } else {
+                                            debugPrint(
+                                              '   - Movendo tarefa de outra coluna',
+                                            );
+                                            _handleTaskDrop(
+                                              context,
+                                              controller,
+                                              draggedTask,
+                                              column.id,
+                                            );
+                                          }
+                                        },
+                                        builder:
+                                            (context, candidateData, rejectedData) {
+                                          final isTargeting =
+                                              candidateData.isNotEmpty;
+                                          final isSameColumn =
+                                              candidateData.isNotEmpty &&
+                                              candidateData.first?.columnId ==
+                                                  column.id;
+                                          return Container(
+                                            margin: EdgeInsets.only(
+                                              bottom: 8,
+                                              top: isTargeting ? 4 : 0,
+                                            ),
+                                            decoration: isTargeting
+                                                ? BoxDecoration(
+                                                    border: Border.all(
+                                                      color: isSameColumn
+                                                          ? Colors.blue
+                                                          : Colors.green,
+                                                      width: 2,
+                                                    ),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                      8,
+                                                    ),
+                                                  )
+                                                : null,
+                                            child: _buildDraggableTaskForReorder(
+                                              context,
+                                              controller,
+                                              task,
+                                              column.id,
+                                            ),
+                                          );
+                                        },
+                                      );
+                                    },
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                  if ((controller.permissions?.canCreateTasks ?? true) &&
+                      !synth)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 2, 8, 10),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            showModalBottomSheet(
+                              context: context,
+                              isScrollControlled: true,
+                              backgroundColor: Colors.transparent,
+                              builder: (context) => Padding(
+                                padding: EdgeInsets.only(
+                                  bottom: MediaQuery.of(context)
+                                      .viewInsets
+                                      .bottom,
+                                ),
+                                child: CreateTaskModal(
+                                  columnId: column.id,
+                                  teamId: controller.teamId ?? '',
+                                ),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.add_rounded, size: 18),
+                          label: const Text('Nova tarefa'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1713,6 +1821,40 @@ class _KanbanPageState extends State<KanbanPage> {
     KanbanTask task,
     String currentColumnId,
   ) {
+    if (controller.bulkSelectionActive) {
+      final selected = controller.isBulkTaskSelected(task.id);
+      final accent = Theme.of(context).colorScheme.primary;
+      return Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: controller.bulkDeleting
+                ? null
+                : () => controller.toggleBulkTaskSelection(task.id),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              curve: Curves.easeOut,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color:
+                      selected ? accent : Colors.transparent,
+                  width: selected ? 2 : 1,
+                ),
+              ),
+              child: _buildTaskCard(
+                task,
+                bulkMode: true,
+                bulkSelected: selected,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     if (!(controller.permissions?.canMoveTasks ?? false)) {
       return Container(
         margin: const EdgeInsets.only(bottom: 8),
@@ -1832,27 +1974,33 @@ class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
-  Widget _buildTaskCard(KanbanTask task) {
+  Widget _buildTaskCard(
+    KanbanTask task, {
+    bool bulkMode = false,
+    bool bulkSelected = false,
+  }) {
     final theme = Theme.of(context);
     final priorityColor = task.priority != null
         ? Color(int.parse(task.priority!.color.replaceFirst('#', '0xFF')))
         : null;
 
     return GestureDetector(
-      onDoubleTap: () {
-        // Abrir modal de detalhes ao dar duplo clique
-        showModalBottomSheet(
-          context: context,
-          isScrollControlled: true,
-          backgroundColor: Colors.transparent,
-          barrierColor: Colors.black54,
-          builder: (context) => TaskDetailsModal(task: task),
-        );
-      },
+      onDoubleTap: bulkMode
+          ? null
+          : () {
+            // Abrir modal de detalhes ao dar duplo clique
+            showModalBottomSheet(
+              context: context,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              barrierColor: Colors.black54,
+              builder: (context) => TaskDetailsModal(task: task),
+            );
+          },
       child: Container(
         width: double.infinity,
         constraints: const BoxConstraints(minHeight: 140),
-        margin: const EdgeInsets.only(bottom: 8),
+        margin: bulkMode ? EdgeInsets.zero : const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
           color: ThemeHelpers.cardBackgroundColor(context),
@@ -1878,6 +2026,18 @@ class _KanbanPageState extends State<KanbanPage> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (bulkMode) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6, top: 2),
+                    child: Icon(
+                      bulkSelected
+                          ? Icons.check_box_rounded
+                          : Icons.check_box_outline_blank_rounded,
+                      size: 22,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+                ],
                 Expanded(
                   child: Text(
                     task.title,
@@ -1888,7 +2048,8 @@ class _KanbanPageState extends State<KanbanPage> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                PopupMenuButton<String>(
+                if (!bulkMode)
+                  PopupMenuButton<String>(
                   icon: const Icon(Icons.more_vert, size: 18),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
@@ -2150,6 +2311,141 @@ class _KanbanPageState extends State<KanbanPage> {
               ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildBulkSelectionDock(
+    BuildContext context,
+    KanbanController controller,
+  ) {
+    final theme = Theme.of(context);
+    final border = ThemeHelpers.borderColor(context);
+
+    return Material(
+      elevation: 12,
+      color: ThemeHelpers.cardBackgroundColor(context),
+      child: SafeArea(
+        top: false,
+        child: Container(
+          decoration: BoxDecoration(
+            border: Border(
+              top: BorderSide(color: border.withValues(alpha: 0.45)),
+            ),
+          ),
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      controller.bulkSelectedCount == 0
+                          ? 'Nenhum card selecionado'
+                          : '${controller.bulkSelectedCount} card(s) selecionado(s)',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Fechar modo de seleção',
+                    onPressed: controller.bulkDeleting
+                        ? null
+                        : () => controller.exitBulkSelectionMode(),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.start,
+                children: [
+                  OutlinedButton(
+                    onPressed: controller.bulkDeleting
+                        ? null
+                        : controller.bulkSelectAllCurrentTasks,
+                    child: const Text('Selecionar todos'),
+                  ),
+                  OutlinedButton(
+                    onPressed: controller.bulkDeleting ||
+                            controller.bulkSelectedCount == 0
+                        ? null
+                        : controller.clearBulkTaskSelection,
+                    child: const Text('Limpar'),
+                  ),
+                  FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: theme.colorScheme.error,
+                      foregroundColor: theme.colorScheme.onError,
+                    ),
+                    onPressed: controller.bulkDeleting ||
+                            controller.bulkSelectedCount == 0
+                        ? null
+                        : () => _confirmBulkDelete(context, controller),
+                    child: const Text('Excluir'),
+                  ),
+                ],
+              ),
+              if (controller.bulkDeleting) ...[
+                const SizedBox(height: 10),
+                LinearProgressIndicator(
+                  backgroundColor:
+                      theme.colorScheme.primary.withValues(alpha: 0.12),
+                  color: theme.colorScheme.primary,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _confirmBulkDelete(
+    BuildContext context,
+    KanbanController controller,
+  ) {
+    final n = controller.bulkSelectedCount;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Excluir cards em massa'),
+        content: Text(
+          n <= 1
+              ? 'Excluir o card selecionado definitivamente?'
+              : 'Excluir $n cards definitivamente?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              final ok = await controller.bulkDeleteSelectedTasks();
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    ok
+                        ? 'Exclusão concluída.'
+                        : (controller.error ??
+                            'Alguns ou todos os cards não puderam ser excluídos. O quadro foi atualizado.'),
+                  ),
+                  backgroundColor: ok ? Colors.green : Colors.orange.shade900,
+                ),
+              );
+            },
+            child: const Text('Excluir'),
+          ),
+        ],
       ),
     );
   }

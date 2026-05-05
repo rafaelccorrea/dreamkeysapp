@@ -204,6 +204,7 @@ class ApiConstants {
   // Endpoints de Teams
   static const String teams = '/teams';
   static String teamById(String id) => '/teams/$id';
+  static String teamMembers(String teamId) => '/teams/$teamId/members';
 
   // Endpoints de Permissions
   static const String myPermissions = '/permissions/my-permissions';
@@ -308,6 +309,11 @@ class ApiConstants {
   // Endpoints de Projetos Kanban
   static const String kanbanProjects = '/kanban/projects';
   static String kanbanProjectById(String id) => '/kanban/projects/$id';
+  /// Equipes do seletor de funis (`ProjectSelect` / `GET /kanban/teams`).
+  static const String kanbanTeams = '/kanban/teams';
+  /// Projetos de várias equipes: `GET ...?teamIds=uuid1,uuid2`
+  static const String kanbanProjectsByTeams = '/kanban/projects/teams';
+  static const String kanbanProjectsWithoutTeam = '/kanban/projects/without-team';
   static String kanbanProjectsByTeam(String teamId) =>
       '/kanban/projects/team/$teamId';
   static const String kanbanProjectsPersonal = '/kanban/projects/team/personal';
@@ -320,6 +326,12 @@ class ApiConstants {
       '/kanban/projects/$id/history';
   static String kanbanProjectMembers(String projectId) =>
       '/kanban/projects/$projectId/members';
+  static String kanbanProjectClients(String projectId) =>
+      '/kanban/projects/$projectId/clients';
+  static String kanbanProjectProperties(String projectId) =>
+      '/kanban/projects/$projectId/properties';
+  static String kanbanTaskInvolvedUsers(String taskId) =>
+      '/kanban/tasks/$taskId/involved-users';
 
   // Endpoints de Documentos
   static const String documents = '/documents';

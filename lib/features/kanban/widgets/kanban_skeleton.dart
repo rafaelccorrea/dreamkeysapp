@@ -151,7 +151,7 @@ class KanbanSkeleton extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Icon(Icons.view_kanban_rounded, size: 22, color: accent),
+                    SkeletonBox(width: 22, height: 22, borderRadius: 8),
                     const SizedBox(width: 10),
                     Expanded(
                       child: SkeletonBox(height: 18, width: 160, borderRadius: 4),
@@ -177,6 +177,10 @@ class KanbanSkeleton extends StatelessWidget {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final usable = math.max(0.0, constraints.maxWidth - gutter * 2);
+                final colViewportH =
+                    constraints.hasBoundedHeight && constraints.maxHeight.isFinite
+                        ? math.max(48.0, constraints.maxHeight)
+                        : 200.0;
                 const gap = 10.0;
                 const minCol = 240.0;
                 final threeFit = (usable - gap * 2) / 3 >= minCol;
@@ -192,11 +196,19 @@ class KanbanSkeleton extends StatelessWidget {
                     children: List.generate(3, (i) {
                       return Padding(
                         padding: EdgeInsets.only(right: i < 2 ? gap : 0),
-                        child: _ColumnSkeleton(
+                        child: SizedBox(
                           width: colW,
-                          accent: accent,
-                          border: border,
-                          subtleFill: subtleFill,
+                          height: colViewportH,
+                          child: SingleChildScrollView(
+                            physics: const ClampingScrollPhysics(),
+                            clipBehavior: Clip.hardEdge,
+                            child: _ColumnSkeleton(
+                              width: colW,
+                              accent: accent,
+                              border: border,
+                              subtleFill: subtleFill,
+                            ),
+                          ),
                         ),
                       );
                     }),
@@ -234,7 +246,7 @@ class _ColumnSkeleton extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.flag_outlined, size: 22, color: accent.withValues(alpha: 0.85)),
+              SkeletonBox(width: 22, height: 22, borderRadius: 8),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(

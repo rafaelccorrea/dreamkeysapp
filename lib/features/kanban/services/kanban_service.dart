@@ -85,6 +85,118 @@ class KanbanService {
     );
   }
 
+  /// Equipes para montar lista de funis (paridade com `GET /kanban/teams` do web).
+  Future<ApiResponse<List<KanbanTeam>>> getKanbanTeams({
+    bool onlyWithProjects = true,
+  }) async {
+    try {
+      final qp = onlyWithProjects
+          ? const {'onlyWithProjects': 'true'}
+          : null;
+      final response = await _apiService.get<List<dynamic>>(
+        ApiConstants.kanbanTeams,
+        queryParameters: qp,
+      );
+
+      if (response.success && response.data != null) {
+        final teams = (response.data!)
+            .map((e) => KanbanTeam.fromJson(e as Map<String, dynamic>))
+            .toList();
+        return ApiResponse.success(
+          data: teams,
+          statusCode: response.statusCode,
+        );
+      }
+
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao listar equipes do Kanban',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      return ApiResponse.error(
+        message: 'Erro ao listar equipes do Kanban: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Projetos (funis) de várias equipes numa chamada (`GET /kanban/projects/teams`).
+  Future<ApiResponse<List<KanbanProject>>> getProjectsByTeams(
+    List<String> teamIds,
+  ) async {
+    final ids = teamIds
+        .map((id) => id.trim())
+        .where(
+          (id) =>
+              id.isNotEmpty &&
+              id != 'undefined' &&
+              id != 'null' &&
+              id != 'personal' &&
+              id != 'me',
+        )
+        .toSet()
+        .toList()
+      ..sort();
+    if (ids.isEmpty) {
+      return ApiResponse.success(data: const [], statusCode: 200);
+    }
+    try {
+      final response = await _apiService.get<List<dynamic>>(
+        ApiConstants.kanbanProjectsByTeams,
+        queryParameters: {'teamIds': ids.join(',')},
+      );
+
+      if (response.success && response.data != null) {
+        final projects = (response.data!)
+            .map((e) => KanbanProject.fromJson(e as Map<String, dynamic>))
+            .toList();
+        return ApiResponse.success(
+          data: projects,
+          statusCode: response.statusCode,
+        );
+      }
+
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao listar funis das equipes',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      return ApiResponse.error(
+        message: 'Erro ao listar funis das equipes: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Funis sem equipe (`GET /kanban/projects/without-team`).
+  Future<ApiResponse<List<KanbanProject>>> getProjectsWithoutTeam() async {
+    try {
+      final response = await _apiService.get<List<dynamic>>(
+        ApiConstants.kanbanProjectsWithoutTeam,
+      );
+
+      if (response.success && response.data != null) {
+        final projects = (response.data!)
+            .map((e) => KanbanProject.fromJson(e as Map<String, dynamic>))
+            .toList();
+        return ApiResponse.success(
+          data: projects,
+          statusCode: response.statusCode,
+        );
+      }
+
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao listar funis sem equipe',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      return ApiResponse.error(
+        message: 'Erro ao listar funis sem equipe: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
   /// Busca quadro Kanban completo
   ///
   /// [perColumnLimit] alinhado ao `useKanban` do front (12 na primeira carga).
@@ -371,7 +483,7 @@ class KanbanService {
       debugPrint('🔍 [KANBAN_SERVICE]   - assignedToId: ${dto.assignedToId ?? "null"}');
       debugPrint('🔍 [KANBAN_SERVICE]   - dueDate: ${dto.dueDate?.toIso8601String() ?? "null"}');
       debugPrint('🔍 [KANBAN_SERVICE]   - projectId: ${dto.projectId ?? "null"}');
-      debugPrint('🔍 [KANBAN_SERVICE]   - tags: ${dto.tags ?? "null"}');
+      debugPrint('🔍 [KANBAN_SERVICE]   - tags (tagIds): ${dto.tagIds ?? "null"}');
       
       final jsonBody = dto.toJson();
       debugPrint('🔍 [KANBAN_SERVICE] Body JSON: $jsonBody');
@@ -497,6 +609,163 @@ class KanbanService {
         statusCode: 0,
       );
     }
+  }
+
+  /// Clientes vinculáveis ao funil (`GET /kanban/projects/:id/clients`).
+  Future<ApiResponse<List<KanbanProjectLinkedClient>>> getProjectClients(
+    String projectId, {
+    String? search,
+  }) async {
+    try {
+      final params = <String, String>{};
+      if (search != null && search.trim().isNotEmpty) {
+        params['search'] = search.trim();
+      }
+      final response = await _apiService.get<dynamic>(
+        ApiConstants.kanbanProjectClients(projectId),
+        queryParameters: params.isEmpty ? null : params,
+      );
+
+      if (!response.success || response.data == null) {
+        return ApiResponse.error(
+          message: response.message ?? 'Erro ao listar clientes do funil',
+          statusCode: response.statusCode,
+        );
+      }
+
+      final list = _parseProjectLinkedClients(response.data);
+      return ApiResponse.success(
+        data: list,
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [KANBAN_SERVICE] getProjectClients: $e');
+      return ApiResponse.error(
+        message: 'Erro ao listar clientes do funil: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Imóveis vinculáveis ao funil (`GET /kanban/projects/:id/properties`).
+  Future<ApiResponse<List<KanbanProjectLinkedProperty>>> getProjectProperties(
+    String projectId, {
+    String? search,
+  }) async {
+    try {
+      final params = <String, String>{};
+      if (search != null && search.trim().isNotEmpty) {
+        params['search'] = search.trim();
+      }
+      final response = await _apiService.get<dynamic>(
+        ApiConstants.kanbanProjectProperties(projectId),
+        queryParameters: params.isEmpty ? null : params,
+      );
+
+      if (!response.success || response.data == null) {
+        return ApiResponse.error(
+          message: response.message ?? 'Erro ao listar imóveis do funil',
+          statusCode: response.statusCode,
+        );
+      }
+
+      final list = _parseProjectLinkedProperties(response.data);
+      return ApiResponse.success(
+        data: list,
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [KANBAN_SERVICE] getProjectProperties: $e');
+      return ApiResponse.error(
+        message: 'Erro ao listar imóveis do funil: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Substitui pessoas envolvidas (paridade com `PUT /kanban/tasks/:id/involved-users`).
+  Future<ApiResponse<void>> setInvolvedUsers(
+    String taskId,
+    List<String> userIds,
+  ) async {
+    try {
+      final response = await _apiService.put<dynamic>(
+        ApiConstants.kanbanTaskInvolvedUsers(taskId),
+        body: {'userIds': userIds},
+      );
+      if (response.success) {
+        return ApiResponse.success(
+          data: null,
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao definir pessoas envolvidas',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [KANBAN_SERVICE] setInvolvedUsers: $e');
+      return ApiResponse.error(
+        message: 'Erro ao definir pessoas envolvidas: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  List<KanbanProjectLinkedClient> _parseProjectLinkedClients(dynamic raw) {
+    if (raw == null) return [];
+    if (raw is List) {
+      return raw
+          .map((e) {
+            if (e is Map<String, dynamic>) {
+              return KanbanProjectLinkedClient.fromJson(e);
+            }
+            if (e is Map) {
+              return KanbanProjectLinkedClient.fromJson(
+                Map<String, dynamic>.from(e),
+              );
+            }
+            return null;
+          })
+          .whereType<KanbanProjectLinkedClient>()
+          .where((c) => c.id.isNotEmpty)
+          .toList();
+    }
+    if (raw is Map) {
+      final inner = raw['data'];
+      return _parseProjectLinkedClients(inner);
+    }
+    return [];
+  }
+
+  List<KanbanProjectLinkedProperty> _parseProjectLinkedProperties(
+    dynamic raw,
+  ) {
+    if (raw == null) return [];
+    if (raw is List) {
+      return raw
+          .map((e) {
+            if (e is Map<String, dynamic>) {
+              return KanbanProjectLinkedProperty.fromJson(e);
+            }
+            if (e is Map) {
+              return KanbanProjectLinkedProperty.fromJson(
+                Map<String, dynamic>.from(e),
+              );
+            }
+            return null;
+          })
+          .whereType<KanbanProjectLinkedProperty>()
+          .where((p) => p.id.isNotEmpty)
+          .toList();
+    }
+    if (raw is Map) {
+      final inner = raw['data'];
+      if (inner is List) {
+        return _parseProjectLinkedProperties(inner);
+      }
+    }
+    return [];
   }
 
   /// Atualiza tarefa

@@ -1,7 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import '../models/kanban_models.dart';
 import '../services/kanban_service.dart';
+import '../services/team_service.dart';
+import '../../../shared/services/secure_storage_service.dart';
 
 /// Controller para gerenciar estado do Kanban
 class KanbanController extends ChangeNotifier {
@@ -9,7 +13,10 @@ class KanbanController extends ChangeNotifier {
 
   static final KanbanController instance = KanbanController._();
 
+  static final Map<String, bool> _bulkLeaderEligibilityCache = {};
+
   final KanbanService _kanbanService = KanbanService.instance;
+  final TeamService _teamService = TeamService.instance;
 
   Timer? _boardFilterDebounce;
 
@@ -21,14 +28,8 @@ class KanbanController extends ChangeNotifier {
   String? _projectId;
   List<KanbanProject> _projects = [];
   bool _loadingProjects = false;
-  List<KanbanTeam> _teams = [];
-  bool _loadingTeams = false;
-  /// Paginação de GET `/kanban/my-boards` (não baixamos todos os funis de uma vez).
-  static const int _myBoardsPageSize = 24;
-  int _myBoardsLastPageLoaded = 0;
-  int _myBoardsTotalPages = 1;
-  bool _loadingMoreTeams = false;
-  KanbanTeam? _selectedTeam;
+  /// Equipes onde o usuário pode ver funis (`GET /kanban/teams` — igual ao web).
+  List<KanbanTeam> _kanbanTeams = [];
 
   // Filtros
   String? _searchQuery;
@@ -36,11 +37,19 @@ class KanbanController extends ChangeNotifier {
   String? _filterAssigneeId;
   int _filterClearGeneration = 0;
 
+  // Seleção em massa / exclusão em lote — paridade `useCanBulkDeleteCards` + KanbanBoard web.
+  bool _bulkSelectionActive = false;
+  final Set<String> _bulkSelectedTaskIds = <String>{};
+  bool _bulkDeleteEligible = false;
+  bool _bulkDeleteEligibilityLoading = false;
+  String? _bulkBoardContextKey;
+  bool _bulkDeleting = false;
+
   // Getters
   KanbanBoard? get board => _board;
   bool get loading => _loading;
 
-  /// Exibe skeleton enquanto o quadro inicial não existe (inclui `loadTeams()` antes da API do board).
+  /// Exibe skeleton enquanto o quadro inicial não existe (resolver equipe antes do board).
   bool get shouldShowKanbanSkeleton =>
       _loading || (_board == null && _error == null);
 
@@ -49,14 +58,6 @@ class KanbanController extends ChangeNotifier {
   String? get projectId => _projectId;
   List<KanbanProject> get projects => _projects;
   bool get loadingProjects => _loadingProjects;
-  List<KanbanTeam> get teams => _teams;
-  bool get loadingTeams => _loadingTeams;
-  /// Ainda há páginas de funis em `/kanban/my-boards` para carregar sob demanda.
-  bool get teamsHasMore =>
-      _myBoardsLastPageLoaded > 0 &&
-      _myBoardsLastPageLoaded < _myBoardsTotalPages;
-  bool get loadingMoreTeams => _loadingMoreTeams;
-  KanbanTeam? get selectedTeam => _selectedTeam;
 
   List<KanbanColumn> get columns {
     if (_board == null) return [];
@@ -136,6 +137,25 @@ class KanbanController extends ChangeNotifier {
   /// Incrementado em [clearFilters]; permite reset estável dos campos locais em [KanbanFilters].
   int get filterClearGeneration => _filterClearGeneration;
 
+  bool get bulkSelectionActive => _bulkSelectionActive;
+
+  int get bulkSelectedCount => _bulkSelectedTaskIds.length;
+
+  bool get bulkDeleting => _bulkDeleting;
+
+  bool get bulkDeleteEligibilityLoading => _bulkDeleteEligibilityLoading;
+
+  /// Pode usar o fluxo de exclusão em massa (role ou líder da equipe do funil).
+  bool get canBulkDelete => _bulkDeleteEligible;
+
+  /// Entrada na UI: permissão na API já liberada + regra de negócio resolvida.
+  bool get showBulkSelectionEntry =>
+      (permissions?.canDeleteTasks ?? false) &&
+      !_bulkDeleteEligibilityLoading &&
+      _bulkDeleteEligible;
+
+  bool isBulkTaskSelected(String taskId) => _bulkSelectedTaskIds.contains(taskId);
+
   List<KanbanTask> getTasksForColumn(String columnId) {
     final filteredTasks = tasks
         .where((task) => task.columnId == columnId)
@@ -147,6 +167,149 @@ class KanbanController extends ChangeNotifier {
   KanbanPermissions? get permissions => _board?.permissions;
   KanbanTeam? get team => _board?.team;
 
+  /// Equipes com funis Kanban conforme permissão (`GET /kanban/teams?onlyWithProjects=true`).
+  Future<bool> loadKanbanTeams({bool reset = false}) async {
+    if (reset) _kanbanTeams = [];
+    final response =
+        await _kanbanService.getKanbanTeams(onlyWithProjects: true);
+    if (response.success && response.data != null) {
+      _kanbanTeams = _dedupeTeamsKeepingOrder(response.data!);
+      _orderTeamsPreferredFirst(_kanbanTeams);
+      notifyListeners();
+      return _kanbanTeams.isNotEmpty;
+    }
+    _kanbanTeams = [];
+    notifyListeners();
+    return false;
+  }
+
+  /// Lista unificada de funis (`ProjectSelect`): equipes permitidas + pessoais + sem equipe.
+  Future<void> loadAccessibleProjects({
+    bool refreshKanbanTeams = false,
+  }) async {
+    debugPrint(
+      '🚀 [KANBAN_CTRL] ========== INICIANDO loadAccessibleProjects ==========',
+    );
+    _loadingProjects = true;
+    notifyListeners();
+    try {
+      if (_kanbanTeams.isEmpty || refreshKanbanTeams) {
+        await loadKanbanTeams(reset: refreshKanbanTeams);
+      }
+
+      final byId = <String, KanbanProject>{};
+      final teamIds =
+          _kanbanTeams.map((t) => t.id).where((id) => id.isNotEmpty).toList();
+      if (teamIds.isNotEmpty) {
+        final batch = await _kanbanService.getProjectsByTeams(teamIds);
+        if (batch.success && batch.data != null) {
+          for (final p in batch.data!) {
+            if (p.id.isNotEmpty) byId[p.id] = p;
+          }
+        } else {
+          debugPrint(
+            '📋 [KANBAN_CTRL] getProjectsByTeams: ${batch.message}',
+          );
+        }
+      }
+
+      final personalResp = await _kanbanService.getPersonalWorkspace();
+      if (personalResp.success && personalResp.data != null) {
+        for (final p in personalResp.data!) {
+          if (p.id.isNotEmpty) byId[p.id] = p;
+        }
+      }
+
+      final orphanResp = await _kanbanService.getProjectsWithoutTeam();
+      if (orphanResp.success && orphanResp.data != null) {
+        for (final p in orphanResp.data!) {
+          if (p.id.isNotEmpty) byId[p.id] = p;
+        }
+      }
+
+      final merged = byId.values.toList()
+        ..sort((a, b) {
+          final ap = a.isPersonal == true ? 0 : 1;
+          final bp = b.isPersonal == true ? 0 : 1;
+          if (ap != bp) return ap.compareTo(bp);
+          return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+        });
+      _projects = merged;
+      _assignDefaultWorkspaceIfUnset(_projects);
+      debugPrint(
+        '📋 [KANBAN_CTRL] ✅ ${_projects.length} funil(is) na lista combinada',
+      );
+    } catch (e, stackTrace) {
+      debugPrint('❌ [KANBAN_CTRL] loadAccessibleProjects: $e');
+      debugPrint('📚 [KANBAN_CTRL] $stackTrace');
+      _projects = [];
+    } finally {
+      _loadingProjects = false;
+      notifyListeners();
+      debugPrint(
+        '📋 [KANBAN_CTRL] ========== FIM loadAccessibleProjects ==========',
+      );
+    }
+  }
+
+  /// Funil padrão: workspace pessoal / “Meu workspace”, nunca visão agregada.
+  KanbanProject? _pickDefaultWorkspaceProject(List<KanbanProject> projects) {
+    if (projects.isEmpty) return null;
+
+    KanbanProject? personalActive;
+    for (final p in projects) {
+      if (p.isPersonal == true && p.status == KanbanProjectStatus.active) {
+        personalActive = p;
+        break;
+      }
+    }
+    if (personalActive != null) return personalActive;
+
+    for (final p in projects) {
+      if (p.isPersonal == true) return p;
+    }
+
+    final wsTeam = _pickPreferredDefaultTeam(_kanbanTeams);
+    if (wsTeam != null) {
+      for (final p in projects) {
+        if (p.teamId == wsTeam.id && p.status == KanbanProjectStatus.active) {
+          return p;
+        }
+      }
+      for (final p in projects) {
+        if (p.teamId == wsTeam.id) return p;
+      }
+    }
+
+    for (final p in projects) {
+      if (p.status == KanbanProjectStatus.active) return p;
+    }
+    return projects.first;
+  }
+
+  /// Garante [_projectId] (e [_teamId] coerente) quando ainda não há funil escolhido.
+  void _assignDefaultWorkspaceIfUnset(List<KanbanProject> merged) {
+    if (merged.isEmpty) return;
+    final current = _projectId?.trim();
+    if (current != null &&
+        current.isNotEmpty &&
+        merged.any((p) => p.id == current)) {
+      return;
+    }
+    final def = _pickDefaultWorkspaceProject(merged);
+    if (def == null || def.id.isEmpty) return;
+    _projectId = def.id;
+    if (def.teamId.trim().isNotEmpty) {
+      _teamId = def.teamId;
+    }
+  }
+
+  /// Antes do getBoard: não existe “todos os funis”; exige um funil — padrão workspace.
+  Future<void> _ensureDefaultWorkspaceFunnel() async {
+    if (_projectId != null && _projectId!.trim().isNotEmpty) return;
+    await loadAccessibleProjects();
+  }
+
   /// Ao abrir a página: primeiro frame já mostra skeleton se ainda não há quadro nem erro.
   void markKanbanEnteringIfNeeded() {
     if (_board != null || _error != null) return;
@@ -156,7 +319,7 @@ class KanbanController extends ChangeNotifier {
     }
   }
 
-  /// Carrega o quadro Kanban (teamId vindo de `/kanban/my-boards` quando possível;
+  /// Carrega o quadro Kanban (teamId resolvido via `GET /kanban/teams` quando necessário;
   /// filtros e `perColumnLimit` alinhados ao front Intellisys).
   Future<void> loadBoard({
     String? teamId,
@@ -176,19 +339,19 @@ class KanbanController extends ChangeNotifier {
     try {
       String? resolvedTeamId = teamId ?? _teamId;
 
-      // Descobrir equipe usando a mesma regra que o sistema web (funis permitidos).
+      // Descobrir equipe (paridade web: `GET /kanban/teams?onlyWithProjects=true`).
       if (resolvedTeamId == null || resolvedTeamId.isEmpty) {
         debugPrint(
-          '📋 [KANBAN_CTRL] ⚠️ teamId não definido — usando caches /fallbacks…',
+          '📋 [KANBAN_CTRL] ⚠️ teamId não definido — carregando equipes do Kanban…',
         );
-        if (_teams.isEmpty) {
-          await loadTeams();
+        if (_kanbanTeams.isEmpty) {
+          await loadKanbanTeams();
         }
-        if (_teams.isNotEmpty) {
-          _selectedTeam ??= _pickPreferredDefaultTeam(_teams);
-          resolvedTeamId = (_selectedTeam ?? _teams.first).id;
+        if (_kanbanTeams.isNotEmpty) {
+          final preferred = _pickPreferredDefaultTeam(_kanbanTeams);
+          resolvedTeamId = (preferred ?? _kanbanTeams.first).id;
           debugPrint(
-            '📋 [KANBAN_CTRL] ✅ Time definido pelo my-boards: ${_selectedTeam?.name}',
+            '📋 [KANBAN_CTRL] ✅ Equipe inicial: ${preferred?.name ?? _kanbanTeams.first.name}',
           );
         }
       }
@@ -221,9 +384,12 @@ class KanbanController extends ChangeNotifier {
       }
 
       _teamId = resolvedTeamId;
-      if (projectId != null) {
+      if (projectId != null && projectId.trim().isNotEmpty) {
         _projectId = projectId;
       }
+
+      await _ensureDefaultWorkspaceFunnel();
+      _syncBulkBoardContext();
 
       debugPrint(
         '📋 [KANBAN_CTRL] ========== CHAMANDO API getBoard ==========',
@@ -255,24 +421,24 @@ class KanbanController extends ChangeNotifier {
         _updateState(board: board, loading: false);
 
         if (_teamId != null) {
-          await loadProjects(teamId: _teamId);
+          await loadAccessibleProjects();
         }
+        await refreshBulkDeleteEligibility();
       } else {
         if (response.statusCode == 404 && !recovery404) {
           debugPrint(
-            '📋 [KANBAN_CTRL] ⚠️ 404 Equipe não encontrada — re-sincronizando funis (/my-boards)...',
+            '📋 [KANBAN_CTRL] ⚠️ 404 Equipe não encontrada — re-sincronizando equipes (/kanban/teams)...',
           );
           final badTeamId = _teamId;
-          await loadTeams();
+          await loadKanbanTeams(reset: true);
           KanbanTeam? pick;
-          for (final t in _teams) {
+          for (final t in _kanbanTeams) {
             if (t.id != badTeamId) {
               pick = t;
               break;
             }
           }
           if (pick != null) {
-            _selectedTeam = pick;
             await loadBoard(
               teamId: pick.id,
               projectId: projectId ?? _projectId,
@@ -322,7 +488,8 @@ class KanbanController extends ChangeNotifier {
                 personalBoardResponse.data != null) {
               _teamId = personalTeamId;
               _updateState(board: personalBoardResponse.data!, loading: false);
-              await loadProjects(teamId: _teamId);
+              await loadAccessibleProjects();
+              await refreshBulkDeleteEligibility();
               return;
             }
           }
@@ -458,8 +625,8 @@ class KanbanController extends ChangeNotifier {
     }
   }
 
-  /// Cria uma tarefa
-  Future<bool> createTask(CreateTaskDto dto) async {
+  /// Cria uma tarefa. Retorna a tarefa criada ou `null` em caso de erro.
+  Future<KanbanTask?> createTask(CreateTaskDto dto) async {
     debugPrint('🚀 [KANBAN_CTRL] ========== INICIANDO createTask ==========');
     debugPrint('🚀 [KANBAN_CTRL] DTO recebido:');
     debugPrint('🚀 [KANBAN_CTRL]   - title: ${dto.title}');
@@ -477,7 +644,7 @@ class KanbanController extends ChangeNotifier {
       '🚀 [KANBAN_CTRL]   - dueDate: ${dto.dueDate?.toIso8601String() ?? "null"}',
     );
     debugPrint('🚀 [KANBAN_CTRL]   - projectId: ${dto.projectId ?? "null"}');
-    debugPrint('🚀 [KANBAN_CTRL]   - tags: ${dto.tags ?? "null"}');
+    debugPrint('🚀 [KANBAN_CTRL]   - tagIds: ${dto.tagIds ?? "null"}');
     debugPrint('🚀 [KANBAN_CTRL] Estado atual:');
     debugPrint('🚀 [KANBAN_CTRL]   - _teamId: $_teamId');
     debugPrint('🚀 [KANBAN_CTRL]   - _projectId: $_projectId');
@@ -493,33 +660,11 @@ class KanbanController extends ChangeNotifier {
       );
 
       // Se não tiver projetos carregados, tentar carregar
-      if (_projects.isEmpty && _teamId != null) {
-        debugPrint(
-          '🚀 [KANBAN_CTRL] Nenhum projeto carregado, carregando projetos...',
-        );
-        await loadProjects(teamId: _teamId);
-      }
-
-      // Tentar workspace pessoal se não tiver projetos da equipe
       if (_projects.isEmpty) {
         debugPrint(
-          '🚀 [KANBAN_CTRL] ⚠️ Nenhum projeto da equipe, tentando workspace pessoal...',
+          '🚀 [KANBAN_CTRL] Lista de funis vazia, carregando catálogo acessível...',
         );
-        final personalResponse = await _kanbanService.getPersonalWorkspace();
-        if (personalResponse.success &&
-            personalResponse.data != null &&
-            personalResponse.data!.isNotEmpty) {
-          _projects = personalResponse.data!;
-          debugPrint(
-            '🚀 [KANBAN_CTRL] ✅ ${_projects.length} projetos pessoais carregados',
-          );
-          for (var i = 0; i < _projects.length; i++) {
-            final p = _projects[i];
-            debugPrint(
-              '🚀 [KANBAN_CTRL]   [$i] ${p.name} (ID: ${p.id}) - Status: ${p.status.name}',
-            );
-          }
-        }
+        await loadAccessibleProjects();
       }
 
       // Usar o primeiro projeto ativo disponível
@@ -547,9 +692,10 @@ class KanbanController extends ChangeNotifier {
         debugPrint(
           '🚀 [KANBAN_CTRL] ❌ Nenhum projeto disponível para criar tarefa',
         );
-        _error = 'Nenhum projeto disponível. Crie um projeto primeiro.';
+        _error =
+            'Nenhum funil disponível para criar o card. Crie ou peça acesso a um funil no CRM.';
         notifyListeners();
-        return false;
+        return null;
       }
     }
 
@@ -562,7 +708,18 @@ class KanbanController extends ChangeNotifier {
       assignedToId: dto.assignedToId,
       dueDate: dto.dueDate,
       projectId: finalProjectId,
-      tags: dto.tags,
+      tagIds: dto.tagIds,
+      totalValue: dto.totalValue,
+      clientId: dto.clientId,
+      propertyId: dto.propertyId,
+      source: dto.source,
+      mediaSource: dto.mediaSource,
+      campaign: dto.campaign,
+      metaCampaignId: dto.metaCampaignId,
+      systemCampaignId: dto.systemCampaignId,
+      metaFormId: dto.metaFormId,
+      internalNotes: dto.internalNotes,
+      contacts: dto.contacts,
     );
 
     debugPrint(
@@ -597,7 +754,7 @@ class KanbanController extends ChangeNotifier {
         debugPrint(
           '🚀 [KANBAN_CTRL] ========== FIM createTask (SUCESSO) ==========',
         );
-        return true;
+        return task;
       } else {
         debugPrint(
           '🚀 [KANBAN_CTRL] ❌ Erro ao criar tarefa: ${response.message}',
@@ -607,7 +764,7 @@ class KanbanController extends ChangeNotifier {
         debugPrint(
           '🚀 [KANBAN_CTRL] ========== FIM createTask (ERRO) ==========',
         );
-        return false;
+        return null;
       }
     } catch (e, stackTrace) {
       debugPrint('❌ [KANBAN_CTRL] ========== EXCEÇÃO em createTask ==========');
@@ -618,7 +775,7 @@ class KanbanController extends ChangeNotifier {
       debugPrint(
         '🚀 [KANBAN_CTRL] ========== FIM createTask (EXCEÇÃO) ==========',
       );
-      return false;
+      return null;
     }
   }
 
@@ -761,245 +918,24 @@ class KanbanController extends ChangeNotifier {
     }
   }
 
-  /// Carrega apenas a **primeira página** de funis (`/kanban/my-boards`).
-  /// Use [loadMoreTeams] no seletor para páginas seguintes — evita puxar centenas de funis de uma vez.
-  Future<void> loadTeams({bool reset = true}) async {
-    debugPrint('🚀 [KANBAN_CTRL] ========== INICIANDO loadTeams (my-boards pg1) ==========');
-
-    _loadingTeams = true;
-    final previousSelectionId =
-        reset ? (_selectedTeam?.id ?? _teamId) : null;
-    if (reset) {
-      _myBoardsLastPageLoaded = 0;
-      _myBoardsTotalPages = 1;
-      _teams = [];
-    }
-    notifyListeners();
-
-    try {
-      final response = await _kanbanService.getMyBoardsPage(
-        page: 1,
-        limit: _myBoardsPageSize,
-      );
-
-      debugPrint('🚀 [KANBAN_CTRL] my-boards pg1 — success: ${response.success}');
-
-      if (response.success && response.data != null) {
-        final dto = response.data!;
-        final fromSlots =
-            dto.boards.map((s) => s.team).where((t) => t.id.isNotEmpty);
-        _teams = _dedupeTeamsKeepingOrder(fromSlots);
-        _orderTeamsPreferredFirst(_teams);
-
-        _myBoardsLastPageLoaded = dto.page;
-        _myBoardsTotalPages = dto.totalPages < 1 ? 1 : dto.totalPages;
-
-        _selectedTeam = null;
-        if (previousSelectionId != null) {
-          for (final t in _teams) {
-            if (t.id == previousSelectionId) {
-              _selectedTeam = t;
-              break;
-            }
-          }
-        }
-        _selectedTeam ??=
-            _teams.isNotEmpty ? _pickPreferredDefaultTeam(_teams) : null;
-        debugPrint(
-          '📋 [KANBAN_CTRL] ✅ ${_teams.length} funis (página $_myBoardsLastPageLoaded/$_myBoardsTotalPages)',
-        );
-      } else {
-        _teams = [];
-        debugPrint(
-          '📋 [KANBAN_CTRL] ⚠️ my-boards vazio ou erro: ${response.message}',
-        );
-      }
-    } catch (e, stackTrace) {
-      debugPrint('❌ [KANBAN_CTRL] EXCEÇÃO em loadTeams: $e');
-      debugPrint('📚 [KANBAN_CTRL] StackTrace: $stackTrace');
-      _teams = [];
-    } finally {
-      _loadingTeams = false;
-      notifyListeners();
-      debugPrint('📋 [KANBAN_CTRL] ========== FIM loadTeams ==========');
-    }
-  }
-
-  /// Próxima página de funis (chamado ao rolar o seletor ou em “carregar mais”).
-  Future<void> loadMoreTeams() async {
-    if (!teamsHasMore || _loadingMoreTeams || _loadingTeams) return;
-
-    final nextPage = _myBoardsLastPageLoaded + 1;
-    if (nextPage > _myBoardsTotalPages) return;
-
-    _loadingMoreTeams = true;
-    notifyListeners();
-
-    try {
-      final response = await _kanbanService.getMyBoardsPage(
-        page: nextPage,
-        limit: _myBoardsPageSize,
-      );
-
-      if (response.success && response.data != null) {
-        final dto = response.data!;
-        final incoming =
-            dto.boards.map((s) => s.team).where((t) => t.id.isNotEmpty);
-        for (final t in incoming) {
-          if (_teams.every((x) => x.id != t.id)) {
-            _teams.add(t);
-          }
-        }
-        _myBoardsLastPageLoaded = dto.page;
-        _myBoardsTotalPages = dto.totalPages < 1 ? 1 : dto.totalPages;
-        debugPrint(
-          '📋 [KANBAN_CTRL] ✅ +funis página $nextPage → total ${_teams.length}',
-        );
-      }
-    } catch (e) {
-      debugPrint('❌ [KANBAN_CTRL] loadMoreTeams: $e');
-    } finally {
-      _loadingMoreTeams = false;
-      notifyListeners();
-    }
-  }
-
-  /// Seleciona um funil (equipe). Zera o projeto para evitar 403 ao misturar equipes.
-  Future<void> selectTeam(KanbanTeam? team) async {
-    debugPrint('🚀 [KANBAN_CTRL] ========== selectTeam ==========');
-    debugPrint(
-      '🚀 [KANBAN_CTRL] Time selecionado: ${team?.name} (${team?.id})',
-    );
-    debugPrint(
-      '🚀 [KANBAN_CTRL] Time anterior: ${_selectedTeam?.name} (${_selectedTeam?.id})',
-    );
-
-    if (team == null) {
-      _selectedTeam = null;
-      debugPrint('🚀 [KANBAN_CTRL] Time desmarcado');
-      debugPrint('🚀 [KANBAN_CTRL] ========== FIM selectTeam ==========');
-      notifyListeners();
-      return;
-    }
-
-    final same = _selectedTeam?.id == team.id;
-    _selectedTeam = team;
-    if (same) {
-      debugPrint('🚀 [KANBAN_CTRL] Mesmo funil — ignorando recarga');
-      debugPrint('🚀 [KANBAN_CTRL] ========== FIM selectTeam ==========');
-      return;
-    }
-
-    _projectId = null;
-    debugPrint(
-      '🚀 [KANBAN_CTRL] Recarregando projetos e quadro com novo funil…',
-    );
-    await loadProjects(teamId: team.id);
-    await loadBoard(teamId: team.id, projectId: null);
-
-    debugPrint('🚀 [KANBAN_CTRL] ========== FIM selectTeam ==========');
-  }
-
-  /// Carrega projetos só do funil atual — evita N requisições (uma por equipe).
-  Future<void> loadProjects({String? teamId}) async {
-    debugPrint('🚀 [KANBAN_CTRL] ========== INICIANDO loadProjects ==========');
-    debugPrint('🚀 [KANBAN_CTRL] Parâmetro teamId: $teamId');
-    debugPrint('🚀 [KANBAN_CTRL] _teamId atual: $_teamId');
-
-    teamId ??= _teamId ?? _selectedTeam?.id;
-    debugPrint('🚀 [KANBAN_CTRL] teamId efetivo: $teamId');
-
-    _loadingProjects = true;
-    notifyListeners();
-    debugPrint('🚀 [KANBAN_CTRL] Estado _loadingProjects: true');
-
-    try {
-      if (teamId == null || teamId.isEmpty) {
-        _projects = [];
-        debugPrint('📋 [KANBAN_CTRL] Sem teamId — lista de projetos vazia');
-        return;
-      }
-
-      KanbanTeam? team;
-      for (final t in _teams) {
-        if (t.id == teamId) {
-          team = t;
-          break;
-        }
-      }
-      team ??= _board?.team?.id == teamId ? _board!.team : _selectedTeam;
-
-      final nameLower = (team?.name ?? '').toLowerCase();
-      final usePersonalList =
-          nameLower.contains('pessoal') && !nameLower.contains('workspace');
-
-      if (usePersonalList) {
-        debugPrint(
-          '📋 [KANBAN_CTRL] Funil pessoal — getPersonalWorkspace()',
-        );
-        final personalResponse = await _kanbanService.getPersonalWorkspace();
-        if (personalResponse.success && personalResponse.data != null) {
-          _projects = List<KanbanProject>.from(personalResponse.data!);
-          debugPrint(
-            '📋 [KANBAN_CTRL] ✅ ${_projects.length} projetos (pessoal)',
-          );
-        } else {
-          _projects = [];
-          debugPrint(
-            '📋 [KANBAN_CTRL] ⚠️ Pessoal vazio: ${personalResponse.message}',
-          );
-        }
-      } else {
-        debugPrint(
-          '📋 [KANBAN_CTRL] getProjectsByTeam($teamId)…',
-        );
-        final response = await _kanbanService.getProjectsByTeam(teamId);
-        if (response.success && response.data != null) {
-          _projects = List<KanbanProject>.from(response.data!);
-          debugPrint(
-            '📋 [KANBAN_CTRL] ✅ ${_projects.length} projetos do funil atual',
-          );
-        } else {
-          _projects = [];
-          debugPrint(
-            '📋 [KANBAN_CTRL] ⚠️ Projetos: ${response.message}',
-          );
-        }
-      }
-    } catch (e, stackTrace) {
-      debugPrint(
-        '❌ [KANBAN_CTRL] ========== EXCEÇÃO em loadProjects ==========',
-      );
-      debugPrint('❌ [KANBAN_CTRL] Erro: $e');
-      debugPrint('📚 [KANBAN_CTRL] StackTrace: $stackTrace');
-      _projects = [];
-    } finally {
-      _loadingProjects = false;
-      notifyListeners();
-      debugPrint('📋 [KANBAN_CTRL] ========== FIM loadProjects ==========');
-      debugPrint('📋 [KANBAN_CTRL] Total de projetos: ${_projects.length}');
-    }
-  }
-
-  /// Seleciona um projeto
-  Future<void> selectProject(String? projectId) async {
+  /// Seleciona um funil (sempre um UUID concreto — não há “todos os funis”).
+  Future<void> selectProject(String projectId) async {
     debugPrint('🚀 [KANBAN_CTRL] ========== selectProject ==========');
     debugPrint('🚀 [KANBAN_CTRL] Projeto selecionado: $projectId');
     debugPrint('🚀 [KANBAN_CTRL] Projeto anterior: $_projectId');
     debugPrint('🚀 [KANBAN_CTRL] teamId atual: $_teamId');
 
+    if (projectId.trim().isEmpty) return;
     _projectId = projectId;
 
     // Encontrar o projeto selecionado para obter o teamId correto
     String? projectTeamId;
-    if (projectId != null) {
-      final idx = _projects.indexWhere((p) => p.id == projectId);
-      if (idx != -1) {
-        projectTeamId = _projects[idx].teamId;
-        debugPrint(
-          '🚀 [KANBAN_CTRL] Projeto encontrado: ${_projects[idx].name} (teamId: $projectTeamId)',
-        );
-      }
+    final idx = _projects.indexWhere((p) => p.id == projectId);
+    if (idx != -1) {
+      projectTeamId = _projects[idx].teamId;
+      debugPrint(
+        '🚀 [KANBAN_CTRL] Projeto encontrado: ${_projects[idx].name} (teamId: $projectTeamId)',
+      );
     }
 
     // Usar o teamId do projeto, ou o teamId atual como fallback
@@ -1054,6 +990,273 @@ class KanbanController extends ChangeNotifier {
     }
   }
 
+  void _syncBulkBoardContext() {
+    final key = '${_teamId ?? ''}|${_projectId ?? ''}';
+    if (_bulkBoardContextKey != null &&
+        _bulkBoardContextKey != key &&
+        (_bulkSelectionActive || _bulkSelectedTaskIds.isNotEmpty)) {
+      _bulkSelectionActive = false;
+      _bulkSelectedTaskIds.clear();
+    }
+    _bulkBoardContextKey = key;
+  }
+
+  bool _isBulkTeamQueryId(String? id) {
+    if (id == null) return false;
+    final t = id.trim();
+    if (t.isEmpty) return false;
+    final lower = t.toLowerCase();
+    if (lower == 'undefined' || lower == 'null') return false;
+    if (lower.startsWith('personal')) return false;
+    return true;
+  }
+
+  Set<String> _teamIdsEligibleForBulk() {
+    final out = <String>{};
+    void addMaybe(String? id) {
+      if (!_isBulkTeamQueryId(id)) return;
+      out.add(id!.trim());
+    }
+
+    addMaybe(_teamId);
+    addMaybe(_board?.team?.id);
+    final ix = _projects.indexWhere((p) => p.id == (_projectId ?? ''));
+    if (ix >= 0) {
+      final p = _projects[ix];
+      addMaybe(p.teamId);
+      final extra = p.teamIds;
+      if (extra != null) {
+        for (final x in extra) {
+          addMaybe(x);
+        }
+      }
+    }
+    return out;
+  }
+
+  Future<(String?, String?)> _jwtSubAndRole() async {
+    try {
+      final token = await SecureStorageService.instance.getAccessToken();
+      if (token == null || token.isEmpty) return (null, null);
+      final parts = token.split('.');
+      if (parts.length != 3) return (null, null);
+      var output = parts[1].replaceAll('-', '+').replaceAll('_', '/');
+      switch (output.length % 4) {
+        case 2:
+          output += '==';
+          break;
+        case 3:
+          output += '=';
+          break;
+      }
+      final jsonBytes = base64Decode(output);
+      final decoded = utf8.decode(jsonBytes);
+      final map = jsonDecode(decoded);
+      if (map is! Map) return (null, null);
+      final m = Map<String, dynamic>.from(map);
+      final sub = m['sub']?.toString() ??
+          m['userId']?.toString() ??
+          m['id']?.toString();
+      final role = m['role']?.toString();
+      return (sub, role);
+    } catch (e) {
+      debugPrint('⚠️ [KANBAN_CTRL] JWT parse: $e');
+      return (null, null);
+    }
+  }
+
+  /// Atualiza se o usuário pode usar exclusão em massa (`master` / `admin` / `manager` ou `leader`).
+  Future<void> refreshBulkDeleteEligibility() async {
+    final canDeleteTasks = permissions?.canDeleteTasks ?? false;
+    if (!canDeleteTasks) {
+      _bulkDeleteEligible = false;
+      _bulkDeleteEligibilityLoading = false;
+      exitBulkSelectionMode();
+      notifyListeners();
+      return;
+    }
+
+    final claims = await _jwtSubAndRole();
+    final userId = claims.$1 ?? '';
+    final role = claims.$2?.toLowerCase().trim() ?? '';
+
+    if (userId.isEmpty) {
+      _bulkDeleteEligible = false;
+      _bulkDeleteEligibilityLoading = false;
+      exitBulkSelectionMode();
+      notifyListeners();
+      return;
+    }
+
+    if (role == 'master' || role == 'admin' || role == 'manager') {
+      _bulkDeleteEligible = true;
+      _bulkDeleteEligibilityLoading = false;
+      notifyListeners();
+      return;
+    }
+
+    final teamIds = _teamIdsEligibleForBulk().toList()..sort();
+
+    if (teamIds.isEmpty) {
+      _bulkDeleteEligible = false;
+      _bulkDeleteEligibilityLoading = false;
+      exitBulkSelectionMode();
+      notifyListeners();
+      return;
+    }
+
+    final cacheKey = '$userId::${teamIds.join(',')}';
+    final cached = KanbanController._bulkLeaderEligibilityCache[cacheKey];
+    if (cached != null) {
+      _bulkDeleteEligible = cached;
+      _bulkDeleteEligibilityLoading = false;
+      if (!cached) exitBulkSelectionMode();
+      notifyListeners();
+      return;
+    }
+
+    _bulkDeleteEligibilityLoading = true;
+    notifyListeners();
+
+    var leader = false;
+    try {
+      for (final tid in teamIds) {
+        final resp = await _teamService.getTeamMembers(tid);
+        if (!resp.success || resp.data == null) continue;
+        for (final m in resp.data!) {
+          if (m.memberUserId == userId && m.role.trim() == 'leader') {
+            leader = true;
+            break;
+          }
+        }
+        if (leader) break;
+      }
+    } catch (_) {
+      leader = false;
+    }
+
+    KanbanController._bulkLeaderEligibilityCache[cacheKey] = leader;
+    _bulkDeleteEligible = leader;
+    _bulkDeleteEligibilityLoading = false;
+    if (!leader) exitBulkSelectionMode();
+    notifyListeners();
+  }
+
+  void exitBulkSelectionMode() {
+    if (!_bulkSelectionActive && _bulkSelectedTaskIds.isEmpty) return;
+    _bulkSelectionActive = false;
+    _bulkSelectedTaskIds.clear();
+    notifyListeners();
+  }
+
+  void setBulkSelectionActive(bool value) {
+    if (_bulkDeleting) return;
+    if (value &&
+        (!(permissions?.canDeleteTasks ?? false) || !_bulkDeleteEligible)) {
+      return;
+    }
+    if (_bulkSelectionActive == value) return;
+    if (!value) {
+      _bulkSelectedTaskIds.clear();
+    }
+    _bulkSelectionActive = value;
+    notifyListeners();
+  }
+
+  void toggleBulkTaskSelection(String taskId) {
+    if (!_bulkSelectionActive || taskId.isEmpty || _bulkDeleting) return;
+    if (_bulkSelectedTaskIds.contains(taskId)) {
+      _bulkSelectedTaskIds.remove(taskId);
+    } else {
+      _bulkSelectedTaskIds.add(taskId);
+    }
+    notifyListeners();
+  }
+
+  void clearBulkTaskSelection() {
+    if (_bulkSelectedTaskIds.isEmpty) return;
+    _bulkSelectedTaskIds.clear();
+    notifyListeners();
+  }
+
+  /// Seleciona todos os cards do quadro corrente (lista já filtrada pela API).
+  void bulkSelectAllCurrentTasks() {
+    if (!_bulkSelectionActive || _bulkDeleting) return;
+    _bulkSelectedTaskIds
+      ..clear()
+      ..addAll(tasks.map((t) => t.id));
+    notifyListeners();
+  }
+
+  /// Exclusão em lote sem recarregar o quadro a cada DELETE.
+  ///
+  /// Exige a mesma permissão de API que um delete unitário (`canDeleteTasks`);
+  /// o modo de seleção na UI permanece atrás de [showBulkSelectionEntry].
+  /// Deletes são **sequenciais** para evitar corridas em refresh de token / 401
+  /// quando várias requisições terminam ao mesmo tempo.
+  Future<bool> bulkDeleteSelectedTasks() async {
+    if (!_bulkSelectionActive || _bulkSelectedTaskIds.isEmpty) return false;
+    if (!(permissions?.canDeleteTasks ?? false)) {
+      _error =
+          'Sem permissão para excluir cards. Verifique o perfil no CRM web.';
+      notifyListeners();
+      return false;
+    }
+
+    final ids = _bulkSelectedTaskIds
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    if (ids.isEmpty) {
+      _error = 'Nenhum id de card válido para excluir.';
+      notifyListeners();
+      return false;
+    }
+
+    _bulkDeleting = true;
+    notifyListeners();
+
+    var failures = 0;
+    String? lastFailMessage;
+
+    try {
+      for (final id in ids) {
+        final r = await _kanbanService.deleteTask(id);
+        if (!r.success) {
+          failures++;
+          lastFailMessage = r.message;
+        }
+      }
+
+      _bulkSelectedTaskIds.clear();
+      _bulkSelectionActive = false;
+
+      await loadBoard(teamId: _teamId, projectId: _projectId);
+      _bulkDeleting = false;
+
+      if (failures > 0) {
+        _error =
+            lastFailMessage ?? '$failures exclusão(ões) falhou(ram). Verifique a conexão ou as permissões.';
+      } else {
+        _error = null;
+      }
+
+      notifyListeners();
+      return failures == 0;
+    } catch (e) {
+      _bulkSelectedTaskIds.clear();
+      _bulkSelectionActive = false;
+      _bulkDeleting = false;
+
+      await loadBoard(teamId: _teamId, projectId: _projectId);
+
+      _error =
+          lastFailMessage ?? 'Erro ao excluir em massa: ${e.toString()}';
+      notifyListeners();
+      return false;
+    }
+  }
+
   /// Atualiza estado interno
   void _updateState({
     KanbanBoard? board,
@@ -1079,10 +1282,14 @@ class KanbanController extends ChangeNotifier {
     _error = null;
     _teamId = null;
     _projectId = null;
-    _teams = [];
-    _myBoardsLastPageLoaded = 0;
-    _myBoardsTotalPages = 1;
-    _loadingMoreTeams = false;
+    _projects = [];
+    _kanbanTeams = [];
+    _bulkSelectionActive = false;
+    _bulkSelectedTaskIds.clear();
+    _bulkDeleteEligible = false;
+    _bulkDeleteEligibilityLoading = false;
+    _bulkBoardContextKey = null;
+    _bulkDeleting = false;
     notifyListeners();
   }
 }

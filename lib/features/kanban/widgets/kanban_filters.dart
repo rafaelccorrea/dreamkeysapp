@@ -6,10 +6,13 @@ import '../controllers/kanban_controller.dart';
 
 /// Widget de filtros do Kanban
 class KanbanFilters extends StatefulWidget {
-  /// Quando [true], omiti o cartão externo (uso dentro do painel agrupado na [KanbanPage]).
+  /// Quando [true], omite o cartão externo (uso dentro do painel agrupado na [KanbanPage]).
   final bool embedded;
 
-  const KanbanFilters({super.key, this.embedded = false});
+  const KanbanFilters({
+    super.key,
+    this.embedded = false,
+  });
 
   @override
   State<KanbanFilters> createState() => _KanbanFiltersState();
@@ -26,13 +29,20 @@ class _KanbanFiltersState extends State<KanbanFilters> {
     super.dispose();
   }
 
+  static const double _kWideBreak = 520;
+
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<KanbanController>();
+    final theme = Theme.of(context);
 
-    InputDecoration fluxSearchDecoration() {
+    InputDecoration searchDecoration({required bool inCard}) {
       return InputDecoration(
-        hintText: 'Buscar leads, título ou descrição...',
+        hintText: 'Buscar leads, título ou descrição…',
+        hintStyle: theme.textTheme.bodyMedium?.copyWith(
+          color: ThemeHelpers.textSecondaryColor(context),
+          fontWeight: FontWeight.w500,
+        ),
         prefixIcon: Icon(
           Icons.search_rounded,
           color: ThemeHelpers.textSecondaryColor(context),
@@ -47,145 +57,207 @@ class _KanbanFiltersState extends State<KanbanFilters> {
                 },
               )
             : null,
-      ).applyDefaults(Theme.of(context).inputDecorationTheme);
+      ).applyDefaults(theme.inputDecorationTheme);
     }
 
-    InputDecoration fluxPriorityDecoration() {
-      return const InputDecoration(
+    InputDecoration priorityDecoration() {
+      return InputDecoration(
         labelText: 'Prioridade',
-      ).applyDefaults(Theme.of(context).inputDecorationTheme);
+        alignLabelWithHint: true,
+      ).applyDefaults(theme.inputDecorationTheme);
+    }
+
+    void onSearchChanged(String _) {
+      setState(() {});
+      _applyFilters(controller);
+    }
+
+    Widget searchField({required bool inCard}) {
+      return TextField(
+        controller: _searchController,
+        textInputAction: TextInputAction.search,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          fontWeight: FontWeight.w600,
+        ),
+        decoration: widget.embedded
+            ? searchDecoration(inCard: inCard)
+            : InputDecoration(
+                hintText: 'Buscar leads, título ou descrição…',
+                prefixIcon: const Icon(Icons.search_rounded),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear_rounded),
+                        onPressed: () {
+                          _searchController.clear();
+                          _applyFilters(controller);
+                          setState(() {});
+                        },
+                      )
+                    : null,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                filled: true,
+                fillColor: ThemeHelpers.cardBackgroundColor(context),
+              ),
+        onChanged: onSearchChanged,
+      );
+    }
+
+    final priorityField = DropdownButtonFormField<KanbanPriority?>(
+      value: _selectedPriority,
+      isExpanded: true,
+      decoration: widget.embedded
+          ? priorityDecoration()
+          : InputDecoration(
+              labelText: 'Prioridade',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              filled: true,
+              fillColor: ThemeHelpers.cardBackgroundColor(context),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 12,
+              ),
+            ),
+      items: [
+        const DropdownMenuItem<KanbanPriority?>(
+          value: null,
+          child: Text('Todas'),
+        ),
+        ...KanbanPriority.values.map((priority) {
+          return DropdownMenuItem(
+            value: priority,
+            child: Row(
+              children: [
+                Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: Color(int.parse(
+                      priority.color.replaceFirst('#', '0xFF'),
+                    )),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(priority.label),
+              ],
+            ),
+          );
+        }),
+      ],
+      onChanged: (value) {
+        setState(() {
+          _selectedPriority = value;
+        });
+        _applyFilters(controller);
+      },
+    );
+
+    final clearBtn = !_hasActiveFilters()
+        ? const SizedBox.shrink()
+        : IconButton(
+            onPressed: () => _clearFilters(controller),
+            icon: Icon(
+              Icons.clear_all_rounded,
+              size: 20,
+              color: ThemeHelpers.textSecondaryColor(context),
+            ),
+            tooltip: 'Limpar filtros',
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+          );
+
+    Widget narrowStack() {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          searchField(inCard: true),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: priorityField),
+              if (_hasActiveFilters()) clearBtn,
+            ],
+          ),
+        ],
+      );
+    }
+
+    Widget wideRow() {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 58,
+            child: searchField(inCard: true),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 42,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: priorityField),
+                if (_hasActiveFilters()) clearBtn,
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    Widget innerFields(double maxWidth) {
+      if (maxWidth >= _kWideBreak) {
+        return wideRow();
+      }
+      return narrowStack();
+    }
+
+    if (widget.embedded) {
+      return LayoutBuilder(
+        builder: (context, c) => innerFields(c.maxWidth),
+      );
     }
 
     final body = Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Busca
-          TextField(
-            controller: _searchController,
-            decoration: widget.embedded
-                ? fluxSearchDecoration()
-                : InputDecoration(
-                    hintText: 'Buscar leads, título ou descrição...',
-                    prefixIcon: const Icon(Icons.search),
-                    suffixIcon: _searchController.text.isNotEmpty
-                        ? IconButton(
-                            icon: const Icon(Icons.clear),
-                            onPressed: () {
-                              _searchController.clear();
-                              _applyFilters(controller);
-                            },
-                          )
-                        : null,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    filled: true,
-                    fillColor: ThemeHelpers.cardBackgroundColor(context),
-                  ),
-            onChanged: (value) {
-              setState(() {});
-              _applyFilters(controller);
-            },
-          ),
-          SizedBox(height: widget.embedded ? 14 : 12),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final narrowRow = constraints.maxWidth < 520;
-              final priorityDeco = widget.embedded
-                  ? fluxPriorityDecoration()
-                  : InputDecoration(
-                      labelText: 'Prioridade',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      filled: true,
-                      fillColor: ThemeHelpers.cardBackgroundColor(context),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                    );
-
-              final priorityField =
-                  DropdownButtonFormField<KanbanPriority?>(
-                initialValue: _selectedPriority,
-                isExpanded: true,
-                decoration: priorityDeco,
-                items: [
-                  const DropdownMenuItem<KanbanPriority?>(
-                    value: null,
-                    child: Text('Todas'),
-                  ),
-                  ...KanbanPriority.values.map((priority) {
-                    return DropdownMenuItem(
-                      value: priority,
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 12,
-                            height: 12,
-                            decoration: BoxDecoration(
-                              color: Color(int.parse(
-                                priority.color.replaceFirst('#', '0xFF'),
-                              )),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(priority.label),
-                        ],
-                      ),
-                    );
-                  }),
-                ],
-                onChanged: (value) {
-                  setState(() {
-                    _selectedPriority = value;
-                  });
-                  _applyFilters(controller);
-                },
-              );
-
-              final clearBtn = !_hasActiveFilters()
-                  ? const SizedBox.shrink()
-                  : IconButton(
-                      icon: const Icon(Icons.clear_all_rounded),
-                      onPressed: () => _clearFilters(controller),
-                      tooltip: 'Limpar filtros',
-                    );
-
-              if (narrowRow) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    priorityField,
-                    if (_hasActiveFilters())
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Align(
-                          alignment: Alignment.centerRight,
-                          child: clearBtn,
-                        ),
-                      ),
-                  ],
-                );
-              }
-
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        searchField(inCard: false),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth < _kWideBreak) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(child: priorityField),
-                  clearBtn,
+                  priorityField,
+                  if (_hasActiveFilters())
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: clearBtn,
+                      ),
+                    ),
                 ],
               );
-            },
-          ),
-        ],
+            }
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: priorityField),
+                clearBtn,
+              ],
+            );
+          },
+        ),
+      ],
     );
-
-    if (widget.embedded) {
-      return body;
-    }
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -226,4 +298,3 @@ class _KanbanFiltersState extends State<KanbanFilters> {
     controller.clearFilters();
   }
 }
-
