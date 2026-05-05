@@ -160,7 +160,7 @@ class KanbanController extends ChangeNotifier {
     final filteredTasks = tasks
         .where((task) => task.columnId == columnId)
         .toList()
-      ..sort((a, b) => a.position.compareTo(b.position));
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return filteredTasks;
   }
 
@@ -839,11 +839,16 @@ class KanbanController extends ChangeNotifier {
     }
   }
 
-  /// Move uma tarefa
+  /// Move uma tarefa.
+  ///
+  /// `fromColumnId` é obrigatório no backend (validado via `@IsUUID`). Quando
+  /// não passado, recuperamos a partir do snapshot da tarefa no board para
+  /// manter o contrato sem fricção em chamadas legadas.
   Future<bool> moveTask({
     required String taskId,
     required String targetColumnId,
     required int targetPosition,
+    String? fromColumnId,
   }) async {
     // Salvar estado anterior para rollback
     KanbanBoard? previousBoard;
@@ -857,12 +862,17 @@ class KanbanController extends ChangeNotifier {
       );
     }
 
+    String? originColumnId = fromColumnId;
+
     try {
-      // Optimistic update
+      // Optimistic update + descoberta automática do fromColumnId quando o
+      // chamador não passou explicitamente (alinhado ao DTO obrigatório do
+      // backend).
       if (_board != null) {
         final taskIndex = _board!.tasks.indexWhere((t) => t.id == taskId);
         if (taskIndex != -1) {
           final task = _board!.tasks[taskIndex];
+          originColumnId ??= task.columnId;
           final updatedTask = task.copyWith(
             columnId: targetColumnId,
             position: targetPosition,
@@ -883,9 +893,20 @@ class KanbanController extends ChangeNotifier {
         }
       }
 
+      if (originColumnId == null || originColumnId.isEmpty) {
+        if (previousBoard != null) {
+          _board = previousBoard;
+          notifyListeners();
+        }
+        _error = 'Coluna de origem da tarefa não identificada.';
+        notifyListeners();
+        return false;
+      }
+
       final response = await _kanbanService.moveTask(
         MoveTaskDto(
           taskId: taskId,
+          fromColumnId: originColumnId,
           targetColumnId: targetColumnId,
           targetPosition: targetPosition,
         ),

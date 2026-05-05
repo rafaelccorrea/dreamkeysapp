@@ -1,22 +1,28 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
+
+import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/secure_storage_service.dart';
 import '../../../shared/utils/jwt_utils.dart';
 import '../models/kanban_models.dart';
 import '../services/kanban_service.dart';
 
-/// Modal completo de detalhes da tarefa com abas
+/// Modal completo de detalhes do card.
+///
+/// Reestilizado num conceito **editorial**: hierarquia tipográfica forte, sem
+/// sombras pesadas nem gradientes coloridos no fundo dos blocos. Estados (em
+/// dia, vence hoje, atrasada, concluída) são sinalizados por uma "stripe"
+/// finíssima no topo do header e pelas pílulas de meta-status. A intenção é
+/// que o modal pareça mais um documento estruturado do que uma sopa de cards
+/// coloridos — mais legível no modo claro e ainda elegante no escuro.
 class TaskDetailsModal extends StatefulWidget {
   final KanbanTask task;
 
-  const TaskDetailsModal({
-    super.key,
-    required this.task,
-  });
+  const TaskDetailsModal({super.key, required this.task});
 
   @override
   State<TaskDetailsModal> createState() => _TaskDetailsModalState();
@@ -27,56 +33,66 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
   late TabController _tabController;
   final KanbanService _kanbanService = KanbanService.instance;
 
-  // Estado de comentários
+  // Comentários
   List<KanbanTaskComment> _comments = [];
   bool _loadingComments = false;
   String? _commentsError;
   final TextEditingController _commentController = TextEditingController();
+  final FocusNode _commentFocus = FocusNode();
   final List<File> _selectedFiles = [];
   bool _submittingComment = false;
   int _commentLength = 0;
 
-  // Estado de histórico
+  // Histórico
   List<HistoryEntry> _history = [];
   bool _loadingHistory = false;
   String? _historyError;
 
-  // ID do usuário atual (para verificar se pode deletar comentários)
   String? _currentUserId;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(_onTabChanged);
+    _commentController.addListener(() {
+      if (mounted) setState(() => _commentLength = _commentController.text.length);
+    });
+    _commentFocus.addListener(() => setState(() {}));
     _loadCurrentUserId();
     _loadComments();
-    _tabController.addListener(() {
-      if (_tabController.index == 2 && _history.isEmpty && !_loadingHistory) {
-        _loadHistory();
-      }
-    });
-    _commentController.addListener(() {
-      setState(() {
-        _commentLength = _commentController.text.length;
-      });
-    });
+  }
+
+  void _onTabChanged() {
+    if (!mounted) return;
+    setState(() {});
+    if (_tabController.index == 2 && _history.isEmpty && !_loadingHistory) {
+      _loadHistory();
+    }
   }
 
   @override
   void dispose() {
+    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _commentController.dispose();
+    _commentFocus.dispose();
     super.dispose();
   }
+
+  // ---------------------------------------------------------------------------
+  // DATA
+  // ---------------------------------------------------------------------------
 
   Future<void> _loadCurrentUserId() async {
     try {
       final token = await SecureStorageService.instance.getAccessToken();
       if (token != null) {
         final payload = JwtUtils.decodeToken(token);
-        if (payload != null) {
+        if (payload != null && mounted) {
           setState(() {
-            _currentUserId = payload['sub']?.toString() ?? payload['userId']?.toString();
+            _currentUserId = payload['sub']?.toString() ??
+                payload['userId']?.toString();
           });
         }
       }
@@ -90,9 +106,9 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
       _loadingComments = true;
       _commentsError = null;
     });
-
     try {
       final response = await _kanbanService.listComments(widget.task.id);
+      if (!mounted) return;
       if (response.success && response.data != null) {
         setState(() {
           _comments = response.data!;
@@ -105,8 +121,9 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
-        _commentsError = 'Erro ao carregar comentários: ${e.toString()}';
+        _commentsError = 'Erro ao carregar comentários: $e';
         _loadingComments = false;
       });
     }
@@ -117,9 +134,9 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
       _loadingHistory = true;
       _historyError = null;
     });
-
     try {
       final response = await _kanbanService.getTaskHistory(widget.task.id);
+      if (!mounted) return;
       if (response.success && response.data != null) {
         setState(() {
           _history = response.data!;
@@ -132,8 +149,9 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
-        _historyError = 'Erro ao carregar histórico: ${e.toString()}';
+        _historyError = 'Erro ao carregar histórico: $e';
         _loadingHistory = false;
       });
     }
@@ -145,14 +163,11 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
         allowMultiple: true,
         type: FileType.any,
       );
-
       if (result != null && result.files.isNotEmpty) {
         final files = result.files
             .where((f) => f.path != null)
             .map((f) => File(f.path!))
             .toList();
-
-        // Validar quantidade (máx. 10)
         if (_selectedFiles.length + files.length > 10) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -164,17 +179,13 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
           }
           return;
         }
-
-        setState(() {
-          _selectedFiles.addAll(files);
-        });
+        setState(() => _selectedFiles.addAll(files));
       }
     } catch (e) {
-      debugPrint('❌ [TASK_DETAILS] Erro ao selecionar arquivos: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro ao selecionar arquivos: ${e.toString()}'),
+            content: Text('Erro ao selecionar arquivos: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -183,9 +194,7 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
   }
 
   void _removeFile(int index) {
-    setState(() {
-      _selectedFiles.removeAt(index);
-    });
+    setState(() => _selectedFiles.removeAt(index));
   }
 
   Future<void> _submitComment() async {
@@ -199,7 +208,6 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
       );
       return;
     }
-
     if (message.length > 2000) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -209,58 +217,45 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
       );
       return;
     }
-
-    setState(() {
-      _submittingComment = true;
-    });
-
+    setState(() => _submittingComment = true);
     try {
       final response = await _kanbanService.createComment(
         widget.task.id,
         message,
         _selectedFiles.isNotEmpty ? _selectedFiles : null,
       );
-
-      if (mounted) {
-        if (response.success && response.data != null) {
-          // Adicionar comentário à lista (optimistic update)
-          setState(() {
-            _comments.add(response.data!);
-            _commentController.clear();
-            _selectedFiles.clear();
-            _submittingComment = false;
-          });
-
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Comentário criado com sucesso!'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        } else {
-          setState(() {
-            _submittingComment = false;
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(response.message ?? 'Erro ao criar comentário'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
+      if (!mounted) return;
+      if (response.success && response.data != null) {
         setState(() {
+          _comments.add(response.data!);
+          _commentController.clear();
+          _selectedFiles.clear();
           _submittingComment = false;
         });
         ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Comentário criado com sucesso!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        setState(() => _submittingComment = false);
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro ao criar comentário: ${e.toString()}'),
+            content: Text(response.message ?? 'Erro ao criar comentário'),
             backgroundColor: Colors.red,
           ),
         );
       }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _submittingComment = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro ao criar comentário: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -268,8 +263,8 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Deletar Comentário'),
-        content: const Text('Tem certeza que deseja deletar este comentário?'),
+        title: const Text('Excluir comentário'),
+        content: const Text('Tem certeza que deseja excluir este comentário?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -278,993 +273,1985 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Deletar'),
+            child: const Text('Excluir'),
           ),
         ],
       ),
     );
-
     if (confirmed != true) return;
-
     try {
-      final response = await _kanbanService.deleteComment(widget.task.id, commentId);
+      final response =
+          await _kanbanService.deleteComment(widget.task.id, commentId);
+      if (!mounted) return;
       if (response.success) {
-        setState(() {
-          _comments.removeWhere((c) => c.id == commentId);
-        });
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Comentário deletado com sucesso!'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
+        setState(() => _comments.removeWhere((c) => c.id == commentId));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Comentário excluído'),
+            backgroundColor: Colors.green,
+          ),
+        );
       } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(response.message ?? 'Erro ao deletar comentário'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro ao deletar comentário: ${e.toString()}'),
+            content: Text(response.message ?? 'Erro ao excluir comentário'),
             backgroundColor: Colors.red,
           ),
         );
       }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro ao excluir comentário: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
-  bool _canDeleteComment(KanbanTaskComment comment) {
-    return _currentUserId != null && comment.userId == _currentUserId;
+  bool _canDeleteComment(KanbanTaskComment comment) =>
+      _currentUserId != null && comment.userId == _currentUserId;
+
+  // ---------------------------------------------------------------------------
+  // BUILD
+  // ---------------------------------------------------------------------------
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final task = widget.task;
+    final state = _TaskState.from(task);
+
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        height: mq.size.height * 0.94,
+        decoration: BoxDecoration(
+          color: ThemeHelpers.cardBackgroundColor(context),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
+          border: Border.all(
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          children: [
+            _buildDragHandle(context, isDark),
+            _StateRibbon(state: state),
+            _TaskHeroHeader(
+              task: task,
+              state: state,
+              onClose: () => Navigator.of(context).pop(),
+              onCopyId: () {
+                Clipboard.setData(ClipboardData(text: task.id));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('ID da tarefa copiado'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              },
+            ),
+            _MinimalTabBar(
+              controller: _tabController,
+              tabs: [
+                _TabItem(icon: Icons.article_outlined, label: 'Detalhes'),
+                _TabItem(
+                  icon: Icons.forum_outlined,
+                  label: 'Conversas',
+                  badge: _comments.length,
+                ),
+                _TabItem(
+                  icon: Icons.history_rounded,
+                  label: 'Histórico',
+                  badge: (_history.isNotEmpty || _loadingHistory)
+                      ? _history.length
+                      : null,
+                ),
+              ],
+            ),
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
+                physics: const ClampingScrollPhysics(),
+                children: [
+                  _buildDetailsTab(context, theme, state),
+                  _buildCommentsTab(context, theme),
+                  _buildHistoryTab(context, theme),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
-  String _formatFileSize(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  Widget _buildDragHandle(BuildContext context, bool isDark) {
+    return Container(
+      padding: const EdgeInsets.only(top: 8, bottom: 6),
+      child: Center(
+        child: Container(
+          width: 40,
+          height: 4,
+          decoration: BoxDecoration(
+            color: ThemeHelpers.textSecondaryColor(context)
+                .withValues(alpha: isDark ? 0.32 : 0.22),
+            borderRadius: BorderRadius.circular(999),
+          ),
+        ),
+      ),
+    );
   }
 
-  String _getActionLabel(String action) {
-    switch (action) {
-      case 'created':
-        return 'criou a tarefa';
-      case 'updated':
-        return 'atualizou';
-      case 'moved':
-        return 'moveu';
-      case 'assigned':
-        return 'atribuiu responsável';
-      case 'unassigned':
-        return 'removeu responsável';
-      case 'priority_changed':
-        return 'alterou prioridade';
-      case 'due_date_changed':
-        return 'alterou data de vencimento';
-      case 'description_changed':
-        return 'alterou descrição';
-      case 'title_changed':
-        return 'alterou título';
-      case 'tags_changed':
-        return 'alterou tags';
-      case 'project_changed':
-        return 'alterou projeto';
-      case 'completed':
-        return 'concluiu a tarefa';
-      case 'reopened':
-        return 'reabriu a tarefa';
-      default:
-        return action;
+  // ---------------------------------------------------------------------------
+  // TAB: DETAILS
+  // ---------------------------------------------------------------------------
+
+  Widget _buildDetailsTab(BuildContext context, ThemeData theme, _TaskState state) {
+    final task = widget.task;
+    final hasDescription =
+        task.description != null && task.description!.trim().isNotEmpty;
+    final tags = task.displayTags;
+    final hasTags = tags != null && tags.isNotEmpty;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 32),
+      physics: const BouncingScrollPhysics(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SectionHeader(
+            overline: 'Sobre o card',
+            title: 'Descrição',
+            trailing: hasDescription
+                ? '${task.description!.trim().length} caracteres'
+                : null,
+          ),
+          const SizedBox(height: 10),
+          _DescriptionBlock(
+            text: hasDescription ? task.description!.trim() : null,
+          ),
+          const SizedBox(height: 24),
+          _SectionHeader(
+            overline: 'Status & contexto',
+            title: 'Informações',
+          ),
+          const SizedBox(height: 10),
+          _InfoStack(task: task, state: state),
+          const SizedBox(height: 24),
+          _SectionHeader(
+            overline: 'Equipe',
+            title: 'Pessoas envolvidas',
+          ),
+          const SizedBox(height: 10),
+          _PeopleStrip(task: task),
+          if (hasTags) ...[
+            const SizedBox(height: 24),
+            _SectionHeader(
+              overline: 'Categorias',
+              title: 'Tags',
+              trailing: '${tags.length}',
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [for (final t in tags) _PillTag(label: t)],
+            ),
+          ],
+          const SizedBox(height: 24),
+          _SectionHeader(
+            overline: 'Auditoria',
+            title: 'Linha do tempo',
+          ),
+          const SizedBox(height: 10),
+          _TimelineFooter(task: task, state: state),
+        ],
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // TAB: COMMENTS
+  // ---------------------------------------------------------------------------
+
+  Widget _buildCommentsTab(BuildContext context, ThemeData theme) {
+    final accent = _kanbanAccent(context);
+    return Column(
+      children: [
+        Expanded(
+          child: _loadingComments
+              ? const _LoadingView()
+              : _commentsError != null
+                  ? _ErrorView(
+                      message: _commentsError!,
+                      onRetry: _loadComments,
+                    )
+                  : _comments.isEmpty
+                      ? const _EmptyState(
+                          icon: Icons.forum_outlined,
+                          title: 'Sem conversas por aqui',
+                          subtitle:
+                              'Seja o primeiro a comentar e deixar contexto para o time.',
+                        )
+                      : ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
+                          physics: const BouncingScrollPhysics(),
+                          itemCount: _comments.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: 4),
+                          itemBuilder: (context, i) {
+                            final c = _comments[i];
+                            return _CommentBubble(
+                              comment: c,
+                              isMe: c.userId == _currentUserId,
+                              canDelete: _canDeleteComment(c),
+                              onDelete: () => _deleteComment(c.id),
+                            );
+                          },
+                        ),
+        ),
+        _CommentComposer(
+          controller: _commentController,
+          focusNode: _commentFocus,
+          onSubmit: _submittingComment ? null : _submitComment,
+          isSubmitting: _submittingComment,
+          length: _commentLength,
+          maxLength: 2000,
+          files: _selectedFiles,
+          onPickFiles: _selectFiles,
+          onRemoveFile: _removeFile,
+          accent: accent,
+        ),
+      ],
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // TAB: HISTORY
+  // ---------------------------------------------------------------------------
+
+  Widget _buildHistoryTab(BuildContext context, ThemeData theme) {
+    if (_loadingHistory) return const _LoadingView();
+    if (_historyError != null) {
+      return _ErrorView(message: _historyError!, onRetry: _loadHistory);
     }
-  }
-
-  String _getPriorityLabel(String? priority) {
-    switch (priority?.toLowerCase()) {
-      case 'low':
-        return 'Baixa';
-      case 'medium':
-        return 'Média';
-      case 'high':
-        return 'Alta';
-      case 'urgent':
-        return 'Urgente';
-      default:
-        return priority ?? 'Não definida';
+    if (_history.isEmpty) {
+      return const _EmptyState(
+        icon: Icons.history_toggle_off_rounded,
+        title: 'Sem histórico ainda',
+        subtitle:
+            'As ações nesta tarefa (criação, edições, movimentações) aparecem aqui.',
+      );
     }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+      physics: const BouncingScrollPhysics(),
+      itemCount: _history.length,
+      itemBuilder: (context, i) {
+        return _HistoryRow(
+          entry: _history[i],
+          isLast: i == _history.length - 1,
+        );
+      },
+    );
   }
+}
+
+// =============================================================================
+// SHARED STATE (overdue / due-today / completed / active)
+// =============================================================================
+
+enum _TaskHealth { ok, dueToday, overdue, completed }
+
+class _TaskState {
+  final _TaskHealth health;
+  final Color accent;
+  final String stateLabel;
+  final IconData stateIcon;
+  final DateTime? dueDate;
+  final int? daysFromToday;
+
+  const _TaskState({
+    required this.health,
+    required this.accent,
+    required this.stateLabel,
+    required this.stateIcon,
+    required this.dueDate,
+    required this.daysFromToday,
+  });
+
+  static _TaskState from(KanbanTask task) {
+    if (task.isCompleted) {
+      return const _TaskState(
+        health: _TaskHealth.completed,
+        accent: Color(0xFF10B981),
+        stateLabel: 'Concluída',
+        stateIcon: Icons.check_circle_rounded,
+        dueDate: null,
+        daysFromToday: null,
+      );
+    }
+    final due = task.dueDate;
+    if (due != null) {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final localDue = due.toLocal();
+      final dueDay = DateTime(localDue.year, localDue.month, localDue.day);
+      final diffDays = dueDay.difference(today).inDays;
+      if (diffDays < 0) {
+        return _TaskState(
+          health: _TaskHealth.overdue,
+          accent: const Color(0xFFEF4444),
+          stateLabel: 'Atrasada',
+          stateIcon: Icons.error_rounded,
+          dueDate: due,
+          daysFromToday: diffDays,
+        );
+      }
+      if (diffDays == 0) {
+        return _TaskState(
+          health: _TaskHealth.dueToday,
+          accent: const Color(0xFFF59E0B),
+          stateLabel: 'Vence hoje',
+          stateIcon: Icons.warning_amber_rounded,
+          dueDate: due,
+          daysFromToday: 0,
+        );
+      }
+    }
+    return _TaskState(
+      health: _TaskHealth.ok,
+      accent: task.priority != null
+          ? Color(int.parse(task.priority!.color.replaceFirst('#', '0xFF')))
+          : const Color(0xFF0891B2),
+      stateLabel: 'Em andamento',
+      stateIcon: Icons.bolt_rounded,
+      dueDate: due,
+      daysFromToday: due?.toLocal().difference(DateTime.now()).inDays,
+    );
+  }
+}
+
+/// Tira finíssima no topo do header indicando o estado da tarefa. Substitui
+/// o gradiente colorido do header anterior — visualmente mais leve no claro.
+class _StateRibbon extends StatelessWidget {
+  final _TaskState state;
+
+  const _StateRibbon({required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 3,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            state.accent.withValues(alpha: 0.0),
+            state.accent.withValues(alpha: 0.95),
+            state.accent.withValues(alpha: 0.0),
+          ],
+          stops: const [0.0, 0.5, 1.0],
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// HEADER
+// =============================================================================
+
+class _TaskHeroHeader extends StatelessWidget {
+  final KanbanTask task;
+  final _TaskState state;
+  final VoidCallback onClose;
+  final VoidCallback onCopyId;
+
+  const _TaskHeroHeader({
+    required this.task,
+    required this.state,
+    required this.onClose,
+    required this.onCopyId,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final task = widget.task;
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final priorityColor = task.priority != null
+        ? Color(int.parse(task.priority!.color.replaceFirst('#', '0xFF')))
+        : null;
 
-    return Material(
-      color: ThemeHelpers.cardBackgroundColor(context),
-      borderRadius: const BorderRadius.only(
-        topLeft: Radius.circular(20),
-        topRight: Radius.circular(20),
-      ),
-      child: ClipRRect(
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(20),
-          topRight: Radius.circular(20),
-        ),
-        child: Container(
-          height: MediaQuery.of(context).size.height * 0.9,
-          decoration: BoxDecoration(
-            color: ThemeHelpers.cardBackgroundColor(context),
-            borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(20),
-              topRight: Radius.circular(20),
-            ),
-          ),
-        child: Column(
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 8, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Handle
-          Container(
-            margin: const EdgeInsets.only(top: 12),
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: ThemeHelpers.textSecondaryColor(context),
-              borderRadius: BorderRadius.circular(2),
-            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    if (task.project != null)
+                      _BreadcrumbChip(
+                        icon: Icons.account_tree_outlined,
+                        label: task.project!.name,
+                      ),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 14,
+                      color: secondary,
+                    ),
+                    _BreadcrumbChip(
+                      icon: state.stateIcon,
+                      label: state.stateLabel,
+                      color: state.accent,
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Copiar ID',
+                onPressed: onCopyId,
+                icon: const Icon(Icons.copy_rounded, size: 18),
+                visualDensity: VisualDensity.compact,
+                style: IconButton.styleFrom(
+                  foregroundColor: secondary,
+                ),
+              ),
+              IconButton(
+                tooltip: 'Fechar',
+                onPressed: onClose,
+                icon: const Icon(Icons.close_rounded),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
           ),
-          // Header
-          Container(
-            padding: const EdgeInsets.all(20),
+          const SizedBox(height: 10),
+          // Linha de "monograma" lateral + título grande, multilinhas.
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  Icons.task_alt,
-                  color: theme.colorScheme.primary,
+                _PriorityMark(
+                  color: priorityColor ?? state.accent,
+                  hasPriority: task.priority != null,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Text(
-                    task.title,
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        task.title,
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.4,
+                          height: 1.2,
+                          fontSize: 20,
+                          color: ThemeHelpers.textColor(context),
+                        ),
+                        maxLines: 4,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _headerSubtitle(task),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: secondary,
+                          fontWeight: FontWeight.w600,
+                          height: 1.3,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.of(context).pop(),
                 ),
               ],
             ),
           ),
-          // Tabs
-          TabBar(
-            controller: _tabController,
-            tabs: const [
-              Tab(text: 'Detalhes', icon: Icon(Icons.info_outline)),
-              Tab(text: 'Comentários', icon: Icon(Icons.comment_outlined)),
-              Tab(text: 'Histórico', icon: Icon(Icons.history)),
-            ],
-          ),
-          // Content
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
+          const SizedBox(height: 14),
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                _buildDetailsTab(context, task, theme),
-                _buildCommentsTab(context, theme),
-                _buildHistoryTab(context, theme),
+                _MetaPill(
+                  icon: state.stateIcon,
+                  label: state.stateLabel,
+                  color: state.accent,
+                  emphasized: state.health != _TaskHealth.ok,
+                ),
+                if (task.priority != null)
+                  _MetaPill(
+                    icon: Icons.flag_rounded,
+                    label: task.priority!.label,
+                    color: priorityColor ?? state.accent,
+                  ),
+                if (state.dueDate != null)
+                  _MetaPill(
+                    icon: Icons.event_outlined,
+                    label: DateFormat("d 'de' MMM", 'pt_BR')
+                        .format(state.dueDate!.toLocal()),
+                    color: state.accent,
+                    subtle: true,
+                  ),
+                if (task.assignedTo != null)
+                  _MetaAvatarPill(user: task.assignedTo!),
+                if (task.commentsCount != null && task.commentsCount! > 0)
+                  _MetaPill(
+                    icon: Icons.mode_comment_outlined,
+                    label: '${task.commentsCount} comentários',
+                    color: secondary,
+                    subtle: true,
+                  ),
               ],
+            ),
+          ),
+          // Linha sutil de separação no final do header.
+          Padding(
+            padding: const EdgeInsets.only(top: 16, right: 16),
+            child: Container(
+              height: 1,
+              color: ThemeHelpers.borderColor(context)
+                  .withValues(alpha: isDark ? 0.45 : 0.55),
             ),
           ),
         ],
-        ),
-        ),
       ),
     );
   }
 
-  Widget _buildDetailsTab(
-    BuildContext context,
-    KanbanTask task,
-    ThemeData theme,
-  ) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  static String _headerSubtitle(KanbanTask task) {
+    final parts = <String>[];
+    if (task.createdBy?.name.isNotEmpty == true) {
+      parts.add('Criada por ${task.createdBy!.name}');
+    }
+    parts.add(_relativeTime(task.createdAt, prefix: '• criada'));
+    if (task.updatedAt.difference(task.createdAt).inMinutes > 1) {
+      parts.add(_relativeTime(task.updatedAt, prefix: '• atualizada'));
+    }
+    return parts.join('  ');
+  }
+}
+
+class _BreadcrumbChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color? color;
+
+  const _BreadcrumbChip({required this.icon, required this.label, this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final c = color ?? ThemeHelpers.textSecondaryColor(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        color: color == null
+            ? ThemeHelpers.borderColor(context).withValues(alpha: 0.12)
+            : c.withValues(alpha: 0.1),
+        border: Border.all(
+          color: color == null
+              ? ThemeHelpers.borderColor(context).withValues(alpha: 0.45)
+              : c.withValues(alpha: 0.34),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Descrição
-          if (task.description != null && task.description!.isNotEmpty) ...[
-            Text(
-              'Descrição',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
+          Icon(icon, size: 12, color: c),
+          const SizedBox(width: 5),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 200),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.1,
+                color: c,
+                height: 1,
               ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              task.description!,
-              style: theme.textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 24),
-          ],
-          // Informações
-          Text(
-            'Informações',
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w600,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PriorityMark extends StatelessWidget {
+  final Color color;
+  final bool hasPriority;
+
+  const _PriorityMark({required this.color, required this.hasPriority});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        color: color.withValues(alpha: 0.14),
+        border: Border.all(color: color.withValues(alpha: 0.36)),
+      ),
+      alignment: Alignment.center,
+      child: Icon(
+        hasPriority ? Icons.flag_rounded : Icons.task_alt_rounded,
+        color: color,
+        size: 20,
+      ),
+    );
+  }
+}
+
+class _MetaPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final bool emphasized;
+  final bool subtle;
+
+  const _MetaPill({
+    required this.icon,
+    required this.label,
+    required this.color,
+    this.emphasized = false,
+    this.subtle = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final fillAlpha = emphasized
+        ? (isDark ? 0.22 : 0.14)
+        : subtle
+            ? (isDark ? 0.10 : 0.06)
+            : (isDark ? 0.16 : 0.10);
+    final borderAlpha = emphasized ? 0.5 : (subtle ? 0.22 : 0.34);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: color.withValues(alpha: fillAlpha),
+        border: Border.all(color: color.withValues(alpha: borderAlpha)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 220),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: color,
+                fontWeight: FontWeight.w800,
+                fontSize: 11.5,
+                letterSpacing: 0.1,
+                height: 1,
+              ),
             ),
           ),
-          const SizedBox(height: 12),
-          _buildInfoRow(
-            context,
-            'Prioridade',
-            task.priority != null
-                ? Row(
+        ],
+      ),
+    );
+  }
+}
+
+class _MetaAvatarPill extends StatelessWidget {
+  final KanbanUser user;
+
+  const _MetaAvatarPill({required this.user});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final accent = _kanbanAccent(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: accent.withValues(alpha: isDark ? 0.16 : 0.08),
+        border: Border.all(color: accent.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _SolidAvatar(user: user, size: 22),
+          const SizedBox(width: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 160),
+            child: Text(
+              user.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: accent,
+                fontWeight: FontWeight.w800,
+                fontSize: 11.5,
+                height: 1,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Avatar circular sólido (cor accent + iniciais), sem gradiente nem sombra.
+class _SolidAvatar extends StatelessWidget {
+  final KanbanUser? user;
+  final double size;
+
+  const _SolidAvatar({required this.user, this.size = 28});
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = _kanbanAccent(context);
+    final initials = _initialsFromName(user?.name);
+    final hasAvatar = user?.avatar != null && user!.avatar!.isNotEmpty;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: accent,
+        border: Border.all(
+          color: accent.withValues(alpha: 0.6),
+          width: 0.6,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: hasAvatar
+          ? Image.network(
+              user!.avatar!,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => _initialFallback(initials),
+            )
+          : _initialFallback(initials),
+    );
+  }
+
+  Widget _initialFallback(String initials) => Center(
+        child: Text(
+          initials,
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w900,
+            fontSize: size * 0.42,
+            letterSpacing: 0.2,
+            height: 1,
+          ),
+        ),
+      );
+}
+
+String _initialsFromName(String? name) {
+  if (name == null || name.trim().isEmpty) return '?';
+  final parts = name.trim().split(RegExp(r'\s+'));
+  if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
+  return (parts.first[0] + parts.last[0]).toUpperCase();
+}
+
+// =============================================================================
+// MINIMAL TAB BAR (underline)
+// =============================================================================
+
+class _TabItem {
+  final IconData icon;
+  final String label;
+  final int? badge;
+
+  const _TabItem({required this.icon, required this.label, this.badge});
+}
+
+class _MinimalTabBar extends StatelessWidget {
+  final TabController controller;
+  final List<_TabItem> tabs;
+
+  const _MinimalTabBar({required this.controller, required this.tabs});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final accent = _kanbanAccent(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+          ),
+        ),
+      ),
+      child: TabBar(
+        controller: controller,
+        labelColor: accent,
+        unselectedLabelColor: secondary,
+        indicatorColor: accent,
+        indicatorWeight: 2.5,
+        indicatorSize: TabBarIndicatorSize.label,
+        dividerHeight: 0,
+        labelPadding: EdgeInsets.zero,
+        labelStyle: theme.textTheme.labelLarge?.copyWith(
+          fontWeight: FontWeight.w900,
+          fontSize: 13,
+          letterSpacing: 0.1,
+        ),
+        unselectedLabelStyle: theme.textTheme.labelLarge?.copyWith(
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
+          letterSpacing: 0.1,
+        ),
+        tabs: [
+          for (final t in tabs) _renderTab(t, secondary),
+        ],
+      ),
+    );
+  }
+
+  Widget _renderTab(_TabItem t, Color secondary) {
+    return Tab(
+      height: 50,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(t.icon, size: 16),
+            const SizedBox(width: 7),
+            Flexible(child: Text(t.label, overflow: TextOverflow.ellipsis)),
+            if (t.badge != null && t.badge! > 0) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  color: secondary.withValues(alpha: 0.14),
+                ),
+                child: Text(
+                  '${t.badge}',
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    height: 1,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// SECTION HEADER (overline + title)
+// =============================================================================
+
+class _SectionHeader extends StatelessWidget {
+  final String overline;
+  final String title;
+  final String? trailing;
+
+  const _SectionHeader({
+    required this.overline,
+    required this.title,
+    this.trailing,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final accent = _kanbanAccent(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(width: 4, height: 14, color: accent),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                overline.toUpperCase(),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  letterSpacing: 1.4,
+                  fontWeight: FontWeight.w800,
+                  color: accent,
+                  fontSize: 10,
+                  height: 1,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                title,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.2,
+                  height: 1.1,
+                  fontSize: 15,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (trailing != null)
+          Text(
+            trailing!,
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: secondary,
+              letterSpacing: 0.4,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+// =============================================================================
+// DESCRIPTION
+// =============================================================================
+
+class _DescriptionBlock extends StatelessWidget {
+  final String? text;
+
+  const _DescriptionBlock({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final empty = text == null || text!.isEmpty;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: ThemeHelpers.cardBackgroundColor(context)
+            .withValues(alpha: isDark ? 0.42 : 0.55),
+        border: Border.all(
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.4),
+        ),
+      ),
+      child: empty
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.short_text_rounded, size: 18, color: secondary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Sem descrição. Edite o card para adicionar contexto.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: secondary,
+                      fontWeight: FontWeight.w600,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            )
+          : SelectableText(
+              text!,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                height: 1.55,
+                fontSize: 14,
+                color: ThemeHelpers.textColor(context),
+              ),
+            ),
+    );
+  }
+}
+
+// =============================================================================
+// INFO STACK (lista vertical de info-rows mais legível que grid 2x2)
+// =============================================================================
+
+class _InfoStack extends StatelessWidget {
+  final KanbanTask task;
+  final _TaskState state;
+
+  const _InfoStack({required this.task, required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final priorityColor = task.priority != null
+        ? Color(int.parse(task.priority!.color.replaceFirst('#', '0xFF')))
+        : null;
+
+    final items = <_InfoRow>[
+      _InfoRow(
+        icon: Icons.flag_rounded,
+        iconColor: priorityColor ?? ThemeHelpers.textSecondaryColor(context),
+        label: 'Prioridade',
+        valueText: task.priority?.label ?? 'Não definida',
+        accentValue: task.priority != null,
+      ),
+      _InfoRow(
+        icon: state.health == _TaskHealth.overdue
+            ? Icons.error_rounded
+            : state.health == _TaskHealth.dueToday
+                ? Icons.warning_amber_rounded
+                : Icons.event_outlined,
+        iconColor: state.dueDate == null
+            ? ThemeHelpers.textSecondaryColor(context)
+            : state.accent,
+        label: 'Prazo',
+        valueText: state.dueDate == null
+            ? 'Sem prazo'
+            : DateFormat("d 'de' MMMM, y", 'pt_BR')
+                .format(state.dueDate!.toLocal()),
+        helper: state.dueDate == null
+            ? null
+            : _deadlineHelper(state),
+        accentValue: state.dueDate != null && state.health != _TaskHealth.ok,
+      ),
+      if (task.project != null)
+        _InfoRow(
+          icon: Icons.account_tree_outlined,
+          iconColor: const Color(0xFF8B5CF6),
+          label: 'Funil',
+          valueText: task.project!.name,
+          helper: task.project!.isPersonal == true
+              ? 'Workspace pessoal'
+              : task.project!.status.label,
+        ),
+      _InfoRow(
+        icon: task.isCompleted
+            ? Icons.check_circle_rounded
+            : Icons.circle_outlined,
+        iconColor: task.isCompleted
+            ? const Color(0xFF10B981)
+            : ThemeHelpers.textSecondaryColor(context),
+        label: 'Status',
+        valueText: task.isCompleted ? 'Concluída' : 'Em aberto',
+      ),
+    ];
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: ThemeHelpers.cardBackgroundColor(context)
+            .withValues(alpha: isDark ? 0.42 : 0.55),
+        border: Border.all(
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.4),
+        ),
+      ),
+      child: Column(
+        children: [
+          for (var i = 0; i < items.length; i++) ...[
+            items[i].render(context, theme),
+            if (i < items.length - 1)
+              Divider(
+                height: 1,
+                thickness: 1,
+                color:
+                    ThemeHelpers.borderColor(context).withValues(alpha: 0.32),
+                indent: 16,
+                endIndent: 16,
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  static String? _deadlineHelper(_TaskState state) {
+    final d = state.daysFromToday;
+    if (d == null) return null;
+    if (d < 0) {
+      final abs = d.abs();
+      return 'Atrasada há $abs dia${abs == 1 ? '' : 's'}';
+    }
+    if (d == 0) return 'Vence hoje';
+    return 'Em $d dia${d == 1 ? '' : 's'}';
+  }
+}
+
+class _InfoRow {
+  final IconData icon;
+  final Color iconColor;
+  final String label;
+  final String valueText;
+  final String? helper;
+  final bool accentValue;
+
+  const _InfoRow({
+    required this.icon,
+    required this.iconColor,
+    required this.label,
+    required this.valueText,
+    this.helper,
+    this.accentValue = false,
+  });
+
+  Widget render(BuildContext context, ThemeData theme) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              color: iconColor.withValues(alpha: isDark ? 0.18 : 0.1),
+              border: Border.all(color: iconColor.withValues(alpha: 0.32)),
+            ),
+            child: Icon(icon, size: 16, color: iconColor),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label.toUpperCase(),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    letterSpacing: 1.2,
+                    fontWeight: FontWeight.w800,
+                    color: secondary,
+                    fontSize: 10,
+                    height: 1,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  valueText,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.2,
+                    height: 1.2,
+                    color: accentValue
+                        ? iconColor
+                        : ThemeHelpers.textColor(context),
+                  ),
+                ),
+                if (helper != null && helper!.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    helper!,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: secondary,
+                      height: 1.2,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// PEOPLE STRIP
+// =============================================================================
+
+class _PeopleStrip extends StatelessWidget {
+  final KanbanTask task;
+
+  const _PeopleStrip({required this.task});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, c) {
+        final twoCols = c.maxWidth >= 460;
+        final cards = <Widget>[
+          _PersonCard(
+            label: 'Responsável',
+            user: task.assignedTo,
+            emptyHint: 'Nenhum responsável',
+          ),
+          _PersonCard(
+            label: 'Criado por',
+            user: task.createdBy,
+            emptyHint: 'Desconhecido',
+          ),
+        ];
+        if (!twoCols) {
+          return Column(
+            children: [
+              for (var i = 0; i < cards.length; i++) ...[
+                if (i > 0) const SizedBox(height: 10),
+                cards[i],
+              ],
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(child: cards[0]),
+            const SizedBox(width: 10),
+            Expanded(child: cards[1]),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _PersonCard extends StatelessWidget {
+  final String label;
+  final KanbanUser? user;
+  final String emptyHint;
+
+  const _PersonCard({
+    required this.label,
+    required this.user,
+    required this.emptyHint,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final assigned = user != null;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: ThemeHelpers.cardBackgroundColor(context)
+            .withValues(alpha: isDark ? 0.42 : 0.55),
+        border: Border.all(
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.4),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          if (assigned)
+            _SolidAvatar(user: user, size: 38)
+          else
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: ThemeHelpers.borderColor(context)
+                    .withValues(alpha: 0.18),
+                border: Border.all(
+                  color: ThemeHelpers.borderColor(context)
+                      .withValues(alpha: 0.5),
+                ),
+              ),
+              alignment: Alignment.center,
+              child: Icon(
+                Icons.person_outline_rounded,
+                size: 18,
+                color: secondary,
+              ),
+            ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label.toUpperCase(),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    letterSpacing: 1.2,
+                    fontWeight: FontWeight.w800,
+                    color: secondary,
+                    fontSize: 10,
+                    height: 1,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  assigned ? user!.name : emptyHint,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.2,
+                    height: 1.2,
+                    color: assigned
+                        ? ThemeHelpers.textColor(context)
+                        : secondary,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (assigned && (user!.email).isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    user!.email,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontSize: 11.5,
+                      color: secondary,
+                      fontWeight: FontWeight.w600,
+                      height: 1.2,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// TAGS
+// =============================================================================
+
+class _PillTag extends StatelessWidget {
+  final String label;
+
+  const _PillTag({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final color = _tagColor(label);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: color.withValues(alpha: isDark ? 0.16 : 0.1),
+        border: Border.all(color: color.withValues(alpha: 0.32)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: theme.textTheme.labelMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: color,
+              fontSize: 11.5,
+              letterSpacing: 0.1,
+              height: 1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+Color _tagColor(String tag) {
+  const palette = [
+    Color(0xFF0EA5E9),
+    Color(0xFF14B8A6),
+    Color(0xFF6366F1),
+    Color(0xFFF97316),
+    Color(0xFF22C55E),
+    Color(0xFFEC4899),
+    Color(0xFFA855F7),
+  ];
+  if (tag.isEmpty) return palette.first;
+  var h = 0;
+  for (final c in tag.codeUnits) {
+    h = (h * 31 + c) & 0x7fffffff;
+  }
+  return palette[h % palette.length];
+}
+
+// =============================================================================
+// TIMELINE FOOTER (created/updated/due)
+// =============================================================================
+
+class _TimelineFooter extends StatelessWidget {
+  final KanbanTask task;
+  final _TaskState state;
+
+  const _TimelineFooter({required this.task, required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final fmt = DateFormat("d MMM y · HH:mm", 'pt_BR');
+    final items = <_FooterDate>[
+      _FooterDate(
+        icon: Icons.add_circle_outline_rounded,
+        label: 'Criada',
+        value: fmt.format(task.createdAt.toLocal()),
+        helper: _relativeTime(task.createdAt),
+      ),
+      _FooterDate(
+        icon: Icons.update_rounded,
+        label: 'Atualizada',
+        value: fmt.format(task.updatedAt.toLocal()),
+        helper: _relativeTime(task.updatedAt),
+      ),
+      if (state.dueDate != null)
+        _FooterDate(
+          icon: Icons.event_outlined,
+          label: 'Prazo',
+          value: fmt.format(state.dueDate!.toLocal()),
+          helper: _InfoStack._deadlineHelper(state),
+          accent: state.health != _TaskHealth.ok ? state.accent : null,
+        ),
+    ];
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: ThemeHelpers.cardBackgroundColor(context)
+            .withValues(alpha: isDark ? 0.42 : 0.55),
+        border: Border.all(
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.4),
+        ),
+      ),
+      child: Column(
+        children: [
+          for (var i = 0; i < items.length; i++) ...[
+            items[i].render(context, theme),
+            if (i < items.length - 1)
+              Divider(
+                height: 14,
+                thickness: 1,
+                color: ThemeHelpers.borderColor(context)
+                    .withValues(alpha: 0.32),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _FooterDate {
+  final IconData icon;
+  final String label;
+  final String value;
+  final String? helper;
+  final Color? accent;
+
+  const _FooterDate({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.helper,
+    this.accent,
+  });
+
+  Widget render(BuildContext context, ThemeData theme) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final color = accent ?? secondary;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 86,
+          child: Text(
+            label.toUpperCase(),
+            style: theme.textTheme.labelSmall?.copyWith(
+              letterSpacing: 1.2,
+              fontWeight: FontWeight.w800,
+              color: color,
+              fontSize: 10,
+              height: 1,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
+              letterSpacing: -0.1,
+              height: 1.2,
+              color: ThemeHelpers.textColor(context),
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        if (helper != null && helper!.isNotEmpty)
+          Text(
+            helper!,
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: color,
+              fontSize: 10.5,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+// =============================================================================
+// COMMENT BUBBLE / COMPOSER
+// =============================================================================
+
+class _CommentBubble extends StatelessWidget {
+  final KanbanTaskComment comment;
+  final bool isMe;
+  final bool canDelete;
+  final VoidCallback onDelete;
+
+  const _CommentBubble({
+    required this.comment,
+    required this.isMe,
+    required this.canDelete,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = _kanbanAccent(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+
+    final bubbleColor = isMe
+        ? accent.withValues(alpha: isDark ? 0.16 : 0.08)
+        : ThemeHelpers.cardBackgroundColor(context)
+            .withValues(alpha: isDark ? 0.5 : 0.7);
+    final borderColor = isMe
+        ? accent.withValues(alpha: 0.34)
+        : ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SolidAvatar(user: comment.user, size: 34),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(14, 10, 12, 12),
+              decoration: BoxDecoration(
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(4),
+                  topRight: Radius.circular(14),
+                  bottomLeft: Radius.circular(14),
+                  bottomRight: Radius.circular(14),
+                ),
+                color: bubbleColor,
+                border: Border.all(color: borderColor),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     children: [
-                      Container(
-                        width: 12,
-                        height: 12,
-                        decoration: BoxDecoration(
-                          color: Color(int.parse(
-                            task.priority!.color.replaceFirst('#', '0xFF'),
-                          )),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          _getPriorityLabel(task.priority!.name),
-                          maxLines: 2,
+                          comment.user?.name ??
+                              (isMe ? 'Você' : 'Usuário'),
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.2,
+                            height: 1.15,
+                            color: isMe
+                                ? accent
+                                : ThemeHelpers.textColor(context),
+                          ),
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _relativeTime(comment.createdAt),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: secondary,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                      if (canDelete)
+                        InkWell(
+                          onTap: onDelete,
+                          borderRadius: BorderRadius.circular(999),
+                          child: Padding(
+                            padding: const EdgeInsets.all(4),
+                            child: Icon(
+                              Icons.delete_outline_rounded,
+                              size: 16,
+                              color: theme.colorScheme.error,
+                            ),
+                          ),
+                        ),
                     ],
-                  )
-                : const Text('Não definida'),
-          ),
-          if (task.assignedTo != null) ...[
-            const SizedBox(height: 8),
-            _buildInfoRow(
-              context,
-              'Responsável',
-              Row(
-                children: [
-                  if (task.assignedTo!.avatar != null)
-                    CircleAvatar(
-                      radius: 12,
-                      backgroundImage: NetworkImage(task.assignedTo!.avatar!),
-                    )
-                  else
-                    CircleAvatar(
-                      radius: 12,
-                      child: Text(
-                        task.assignedTo!.name[0].toUpperCase(),
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      task.assignedTo!.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 6),
+                  SelectableText(
+                    comment.message,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      height: 1.5,
+                      fontSize: 13.5,
                     ),
                   ),
+                  if (comment.attachments.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    ...comment.attachments.map(
+                      (a) => Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: _AttachmentRow(attachment: a),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
-          ],
-          if (task.createdBy != null) ...[
-            const SizedBox(height: 8),
-            _buildInfoRow(
-              context,
-              'Criado por',
-              Row(
-                children: [
-                  if (task.createdBy!.avatar != null)
-                    CircleAvatar(
-                      radius: 12,
-                      backgroundImage: NetworkImage(task.createdBy!.avatar!),
-                    )
-                  else
-                    CircleAvatar(
-                      radius: 12,
-                      child: Text(
-                        task.createdBy!.name[0].toUpperCase(),
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      task.createdBy!.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-          if (task.dueDate != null) ...[
-            const SizedBox(height: 8),
-            _buildInfoRow(
-              context,
-              'Data de Vencimento',
-              Row(
-                children: [
-                  Icon(
-                    Icons.calendar_today,
-                    size: 16,
-                    color: task.dueDate!.isBefore(DateTime.now())
-                        ? Colors.red
-                        : ThemeHelpers.textSecondaryColor(context),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      DateFormat('dd/MM/yyyy').format(task.dueDate!),
-                      style: TextStyle(
-                        color: task.dueDate!.isBefore(DateTime.now())
-                            ? Colors.red
-                            : null,
-                        fontWeight: task.dueDate!.isBefore(DateTime.now())
-                            ? FontWeight.w600
-                            : null,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-          if (task.project != null) ...[
-            const SizedBox(height: 8),
-            _buildInfoRow(
-              context,
-              'Projeto',
-              Text(task.project!.name),
-            ),
-          ],
-          if (task.displayTags != null && task.displayTags!.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            Text(
-              'Tags',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: task.displayTags!.map((tag) {
-                return Chip(
-                  label: Text(tag),
-                  labelStyle: const TextStyle(fontSize: 12),
-                  padding: EdgeInsets.zero,
-                );
-              }).toList(),
-            ),
-          ],
-          const SizedBox(height: 24),
-          // Datas
-          Text(
-            'Datas',
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 12),
-          _buildInfoRow(
-            context,
-            'Criado em',
-            Text(DateFormat('dd/MM/yyyy HH:mm').format(task.createdAt)),
-          ),
-          const SizedBox(height: 8),
-          _buildInfoRow(
-            context,
-            'Atualizado em',
-            Text(DateFormat('dd/MM/yyyy HH:mm').format(task.updatedAt)),
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildInfoRow(BuildContext context, String label, Widget value) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 120,
-          child: Text(
-            label,
-            style: TextStyle(
-              color: ThemeHelpers.textSecondaryColor(context),
-              fontSize: 14,
-            ),
-          ),
-        ),
-        Expanded(child: value),
-      ],
-    );
-  }
+class _AttachmentRow extends StatelessWidget {
+  final Attachment attachment;
 
-  Widget _buildCommentsTab(BuildContext context, ThemeData theme) {
-    return Column(
-      children: [
-        // Lista de comentários
-        Expanded(
-          child: _loadingComments
-              ? const Center(child: CircularProgressIndicator())
-              : _commentsError != null
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.error_outline,
-                            size: 48,
-                            color: theme.colorScheme.error,
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            _commentsError!,
-                            style: theme.textTheme.bodyMedium,
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 16),
-                          ElevatedButton(
-                            onPressed: _loadComments,
-                            child: const Text('Tentar Novamente'),
-                          ),
-                        ],
-                      ),
-                    )
-                  : _comments.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.comment_outlined,
-                                size: 48,
-                                color: ThemeHelpers.textSecondaryColor(context),
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                'Nenhum comentário ainda',
-                                style: theme.textTheme.bodyLarge?.copyWith(
-                                  color: ThemeHelpers.textSecondaryColor(context),
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.all(16),
-                          itemCount: _comments.length,
-                          itemBuilder: (context, index) {
-                            final comment = _comments[index];
-                            return _buildCommentItem(context, comment, theme);
-                          },
-                        ),
-        ),
-        // Formulário de comentário
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: ThemeHelpers.cardBackgroundColor(context),
-            border: Border(
-              top: BorderSide(
-                color: ThemeHelpers.borderColor(context),
-              ),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Arquivos selecionados
-              if (_selectedFiles.isNotEmpty) ...[
-                SizedBox(
-                  height: 60,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: _selectedFiles.length,
-                    itemBuilder: (context, index) {
-                      final file = _selectedFiles[index];
-                      return Container(
-                        margin: const EdgeInsets.only(right: 8),
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: ThemeHelpers.borderColor(context).withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.attach_file, size: 16),
-                            const SizedBox(width: 4),
-                            Flexible(
-                              child: Text(
-                                file.path.split('/').last.split('\\').last,
-                                style: const TextStyle(fontSize: 12),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            IconButton(
-                              icon: const Icon(Icons.close, size: 16),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                              onPressed: () => _removeFile(index),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 8),
-              ],
-              // Campo de mensagem
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _commentController,
-                      decoration: InputDecoration(
-                        hintText: 'Escreva um comentário...',
-                        filled: true,
-                        fillColor: ThemeHelpers.cardBackgroundColor(context),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(
-                            color: ThemeHelpers.borderColor(context),
-                            width: 1,
-                          ),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(
-                            color: ThemeHelpers.borderColor(context),
-                            width: 1,
-                          ),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(
-                            color: theme.colorScheme.primary,
-                            width: 2,
-                          ),
-                        ),
-                        disabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(
-                            color: ThemeHelpers.borderColor(context).withOpacity(0.5),
-                            width: 1,
-                          ),
-                        ),
-                        errorBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(
-                            color: theme.colorScheme.error,
-                            width: 1,
-                          ),
-                        ),
-                        focusedErrorBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(
-                            color: theme.colorScheme.error,
-                            width: 2,
-                          ),
-                        ),
-                        suffixIcon: IconButton(
-                          icon: const Icon(Icons.attach_file),
-                          onPressed: _selectFiles,
-                          tooltip: 'Anexar arquivos',
-                        ),
-                      ),
-                      maxLines: 3,
-                      maxLength: 2000,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    icon: _submittingComment
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.send),
-                    onPressed: _submittingComment ? null : _submitComment,
-                    color: theme.colorScheme.primary,
-                  ),
-                ],
-              ),
-              // Contador de caracteres
-              Text(
-                '$_commentLength/2000',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: ThemeHelpers.textSecondaryColor(context),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
+  const _AttachmentRow({required this.attachment});
 
-  Widget _buildCommentItem(
-    BuildContext context,
-    KanbanTaskComment comment,
-    ThemeData theme,
-  ) {
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = _kanbanAccent(context);
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(8, 6, 4, 6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10),
+        color: ThemeHelpers.borderColor(context)
+            .withValues(alpha: isDark ? 0.14 : 0.08),
+        border: Border.all(
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              color: accent.withValues(alpha: isDark ? 0.18 : 0.12),
+            ),
+            alignment: Alignment.center,
+            child: Icon(Icons.attach_file_rounded, size: 14, color: accent),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  attachment.filename,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  _formatFileSize(attachment.size),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.download_rounded, size: 18, color: accent),
+            onPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Download: ${attachment.url}')),
+              );
+            },
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CommentComposer extends StatelessWidget {
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final VoidCallback? onSubmit;
+  final bool isSubmitting;
+  final int length;
+  final int maxLength;
+  final List<File> files;
+  final VoidCallback onPickFiles;
+  final ValueChanged<int> onRemoveFile;
+  final Color accent;
+
+  const _CommentComposer({
+    required this.controller,
+    required this.focusNode,
+    required this.onSubmit,
+    required this.isSubmitting,
+    required this.length,
+    required this.maxLength,
+    required this.files,
+    required this.onPickFiles,
+    required this.onRemoveFile,
+    required this.accent,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final mq = MediaQuery.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final focused = focusNode.hasFocus;
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(14, 10, 14, 12 + mq.padding.bottom),
       decoration: BoxDecoration(
         color: ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context),
+        border: Border(
+          top: BorderSide(
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+          ),
         ),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Header do comentário
-          Row(
-            children: [
-              // Avatar
-              if (comment.user?.avatar != null)
-                CircleAvatar(
-                  radius: 16,
-                  backgroundImage: NetworkImage(comment.user!.avatar!),
-                )
-              else
-                CircleAvatar(
-                  radius: 16,
-                  child: Text(
-                    comment.user?.name[0].toUpperCase() ?? '?',
-                    style: const TextStyle(fontSize: 14),
-                  ),
-                ),
-              const SizedBox(width: 12),
-              // Nome e data
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      comment.user?.name ?? 'Usuário',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
+          if (files.isNotEmpty) ...[
+            SizedBox(
+              height: 36,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: files.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 6),
+                itemBuilder: (context, i) {
+                  final f = files[i];
+                  final name = f.path.split(RegExp(r'[\\/]')).last;
+                  return Container(
+                    padding: const EdgeInsets.fromLTRB(10, 6, 4, 6),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      color: accent.withValues(alpha: isDark ? 0.14 : 0.08),
+                      border:
+                          Border.all(color: accent.withValues(alpha: 0.28)),
                     ),
-                    Text(
-                      DateFormat('dd/MM/yyyy HH:mm').format(comment.createdAt),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: ThemeHelpers.textSecondaryColor(context),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // Botão deletar (se for o criador)
-              if (_canDeleteComment(comment))
-                IconButton(
-                  icon: const Icon(Icons.delete_outline, size: 18),
-                  color: Colors.red,
-                  onPressed: () => _deleteComment(comment.id),
-                  tooltip: 'Deletar comentário',
-                ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          // Mensagem
-          Text(
-            comment.message,
-            style: theme.textTheme.bodyMedium,
-          ),
-          // Anexos
-          if (comment.attachments.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            ...comment.attachments.map((attachment) {
-              return Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: ThemeHelpers.borderColor(context).withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.attach_file, size: 16),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            attachment.filename,
-                            style: const TextStyle(fontSize: 12),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.attach_file_rounded, size: 14, color: accent),
+                        const SizedBox(width: 6),
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 140),
+                          child: Text(
+                            name,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              color: accent,
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
-                          Text(
-                            _formatFileSize(attachment.size),
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: ThemeHelpers.textSecondaryColor(context),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.download, size: 18),
-                      onPressed: () {
-                        // TODO: Implementar download
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Download: ${attachment.url}'),
-                          ),
-                        );
-                      },
-                      tooltip: 'Download',
-                    ),
-                  ],
-                ),
-              );
-            }),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHistoryTab(BuildContext context, ThemeData theme) {
-    return _loadingHistory
-        ? const Center(child: CircularProgressIndicator())
-        : _historyError != null
-            ? Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.error_outline,
-                      size: 48,
-                      color: theme.colorScheme.error,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      _historyError!,
-                      style: theme.textTheme.bodyMedium,
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: _loadHistory,
-                      child: const Text('Tentar Novamente'),
-                    ),
-                  ],
-                ),
-              )
-            : _history.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.history,
-                          size: 48,
-                          color: ThemeHelpers.textSecondaryColor(context),
                         ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Nenhum histórico disponível',
-                          style: theme.textTheme.bodyLarge?.copyWith(
-                            color: ThemeHelpers.textSecondaryColor(context),
+                        IconButton(
+                          icon: Icon(Icons.close_rounded,
+                              size: 14, color: accent),
+                          onPressed: () => onRemoveFile(i),
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minWidth: 26,
+                            minHeight: 26,
                           ),
                         ),
                       ],
                     ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: _history.length,
-                    itemBuilder: (context, index) {
-                      final entry = _history[index];
-                      return _buildHistoryItem(context, entry, theme);
-                    },
                   );
-  }
-
-  Widget _buildHistoryItem(
-    BuildContext context,
-    HistoryEntry entry,
-    ThemeData theme,
-  ) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context),
-          width: 1,
-        ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Avatar
-          if (entry.user?.avatar != null)
-            CircleAvatar(
-              radius: 16,
-              backgroundImage: NetworkImage(entry.user!.avatar!),
-            )
-          else
-            CircleAvatar(
-              radius: 16,
-              child: Text(
-                entry.user?.name[0].toUpperCase() ?? '?',
-                style: const TextStyle(fontSize: 14),
+                },
               ),
             ),
-          const SizedBox(width: 12),
-          // Conteúdo
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            const SizedBox(height: 8),
+          ],
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              color: ThemeHelpers.cardBackgroundColor(context)
+                  .withValues(alpha: isDark ? 0.45 : 0.65),
+              border: Border.all(
+                color: focused
+                    ? accent.withValues(alpha: 0.6)
+                    : ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+                width: focused ? 1.4 : 1,
+              ),
+            ),
+            padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                // Ação
-                RichText(
-                  text: TextSpan(
-                    style: theme.textTheme.bodyMedium,
-                    children: [
-                      TextSpan(
-                        text: entry.user?.name ?? 'Sistema',
-                        style: const TextStyle(fontWeight: FontWeight.w600),
+                IconButton(
+                  icon: Icon(Icons.attach_file_rounded,
+                      color: accent, size: 20),
+                  onPressed: onPickFiles,
+                  tooltip: 'Anexar arquivos',
+                ),
+                Expanded(
+                  child: TextField(
+                    controller: controller,
+                    focusNode: focusNode,
+                    minLines: 1,
+                    maxLines: 5,
+                    maxLength: maxLength,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      height: 1.35,
+                    ),
+                    decoration: InputDecoration(
+                      hintText: 'Escreva uma mensagem para o time…',
+                      hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                        color: secondary,
+                        fontWeight: FontWeight.w500,
                       ),
-                      TextSpan(text: ' ${_getActionLabel(entry.action)}'),
-                      if (entry.fieldLabel != null)
-                        TextSpan(
-                          text: ' - ${entry.fieldLabel}',
-                          style: TextStyle(
-                            color: ThemeHelpers.textSecondaryColor(context),
-                          ),
-                        ),
-                    ],
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      errorBorder: InputBorder.none,
+                      disabledBorder: InputBorder.none,
+                      counterText: '',
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
                   ),
                 ),
-                // Valores antigos e novos
-                if (entry.oldValue != null || entry.newValue != null) ...[
-                  const SizedBox(height: 4),
-                  if (entry.oldValue != null)
-                    Text(
-                      'Antes: ${entry.oldValue}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: ThemeHelpers.textSecondaryColor(context),
+                Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: onSubmit,
+                      borderRadius: BorderRadius.circular(12),
+                      child: Ink(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          color: onSubmit == null
+                              ? ThemeHelpers.borderColor(context)
+                                  .withValues(alpha: 0.3)
+                              : accent,
+                        ),
+                        child: SizedBox(
+                          width: 38,
+                          height: 38,
+                          child: Center(
+                            child: isSubmitting
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : Icon(
+                                    Icons.send_rounded,
+                                    size: 18,
+                                    color: onSubmit == null
+                                        ? secondary
+                                        : Colors.white,
+                                  ),
+                          ),
+                        ),
                       ),
                     ),
-                  if (entry.newValue != null)
-                    Text(
-                      'Agora: ${entry.newValue}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: ThemeHelpers.textSecondaryColor(context),
-                      ),
-                    ),
-                ],
-                // Movimentação entre colunas
-                if (entry.fromColumn != null && entry.toColumn != null) ...[
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Text(
-                        'De ',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: ThemeHelpers.textSecondaryColor(context),
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Color(int.parse(
-                            entry.fromColumn!.color.replaceFirst('#', '0xFF'),
-                          )).withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(
-                            color: Color(int.parse(
-                              entry.fromColumn!.color.replaceFirst('#', '0xFF'),
-                            )).withOpacity(0.3),
-                            width: 1,
-                          ),
-                        ),
-                        child: Text(
-                          entry.fromColumn!.title,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Color(int.parse(
-                              entry.fromColumn!.color.replaceFirst('#', '0xFF'),
-                            )),
-                          ),
-                        ),
-                      ),
-                      Text(
-                        ' para ',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: ThemeHelpers.textSecondaryColor(context),
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Color(int.parse(
-                            entry.toColumn!.color.replaceFirst('#', '0xFF'),
-                          )).withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(
-                            color: Color(int.parse(
-                              entry.toColumn!.color.replaceFirst('#', '0xFF'),
-                            )).withOpacity(0.3),
-                            width: 1,
-                          ),
-                        ),
-                        child: Text(
-                          entry.toColumn!.title,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Color(int.parse(
-                              entry.toColumn!.color.replaceFirst('#', '0xFF'),
-                            )),
-                          ),
-                        ),
-                      ),
-                    ],
                   ),
-                ],
-                // Data
-                const SizedBox(height: 4),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline_rounded, size: 12, color: secondary),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    'Notas, links e arquivos ficam visíveis ao time todo.',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: secondary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
                 Text(
-                  DateFormat('dd/MM/yyyy HH:mm').format(entry.createdAt),
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: ThemeHelpers.textSecondaryColor(context),
+                  '$length / $maxLength',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: length > maxLength * 0.9
+                        ? theme.colorScheme.error
+                        : secondary,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
               ],
@@ -1276,3 +2263,509 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
   }
 }
 
+// =============================================================================
+// HISTORY ROW (timeline minimal)
+// =============================================================================
+
+class _HistoryRow extends StatelessWidget {
+  final HistoryEntry entry;
+  final bool isLast;
+
+  const _HistoryRow({required this.entry, required this.isLast});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final action = _ActionStyle.fromAction(entry.action);
+
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            width: 28,
+            child: Column(
+              children: [
+                Container(
+                  width: 24,
+                  height: 24,
+                  margin: const EdgeInsets.only(top: 4),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: action.color.withValues(alpha: isDark ? 0.22 : 0.12),
+                    border: Border.all(
+                      color: action.color.withValues(alpha: 0.5),
+                    ),
+                  ),
+                  child: Icon(action.icon, size: 13, color: action.color),
+                ),
+                if (!isLast)
+                  Expanded(
+                    child: Container(
+                      width: 1.5,
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      color: ThemeHelpers.borderColor(context)
+                          .withValues(alpha: isDark ? 0.4 : 0.5),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  RichText(
+                    text: TextSpan(
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        height: 1.4,
+                        fontSize: 13.5,
+                        color: ThemeHelpers.textColor(context),
+                      ),
+                      children: [
+                        TextSpan(
+                          text: entry.user?.name ?? 'Sistema',
+                          style: const TextStyle(fontWeight: FontWeight.w900),
+                        ),
+                        TextSpan(text: ' ${action.label}'),
+                        if (entry.fieldLabel != null)
+                          TextSpan(
+                            text: ' · ${entry.fieldLabel}',
+                            style: TextStyle(
+                              color: secondary,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  if (entry.fromColumn != null && entry.toColumn != null) ...[
+                    const SizedBox(height: 8),
+                    _ColumnTransitionRow(
+                      from: entry.fromColumn!,
+                      to: entry.toColumn!,
+                    ),
+                  ] else if (entry.oldValue != null ||
+                      entry.newValue != null) ...[
+                    const SizedBox(height: 8),
+                    _ValueDelta(
+                      oldValue: entry.oldValue,
+                      newValue: entry.newValue,
+                    ),
+                  ],
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Icon(Icons.schedule_rounded, size: 11, color: secondary),
+                      const SizedBox(width: 4),
+                      Text(
+                        _relativeTime(entry.createdAt),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: secondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ColumnTransitionRow extends StatelessWidget {
+  final HistoryColumn from;
+  final HistoryColumn to;
+
+  const _ColumnTransitionRow({required this.from, required this.to});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Flexible(child: _ColumnPill(column: from)),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: Icon(
+            Icons.east_rounded,
+            size: 14,
+            color: ThemeHelpers.textSecondaryColor(context),
+          ),
+        ),
+        Flexible(child: _ColumnPill(column: to)),
+      ],
+    );
+  }
+}
+
+class _ColumnPill extends StatelessWidget {
+  final HistoryColumn column;
+
+  const _ColumnPill({required this.column});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    Color color;
+    try {
+      color = Color(int.parse(column.color.replaceFirst('#', '0xFF')));
+    } catch (_) {
+      color = _kanbanAccent(context);
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        color: color.withValues(alpha: 0.14),
+        border: Border.all(color: color.withValues(alpha: 0.34)),
+      ),
+      child: Text(
+        column.title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.labelMedium?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.1,
+        ),
+      ),
+    );
+  }
+}
+
+class _ValueDelta extends StatelessWidget {
+  final String? oldValue;
+  final String? newValue;
+
+  const _ValueDelta({required this.oldValue, required this.newValue});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (oldValue != null && oldValue!.isNotEmpty)
+          _DeltaRow(
+            color: const Color(0xFFEF4444),
+            icon: Icons.remove_circle_outline_rounded,
+            label: 'antes',
+            value: oldValue!,
+            theme: theme,
+          ),
+        if (oldValue != null && newValue != null) const SizedBox(height: 4),
+        if (newValue != null && newValue!.isNotEmpty)
+          _DeltaRow(
+            color: const Color(0xFF10B981),
+            icon: Icons.add_circle_outline_rounded,
+            label: 'agora',
+            value: newValue!,
+            theme: theme,
+          ),
+      ],
+    );
+  }
+}
+
+class _DeltaRow extends StatelessWidget {
+  final Color color;
+  final IconData icon;
+  final String label;
+  final String value;
+  final ThemeData theme;
+
+  const _DeltaRow({
+    required this.color,
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.theme,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 6),
+        Text(
+          '$label: ',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: color,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 0.4,
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              height: 1.3,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ActionStyle {
+  final String label;
+  final IconData icon;
+  final Color color;
+
+  const _ActionStyle._(this.label, this.icon, this.color);
+
+  static _ActionStyle fromAction(String action) {
+    switch (action) {
+      case 'created':
+        return const _ActionStyle._(
+          'criou a tarefa',
+          Icons.add_circle_rounded,
+          Color(0xFF10B981),
+        );
+      case 'moved':
+        return const _ActionStyle._(
+          'moveu',
+          Icons.drag_handle_rounded,
+          Color(0xFF0891B2),
+        );
+      case 'assigned':
+        return const _ActionStyle._(
+          'atribuiu responsável',
+          Icons.person_add_alt_1_rounded,
+          Color(0xFF8B5CF6),
+        );
+      case 'unassigned':
+        return const _ActionStyle._(
+          'removeu responsável',
+          Icons.person_remove_rounded,
+          Color(0xFF94A3B8),
+        );
+      case 'priority_changed':
+        return const _ActionStyle._(
+          'alterou a prioridade',
+          Icons.flag_rounded,
+          Color(0xFFF59E0B),
+        );
+      case 'due_date_changed':
+        return const _ActionStyle._(
+          'alterou o prazo',
+          Icons.event_rounded,
+          Color(0xFF06B6D4),
+        );
+      case 'description_changed':
+        return const _ActionStyle._(
+          'alterou a descrição',
+          Icons.notes_rounded,
+          Color(0xFF6366F1),
+        );
+      case 'title_changed':
+        return const _ActionStyle._(
+          'alterou o título',
+          Icons.title_rounded,
+          Color(0xFF6366F1),
+        );
+      case 'tags_changed':
+        return const _ActionStyle._(
+          'alterou as tags',
+          Icons.local_offer_rounded,
+          Color(0xFFEC4899),
+        );
+      case 'project_changed':
+        return const _ActionStyle._(
+          'alterou o funil',
+          Icons.account_tree_rounded,
+          Color(0xFF14B8A6),
+        );
+      case 'completed':
+        return const _ActionStyle._(
+          'concluiu a tarefa',
+          Icons.check_circle_rounded,
+          Color(0xFF10B981),
+        );
+      case 'reopened':
+        return const _ActionStyle._(
+          'reabriu a tarefa',
+          Icons.restart_alt_rounded,
+          Color(0xFFF97316),
+        );
+      case 'updated':
+      default:
+        return _ActionStyle._(
+          action.isEmpty ? 'atualizou' : 'atualizou ($action)',
+          Icons.edit_rounded,
+          const Color(0xFF94A3B8),
+        );
+    }
+  }
+}
+
+// =============================================================================
+// SHARED: loading / error / empty
+// =============================================================================
+
+class _LoadingView extends StatelessWidget {
+  const _LoadingView();
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = _kanbanAccent(context);
+    return Center(
+      child: SizedBox(
+        width: 32,
+        height: 32,
+        child: CircularProgressIndicator(strokeWidth: 2.6, color: accent),
+      ),
+    );
+  }
+}
+
+class _ErrorView extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+
+  const _ErrorView({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final danger = theme.colorScheme.error;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: danger.withValues(alpha: 0.12),
+                border: Border.all(color: danger.withValues(alpha: 0.36)),
+              ),
+              child: Icon(Icons.error_outline_rounded, color: danger, size: 26),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              message,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                height: 1.4,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 14),
+            FilledButton.tonal(
+              onPressed: onRetry,
+              child: const Text('Tentar novamente'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  const _EmptyState({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final accent = _kanbanAccent(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 68,
+              height: 68,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: accent.withValues(alpha: 0.1),
+                border: Border.all(color: accent.withValues(alpha: 0.32)),
+              ),
+              child: Icon(icon, size: 28, color: accent),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              title,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.3,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              subtitle,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: secondary,
+                fontWeight: FontWeight.w600,
+                height: 1.4,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// UTILS
+// =============================================================================
+
+Color _kanbanAccent(BuildContext context) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  return isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+}
+
+String _formatFileSize(int bytes) {
+  if (bytes < 1024) return '$bytes B';
+  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+  return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+}
+
+String _relativeTime(DateTime date, {String prefix = ''}) {
+  final now = DateTime.now();
+  final diff = now.difference(date);
+  String value;
+  if (diff.inSeconds < 60) {
+    value = 'agora';
+  } else if (diff.inMinutes < 60) {
+    value = '${diff.inMinutes} min';
+  } else if (diff.inHours < 24) {
+    value = '${diff.inHours} h';
+  } else if (diff.inDays < 7) {
+    value = '${diff.inDays} d';
+  } else {
+    value = DateFormat('d MMM', 'pt_BR').format(date.toLocal());
+  }
+  return prefix.isEmpty ? value : '$prefix $value';
+}

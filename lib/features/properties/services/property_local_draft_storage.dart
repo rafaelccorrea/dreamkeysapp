@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -15,11 +16,22 @@ class PropertyLocalDraftStorage {
       PropertyLocalDraftStorage._();
 
   static const _prefsNamespace = 'property_local_drafts_v1';
+  /// Auto-save anônimo do form em andamento (paridade com o `localStorage`
+  /// `imobx_createProperty_draft` do web). Diferente dos rascunhos nomeados,
+  /// só guarda **um** rascunho por empresa e é limpo quando o imóvel é
+  /// criado com sucesso.
+  static const _prefsAnonymousNamespace = 'property_anonymous_draft_v1';
 
   Future<String> _scopeKey() async {
     final companyId =
         (await SecureStorageService.instance.getCompanyId()) ?? '_no_company';
     return '${_prefsNamespace}_$companyId';
+  }
+
+  Future<String> _anonymousScopeKey() async {
+    final companyId =
+        (await SecureStorageService.instance.getCompanyId()) ?? '_no_company';
+    return '${_prefsAnonymousNamespace}_$companyId';
   }
 
   Future<SharedPreferences> get _prefs => SharedPreferences.getInstance();
@@ -79,6 +91,46 @@ class PropertyLocalDraftStorage {
       }
     } catch (e) {
       // Best-effort: pasta órfã não impede remoção do índice
+      // ignore
+    }
+  }
+
+  // -------------------------- Anonymous auto-save --------------------------
+
+  /// Lê o rascunho anônimo da empresa atual (ou `null` se inexistente / inválido).
+  /// O JSON é o mesmo `_freezeFormState()` da CreatePropertyPage acrescido
+  /// de `wizardStep`, `addressMode`, `addressLinkedEntityName`, `imagePaths`.
+  Future<Map<String, dynamic>?> getAnonymous() async {
+    try {
+      final key = await _anonymousScopeKey();
+      final raw = (await _prefs).getString(key);
+      if (raw == null || raw.trim().isEmpty) return null;
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Persiste o rascunho anônimo. Idempotente, sobrescreve.
+  Future<void> saveAnonymous(Map<String, dynamic> data) async {
+    try {
+      final key = await _anonymousScopeKey();
+      await (await _prefs).setString(key, jsonEncode(data));
+    } catch (_) {
+      // Best-effort: não interrompe o fluxo de criação.
+    }
+  }
+
+  /// Remove o rascunho anônimo (ex.: imóvel criado com sucesso ou descarte
+  /// explícito).
+  Future<void> clearAnonymous() async {
+    try {
+      final key = await _anonymousScopeKey();
+      await (await _prefs).remove(key);
+    } catch (_) {
       // ignore
     }
   }

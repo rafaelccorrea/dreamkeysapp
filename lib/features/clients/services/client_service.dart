@@ -2,7 +2,6 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../../../core/constants/api_constants.dart';
 import '../../../shared/services/api_service.dart';
-import '../../../shared/services/secure_storage_service.dart';
 import '../models/client_model.dart';
 
 // Re-export UserInfo para uso no serviço
@@ -822,25 +821,18 @@ class ClientService {
       final queryParams = filters?.toQueryParams() ?? <String, String>{};
       queryParams['format'] = format;
 
-      // Para download de arquivo, precisamos usar http diretamente
-      final token = await SecureStorageService.instance.getAccessToken();
-      if (token == null || token.isEmpty) {
-        return ApiResponse.error(
-          message: 'Token de autenticação não encontrado',
-          statusCode: 401,
-        );
-      }
-
       final uri = Uri.parse('${ApiConstants.baseApiUrl}${ApiConstants.clientsExport}')
           .replace(queryParameters: queryParams);
-      
-      final httpResponse = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      ).timeout(const Duration(seconds: 120));
+
+      // Headers padronizados (Authorization + X-Company-ID) — paridade
+      // `imobx-front` via `ApiService.buildOutboundHeaders`.
+      final headers = await _apiService.buildOutboundHeaders(
+        endpoint: ApiConstants.clientsExport,
+      );
+
+      final httpResponse = await http
+          .get(uri, headers: headers)
+          .timeout(const Duration(seconds: 120));
 
       if (httpResponse.statusCode >= 200 && httpResponse.statusCode < 300) {
         debugPrint('✅ [CLIENT_SERVICE] Clientes exportados');

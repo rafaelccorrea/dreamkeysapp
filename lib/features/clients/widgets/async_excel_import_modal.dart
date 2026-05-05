@@ -9,7 +9,7 @@ import 'package:http/http.dart' as http;
 import '../../../core/constants/api_constants.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
-import '../../../shared/services/secure_storage_service.dart';
+import '../../../shared/services/api_service.dart';
 
 /// Modal para importação assíncrona de clientes via Excel.
 class AsyncExcelImportModal extends StatefulWidget {
@@ -672,19 +672,17 @@ class _AsyncExcelImportModalState extends State<AsyncExcelImportModal> {
     });
 
     try {
-      final token = await SecureStorageService.instance.getAccessToken();
-      if (token == null || token.isEmpty) {
-        setState(() {
-          _errorMessage = 'Token de autenticação não encontrado';
-          _isUploading = false;
-        });
-        return;
-      }
-
-      final uri = Uri.parse(
-          '${ApiConstants.baseApiUrl}${ApiConstants.clientsBulkImport}');
+      final endpoint = ApiConstants.clientsBulkImport;
+      final uri = Uri.parse('${ApiConstants.baseApiUrl}$endpoint');
       final request = http.MultipartRequest('POST', uri);
-      request.headers['Authorization'] = 'Bearer $token';
+
+      // Headers padronizados (Authorization + X-Company-ID) — paridade
+      // `imobx-front` via `ApiService.buildOutboundHeaders`.
+      final headers = await ApiService.instance.buildOutboundHeaders(
+        endpoint: endpoint,
+        excludeContentType: true,
+      );
+      request.headers.addAll(headers);
 
       final fileStream = http.ByteStream(_selectedFile!.openRead());
       final fileLength = await _selectedFile!.length();
@@ -754,24 +752,16 @@ class _AsyncExcelImportModalState extends State<AsyncExcelImportModal> {
         _status != 'completed' &&
         _status != 'failed') {
       try {
-        final token = await SecureStorageService.instance.getAccessToken();
-        if (token == null || token.isEmpty) {
-          setState(() {
-            _errorMessage = 'Token de autenticação não encontrado';
-            _isPolling = false;
-          });
-          break;
-        }
-
-        final uri = Uri.parse(
-            '${ApiConstants.baseApiUrl}${ApiConstants.clientsImportJob(jobId)}');
-        final response = await http.get(
-          uri,
-          headers: {
-            'Authorization': 'Bearer $token',
-            'Content-Type': 'application/json',
-          },
-        ).timeout(const Duration(seconds: 10));
+        final endpoint = ApiConstants.clientsImportJob(jobId);
+        final uri = Uri.parse('${ApiConstants.baseApiUrl}$endpoint');
+        // Headers padronizados (Authorization + X-Company-ID) — paridade
+        // `imobx-front` via `ApiService.buildOutboundHeaders`.
+        final headers = await ApiService.instance.buildOutboundHeaders(
+          endpoint: endpoint,
+        );
+        final response = await http
+            .get(uri, headers: headers)
+            .timeout(const Duration(seconds: 10));
 
         if (response.statusCode >= 200 && response.statusCode < 300) {
           final data = jsonDecode(response.body) as Map<String, dynamic>;

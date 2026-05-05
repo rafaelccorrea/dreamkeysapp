@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../../../core/constants/api_constants.dart';
 import '../../../shared/services/api_service.dart';
-import '../../../shared/services/secure_storage_service.dart';
 import '../models/kanban_models.dart';
 
 /// Serviço para gerenciar Kanban
@@ -947,14 +946,6 @@ class KanbanService {
       debugPrint('💬 [KANBAN_SERVICE] Mensagem: $message');
       debugPrint('💬 [KANBAN_SERVICE] Anexos: ${files?.length ?? 0}');
 
-      final token = await SecureStorageService.instance.getAccessToken();
-      if (token == null || token.isEmpty) {
-        return ApiResponse.error(
-          message: 'Token de autenticação não encontrado',
-          statusCode: 401,
-        );
-      }
-
       // Validar mensagem
       if (message.trim().isEmpty) {
         return ApiResponse.error(
@@ -978,11 +969,18 @@ class KanbanService {
         );
       }
 
-      final uri = Uri.parse('${ApiConstants.baseApiUrl}${ApiConstants.kanbanTaskComments(taskId)}');
+      final endpoint = ApiConstants.kanbanTaskComments(taskId);
+      final uri = Uri.parse('${ApiConstants.baseApiUrl}$endpoint');
       final request = http.MultipartRequest('POST', uri);
 
-      // Headers
-      request.headers['Authorization'] = 'Bearer $token';
+      // Headers padronizados (Authorization + X-Company-ID) — paridade
+      // `imobx-front`. Sem o `X-Company-ID` o backend responde 400
+      // "Usuário deve estar associado a uma empresa".
+      final headers = await _apiService.buildOutboundHeaders(
+        endpoint: endpoint,
+        excludeContentType: true,
+      );
+      request.headers.addAll(headers);
 
       // Adicionar mensagem
       request.fields['message'] = message;

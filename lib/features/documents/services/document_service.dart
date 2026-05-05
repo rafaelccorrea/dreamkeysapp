@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../../../core/constants/api_constants.dart';
 import '../../../shared/services/api_service.dart';
-import '../../../shared/services/secure_storage_service.dart';
 import '../models/document_model.dart';
 import '../models/document_signature_model.dart';
 import '../models/upload_token_model.dart';
@@ -219,19 +218,17 @@ class DocumentService {
         );
       }
 
-      final token = await SecureStorageService.instance.getAccessToken();
-      if (token == null || token.isEmpty) {
-        return ApiResponse.error(
-          message: 'Token de autenticação não encontrado',
-          statusCode: 401,
-        );
-      }
-
-      final uri = Uri.parse('${ApiConstants.baseApiUrl}${ApiConstants.documentsUpload}');
+      final endpoint = ApiConstants.documentsUpload;
+      final uri = Uri.parse('${ApiConstants.baseApiUrl}$endpoint');
       final request = http.MultipartRequest('POST', uri);
 
-      // Headers
-      request.headers['Authorization'] = 'Bearer $token';
+      // Headers padronizados (Authorization + X-Company-ID) — paridade
+      // `imobx-front` via `ApiService.buildOutboundHeaders`.
+      final headers = await _apiService.buildOutboundHeaders(
+        endpoint: endpoint,
+        excludeContentType: true,
+      );
+      request.headers.addAll(headers);
       
       // Adicionar arquivo
       final fileStream = http.ByteStream(file.openRead());
@@ -384,24 +381,22 @@ class DocumentService {
     try {
       debugPrint('🗑️ [DOCUMENT_SERVICE] Deletando ${documentIds.length} documentos...');
 
-      // DELETE com body requer uso direto do http
-      final token = await SecureStorageService.instance.getAccessToken();
-      if (token == null || token.isEmpty) {
-        return ApiResponse.error(
-          message: 'Token de autenticação não encontrado',
-          statusCode: 401,
-        );
-      }
+      // DELETE com body requer uso direto do http; reusa o helper de
+      // headers do `ApiService` para enviar Authorization + X-Company-ID
+      // (paridade `imobx-front`).
+      final headers = await _apiService.buildOutboundHeaders(
+        endpoint: ApiConstants.documents,
+      );
 
-      final uri = Uri.parse('${ApiConstants.baseApiUrl}${ApiConstants.documents}');
-      final response = await http.delete(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({'documentIds': documentIds}),
-      ).timeout(const Duration(seconds: 30));
+      final uri =
+          Uri.parse('${ApiConstants.baseApiUrl}${ApiConstants.documents}');
+      final response = await http
+          .delete(
+            uri,
+            headers: headers,
+            body: jsonEncode({'documentIds': documentIds}),
+          )
+          .timeout(const Duration(seconds: 30));
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
         debugPrint('✅ [DOCUMENT_SERVICE] Documentos deletados com sucesso');

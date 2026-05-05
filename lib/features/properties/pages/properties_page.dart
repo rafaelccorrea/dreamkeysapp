@@ -19,6 +19,7 @@ import '../../../../shared/services/ai_service.dart';
 import '../../matches/widgets/matches_badge.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../models/property_wizard_pop_result.dart';
+import '../utils/property_edit_permissions.dart';
 
 // Formatter de moeda
 final _currencyFormatter = NumberFormat.currency(
@@ -185,11 +186,14 @@ class _PropertiesPageState extends State<PropertiesPage> {
     }
   }
 
-  /// Acima deste tamanho, uma faixa horizontal de destaques evita sensação de “fila” única.
-  int _discoverLeadCount(int total) {
-    if (total <= 8) return 0;
-    return total >= 18 ? 8 : 6;
-  }
+  /// Imóveis marcados como destaque pelo CRM (`p.isFeatured == true`).
+  /// Recebem o carrossel premium grande no topo da listagem.
+  List<Property> get _featuredProperties =>
+      _properties.where((p) => p.isFeatured).toList();
+
+  /// Demais imóveis — vão para a grade compacta abaixo do carrossel.
+  List<Property> get _nonFeaturedProperties =>
+      _properties.where((p) => !p.isFeatured).toList();
 
   final PropertyService _propertyService = PropertyService.instance;
   bool _isLoading = true;
@@ -207,6 +211,11 @@ class _PropertiesPageState extends State<PropertiesPage> {
 
   int _localDraftCount = 0;
 
+  /// Carrossel de imóveis em destaque (`isFeatured`).
+  late final PageController _featuredPageController =
+      PageController(viewportFraction: 0.86);
+  int _currentFeaturedIndex = 0;
+
   @override
   void initState() {
     super.initState();
@@ -220,6 +229,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
     _searchController.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    _featuredPageController.dispose();
     super.dispose();
   }
 
@@ -245,7 +255,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
           SnackBar(
             behavior: SnackBarBehavior.floating,
             content: const Text(
-              'Imóvel na fila de aprovação ou autorização — o backend aplicou o mesmo fluxo do CRM web.',
+              'Imóvel enviado para a fila de aprovação.',
             ),
             action: SnackBarAction(
               label: 'Abrir imóvel',
@@ -290,7 +300,11 @@ class _PropertiesPageState extends State<PropertiesPage> {
       setState(() {
         _currentPage = 1;
         _properties.clear();
+        _currentFeaturedIndex = 0;
       });
+      if (_featuredPageController.hasClients) {
+        _featuredPageController.jumpToPage(0);
+      }
     }
 
     setState(() {
@@ -2745,57 +2759,47 @@ class _PropertiesPageState extends State<PropertiesPage> {
     _loadProperties(refresh: true);
   }
 
-  /// Faixa horizontal antes da grade — quebra o ritmo “tudo empilhado”.
-  Widget _buildDiscoverHorizontalStrip(
+  /// Carrossel premium de imóveis em destaque (`isFeatured`).
+  ///
+  /// Usa `PageView` com snap por página e cards bem maiores que a grade.
+  /// O cabeçalho é minimalista (apenas ícone + título). Quando não há
+  /// imóveis em destaque, a área é completamente omitida.
+  Widget _buildFeaturedCarousel(
     BuildContext context,
     ThemeData theme, {
     required double horizontalPad,
-    required int columns,
   }) {
-    final lead = _discoverLeadCount(_properties.length);
-    if (lead <= 0) return const SizedBox.shrink();
+    final featured = _featuredProperties;
+    if (featured.isEmpty) return const SizedBox.shrink();
 
     final w = MediaQuery.sizeOf(context).width;
-    final aspect = _exploreGridChildAspectRatio(columns);
-    final cardW = (w * 0.74).clamp(258.0, 312.0);
-    final cardH = cardW / aspect;
-    final muted = ThemeHelpers.textSecondaryColor(context);
+    final accent = AppColors.primary.primary;
+
+    final cardH = (w * 1.12).clamp(360.0, 460.0);
+    final currentIdx = _currentFeaturedIndex.clamp(0, featured.length - 1);
 
     return Padding(
-      padding: const EdgeInsets.only(top: 16, bottom: 2),
+      padding: const EdgeInsets.only(top: 14, bottom: 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
             padding: EdgeInsets.fromLTRB(horizontalPad, 0, horizontalPad, 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.view_carousel_outlined,
-                      size: 18,
-                      color: AppColors.primary.primary,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Propriedades em destaque — percorra ao lado',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.25,
-                        ),
-                      ),
-                    ),
-                  ],
+                Icon(
+                  Icons.workspace_premium_rounded,
+                  size: 18,
+                  color: accent,
                 ),
-                const SizedBox(height: 5),
-                Text(
-                  'Abaixo ficam as demais propriedades.',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: muted,
-                    height: 1.35,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Propriedades em destaque',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.25,
+                    ),
                   ),
                 ),
               ],
@@ -2803,25 +2807,27 @@ class _PropertiesPageState extends State<PropertiesPage> {
           ),
           SizedBox(
             height: cardH,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
+            child: PageView.builder(
+              controller: _featuredPageController,
               physics: const BouncingScrollPhysics(),
-              padding: EdgeInsets.fromLTRB(horizontalPad, 0, horizontalPad + 8, 0),
-              itemCount: lead,
+              padEnds: false,
+              onPageChanged: (i) => setState(() => _currentFeaturedIndex = i),
+              itemCount: featured.length,
               itemBuilder: (context, i) {
-                return Padding(
-                  padding: const EdgeInsets.only(right: 12),
-                  child: SizedBox(
-                    width: cardW,
-                    child: AspectRatio(
-                      aspectRatio: aspect,
-                      child: _buildPropertyExploreTile(
-                        context,
-                        theme,
-                        _properties[i],
-                        featuredStripLayout: true,
-                      ),
-                    ),
+                final isActive = i == currentIdx;
+                return AnimatedPadding(
+                  duration: const Duration(milliseconds: 240),
+                  curve: Curves.easeOut,
+                  padding: EdgeInsets.fromLTRB(
+                    i == 0 ? horizontalPad : 6,
+                    isActive ? 0 : 14,
+                    i == featured.length - 1 ? horizontalPad : 6,
+                    isActive ? 0 : 14,
+                  ),
+                  child: _buildPremiumFeaturedCard(
+                    context,
+                    theme,
+                    featured[i],
                   ),
                 );
               },
@@ -2832,16 +2838,250 @@ class _PropertiesPageState extends State<PropertiesPage> {
     );
   }
 
+  /// Card grande do carrossel "Em destaque" — imagem hero + bottom-sheet
+  /// translúcido com preço, título, localização e specs. Borda em gradiente
+  /// dourado/marca, sombra forte. NUNCA usado dentro da grade.
+  Widget _buildPremiumFeaturedCard(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = AppColors.primary.primary;
+    final price = _formatMainPrice(property);
+    final specs = _editorialSpecsLine(property);
+    final locCompact = _compactLocationLine(property);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => Navigator.of(context)
+            .pushNamed(AppRoutes.propertyDetails(property.id)),
+        onLongPress: () {
+          HapticFeedback.mediumImpact();
+          _showPropertyQuickActionsSheet(context, theme, property);
+        },
+        borderRadius: BorderRadius.circular(28),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(28),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                const Color(0xFFFBD06A).withValues(alpha: 0.92),
+                accent.withValues(alpha: 0.85),
+                const Color(0xFFB71C1C).withValues(alpha: 0.92),
+              ],
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: accent.withValues(alpha: isDark ? 0.32 : 0.22),
+                blurRadius: 32,
+                offset: const Offset(0, 14),
+                spreadRadius: -6,
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.55 : 0.16),
+                blurRadius: 22,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.all(2),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(26),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (property.mainImage != null)
+                  ShimmerImage(
+                    imageUrl: property.mainImage!.url,
+                    width: double.infinity,
+                    height: double.infinity,
+                    fit: BoxFit.cover,
+                    errorWidget: _buildPropertyImageFallback(context, theme),
+                  )
+                else
+                  _buildPropertyImageFallback(context, theme),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      stops: const [0.0, 0.32, 0.62, 1.0],
+                      colors: [
+                        Colors.black.withValues(alpha: 0.42),
+                        Colors.transparent,
+                        Colors.black.withValues(alpha: 0.40),
+                        Colors.black.withValues(alpha: 0.96),
+                      ],
+                    ),
+                  ),
+                ),
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: RadialGradient(
+                          center: const Alignment(-0.85, -0.95),
+                          radius: 1.25,
+                          colors: [
+                            Colors.white.withValues(alpha: 0.18),
+                            Colors.transparent,
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 14,
+                  left: 14,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      gradient: const LinearGradient(
+                        colors: [
+                          Color(0xFFFEE08A),
+                          Color(0xFFFBC02D),
+                        ],
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.28),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.workspace_premium_rounded,
+                          size: 14,
+                          color: Color(0xFF7B5904),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          'EM DESTAQUE',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            color: const Color(0xFF6B4D03),
+                            letterSpacing: 0.8,
+                            fontSize: 10.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 10,
+                  right: 10,
+                  child: _buildPropertyActionsMenu(context, theme, property),
+                ),
+                Positioned(
+                  left: 18,
+                  right: 18,
+                  bottom: 18,
+                  child: MatchesBadge(
+                    propertyId: property.id,
+                    onClick: () => Navigator.pushNamed(
+                      context,
+                      AppRoutes.matchesByProperty(property.id),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          price.value,
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
+                            height: 1.0,
+                            letterSpacing: -0.4,
+                            fontSize: 22,
+                            shadows: const [
+                              Shadow(
+                                offset: Offset(0, 1),
+                                blurRadius: 10,
+                                color: Colors.black87,
+                              ),
+                            ],
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          property.title,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: Colors.white.withValues(alpha: 0.96),
+                            fontWeight: FontWeight.w700,
+                            height: 1.15,
+                            fontSize: 13,
+                            shadows: const [
+                              Shadow(
+                                offset: Offset(0, 1),
+                                blurRadius: 8,
+                                color: Colors.black54,
+                              ),
+                            ],
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          [locCompact, ?specs].join('  ·  '),
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: Colors.white.withValues(alpha: 0.78),
+                            fontWeight: FontWeight.w700,
+                            fontSize: 10.5,
+                            letterSpacing: 0.1,
+                            height: 1.15,
+                            fontFeatures: const [
+                              FontFeature.tabularFigures(),
+                            ],
+                            shadows: const [
+                              Shadow(
+                                offset: Offset(0, 1),
+                                blurRadius: 6,
+                                color: Colors.black54,
+                              ),
+                            ],
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   /// Radar e grade explorável no mobile, estilo galeria; sem fila larga vertical de propriedades.
   Widget _buildScrollablePropertiesViewport(BuildContext context) {
     final theme = Theme.of(context);
     final w = MediaQuery.sizeOf(context).width;
     final cols = _exploreGridCrossAxisCount(w);
     final horizontal = w < 360 ? 10.0 : (cols >= 3 ? 14.0 : 12.0);
-    final n = _properties.length;
     final aspect = _exploreGridChildAspectRatio(cols);
-    final lead = _discoverLeadCount(n);
-    final gridCount = n - lead;
+    final featured = _featuredProperties;
+    final rest = _nonFeaturedProperties;
 
     return RefreshIndicator(
       onRefresh: () => _loadProperties(refresh: true),
@@ -2854,17 +3094,16 @@ class _PropertiesPageState extends State<PropertiesPage> {
         slivers: [
           SliverToBoxAdapter(child: _buildPortfolioHeader(context)),
           SliverToBoxAdapter(
-            child: _buildDiscoverHorizontalStrip(
+            child: _buildFeaturedCarousel(
               context,
               theme,
               horizontalPad: horizontal,
-              columns: cols,
             ),
           ),
-          if (lead > 0 && gridCount > 0)
+          if (featured.isNotEmpty && rest.isNotEmpty)
             SliverToBoxAdapter(
               child: Padding(
-                padding: EdgeInsets.fromLTRB(horizontal, 12, horizontal, 8),
+                padding: EdgeInsets.fromLTRB(horizontal, 18, horizontal, 8),
                 child: Row(
                   children: [
                     Expanded(
@@ -2892,7 +3131,12 @@ class _PropertiesPageState extends State<PropertiesPage> {
               ),
             ),
           SliverPadding(
-            padding: EdgeInsets.fromLTRB(horizontal, lead > 0 ? 2 : 14, horizontal, 8),
+            padding: EdgeInsets.fromLTRB(
+              horizontal,
+              featured.isNotEmpty ? 2 : 14,
+              horizontal,
+              8,
+            ),
             sliver: SliverGrid.builder(
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: cols,
@@ -2900,12 +3144,12 @@ class _PropertiesPageState extends State<PropertiesPage> {
                 mainAxisSpacing: cols >= 3 ? 11 : 13,
                 childAspectRatio: aspect,
               ),
-              itemCount: gridCount,
+              itemCount: rest.length,
               itemBuilder: (context, index) {
                 return _buildPropertyExploreTile(
                   context,
                   theme,
-                  _properties[lead + index],
+                  rest[index],
                   featuredStripLayout: false,
                 );
               },
@@ -3606,13 +3850,27 @@ class _PropertiesPageState extends State<PropertiesPage> {
     Property property,
   ) async {
     final access = ModuleAccessService.instance;
-    final canEdit = access.hasPermission('property:update');
-    final canDelete = access.hasPermission('property:delete');
+    // Replica a regra do backend (`PropertiesService.assertUserMayEditPropertyEntity`):
+    // master/admin/manager OU permissão de aprovação na matriz OU vínculo
+    // (responsável/captador). Sem isso o usuário só visualiza — o PATCH/DELETE
+    // são rejeitados pela API.
+    final canEdit = canUserEditThisPropertyRecord(
+      property: property,
+      currentUserId: access.userId,
+      userRole: access.userRole,
+      hasPermission: access.hasPermission,
+    );
+    final canDelete = canUserDeleteThisPropertyRecord(
+      property: property,
+      currentUserId: access.userId,
+      userRole: access.userRole,
+      hasPermission: access.hasPermission,
+    );
     final canMatches = access.hasPermission('match:view') &&
         access.isModuleAvailableForCompany('match_system');
 
     // O menu abre para todos (igual ao toque no cartão). Cada ação continua
-    // condicionada a permissões abaixo (ex.: excluir só com property:delete).
+    // condicionada às regras espelhadas do backend acima.
 
     final parentContext = context;
     final isDark = theme.brightness == Brightness.dark;

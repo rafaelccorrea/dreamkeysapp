@@ -18,6 +18,8 @@ import '../../../../core/constants/api_constants.dart';
 import '../../../../shared/services/api_service.dart';
 import '../../keys/services/key_service.dart';
 import '../../keys/models/key_model.dart' as key_models;
+import '../../../../shared/services/module_access_service.dart';
+import '../utils/property_edit_permissions.dart';
 
 // Formatter de moeda
 final _currencyFormatter = NumberFormat.currency(
@@ -98,6 +100,32 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   /// Controlador da rolagem — controla FAB "voltar ao topo".
   final ScrollController _detailsScrollController = ScrollController();
   bool _showScrollTopFab = false;
+
+  /// Avaliação alinhada às regras do backend (master/admin/manager, aprovador
+  /// na matriz, vínculo como responsável/captador, ou autorização de venda
+  /// assinada bloqueando vinculados). Veja
+  /// `property_edit_permissions.dart` para a lógica completa.
+  PropertyEditPermissionResult get _editPermission {
+    final access = ModuleAccessService.instance;
+    return evaluatePropertyEditPermission(
+      property: _property,
+      currentUserId: access.userId,
+      userRole: access.userRole,
+      hasPermission: access.hasPermission,
+    );
+  }
+
+  bool get _canEditProperty => _editPermission.canEdit;
+
+  bool get _canDeleteProperty {
+    final access = ModuleAccessService.instance;
+    return canUserDeleteThisPropertyRecord(
+      property: _property,
+      currentUserId: access.userId,
+      userRole: access.userRole,
+      hasPermission: access.hasPermission,
+    );
+  }
 
   @override
   void initState() {
@@ -448,59 +476,76 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               ),
             ],
           ),
-        PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert),
-          onSelected: (value) {
-            switch (value) {
-              case 'edit':
-                Navigator.of(
-                  context,
-                ).pushNamed('/properties/${widget.propertyId}/edit');
-                break;
-              case 'delete':
-                _deleteProperty();
-                break;
-              case 'offers':
-                Navigator.of(context).pushNamed(
-                  '/properties/offers',
-                  arguments: {'propertyId': widget.propertyId},
-                );
-                break;
+        Builder(
+          builder: (context) {
+            // Esconde o menu por completo se o usuário não tem nenhuma ação
+            // disponível (visualização-pura para imóvel de outro corretor).
+            final canEdit = _canEditProperty;
+            final canDelete = _canDeleteProperty;
+            final hasOffersShortcut =
+                _property != null && _property!.hasPendingOffers == true;
+            if (!canEdit && !canDelete && !hasOffersShortcut) {
+              return const SizedBox.shrink();
             }
+            return PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert),
+              onSelected: (value) {
+                switch (value) {
+                  case 'edit':
+                    if (!canEdit) return;
+                    Navigator.of(
+                      context,
+                    ).pushNamed('/properties/${widget.propertyId}/edit');
+                    break;
+                  case 'delete':
+                    if (!canDelete) return;
+                    _deleteProperty();
+                    break;
+                  case 'offers':
+                    Navigator.of(context).pushNamed(
+                      '/properties/offers',
+                      arguments: {'propertyId': widget.propertyId},
+                    );
+                    break;
+                }
+              },
+              itemBuilder: (context) => [
+                if (canEdit)
+                  const PopupMenuItem(
+                    value: 'edit',
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit, size: 20),
+                        SizedBox(width: 8),
+                        Text('Editar'),
+                      ],
+                    ),
+                  ),
+                if (hasOffersShortcut)
+                  const PopupMenuItem(
+                    value: 'offers',
+                    child: Row(
+                      children: [
+                        Icon(Icons.request_quote, size: 20),
+                        SizedBox(width: 8),
+                        Text('Ver Ofertas'),
+                      ],
+                    ),
+                  ),
+                if (canDelete)
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete, size: 20, color: Colors.red),
+                        SizedBox(width: 8),
+                        Text('Excluir', style: TextStyle(color: Colors.red)),
+                      ],
+                    ),
+                  ),
+              ],
+            );
           },
-          itemBuilder: (context) => [
-            const PopupMenuItem(
-              value: 'edit',
-              child: Row(
-                children: [
-                  Icon(Icons.edit, size: 20),
-                  SizedBox(width: 8),
-                  Text('Editar'),
-                ],
-              ),
-            ),
-            if (_property != null && _property!.hasPendingOffers == true)
-              const PopupMenuItem(
-                value: 'offers',
-                child: Row(
-                  children: [
-                    Icon(Icons.request_quote, size: 20),
-                    SizedBox(width: 8),
-                    Text('Ver Ofertas'),
-                  ],
-                ),
-              ),
-            const PopupMenuItem(
-              value: 'delete',
-              child: Row(
-                children: [
-                  Icon(Icons.delete, size: 20, color: Colors.red),
-                  SizedBox(width: 8),
-                  Text('Excluir', style: TextStyle(color: Colors.red)),
-                ],
-              ),
-            ),
-          ],
         ),
       ],
       body: _isLoading
@@ -1926,14 +1971,17 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           ),
           color: AppColors.status.warning,
         ),
-      (
-        icon: Icons.edit_outlined,
-        label: 'Editar',
-        onTap: () => Navigator.of(context).pushNamed(
-          '/properties/${widget.propertyId}/edit',
+      // Botão "Editar" só aparece se o usuário tem direito de alterar a ficha
+      // (gestão, aprovador ou vínculo). Espelha exatamente o backend.
+      if (_canEditProperty)
+        (
+          icon: Icons.edit_outlined,
+          label: 'Editar',
+          onTap: () => Navigator.of(context).pushNamed(
+            '/properties/${widget.propertyId}/edit',
+          ),
+          color: null,
         ),
-        color: null,
-      ),
     ];
 
     final muted = ThemeHelpers.textSecondaryColor(context);
@@ -5479,37 +5527,63 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           ),
           child: Row(
             children: [
+              // Para usuários comuns sem vínculo, o backend rejeita a edição —
+              // então em vez do botão primário "Editar imóvel" exibimos
+              // "Compartilhar link" como ação principal (visualização-pura).
               Expanded(
-                child: _bottomActionPrimary(
-                  context: context,
+                child: _canEditProperty
+                    ? _bottomActionPrimary(
+                        context: context,
+                        theme: theme,
+                        icon: Icons.edit_rounded,
+                        label: 'Editar imóvel',
+                        accent: accent,
+                        onTap: () => Navigator.of(context).pushNamed(
+                          '/properties/${property.id}/edit',
+                        ),
+                      )
+                    : _bottomActionPrimary(
+                        context: context,
+                        theme: theme,
+                        icon: Icons.share_outlined,
+                        label: 'Compartilhar link',
+                        accent: accent,
+                        onTap: () {
+                          final url = property.code != null &&
+                                  property.code!.isNotEmpty
+                              ? 'imovel/${property.code}'
+                              : 'imovel/${property.id}';
+                          Clipboard.setData(ClipboardData(text: url));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Link copiado'),
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+              if (_canEditProperty) ...[
+                const SizedBox(width: 8),
+                _bottomActionGhost(
                   theme: theme,
-                  icon: Icons.edit_rounded,
-                  label: 'Editar imóvel',
-                  accent: accent,
-                  onTap: () => Navigator.of(context).pushNamed(
-                    '/properties/${property.id}/edit',
-                  ),
+                  muted: muted,
+                  icon: Icons.share_outlined,
+                  tooltip: 'Compartilhar link',
+                  onTap: () {
+                    final url = property.code != null && property.code!.isNotEmpty
+                        ? 'imovel/${property.code}'
+                        : 'imovel/${property.id}';
+                    Clipboard.setData(ClipboardData(text: url));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Link copiado'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  },
                 ),
-              ),
-              const SizedBox(width: 8),
-              _bottomActionGhost(
-                theme: theme,
-                muted: muted,
-                icon: Icons.share_outlined,
-                tooltip: 'Compartilhar link',
-                onTap: () {
-                  final url = property.code != null && property.code!.isNotEmpty
-                      ? 'imovel/${property.code}'
-                      : 'imovel/${property.id}';
-                  Clipboard.setData(ClipboardData(text: url));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Link copiado'),
-                      duration: Duration(seconds: 2),
-                    ),
-                  );
-                },
-              ),
+              ],
               const SizedBox(width: 8),
               _bottomActionGhost(
                 theme: theme,

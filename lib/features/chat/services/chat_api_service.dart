@@ -5,7 +5,6 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import '../../../core/constants/api_constants.dart';
 import '../../../shared/services/api_service.dart';
-import '../../../shared/services/secure_storage_service.dart';
 import '../models/chat_models.dart';
 
 /// Serviço para gerenciar chat via API REST
@@ -251,22 +250,18 @@ class ChatApiService {
     try {
       debugPrint('💬 [CHAT_API] Fazendo upload de imagem do grupo: $roomId');
       
+      final endpoint = ApiConstants.chatRoomUploadImage(roomId);
       final request = http.MultipartRequest(
         'POST',
-        Uri.parse('${ApiConstants.baseApiUrl}${ApiConstants.chatRoomUploadImage(roomId)}'),
+        Uri.parse('${ApiConstants.baseApiUrl}$endpoint'),
       );
 
-      // Adicionar token de autorização
-      final token = await SecureStorageService.instance.getAccessToken();
-      if (token != null) {
-        request.headers['Authorization'] = 'Bearer $token';
-      }
-
-      // Adicionar Company ID
-      final companyId = await SecureStorageService.instance.getCompanyId();
-      if (companyId != null) {
-        request.headers['X-Company-ID'] = companyId;
-      }
+      // Headers padronizados — paridade `imobx-front`.
+      final headers = await _apiService.buildOutboundHeaders(
+        endpoint: endpoint,
+        excludeContentType: true,
+      );
+      request.headers.addAll(headers);
 
       // Adicionar arquivo
       final fileStream = http.ByteStream(imageFile.openRead());
@@ -804,22 +799,18 @@ class ChatApiService {
     required File file,
   }) async {
     try {
+      final endpoint = ApiConstants.chatMessages;
       final request = http.MultipartRequest(
         'POST',
-        Uri.parse('${ApiConstants.baseApiUrl}${ApiConstants.chatMessages}'),
+        Uri.parse('${ApiConstants.baseApiUrl}$endpoint'),
       );
 
-      // Adicionar token de autorização
-      final token = await SecureStorageService.instance.getAccessToken();
-      if (token != null) {
-        request.headers['Authorization'] = 'Bearer $token';
-      }
-
-      // Adicionar Company ID
-      final companyId = await SecureStorageService.instance.getCompanyId();
-      if (companyId != null) {
-        request.headers['X-Company-ID'] = companyId;
-      }
+      // Headers padronizados — paridade `imobx-front`.
+      final headers = await _apiService.buildOutboundHeaders(
+        endpoint: endpoint,
+        excludeContentType: true,
+      );
+      request.headers.addAll(headers);
 
       // Adicionar campos
       request.fields['roomId'] = roomId;

@@ -4,8 +4,6 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'api_service.dart';
 import '../../core/constants/api_constants.dart';
-import 'secure_storage_service.dart';
-
 /// Modelo de imagem da galeria
 class GalleryImage {
   final String id;
@@ -111,19 +109,17 @@ class GalleryService {
     debugPrint('🖼️ [GALLERY_SERVICE] Fazendo upload de ${files.length} imagens');
 
     try {
-      final token = await SecureStorageService.instance.getAccessToken();
-      if (token == null || token.isEmpty) {
-        return ApiResponse.error(
-          message: 'Token de autenticação não encontrado',
-          statusCode: 401,
-        );
-      }
+      // Headers (Authorization + X-Company-ID) gerados pelo `ApiService`
+      // — paridade `imobx-front`. Sem isso, o backend responde 400
+      // "Usuário deve estar associado a uma empresa".
+      final headers = await _apiService.buildOutboundHeaders(
+        endpoint: '/gallery/upload',
+        excludeContentType: true,
+      );
 
       final uri = Uri.parse('${ApiConstants.baseApiUrl}/gallery/upload');
       final request = http.MultipartRequest('POST', uri);
-
-      // Headers
-      request.headers['Authorization'] = 'Bearer $token';
+      request.headers.addAll(headers);
       request.headers['Content-Type'] = 'multipart/form-data';
 
       // Adicionar arquivos
@@ -156,12 +152,28 @@ class GalleryService {
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
         try {
-          final jsonData = jsonDecode(response.body) as Map<String, dynamic>;
-          final imagesList = jsonData['data'] as List<dynamic>? ?? jsonData['images'] as List<dynamic>? ?? [];
+          // O backend (`gallery.controller.ts`, `@Post('upload')`) responde com
+          // um ARRAY direto de imagens (`@ApiResponse type: 'array'`).
+          // Aceitamos também o envelope `{ data: [...] }` ou `{ images: [...] }`
+          // por tolerância retroativa.
+          final decoded = jsonDecode(response.body);
+          final List<dynamic> imagesList;
+          if (decoded is List) {
+            imagesList = decoded;
+          } else if (decoded is Map<String, dynamic>) {
+            imagesList = (decoded['data'] as List<dynamic>?) ??
+                (decoded['images'] as List<dynamic>?) ??
+                const [];
+          } else {
+            imagesList = const [];
+          }
           final images = imagesList
-              .map((e) => GalleryImage.fromJson(e as Map<String, dynamic>))
+              .whereType<Map<String, dynamic>>()
+              .map(GalleryImage.fromJson)
               .toList();
-          debugPrint('✅ [GALLERY_SERVICE] ${images.length} imagens enviadas com sucesso');
+          debugPrint(
+            '✅ [GALLERY_SERVICE] ${images.length} imagens enviadas com sucesso',
+          );
           return ApiResponse.success(
             data: images,
             statusCode: response.statusCode,

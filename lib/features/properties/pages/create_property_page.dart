@@ -1,6 +1,8 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import '../../../../shared/services/property_service.dart';
 import '../../../../shared/services/profile_service.dart';
@@ -22,6 +24,7 @@ import '../../../../core/routes/app_routes.dart';
 import '../models/property_local_draft.dart';
 import '../models/property_wizard_pop_result.dart';
 import '../services/property_local_draft_storage.dart';
+import '../widgets/property_creation_setup_modal.dart';
 import 'package:intl/intl.dart';
 import '../../../../shared/utils/property_form_config.dart';
 
@@ -65,9 +68,26 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   ];
 
   static const EdgeInsets _wizScrollPadding =
-      EdgeInsets.fromLTRB(24, 18, 24, 52);
-  static const double _wizGapAfterHeader = 28;
+      EdgeInsets.fromLTRB(14, 6, 14, 44);
+  static const double _wizGapAfterHeader = 22;
   static const double _wizGapBetweenSections = 22;
+
+  /// Identidade visual por etapa (ícone + cor de acento) — usada no stepper,
+  /// no hero da etapa e na faixa lateral das seções.
+  static const List<({IconData icon, Color color})> _wizStepIdentity = [
+    (icon: Icons.auto_awesome_rounded, color: Color(0xFF6366F1)),
+    (icon: Icons.location_on_rounded, color: Color(0xFF0EA5E9)),
+    (icon: Icons.straighten_rounded, color: Color(0xFF14B8A6)),
+    (icon: Icons.payments_rounded, color: Color(0xFF10B981)),
+    (icon: Icons.photo_library_rounded, color: Color(0xFFA855F7)),
+    (icon: Icons.badge_rounded, color: Color(0xFFF59E0B)),
+    (icon: Icons.fact_check_rounded, color: Color(0xFFD32F2F)),
+  ];
+
+  Color _stepAccent(int step) =>
+      _wizStepIdentity[step.clamp(0, _totalSteps - 1)].color;
+  IconData _stepIcon(int step) =>
+      _wizStepIdentity[step.clamp(0, _totalSteps - 1)].icon;
 
   // Controllers do formulário
   final _formKey = GlobalKey<FormState>();
@@ -164,6 +184,24 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   String? _selectedCondominiumId;
   String? _selectedEmpreendimentoId;
 
+  /// Modo de origem do endereço — paridade web (`PropertyCreationSetupPayload`).
+  PropertyCreationAddressMode _addressMode =
+      PropertyCreationAddressMode.standalone;
+  /// Nome da entidade vinculada (para mostrar no Step 2 — "endereço vem de X").
+  String? _addressLinkedEntityName;
+  /// Garante que o setup modal só é aberto uma vez automaticamente.
+  bool _setupModalAlreadyShown = false;
+  /// Controla "carregando endereço do cadastro" (cond/emp).
+  bool _isPrefillingFromLinkedEntity = false;
+
+  /// Auto-save anônimo do form (paridade `localStorage` web).
+  /// Debounced em ~500ms — guarda todo o estado em
+  /// `PropertyLocalDraftStorage.saveAnonymous` para sobreviver a rebuilds.
+  Timer? _anonymousAutoSaveTimer;
+  bool _anonymousDraftRestored = false;
+  bool _isApplyingAnonymousDraft = false;
+  bool _suppressAnonymousAutoSave = false;
+
   /// Formulário: default web `getDefaultFormData().isAvailableForSite === false`.
   bool _publishToSite = false;
   /// Quando não há fila obrigatória, espelha o seletor rascunho/disponível do web.
@@ -196,6 +234,13 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         widget.localDraftId!.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _loadLocalDraft(widget.localDraftId!);
+      });
+    } else {
+      // Criação fresca: tenta restaurar rascunho anônimo do dispositivo
+      // (paridade `localStorage.getItem(DRAFT_STORAGE_KEY)` do web).
+      // Só abre o modal de pré-criação se não houver rascunho válido.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _restoreAnonymousDraftThenMaybeOpenSetup();
       });
     }
 
@@ -318,6 +363,339 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     }
   }
 
+  // -------------------------- Anonymous auto-save -------------------------
+  //
+  // Paridade web: `localStorage.setItem(DRAFT_STORAGE_KEY, ...)` em debounce
+  // de ~400-500 ms enquanto o usuário preenche o formulário. Restaurado no
+  // próximo abrir da tela de criação para que rebuilds não percam progresso.
+
+  /// Lê o rascunho anônimo. Se contém tipo + teamId, aplica e dispensa o
+  /// modal de pré-criação automático (mesma regra do `inferCreationSetupFromDraft`
+  /// do web). Caso contrário, abre o modal como sempre.
+  Future<void> _restoreAnonymousDraftThenMaybeOpenSetup() async {
+    if (!mounted || _setupModalAlreadyShown) return;
+    Map<String, dynamic>? draft;
+    try {
+      draft = await _draftStorage.getAnonymous();
+    } catch (_) {
+      draft = null;
+    }
+    if (!mounted) return;
+
+    final hasUsableDraft = _isUsableAnonymousDraft(draft);
+    if (hasUsableDraft) {
+      _isApplyingAnonymousDraft = true;
+      _suppressAnonymousAutoSave = true;
+      try {
+        setState(() {
+          _applyFrozenFormState(draft);
+          _anonymousDraftRestored = true;
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          final step = _currentStep.clamp(0, _totalSteps - 1);
+          try {
+            _pageController.jumpToPage(step);
+          } catch (_) {
+            /* ignore */
+          }
+        });
+      } finally {
+        _isApplyingAnonymousDraft = false;
+        _suppressAnonymousAutoSave = false;
+      }
+      _setupModalAlreadyShown = true;
+      return;
+    }
+
+    _setupModalAlreadyShown = true;
+    _openPropertyCreationSetup(isInitial: true);
+  }
+
+  /// Considera o rascunho usável quando tem `type` E `teamId` definidos
+  /// (mesmas regras do `inferCreationSetupFromDraft` web).
+  bool _isUsableAnonymousDraft(Map<String, dynamic>? draft) {
+    if (draft == null || draft.isEmpty) return false;
+    final type = draft['type']?.toString();
+    final teamId = draft['selectedTeamId']?.toString();
+    if (type == null || type.isEmpty) return false;
+    if (teamId == null || teamId.isEmpty) return false;
+    return true;
+  }
+
+  void _scheduleAnonymousAutoSave() {
+    if (widget.propertyId != null) return; // edição não persiste rascunho
+    if (_isApplyingAnonymousDraft || _suppressAnonymousAutoSave) return;
+    _anonymousAutoSaveTimer?.cancel();
+    _anonymousAutoSaveTimer = Timer(const Duration(milliseconds: 500), () {
+      _flushAnonymousAutoSave();
+    });
+  }
+
+  /// `setState` que também agenda o auto-save anônimo. Usar em mudanças
+  /// de toggle/chip/segmented que não passam pelos `TextEditingController`
+  /// (que já disparam `_onFieldChanged` → `_scheduleAnonymousAutoSave`).
+  void _setStateAndPersist(VoidCallback fn) {
+    setState(fn);
+    _scheduleAnonymousAutoSave();
+  }
+
+  Future<void> _flushAnonymousAutoSave() async {
+    if (widget.propertyId != null) return;
+    try {
+      final snapshot = _freezeFormState();
+      await _draftStorage.saveAnonymous(snapshot);
+    } catch (e) {
+      debugPrint('Auto-save de rascunho anônimo falhou: $e');
+    }
+  }
+
+  Future<void> _clearAnonymousDraft() async {
+    _anonymousAutoSaveTimer?.cancel();
+    try {
+      await _draftStorage.clearAnonymous();
+    } catch (_) {
+      /* ignore */
+    }
+    if (mounted) {
+      setState(() => _anonymousDraftRestored = false);
+    }
+  }
+
+  Future<void> _confirmDiscardAnonymousDraft() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Descartar rascunho?'),
+        content: const Text(
+          'Tudo o que você preencheu até agora será apagado deste dispositivo. '
+          'Você poderá começar um cadastro novo em seguida.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.status.error,
+            ),
+            child: const Text('Descartar'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await _clearAnonymousDraft();
+    if (!mounted) return;
+    // Reseta os controllers e estado para começar do zero — depois reabre
+    // o setup modal para forçar o usuário a configurar novamente.
+    _resetWizardForFreshStart();
+    _setupModalAlreadyShown = false;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _setupModalAlreadyShown) return;
+      _setupModalAlreadyShown = true;
+      _openPropertyCreationSetup(isInitial: true);
+    });
+  }
+
+  void _resetWizardForFreshStart() {
+    _suppressAnonymousAutoSave = true;
+    setState(() {
+      _titleController.text = '';
+      _descriptionController.text = '';
+      _internalNotesController.text = '';
+      _streetController.text = '';
+      _numberController.text = '';
+      _complementController.text = '';
+      _neighborhoodController.text = '';
+      _cityController.text = '';
+      _stateController.text = '';
+      _zipCodeController.text = '';
+      _sectorController.text = '';
+      _totalAreaController.text = '';
+      _builtAreaController.text = '';
+      _bedroomsController.text = '';
+      _bathroomsController.text = '';
+      _parkingSpacesController.text = '';
+      _suitesController.text = '';
+      _salePriceController.text = '';
+      _rentPriceController.text = '';
+      _condominiumFeeController.text = '';
+      _iptuController.text = '';
+      _minSalePriceController.text = '';
+      _minRentPriceController.text = '';
+      _ownerNameController.text = '';
+      _ownerEmailController.text = '';
+      _ownerPhoneController.text = '';
+      _ownerDocumentController.text = '';
+      _ownerAddressController.text = '';
+      _selectedFeatures.clear();
+      _selectedClientIds.clear();
+      _generatedVariants.clear();
+      _selectedImages.clear();
+      _uploadedImages.clear();
+      _selectedType = PropertyType.house;
+      _selectedTeamId = null;
+      _selectedCondominiumId = null;
+      _selectedEmpreendimentoId = null;
+      _addressMode = PropertyCreationAddressMode.standalone;
+      _addressLinkedEntityName = null;
+      _acceptsNegotiation = false;
+      _publishToSite = false;
+      _listingStatusIsDraft = true;
+      _isFeatured = false;
+      _autoGenerateOnReview = true;
+      _hasAutoGeneratedOnReview = false;
+      _offerBelowMinSaleAction = null;
+      _offerBelowMinRentAction = null;
+      _currentStep = 0;
+      _anonymousDraftRestored = false;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        try {
+          _pageController.jumpToPage(0);
+        } catch (_) {/* ignore */}
+        _suppressAnonymousAutoSave = false;
+      }
+    });
+  }
+
+  /// Abre o modal de pré-criação de imóvel — paridade `PropertyCreationSetupModal` web.
+  ///
+  /// `isInitial=true`: chamada automática no `initState` (1ª vez); ao fechar
+  /// sem confirmar, o usuário sai do cadastro (volta para a lista).
+  ///
+  /// `isInitial=false`: aberto pelo botão "Ajustar configuração" no header
+  /// do wizard; ao fechar sem confirmar, mantém os valores atuais.
+  Future<void> _openPropertyCreationSetup({required bool isInitial}) async {
+    final result = await Navigator.of(context).push<PropertyCreationSetupResult>(
+      MaterialPageRoute<PropertyCreationSetupResult>(
+        fullscreenDialog: true,
+        builder: (_) => PropertyCreationSetupPage(
+          initialType: isInitial ? null : _selectedType,
+          initialAddressMode: _addressMode,
+          initialCondominiumId: _selectedCondominiumId,
+          initialEmpreendimentoId: _selectedEmpreendimentoId,
+          initialTeamId: _selectedTeamId,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (result == null) {
+      if (isInitial) {
+        Navigator.of(context).pop();
+      }
+      return;
+    }
+    _applySetupResult(result);
+  }
+
+  void _applySetupResult(PropertyCreationSetupResult r) {
+    final wasExternal = _addressMode != PropertyCreationAddressMode.standalone;
+    final goingStandalone =
+        r.addressMode == PropertyCreationAddressMode.standalone;
+    final shouldResetGeo = wasExternal && goingStandalone;
+
+    setState(() {
+      _selectedType = r.type;
+      _selectedTeamId = r.teamId;
+      _addressMode = r.addressMode;
+      _selectedCondominiumId =
+          r.addressMode == PropertyCreationAddressMode.condominium
+              ? r.condominiumId
+              : null;
+      _selectedEmpreendimentoId =
+          r.addressMode == PropertyCreationAddressMode.empreendimento
+              ? r.empreendimentoId
+              : null;
+      _addressLinkedEntityName =
+          r.addressMode == PropertyCreationAddressMode.condominium
+              ? r.condominiumName
+              : r.addressMode == PropertyCreationAddressMode.empreendimento
+                  ? r.empreendimentoName
+                  : null;
+
+      if (shouldResetGeo) {
+        _zipCodeController.text = '';
+        _streetController.text = '';
+        _numberController.text = '';
+        _neighborhoodController.text = '';
+        _cityController.text = '';
+        _stateController.text = '';
+        _sectorController.text = '';
+      }
+    });
+
+    if (r.addressMode == PropertyCreationAddressMode.condominium &&
+        (r.condominiumId ?? '').isNotEmpty) {
+      _prefillAddressFromCondominium(r.condominiumId!);
+    } else if (r.addressMode == PropertyCreationAddressMode.empreendimento &&
+        (r.empreendimentoId ?? '').isNotEmpty) {
+      _prefillAddressFromEmpreendimento(r.empreendimentoId!);
+    }
+    // Persistir imediatamente após o setup — momento crítico para não
+    // perder configuração se o usuário fechar o app antes de digitar mais.
+    _flushAnonymousAutoSave();
+  }
+
+  Future<void> _prefillAddressFromCondominium(String id) async {
+    if (!mounted) return;
+    setState(() => _isPrefillingFromLinkedEntity = true);
+    final r = await _propertyService.getCondominiumById(id);
+    if (!mounted) return;
+    setState(() => _isPrefillingFromLinkedEntity = false);
+    if (!r.success || r.data == null) return;
+    _applyLinkedEntityAddress(r.data!);
+  }
+
+  Future<void> _prefillAddressFromEmpreendimento(String id) async {
+    if (!mounted) return;
+    setState(() => _isPrefillingFromLinkedEntity = true);
+    final r = await _propertyService.getEmpreendimentoById(id);
+    if (!mounted) return;
+    setState(() => _isPrefillingFromLinkedEntity = false);
+    if (!r.success || r.data == null) return;
+    _applyLinkedEntityAddress(r.data!);
+  }
+
+  void _applyLinkedEntityAddress(NamedEntityWithAddress e) {
+    String? mask8(String? raw) {
+      if (raw == null) return null;
+      final digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
+      if (digits.length < 8) return raw;
+      final d = digits.substring(0, 8);
+      return '${d.substring(0, 5)}-${d.substring(5, 8)}';
+    }
+
+    setState(() {
+      _addressLinkedEntityName = e.name.isNotEmpty ? e.name : null;
+      // Sobrescreve campos vazios — preserva edições do usuário, igual ao web
+      // (`pickFirstNonEmpty(raw.field, prev.field)`).
+      if (_zipCodeController.text.trim().isEmpty && e.zipCode != null) {
+        _zipCodeController.text = mask8(e.zipCode) ?? e.zipCode!;
+      }
+      if (_streetController.text.trim().isEmpty && e.street != null) {
+        _streetController.text = e.street!;
+      }
+      if (_numberController.text.trim().isEmpty && e.number != null) {
+        _numberController.text = e.number!;
+      }
+      if (_neighborhoodController.text.trim().isEmpty &&
+          e.neighborhood != null) {
+        _neighborhoodController.text = e.neighborhood!;
+      }
+      if (_cityController.text.trim().isEmpty && e.city != null) {
+        _cityController.text = e.city!;
+      }
+      if (_stateController.text.trim().isEmpty && e.state != null) {
+        _stateController.text = e.state!.toUpperCase();
+      }
+    });
+  }
+
   Future<void> _ensurePreSubmitConfigLoaded() async {
     await _ensureApprovalSettingsBeforeSave();
     await _ensureFormSettingsBeforeSave();
@@ -374,6 +752,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         // Apenas força rebuild para atualizar o botão
       });
     }
+    _scheduleAnonymousAutoSave();
   }
 
   void _onCepChanged() {
@@ -443,6 +822,12 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     _ownerPhoneController.dispose();
     _ownerDocumentController.dispose();
     _ownerAddressController.dispose();
+    _anonymousAutoSaveTimer?.cancel();
+    // Flush final do rascunho anônimo se houver mudanças pendentes — paridade
+    // com o `useEffect` cleanup do web. Best-effort; se falhar, ignora.
+    if (widget.propertyId == null) {
+      _flushAnonymousAutoSave();
+    }
     super.dispose();
   }
 
@@ -491,6 +876,15 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     _selectedTeamId = property.teamId;
     _selectedCondominiumId = property.condominiumId;
     _selectedEmpreendimentoId = property.empreendimentoId;
+    // Inferir o modo de endereço a partir dos vínculos existentes — paridade
+    // `CreatePropertyPage.tsx` (`isCondominium = !!property.condominiumId`).
+    final hasCondo = (property.condominiumId ?? '').trim().isNotEmpty;
+    final hasEmp = (property.empreendimentoId ?? '').trim().isNotEmpty;
+    _addressMode = hasCondo
+        ? PropertyCreationAddressMode.condominium
+        : hasEmp
+            ? PropertyCreationAddressMode.empreendimento
+            : PropertyCreationAddressMode.standalone;
     _loadedCapturedById =
         property.capturedById ?? property.capturedBy?.id;
 
@@ -1327,7 +1721,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
       );
-      setState(() {
+      _setStateAndPersist(() {
         _currentStep = nextStep;
       });
 
@@ -1416,6 +1810,9 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
 
   Map<String, dynamic> _freezeFormState() {
     return {
+      'wizardStep': _currentStep,
+      'addressMode': _addressMode.value,
+      'addressLinkedEntityName': _addressLinkedEntityName,
       'title': _titleController.text,
       'description': _descriptionController.text,
       'street': _streetController.text,
@@ -1540,6 +1937,20 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     _selectedTeamId = raw['selectedTeamId']?.toString();
     _selectedCondominiumId = raw['selectedCondominiumId']?.toString();
     _selectedEmpreendimentoId = raw['selectedEmpreendimentoId']?.toString();
+
+    _addressMode = PropertyCreationAddressModeX.fromValue(
+      raw['addressMode']?.toString(),
+    );
+    final linkedName = raw['addressLinkedEntityName']?.toString();
+    if (linkedName != null && linkedName.isNotEmpty) {
+      _addressLinkedEntityName = linkedName;
+    }
+    final restoredStep = raw['wizardStep'];
+    if (restoredStep is int) {
+      _currentStep = restoredStep.clamp(0, _totalSteps - 1);
+    } else if (restoredStep is num) {
+      _currentStep = restoredStep.toInt().clamp(0, _totalSteps - 1);
+    }
 
     _generatedVariants.clear();
     final variants = raw['aiVariants'];
@@ -1875,7 +2286,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
       );
-      setState(() {
+      _setStateAndPersist(() {
         _currentStep--;
       });
     }
@@ -1897,69 +2308,557 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     return _listingStatusIsDraft ? 'draft' : 'available';
   }
 
-  bool _validatePublicationRules({
+  /// Verifica regras de publicação no site. Retorna `null` se OK ou um
+  /// `_StepValidationFailure` apontando para o step exato do problema —
+  /// galeria insuficiente vai pro Step 4, conflitos de status/rascunho vão
+  /// pro Step 6 (Revisão final, onde os toggles ficam).
+  _StepValidationFailure? _checkPublicationRules({
     required bool saveAsDraft,
     required String resolvedStatus,
   }) {
-    if (!_publishToSite) return true;
+    if (!_publishToSite) return null;
 
     if (saveAsDraft) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text(
-              'Desative «Publicar no site» ao salvar como rascunho (regra igual ao sistema web).',
-            ),
-            backgroundColor: AppColors.status.error,
-          ),
-        );
-      }
-      return false;
+      return const _StepValidationFailure(
+        step: 6,
+        message:
+            'Desative «Publicar no site» ao salvar como rascunho (regra igual ao sistema web).',
+      );
     }
 
     final imgCount = _totalSelectableImageCount();
     if (imgCount < _kMinGalleryImagesWeb || imgCount > _kMaxGalleryImagesWeb) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Publicação no site exige entre $_kMinGalleryImagesWeb e $_kMaxGalleryImagesWeb '
-              'imagens (atual: $imgCount).',
-            ),
-            backgroundColor: AppColors.status.error,
-          ),
-        );
-      }
-      return false;
+      return _StepValidationFailure(
+        step: 4,
+        message:
+            'Publicação no site exige entre $_kMinGalleryImagesWeb e $_kMaxGalleryImagesWeb '
+            'imagens (atual: $imgCount).',
+      );
     }
 
     // Paridade CreatePropertyPage web: só «Disponível» bloqueia se não há
     // `requireApprovalToBeAvailable` (linha ~3204 do CreatePropertyPage.tsx).
     final needsAvailableResolved = !_requireApprovalToBeAvailable;
     if (needsAvailableResolved && resolvedStatus != 'available') {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text(
-              'Apenas imóveis com status «Disponível» podem ser publicados no site '
-              '(quando a empresa não exige apenas a fila de aprovação).',
-            ),
-            backgroundColor: AppColors.status.error,
-          ),
-        );
-      }
-      return false;
+      return const _StepValidationFailure(
+        step: 6,
+        message:
+            'Apenas imóveis com status «Disponível» podem ser publicados no site '
+            '(quando a empresa não exige apenas a fila de aprovação).',
+      );
     }
 
-    return true;
+    return null;
+  }
+
+  /// Mapa `key` (do backend) → índice do step onde ele é editado.
+  /// Usado para roteamento automático ao primeiro erro de validação,
+  /// inclusive nos campos retornados por `configurableFieldsErrorPt`.
+  static const Map<String, int> _fieldStepMap = {
+    // Step 0 — Informações básicas
+    'type': 0,
+    'title': 0,
+    'description': 0,
+    'teamId': 0,
+    // Step 1 — Localização
+    'zipCode': 1,
+    'street': 1,
+    'number': 1,
+    'complement': 1,
+    'neighborhood': 1,
+    'sector': 1,
+    'city': 1,
+    'state': 1,
+    'condominiumId': 1,
+    'empreendimentoId': 1,
+    // Step 2 — Medidas e detalhes
+    'totalArea': 2,
+    'builtArea': 2,
+    'bedrooms': 2,
+    'suites': 2,
+    'bathrooms': 2,
+    'parkingSpaces': 2,
+    'features': 2,
+    // Step 3 — Valores
+    'salePrice': 3,
+    'rentPrice': 3,
+    'condominiumFee': 3,
+    'iptu': 3,
+    // Step 5 — Proprietário (Step 4 é Galeria)
+    'ownerName': 5,
+    'ownerEmail': 5,
+    'ownerPhone': 5,
+    'ownerDocument': 5,
+    'capturedById': 5,
+    'capturedByIds': 5,
+    'internalNotes': 5,
+  };
+
+  /// Roda as validações de cada step em ordem e retorna o primeiro erro
+  /// encontrado (ou `null` se tudo OK). É a fonte da verdade do "saltar
+  /// até o problema" — não depende dos `validator:` dos `TextFormField`,
+  /// ao contrário do `_formKey.currentState.validate()`, que só dispara
+  /// validações dos widgets atualmente montados na árvore.
+  _StepValidationFailure? _findFirstStepValidationError({
+    required bool saveAsDraft,
+  }) {
+    // ============================ Step 0 ============================
+    if (!_autoGenerateOnReview) {
+      final t = _titleController.text.trim();
+      if (t.isEmpty) {
+        return const _StepValidationFailure(
+          step: 0,
+          message: 'Informe o título do anúncio.',
+        );
+      }
+      if (t.length < 3) {
+        return const _StepValidationFailure(
+          step: 0,
+          message: 'O título deve ter pelo menos 3 caracteres.',
+        );
+      }
+      if (t.length > 255) {
+        return const _StepValidationFailure(
+          step: 0,
+          message: 'O título deve ter no máximo 255 caracteres.',
+        );
+      }
+      final d = _descriptionController.text.trim();
+      if (d.isEmpty) {
+        return const _StepValidationFailure(
+          step: 0,
+          message: 'Informe a descrição do imóvel.',
+        );
+      }
+      if (d.length < 10) {
+        return const _StepValidationFailure(
+          step: 0,
+          message: 'A descrição deve ter pelo menos 10 caracteres.',
+        );
+      }
+      if (d.length > 5000) {
+        return const _StepValidationFailure(
+          step: 0,
+          message: 'A descrição deve ter no máximo 5000 caracteres.',
+        );
+      }
+    }
+    if (_formRequiredKeys.contains('teamId') &&
+        (_selectedTeamId ?? '').trim().isEmpty) {
+      return const _StepValidationFailure(
+        step: 0,
+        message: 'Selecione a equipe responsável pelo imóvel.',
+      );
+    }
+
+    // ============================ Step 1 ============================
+    final zipDigits =
+        _zipCodeController.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (zipDigits.isEmpty) {
+      return const _StepValidationFailure(
+        step: 1,
+        message: 'Informe o CEP do imóvel.',
+      );
+    }
+    if (zipDigits.length != 8) {
+      return const _StepValidationFailure(
+        step: 1,
+        message: 'O CEP deve ter 8 dígitos.',
+      );
+    }
+    final street = _streetController.text.trim();
+    if (street.isEmpty) {
+      return const _StepValidationFailure(
+        step: 1,
+        message: 'Informe a rua / logradouro.',
+      );
+    }
+    if (street.length < 2) {
+      return const _StepValidationFailure(
+        step: 1,
+        message: 'A rua deve ter pelo menos 2 caracteres.',
+      );
+    }
+    if (_numberController.text.trim().isEmpty) {
+      return const _StepValidationFailure(
+        step: 1,
+        message: 'Informe o número do endereço.',
+      );
+    }
+    if (_formRequiredKeys.contains('complement') &&
+        _complementController.text.trim().isEmpty) {
+      return const _StepValidationFailure(
+        step: 1,
+        message: 'Complemento obrigatório (configuração da empresa).',
+      );
+    }
+    final neighborhood = _neighborhoodController.text.trim();
+    if (neighborhood.isEmpty) {
+      return const _StepValidationFailure(
+        step: 1,
+        message: 'Informe o bairro.',
+      );
+    }
+    if (neighborhood.length < 2) {
+      return const _StepValidationFailure(
+        step: 1,
+        message: 'O bairro deve ter pelo menos 2 caracteres.',
+      );
+    }
+    if (neighborhood.length > 100) {
+      return const _StepValidationFailure(
+        step: 1,
+        message: 'O bairro deve ter no máximo 100 caracteres.',
+      );
+    }
+    if (_formRequiredKeys.contains('sector') &&
+        _sectorController.text.trim().isEmpty) {
+      return const _StepValidationFailure(
+        step: 1,
+        message: 'Setor obrigatório (configuração da empresa).',
+      );
+    }
+    final city = _cityController.text.trim();
+    if (city.isEmpty) {
+      return const _StepValidationFailure(
+        step: 1,
+        message: 'Informe a cidade.',
+      );
+    }
+    if (city.length < 2) {
+      return const _StepValidationFailure(
+        step: 1,
+        message: 'A cidade deve ter pelo menos 2 caracteres.',
+      );
+    }
+    if (city.length > 100) {
+      return const _StepValidationFailure(
+        step: 1,
+        message: 'A cidade deve ter no máximo 100 caracteres.',
+      );
+    }
+    final state = _stateController.text.trim().toUpperCase();
+    if (state.isEmpty) {
+      return const _StepValidationFailure(
+        step: 1,
+        message: 'Informe a UF (estado).',
+      );
+    }
+    if (state.length != 2 || !RegExp(r'^[A-Z]{2}$').hasMatch(state)) {
+      return const _StepValidationFailure(
+        step: 1,
+        message: 'A UF deve ter 2 letras maiúsculas (ex.: SP, RJ).',
+      );
+    }
+    // Vínculo a condomínio/empreendimento só é obrigatório quando o usuário
+    // optou pelo respectivo modo de endereço — paridade `CreatePropertyPage.tsx`
+    // linhas 2522-2523 (`if (key === 'condominiumId') return !!formData.isCondominium`).
+    // O `_formRequiredKeys` da empresa NÃO conta para forçar esses IDs;
+    // o backend pode rejeitar com 400 nesse caso, mas isso é tratado como
+    // erro de config e mostrado de forma amigável (sem deslogar o usuário).
+    if (_addressMode == PropertyCreationAddressMode.condominium &&
+        (_selectedCondominiumId ?? '').trim().isEmpty) {
+      return const _StepValidationFailure(
+        step: 1,
+        message: 'Selecione um condomínio para vincular o imóvel.',
+      );
+    }
+    if (_addressMode == PropertyCreationAddressMode.empreendimento &&
+        (_selectedEmpreendimentoId ?? '').trim().isEmpty) {
+      return const _StepValidationFailure(
+        step: 1,
+        message: 'Selecione um empreendimento para vincular o imóvel.',
+      );
+    }
+    // Regra de negócio: apartamentos sempre precisam estar vinculados a um
+    // condomínio. Se o usuário voltou e mudou o tipo no wizard, mantemos a
+    // checagem aqui (no setup modal o "Endereço próprio" já fica desabilitado).
+    if (_selectedType == PropertyType.apartment &&
+        _addressMode == PropertyCreationAddressMode.standalone) {
+      return const _StepValidationFailure(
+        step: 1,
+        message:
+            'Apartamentos precisam estar vinculados a um condomínio. Toque em "Alterar" para escolher um.',
+      );
+    }
+
+    // ============================ Step 2 ============================
+    final totalArea = _parseBrazilianAreaToNumber(_totalAreaController.text);
+    if (totalArea == null || totalArea <= 0) {
+      return const _StepValidationFailure(
+        step: 2,
+        message: 'Informe a área total do imóvel.',
+      );
+    }
+    if (totalArea >= 1000000) {
+      return const _StepValidationFailure(
+        step: 2,
+        message: 'A área total deve ser menor que 1.000.000 m².',
+      );
+    }
+    if (_formRequiredKeys.contains('features') && _selectedFeatures.isEmpty) {
+      return const _StepValidationFailure(
+        step: 2,
+        message:
+            'Selecione pelo menos uma característica (configuração da empresa).',
+      );
+    }
+
+    // ============================ Step 3 ============================
+    final saleText = _salePriceController.text.trim();
+    if (saleText.isNotEmpty) {
+      final p = Masks.unmaskMoney(saleText) / 100.0;
+      if (p <= 0) {
+        return const _StepValidationFailure(
+          step: 3,
+          message: 'Preço de venda deve ser positivo.',
+        );
+      }
+      if (p >= 1000000000) {
+        return const _StepValidationFailure(
+          step: 3,
+          message: 'Preço de venda deve ser menor que R\$ 1 bilhão.',
+        );
+      }
+    }
+    final rentText = _rentPriceController.text.trim();
+    if (rentText.isNotEmpty) {
+      final p = Masks.unmaskMoney(rentText) / 100.0;
+      if (p <= 0) {
+        return const _StepValidationFailure(
+          step: 3,
+          message: 'Preço de aluguel deve ser positivo.',
+        );
+      }
+      if (p >= 1000000) {
+        return const _StepValidationFailure(
+          step: 3,
+          message: 'Preço de aluguel deve ser menor que R\$ 999.999,99.',
+        );
+      }
+    }
+    final feeText = _condominiumFeeController.text.trim();
+    if (feeText.isNotEmpty) {
+      final p = Masks.unmaskMoney(feeText) / 100.0;
+      if (p <= 0) {
+        return const _StepValidationFailure(
+          step: 3,
+          message: 'Valor do condomínio deve ser positivo.',
+        );
+      }
+      if (p >= 100000) {
+        return const _StepValidationFailure(
+          step: 3,
+          message: 'Valor do condomínio deve ser menor que R\$ 99.999,99.',
+        );
+      }
+    }
+    final iptuText = _iptuController.text.trim();
+    if (iptuText.isNotEmpty) {
+      final p = Masks.unmaskMoney(iptuText) / 100.0;
+      if (p <= 0) {
+        return const _StepValidationFailure(
+          step: 3,
+          message: 'IPTU deve ser positivo.',
+        );
+      }
+      if (p >= 100000) {
+        return const _StepValidationFailure(
+          step: 3,
+          message: 'IPTU deve ser menor que R\$ 99.999,99.',
+        );
+      }
+    }
+    if (_acceptsNegotiation) {
+      if (saleText.isNotEmpty) {
+        final minS = _minSalePriceController.text.trim();
+        if (minS.isEmpty) {
+          return const _StepValidationFailure(
+            step: 3,
+            message: 'Informe o valor mínimo de venda (negociação ativada).',
+          );
+        }
+        final minPrice = Masks.unmaskMoney(minS) / 100.0;
+        if (minPrice <= 0) {
+          return const _StepValidationFailure(
+            step: 3,
+            message: 'Preço mínimo de venda deve ser positivo.',
+          );
+        }
+        final salePrice = Masks.unmaskMoney(saleText) / 100.0;
+        if (minPrice >= salePrice) {
+          return const _StepValidationFailure(
+            step: 3,
+            message:
+                'O preço mínimo de venda deve ser menor que o preço anunciado.',
+          );
+        }
+      }
+      if (rentText.isNotEmpty) {
+        final minR = _minRentPriceController.text.trim();
+        if (minR.isEmpty) {
+          return const _StepValidationFailure(
+            step: 3,
+            message:
+                'Informe o valor mínimo de aluguel (negociação ativada).',
+          );
+        }
+        final minPrice = Masks.unmaskMoney(minR) / 100.0;
+        if (minPrice <= 0) {
+          return const _StepValidationFailure(
+            step: 3,
+            message: 'Preço mínimo de aluguel deve ser positivo.',
+          );
+        }
+        final rentPrice = Masks.unmaskMoney(rentText) / 100.0;
+        if (minPrice >= rentPrice) {
+          return const _StepValidationFailure(
+            step: 3,
+            message:
+                'O preço mínimo de aluguel deve ser menor que o valor anunciado.',
+          );
+        }
+      }
+    }
+
+    // ============================ Step 4 — Galeria ============================
+    if (!saveAsDraft) {
+      final imgCount = _totalSelectableImageCount();
+      if (imgCount < _kMinGalleryImagesWeb) {
+        return _StepValidationFailure(
+          step: 4,
+          message:
+              'Adicione pelo menos $_kMinGalleryImagesWeb imagens (mesmo mínimo do CRM web).',
+        );
+      }
+      if (imgCount > _kMaxGalleryImagesWeb) {
+        return _StepValidationFailure(
+          step: 4,
+          message:
+              'Galeria limitada a $_kMaxGalleryImagesWeb imagens (atual: $imgCount).',
+        );
+      }
+    }
+
+    // ============================ Step 5 — Proprietário ============================
+    final ownerName = _ownerNameController.text.trim();
+    if (ownerName.isEmpty) {
+      return const _StepValidationFailure(
+        step: 5,
+        message: 'Informe o nome do proprietário.',
+      );
+    }
+    final ownerPhoneDigits =
+        _ownerPhoneController.text.replaceAll(RegExp(r'\D'), '');
+    if (ownerPhoneDigits.isEmpty) {
+      return const _StepValidationFailure(
+        step: 5,
+        message: 'Informe o telefone do proprietário.',
+      );
+    }
+    final ownerEmail = _ownerEmailController.text.trim();
+    if (ownerEmail.isNotEmpty &&
+        !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(ownerEmail)) {
+      return const _StepValidationFailure(
+        step: 5,
+        message: 'E-mail do proprietário inválido.',
+      );
+    }
+    if (_formRequiredKeys.contains('internalNotes') &&
+        _internalNotesController.text.trim().isEmpty) {
+      return const _StepValidationFailure(
+        step: 5,
+        message:
+            'Observações internas obrigatórias (configuração da empresa).',
+      );
+    }
+
+    return null;
+  }
+
+  /// Anima até o step com erro (se necessário) e mostra um SnackBar
+  /// vermelho com o motivo. No próximo frame, dispara
+  /// `_formKey.currentState.validate()` para que os campos correspondentes
+  /// fiquem em vermelho e visíveis para o usuário.
+  void _navigateToStepWithError(_StepValidationFailure err) {
+    final target = err.step.clamp(0, _totalSteps - 1);
+    if (target != _currentStep) {
+      try {
+        _pageController.animateToPage(
+          target,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeInOut,
+        );
+      } catch (_) {
+        try {
+          _pageController.jumpToPage(target);
+        } catch (_) {/* ignore */}
+      }
+      _setStateAndPersist(() => _currentStep = target);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      try {
+        _formKey.currentState?.validate();
+      } catch (_) {/* ignore */}
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: AppColors.status.error,
+          content: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.error_outline_rounded,
+                  color: Colors.white, size: 18),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Etapa ${target + 1} · ${_wizardTitles[target]}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 12,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      err.message,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    });
   }
 
   Future<void> _saveProperty({bool saveAsDraft = false}) async {
-    if (!_formKey.currentState!.validate()) {
-      _pageController.jumpToPage(0);
-      setState(() {
-        _currentStep = 0;
-      });
+    final firstError =
+        _findFirstStepValidationError(saveAsDraft: saveAsDraft);
+    if (firstError != null) {
+      _navigateToStepWithError(firstError);
+      return;
+    }
+    if (!(_formKey.currentState?.validate() ?? true)) {
+      // Defesa: se o Form ainda achar algo inválido (ex.: validador
+      // específico que não conseguimos espelhar acima), permanece no step
+      // atual e dispara o snackbar de revisão.
+      _navigateToStepWithError(_StepValidationFailure(
+        step: _currentStep,
+        message: 'Há campos inválidos nesta etapa. Revise antes de continuar.',
+      ));
       return;
     }
 
@@ -1986,10 +2885,12 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     }
 
     final resolvedStatus = _resolvedApiStatus(saveAsDraft);
-    if (!_validatePublicationRules(
+    final pubErr = _checkPublicationRules(
       saveAsDraft: saveAsDraft,
       resolvedStatus: resolvedStatus,
-    )) {
+    );
+    if (pubErr != null) {
+      _navigateToStepWithError(pubErr);
       return;
     }
 
@@ -2174,15 +3075,37 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         data['empreendimentoId'] = eid;
       }
 
-      final cfgErr = configurableFieldsErrorPt(_formRequiredKeys, data);
+      // Mesma regra do web (`CreatePropertyPage.tsx` linhas 2522-2523):
+      // `condominiumId` / `empreendimentoId` no `_formRequiredKeys` só
+      // contam quando o usuário optou pelo modo correspondente. Para
+      // `standalone` esses keys são removidos da checagem.
+      final effectiveRequired = _formRequiredKeys.where((k) {
+        if (k == 'condominiumId') {
+          return _addressMode == PropertyCreationAddressMode.condominium;
+        }
+        if (k == 'empreendimentoId') {
+          return _addressMode == PropertyCreationAddressMode.empreendimento;
+        }
+        return true;
+      }).toList();
+      final cfgErr = configurableFieldsErrorPt(effectiveRequired, data);
       if (cfgErr != null) {
+        // Identificar o primeiro key obrigatório que está vazio para
+        // saltar até o step correspondente — paridade com a navegação
+        // automática nos validadores acima.
+        int? targetStep;
+        for (final key in effectiveRequired) {
+          if (!isConfigurableFieldPresent(key, data)) {
+            targetStep = _fieldStepMap[key];
+            if (targetStep != null) break;
+          }
+        }
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(cfgErr),
-              backgroundColor: AppColors.status.error,
-            ),
-          );
+          if (_isLoading) setState(() => _isLoading = false);
+          _navigateToStepWithError(_StepValidationFailure(
+            step: targetStep ?? _currentStep,
+            message: cfgErr,
+          ));
         }
         return;
       }
@@ -2204,6 +3127,11 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
               await _draftStorage.delete(_activeLocalDraftId!);
             } catch (_) {}
           }
+          // Imóvel criado/atualizado com sucesso — limpa o auto-save anônimo
+          // (paridade `localStorage.removeItem(DRAFT_STORAGE_KEY)` web).
+          if (!isEditing && !saveAsDraft) {
+            await _clearAnonymousDraft();
+          }
 
           if (!mounted) return;
 
@@ -2223,8 +3151,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                     : (widget.propertyId != null
                           ? 'Propriedade atualizada com sucesso!'
                           : (queuedForApprovals
-                              ? 'Cadastro registrado — o imóvel segue para a mesma '
-                                    'fila de aprovação/autorização do sistema.'
+                              ? 'Imóvel enviado para a fila de aprovação.'
                               : 'Propriedade criada com sucesso!')),
               ),
               backgroundColor: AppColors.status.success,
@@ -2242,10 +3169,34 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             );
           });
         } else {
+          final raw = (response.message ?? '').trim();
+          final lower = raw.toLowerCase();
+          // O backend pode rejeitar com "Campo obrigatório conforme
+          // configuração da empresa: <Campo>" quando há config legada de
+          // `propertyFormRequiredFields`. Mostramos a mensagem do servidor
+          // sem alterar (paridade com o web) e oferecemos um atalho rápido
+          // para reabrir o setup, sem deslogar nem assumir o motivo.
+          final looksLikeCompanyFieldCfg =
+              lower.contains('campo obrigatório conforme configuração') ||
+                  lower.contains('campo obrigatorio conforme configuracao');
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(response.message ?? 'Erro ao salvar propriedade'),
+              duration: const Duration(seconds: 6),
+              behavior: SnackBarBehavior.floating,
               backgroundColor: AppColors.status.error,
+              content: Text(
+                raw.isEmpty ? 'Erro ao salvar propriedade' : raw,
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+              ),
+              action: looksLikeCompanyFieldCfg && widget.propertyId == null
+                  ? SnackBarAction(
+                      label: 'Ajustar',
+                      textColor: Colors.white,
+                      onPressed: () =>
+                          _openPropertyCreationSetup(isInitial: false),
+                    )
+                  : null,
             ),
           );
         }
@@ -2280,6 +3231,13 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   List<Widget>? get _wizardToolbarActions {
     if (widget.propertyId != null) return null;
     return [
+      IconButton(
+        tooltip: 'Ajustar tipo, equipe e origem do endereço',
+        onPressed: _isLoading
+            ? null
+            : () => _openPropertyCreationSetup(isInitial: false),
+        icon: const Icon(Icons.tune_rounded),
+      ),
       IconButton(
         tooltip: 'Lista de rascunhos neste dispositivo',
         onPressed: () =>
@@ -2318,6 +3276,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           key: _formKey,
           child: Column(
             children: [
+              if (_anonymousDraftRestored) _buildAnonymousDraftRestoredBanner(theme),
               _buildStepIndicator(theme),
               Expanded(
                 child: PageView(
@@ -2345,34 +3304,24 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   bool _wizIsDark(BuildContext context) =>
       Theme.of(context).brightness == Brightness.dark;
 
-  /// Fundo contínuo com profundidade — evita “painel preto + vermelho” no dark.
+  /// Fundo do wizard — minimalista, alinhado às demais telas (Dashboard, Imóveis, CRM).
+  /// Em dark: cor base sólida do app (sem gradientes coloridos).
+  /// Em light: gradiente muito sutil entre os tons neutros do app.
   BoxDecoration _wizardBackdropDecoration(BuildContext context) {
     final isDark = _wizIsDark(context);
     if (isDark) {
       return BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          stops: const [0.0, 0.32, 0.62, 1.0],
-          colors: [
-            const Color(0xFF17172A),
-            const Color(0xFF1E1E38),
-            const Color(0xFF25244A),
-            const Color(0xFF151520),
-          ],
-        ),
+        color: AppColors.background.backgroundDarkMode,
       );
     }
     return BoxDecoration(
       gradient: LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
-        stops: const [0.0, 0.55, 1.0],
+        stops: const [0.0, 1.0],
         colors: [
           AppColors.background.background,
-          Color.lerp(AppColors.background.backgroundSecondary,
-              AppColors.background.backgroundTertiary, 0.5)!,
-          const Color(0xFFF1F6FC),
+          AppColors.background.backgroundSecondary,
         ],
       ),
     );
@@ -2391,68 +3340,341 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       ? AppColors.status.infoDarkMode
       : AppColors.status.info;
 
+  /// Tema fluido para os campos do wizard — alinha-se ao resto do app (CRM,
+  /// Imóveis, Dashboard): fill quase imperceptível por cima do card da seção,
+  /// borda fina, foco no acento da etapa, raio 12.
+  ///
+  /// Aplicado por `Theme(data: ...)` ao redor do conteúdo de cada seção,
+  /// portanto vale para `CustomTextField`, `DropdownButtonFormField`,
+  /// `_buildFormField` e qualquer `TextFormField` interno — sem que cada
+  /// componente precise re-declarar o estilo.
+  ThemeData _wizardFieldTheme(BuildContext context) {
+    final base = Theme.of(context);
+    final isDark = base.brightness == Brightness.dark;
+    final accent = _stepAccent(_currentStep);
+
+    final softBorder = isDark
+        ? Colors.white.withValues(alpha: 0.10)
+        : ThemeHelpers.borderColor(context).withValues(alpha: 0.55);
+    final hoverBorder = isDark
+        ? Colors.white.withValues(alpha: 0.18)
+        : ThemeHelpers.borderColor(context).withValues(alpha: 0.85);
+
+    return base.copyWith(
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: isDark
+            ? Colors.white.withValues(alpha: 0.045)
+            : Colors.white.withValues(alpha: 0.78),
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 14,
+        ),
+        labelStyle: base.textTheme.labelLarge?.copyWith(
+          color: ThemeHelpers.textSecondaryColor(context),
+          fontWeight: FontWeight.w600,
+          fontSize: 13,
+        ),
+        floatingLabelStyle: base.textTheme.labelMedium?.copyWith(
+          color: accent,
+          fontWeight: FontWeight.w800,
+        ),
+        hintStyle: base.textTheme.bodyMedium?.copyWith(
+          color: ThemeHelpers.textSecondaryColor(context)
+              .withValues(alpha: isDark ? 0.55 : 0.62),
+          fontWeight: FontWeight.w500,
+        ),
+        helperStyle: base.textTheme.labelSmall?.copyWith(
+          color: ThemeHelpers.textSecondaryColor(context),
+        ),
+        prefixIconColor: ThemeHelpers.textSecondaryColor(context),
+        suffixIconColor: ThemeHelpers.textSecondaryColor(context),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: softBorder),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: softBorder),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: accent, width: 1.4),
+        ),
+        disabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: softBorder.withValues(alpha: 0.5),
+          ),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: AppColors.status.error),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: AppColors.status.error,
+            width: 1.4,
+          ),
+        ),
+        hoverColor: hoverBorder.withValues(alpha: 0.05),
+      ),
+      switchTheme: SwitchThemeData(
+        overlayColor: WidgetStateProperty.all(Colors.transparent),
+        trackOutlineWidth: WidgetStateProperty.resolveWith((_) => 1),
+        trackOutlineColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return accent.withValues(alpha: 0.0);
+          }
+          return softBorder;
+        }),
+        thumbColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) return Colors.white;
+          return isDark
+              ? Colors.white.withValues(alpha: 0.78)
+              : Colors.white;
+        }),
+        trackColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) return accent;
+          return isDark
+              ? Colors.white.withValues(alpha: 0.06)
+              : ThemeHelpers.borderColor(context).withValues(alpha: 0.20);
+        }),
+      ),
+      segmentedButtonTheme: SegmentedButtonThemeData(
+        style: ButtonStyle(
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+          side: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.selected)) {
+              return BorderSide(
+                color: accent.withValues(alpha: 0.55),
+                width: 1.2,
+              );
+            }
+            return BorderSide(color: softBorder);
+          }),
+          backgroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.selected)) {
+              return accent.withValues(alpha: isDark ? 0.18 : 0.10);
+            }
+            return Colors.transparent;
+          }),
+          foregroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.selected)) return accent;
+            return ThemeHelpers.textColor(context);
+          }),
+          textStyle: WidgetStatePropertyAll(
+            base.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.3,
+              fontSize: 13,
+            ),
+          ),
+          padding: const WidgetStatePropertyAll(
+            EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          ),
+          iconSize: const WidgetStatePropertyAll(16),
+          iconColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.selected)) return accent;
+            return ThemeHelpers.textSecondaryColor(context);
+          }),
+          overlayColor:
+              WidgetStateProperty.all(accent.withValues(alpha: 0.06)),
+        ),
+        selectedIcon: const Icon(Icons.check_rounded, size: 14),
+      ),
+      chipTheme: _wizardChipTheme(base),
+      dropdownMenuTheme: DropdownMenuThemeData(
+        textStyle: base.textTheme.bodyMedium?.copyWith(
+          fontWeight: FontWeight.w600,
+        ),
+        menuStyle: MenuStyle(
+          backgroundColor: WidgetStatePropertyAll(
+            isDark
+                ? AppColors.background.backgroundDarkMode
+                : AppColors.background.background,
+          ),
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: BorderSide(color: softBorder),
+            ),
+          ),
+          elevation: const WidgetStatePropertyAll(8),
+        ),
+      ),
+    );
+  }
+
+  /// Stepper "constelação" — 7 nós conectados por trilha + faixa em gradiente
+  /// proporcional ao progresso. Sem scroll horizontal e sem listas Row clássicas:
+  /// cada nó ocupa apenas o espaço do círculo; o trilho conector ocupa o resto.
   Widget _buildStepIndicator(ThemeData theme) {
     final isDark = _wizIsDark(context);
-    final progress = (_currentStep + 1) / _totalSteps;
-    final track = isDark
-        ? Colors.white.withValues(alpha: 0.07)
-        : ThemeHelpers.borderColor(context).withValues(alpha: 0.28);
+    final cur = _currentStep.clamp(0, _totalSteps - 1);
+    final accent = _stepAccent(cur);
 
-    final gradColors = isDark
-        ? [
-            _wizCool(context).withValues(alpha: 0.75),
-            _wizBrand(context).withValues(alpha: 0.88),
-          ]
-        : [
-            _wizCool(context).withValues(alpha: 0.82),
-            _wizBrand(context),
-          ];
+    final trackBg = isDark
+        ? Colors.white.withValues(alpha: 0.06)
+        : ThemeHelpers.borderColor(context).withValues(alpha: 0.32);
+    final progressGrad = LinearGradient(
+      colors: [
+        Color.lerp(accent, _wizCool(context), 0.35)!.withValues(alpha: 0.85),
+        accent,
+      ],
+    );
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 14, 24, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: SizedBox(
-              height: 6,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  ColoredBox(color: track),
-                  FractionallySizedBox(
-                    alignment: Alignment.centerLeft,
-                    widthFactor: progress,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(colors: gradColors),
-                      ),
-                    ),
+    final nodes = <Widget>[];
+    for (var i = 0; i < _totalSteps; i++) {
+      final done = i < cur;
+      final isCur = i == cur;
+      final base = _stepAccent(i);
+      final size = isCur ? 30.0 : 22.0;
+
+      final ring = isCur
+          ? Container(
+              width: size + 10,
+              height: size + 10,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: base.withValues(alpha: 0.16),
+                border: Border.all(
+                  color: base.withValues(alpha: 0.42),
+                ),
+              ),
+              alignment: Alignment.center,
+            )
+          : null;
+
+      final dot = AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        width: size,
+        height: size,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: isCur
+              ? base
+              : done
+                  ? base.withValues(alpha: 0.85)
+                  : (isDark
+                      ? Colors.white.withValues(alpha: 0.08)
+                      : Colors.white),
+          border: Border.all(
+            color: isCur || done
+                ? base
+                : (isDark
+                    ? Colors.white.withValues(alpha: 0.18)
+                    : ThemeHelpers.borderColor(context)
+                        .withValues(alpha: 0.55)),
+            width: isCur ? 0 : 1,
+          ),
+          boxShadow: isCur
+              ? [
+                  BoxShadow(
+                    color: base.withValues(alpha: 0.32),
+                    blurRadius: 14,
+                    offset: const Offset(0, 4),
                   ),
-                ],
+                ]
+              : null,
+        ),
+        child: done
+            ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
+            : Text(
+                '${i + 1}',
+                style: TextStyle(
+                  fontSize: isCur ? 13 : 11,
+                  fontWeight: FontWeight.w900,
+                  color: isCur
+                      ? Colors.white
+                      : (isDark
+                          ? Colors.white.withValues(alpha: 0.85)
+                          : ThemeHelpers.textSecondaryColor(context)),
+                ),
+              ),
+      );
+
+      nodes.add(
+        SizedBox(
+          width: 36,
+          height: 40,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              ?ring,
+              dot,
+            ],
+          ),
+        ),
+      );
+
+      if (i < _totalSteps - 1) {
+        nodes.add(
+          Expanded(
+            child: Container(
+              height: 3,
+              margin: const EdgeInsets.symmetric(horizontal: 2),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                color: i < cur ? null : trackBg,
+                gradient: i < cur ? progressGrad : null,
               ),
             ),
           ),
+        );
+      }
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: nodes,
+          ),
           const SizedBox(height: 10),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                _wizardTitles[_currentStep.clamp(0, _totalSteps - 1)],
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                'Etapa ${cur + 1}',
                 style: theme.textTheme.labelMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: ThemeHelpers.textSecondaryColor(context),
-                  letterSpacing: 0.15,
+                  fontWeight: FontWeight.w900,
+                  color: accent,
+                  letterSpacing: 0.4,
                 ),
               ),
               Text(
-                '${_currentStep + 1}/$_totalSteps',
+                ' · ',
                 style: theme.textTheme.labelMedium?.copyWith(
+                  color: ThemeHelpers.textSecondaryColor(context),
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  _wizardTitles[cur],
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: ThemeHelpers.textColor(context),
+                  ),
+                ),
+              ),
+              Text(
+                '${cur + 1}/$_totalSteps',
+                style: theme.textTheme.labelSmall?.copyWith(
                   fontWeight: FontWeight.w800,
-                  color: _wizBrand(context),
+                  color: ThemeHelpers.textSecondaryColor(context),
+                  letterSpacing: 0.5,
                 ),
               ),
             ],
@@ -2462,194 +3684,176 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     );
   }
 
+  /// Hero da etapa — ícone tonal + chip de etapa + título + subtítulo.
+  /// Usa a identidade visual da marca (vermelho) com acento da etapa atual,
+  /// sem cards aninhados nem listas; é uma única assinatura visual no topo.
   Widget _wizardStepHeader(ThemeData theme) {
     final step = _currentStep.clamp(0, _totalSteps - 1);
     final isDark = _wizIsDark(context);
-    final cool = _wizCool(context);
+    final accent = _stepAccent(step);
     final brand = _wizBrand(context);
 
-    return Column(
+    return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          width: 56,
+          height: 56,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: BorderRadius.circular(18),
             gradient: LinearGradient(
-              colors: isDark
-                  ? [
-                      cool.withValues(alpha: 0.22),
-                      brand.withValues(alpha: 0.14),
-                    ]
-                  : [
-                      Colors.white.withValues(alpha: 0.95),
-                      cool.withValues(alpha: 0.08),
-                    ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color.lerp(accent, brand, isDark ? 0.18 : 0.08)!,
+                Color.lerp(accent, brand, isDark ? 0.42 : 0.28)!
+                    .withValues(alpha: 0.92),
+              ],
             ),
-            border: Border.all(
-              color: cool.withValues(alpha: isDark ? 0.38 : 0.22),
-            ),
-            boxShadow: isDark
-                ? [
-                    BoxShadow(
-                      color: cool.withValues(alpha: 0.12),
-                      blurRadius: 16,
-                      offset: const Offset(0, 6),
-                    ),
-                  ]
-                : [
-                    BoxShadow(
-                      color: brand.withValues(alpha: 0.06),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
+            boxShadow: [
+              BoxShadow(
+                color: accent.withValues(alpha: isDark ? 0.32 : 0.22),
+                blurRadius: 22,
+                offset: const Offset(0, 10),
+              ),
+            ],
           ),
-          child: Text(
-            'Etapa ${step + 1} de $_totalSteps',
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: isDark ? cool : _wizBrandMuted(context),
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.2,
-            ),
+          alignment: Alignment.center,
+          child: Icon(
+            _stepIcon(step),
+            color: Colors.white.withValues(alpha: 0.96),
+            size: 26,
           ),
         ),
-        const SizedBox(height: 18),
-        Text(
-          _wizardTitles[step],
-          style: theme.textTheme.headlineSmall?.copyWith(
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.35,
-            height: 1.15,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          _wizardSubtitles[step],
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(context),
-            height: 1.45,
-            fontSize: (theme.textTheme.bodyMedium?.fontSize ?? 14) + 0.25,
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 9,
+                  vertical: 3,
+                ),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  color: accent.withValues(alpha: isDark ? 0.20 : 0.12),
+                  border: Border.all(
+                    color: accent.withValues(alpha: 0.32),
+                  ),
+                ),
+                child: Text(
+                  'ETAPA ${step + 1} · $_totalSteps',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: accent,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _wizardTitles[step],
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.5,
+                  height: 1.05,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _wizardSubtitles[step],
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: ThemeHelpers.textSecondaryColor(context),
+                  height: 1.42,
+                  fontSize: (theme.textTheme.bodySmall?.fontSize ?? 12) + 0.5,
+                ),
+              ),
+            ],
           ),
         ),
       ],
     );
   }
 
+  /// Seção fluida do wizard — sem card/borda. Só "eyebrow" com ícone tonal +
+  /// título, linha hairline tonal e o conteúdo edge-to-edge usando toda a
+  /// largura do scroll. Desenho próximo de uma "página de revista":
+  /// inspiração em Imóveis e Kanban, onde o conteúdo respira sem caixas.
   Widget _wizardSection(
     ThemeData theme, {
     required String title,
     String? subtitle,
     Widget? trailing,
+    IconData? icon,
     required Widget child,
   }) {
     final isDark = _wizIsDark(context);
-    final bc = ThemeHelpers.borderColor(context);
-    final cool = _wizCool(context);
+    final accent = _stepAccent(_currentStep);
+    final hairline = isDark
+        ? Colors.white.withValues(alpha: 0.06)
+        : ThemeHelpers.borderColor(context).withValues(alpha: 0.40);
 
-    final borderColor = isDark
-        ? Colors.white.withValues(alpha: 0.13)
-        : bc.withValues(alpha: 0.34);
-
-    final deco = BoxDecoration(
-      borderRadius: BorderRadius.circular(22),
-      gradient: isDark
-          ? LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.white.withValues(alpha: 0.07),
-                const Color(0xFF28283E).withValues(alpha: 0.92),
-                Color.lerp(const Color(0xFF303052), const Color(0xFF28283E), 0.5)!
-                    .withValues(alpha: 0.95),
-              ],
-              stops: const [0.0, 0.45, 1.0],
-            )
-          : LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.white.withValues(alpha: 0.93),
-                const Color(0xFFF9FBFE),
-              ],
-            ),
-      border: Border.all(color: borderColor),
-      boxShadow: isDark
-          ? [
-              BoxShadow(
-                color: cool.withValues(alpha: 0.09),
-                blurRadius: 26,
-                offset: const Offset(0, 12),
-              ),
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.42),
-                blurRadius: 18,
-                offset: const Offset(0, 8),
-              ),
-            ]
-          : [
-              BoxShadow(
-                color: _wizBrand(context).withValues(alpha: 0.035),
-                blurRadius: 26,
-                offset: const Offset(0, 10),
-              ),
-              BoxShadow(
-                color: ThemeHelpers.shadowColor(context),
-                blurRadius: 14,
-                offset: const Offset(0, 4),
-              ),
-            ],
-    );
-
-    return DecoratedBox(
-      decoration: deco,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(22, 21, 22, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.15,
-                          height: 1.25,
-                        ),
-                      ),
-                      if (subtitle != null) ...[
-                        const SizedBox(height: 6),
-                        Text(
-                          subtitle,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: ThemeHelpers.textSecondaryColor(context),
-                            height: 1.42,
-                            fontSize:
-                                (theme.textTheme.bodySmall?.fontSize ?? 12) +
-                                    0.5,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
+            if (icon != null) ...[
+              Container(
+                width: 26,
+                height: 26,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(7),
+                  color: accent.withValues(alpha: isDark ? 0.18 : 0.10),
                 ),
-                if (trailing != null) ...[
-                  const SizedBox(width: 12),
-                  trailing,
+                alignment: Alignment.center,
+                child: Icon(icon, size: 14, color: accent),
+              ),
+              const SizedBox(width: 10),
+            ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title.toUpperCase(),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.1,
+                      color: accent,
+                      fontSize: 11,
+                    ),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: ThemeHelpers.textSecondaryColor(context),
+                        height: 1.35,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
-            const SizedBox(height: 18),
-            child,
+            if (trailing != null) ...[
+              const SizedBox(width: 10),
+              trailing,
+            ],
           ],
         ),
-      ),
+        const SizedBox(height: 8),
+        Container(height: 1, color: hairline),
+        const SizedBox(height: 14),
+        Theme(
+          data: _wizardFieldTheme(context),
+          child: child,
+        ),
+      ],
     );
   }
 
@@ -2703,48 +3907,412 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     );
   }
 
-  ChipThemeData _wizardChipTheme(ThemeData theme) {
+  /// Banner sutil mostrado quando o auto-save anônimo restaurou o que o
+  /// usuário tinha preenchido antes (paridade `localStorage` web). Permite
+  /// descartar o rascunho com confirmação para começar do zero.
+  Widget _buildAnonymousDraftRestoredBanner(ThemeData theme) {
     final isDark = _wizIsDark(context);
-    final cool = _wizCool(context);
-    final brand = _wizBrand(context);
-    final border = isDark
-        ? Colors.white.withValues(alpha: 0.14)
-        : ThemeHelpers.borderColor(context).withValues(alpha: 0.4);
-
-    return ChipThemeData(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      side: BorderSide(color: border),
-      showCheckmark: false,
-      selectedColor: isDark
-          ? Color.lerp(cool.withValues(alpha: 0.28), brand.withValues(alpha: 0.15), 0.5)!
-          : brand.withValues(alpha: 0.12),
-      backgroundColor: isDark
-          ? Colors.white.withValues(alpha: 0.04)
-          : Colors.white.withValues(alpha: 0.65),
-      labelStyle:
-          theme.textTheme.labelLarge!.copyWith(fontWeight: FontWeight.w600),
+    final accent = _wizCool(context);
+    return Container(
+      margin: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+      padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        color: accent.withValues(alpha: isDark ? 0.14 : 0.08),
+        border: Border.all(
+          color: accent.withValues(alpha: isDark ? 0.40 : 0.30),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.history_rounded, size: 16, color: accent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Rascunho deste dispositivo restaurado — continue de onde parou.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                height: 1.3,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: _isLoading ? null : _confirmDiscardAnonymousDraft,
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: Text(
+              'Descartar',
+              style: theme.textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.w900,
+                color: accent,
+                letterSpacing: 0.3,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
-  InputDecoration _wizardOutlinedFieldDecoration(String labelText) {
+  /// Banner informativo quando o endereço vem de um condomínio ou
+  /// empreendimento vinculado (paridade com o web — ali os campos ficam
+  /// editáveis mas o endereço é pré-preenchido). Mostra o nome da entidade
+  /// vinculada e um atalho "Trocar configuração" que reabre o setup.
+  Widget _buildLinkedAddressBanner(
+    ThemeData theme, {
+    required bool isCondo,
+    required String? entityName,
+    required bool loading,
+  }) {
     final isDark = _wizIsDark(context);
-    final soft = isDark
-        ? Colors.white.withValues(alpha: 0.14)
-        : ThemeHelpers.borderColor(context).withValues(alpha: 0.38);
+    final accent = _stepAccent(_currentStep);
+    final fill = isDark
+        ? Colors.white.withValues(alpha: 0.04)
+        : Colors.white.withValues(alpha: 0.78);
+    final border = accent.withValues(alpha: isDark ? 0.30 : 0.22);
 
-    final focusBlend = Color.lerp(_wizCool(context), _wizBrand(context), 0.45)!;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: fill,
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              color: accent.withValues(alpha: isDark ? 0.18 : 0.12),
+            ),
+            child: Icon(
+              isCondo ? Icons.apartment_rounded : Icons.location_city_rounded,
+              size: 18,
+              color: accent,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isCondo
+                      ? 'VINCULADO A CONDOMÍNIO'
+                      : 'VINCULADO A EMPREENDIMENTO',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.0,
+                    fontSize: 10,
+                    color: accent,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  loading
+                      ? 'Carregando endereço do cadastro…'
+                      : (entityName ?? '—'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    height: 1.25,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'CEP e endereço vêm do cadastro. Você pode revisar abaixo se '
+                  'precisar ajustar algo na unidade.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (loading)
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: accent,
+                ),
+              ),
+            )
+          else
+            TextButton(
+              onPressed: _isLoading
+                  ? null
+                  : () => _openPropertyCreationSetup(isInitial: false),
+              style: TextButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: Text(
+                'Trocar',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: accent,
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
+  /// Faixa "tipo · origem do endereço" que substitui o ChoiceChip de tipo
+  /// quando estamos em criação fresca (web `CreatePropertyPage` → linha 4070).
+  /// O tipo já vem fixado pelo modal de pré-criação; aqui só há um botão
+  /// "Alterar" que reabre o setup.
+  Widget _buildTypeSummaryRow(ThemeData theme) {
+    final isDark = _wizIsDark(context);
+    final accent = _stepAccent(_currentStep);
+    final modeLabel = _addressMode == PropertyCreationAddressMode.condominium
+        ? '· Endereço pelo condomínio'
+        : _addressMode == PropertyCreationAddressMode.empreendimento
+            ? '· Endereço pelo empreendimento'
+            : '· Endereço próprio (CEP)';
+
+    IconData typeIcon(PropertyType t) {
+      switch (t) {
+        case PropertyType.house:
+          return Icons.home_rounded;
+        case PropertyType.apartment:
+          return Icons.apartment_rounded;
+        case PropertyType.commercial:
+          return Icons.business_rounded;
+        case PropertyType.land:
+          return Icons.location_on_rounded;
+        case PropertyType.rural:
+          return Icons.cottage_rounded;
+      }
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.04)
+            : Colors.white.withValues(alpha: 0.78),
+        border: Border.all(
+          color: accent.withValues(alpha: isDark ? 0.30 : 0.22),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              color: accent.withValues(alpha: isDark ? 0.18 : 0.12),
+            ),
+            child: Icon(typeIcon(_selectedType), size: 18, color: accent),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _selectedType.label,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    height: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  modeLabel,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton.icon(
+            onPressed: _isLoading
+                ? null
+                : () => _openPropertyCreationSetup(isInitial: false),
+            icon: const Icon(Icons.tune_rounded, size: 16),
+            label: const Text('Alterar'),
+            style: TextButton.styleFrom(
+              foregroundColor: accent,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              textStyle: theme.textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.3,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Tema dos chips dentro do wizard — pill totalmente arredondada, borda
+  /// hairline; quando selecionado, fill suave no acento da etapa e texto na
+  /// cor do acento (peso 800). Sem checkmark por padrão (override por chip
+  /// quando precisar). Usado por `ChoiceChip` e `FilterChip`.
+  ChipThemeData _wizardChipTheme(ThemeData theme) {
+    final isDark = _wizIsDark(context);
+    final accent = _stepAccent(_currentStep);
+    final border = isDark
+        ? Colors.white.withValues(alpha: 0.10)
+        : ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
+
+    return ChipThemeData(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      labelPadding: const EdgeInsets.symmetric(horizontal: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+      side: WidgetStateBorderSide.resolveWith((states) {
+        if (states.contains(WidgetState.selected)) {
+          return BorderSide(color: accent.withValues(alpha: 0.55), width: 1.2);
+        }
+        return BorderSide(color: border);
+      }),
+      showCheckmark: false,
+      checkmarkColor: accent,
+      selectedColor: accent.withValues(alpha: isDark ? 0.18 : 0.10),
+      backgroundColor: isDark
+          ? Colors.white.withValues(alpha: 0.035)
+          : Colors.white.withValues(alpha: 0.70),
+      labelStyle: theme.textTheme.labelLarge!.copyWith(
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.1,
+        fontSize: 13,
+      ),
+      secondaryLabelStyle: theme.textTheme.labelLarge!.copyWith(
+        fontWeight: FontWeight.w800,
+        letterSpacing: 0.1,
+        fontSize: 13,
+        color: accent,
+      ),
+      brightness: theme.brightness,
+    );
+  }
+
+  /// Decoração refinada para `DropdownButtonFormField` dentro do wizard.
+  /// Usa o `_wizardFieldTheme` (fill, borda, foco) e adiciona um ícone
+  /// leading discreto na cor de acento da etapa.
+  InputDecoration _wizardDropdownDecoration(
+    String labelText, {
+    IconData? icon,
+    String? hint,
+  }) {
+    final accent = _stepAccent(_currentStep);
     return InputDecoration(
       labelText: labelText,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(color: soft),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(color: focusBlend, width: isDark ? 1.85 : 1.6),
+      hintText: hint,
+      prefixIcon: icon != null
+          ? Padding(
+              padding: const EdgeInsets.only(left: 12, right: 6),
+              child: Icon(icon, size: 18, color: accent),
+            )
+          : null,
+      prefixIconConstraints: icon != null
+          ? const BoxConstraints(minWidth: 36, minHeight: 36)
+          : null,
+    );
+  }
+
+  /// Linha de toggle (switch) refinada e fluida — sem caixa/borda. Apenas
+  /// um ícone tonal, título, subtítulo e o switch alinhado à direita.
+  /// Usa o `switchTheme` herdado de `_wizardFieldTheme` (acento da etapa).
+  Widget _wizardSwitchRow(
+    ThemeData theme, {
+    required String title,
+    String? subtitle,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+    IconData? icon,
+  }) {
+    final accent = _stepAccent(_currentStep);
+    final isDark = _wizIsDark(context);
+    return InkWell(
+      onTap: () => onChanged(!value),
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            if (icon != null) ...[
+              Container(
+                width: 32,
+                height: 32,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  color: accent.withValues(alpha: isDark ? 0.16 : 0.10),
+                ),
+                child: Icon(icon, size: 16, color: accent),
+              ),
+              const SizedBox(width: 12),
+            ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      height: 1.25,
+                    ),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: ThemeHelpers.textSecondaryColor(context),
+                        height: 1.32,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Transform.scale(
+              scale: 0.88,
+              alignment: Alignment.centerRight,
+              child: Switch.adaptive(
+                value: value,
+                onChanged: onChanged,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2759,105 +4327,26 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           SizedBox(height: _wizGapAfterHeader),
           _wizardSection(
             theme,
+            icon: Icons.auto_awesome_rounded,
             title: 'Gerar texto com IA',
             subtitle:
                 'Na última etapa você pode criar ou ajustar título e descrição automaticamente.',
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(11),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        _wizCool(context).withValues(alpha: 0.28),
-                        _wizBrand(context).withValues(alpha: 0.22),
-                      ],
-                    ),
-                    border: Border.all(
-                      color: _wizCool(context).withValues(alpha: 0.35),
-                    ),
-                  ),
-                  child: Icon(
-                    Icons.auto_awesome_rounded,
-                    color: Color.lerp(_wizCool(context), Colors.white, 0.45),
-                    size: 23,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Preencher título e descrição na revisão',
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      SwitchTheme(
-                        data: SwitchThemeData(
-                          overlayColor:
-                              WidgetStateProperty.all(Colors.transparent),
-                          trackOutlineWidth:
-                              WidgetStateProperty.resolveWith((states) => 1),
-                          trackOutlineColor: WidgetStateProperty.resolveWith(
-                            (states) => ThemeHelpers.borderColor(context),
-                          ),
-                          thumbColor: WidgetStateProperty.resolveWith((states) {
-                            if (states.contains(WidgetState.selected)) {
-                              return _wizBrand(context);
-                            }
-                            return ThemeHelpers.borderColor(context);
-                          }),
-                          trackColor: WidgetStateProperty.resolveWith((states) {
-                            if (states.contains(WidgetState.selected)) {
-                              return Color.lerp(
-                                _wizCool(context),
-                                _wizBrand(context),
-                                0.35,
-                              )!.withValues(alpha: 0.55);
-                            }
-                            return _wizIsDark(context)
-                                ? Colors.white.withValues(alpha: 0.08)
-                                : null;
-                          }),
-                        ),
-                        child: Transform.scale(
-                          scale: 0.92,
-                          alignment: Alignment.centerLeft,
-                          child: Switch.adaptive(
-                            value: _autoGenerateOnReview,
-                            onChanged: (value) {
-                              setState(() {
-                                _autoGenerateOnReview = value;
-                              });
-                            },
-                          ),
-                        ),
-                      ),
-                      Text(
-                        _autoGenerateOnReview
-                            ? 'Ao final, a IA usa os dados do formulário para sugerir título e descrição.'
-                            : 'Informe manualmente aqui ou use o botão de IA na etapa final.',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                          height: 1.38,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+            child: _wizardSwitchRow(
+              theme,
+              icon: Icons.auto_awesome_rounded,
+              title: 'Preencher título e descrição na revisão',
+              subtitle: _autoGenerateOnReview
+                  ? 'Ao final, a IA usa os dados do formulário para sugerir título e descrição.'
+                  : 'Informe manualmente aqui ou use o botão de IA na etapa final.',
+              value: _autoGenerateOnReview,
+              onChanged: (value) =>
+                  _setStateAndPersist(() => _autoGenerateOnReview = value),
             ),
           ),
           SizedBox(height: _wizGapBetweenSections),
           _wizardSection(
             theme,
+            icon: Icons.title_rounded,
             title: 'Texto do anúncio',
             subtitle: _autoGenerateOnReview
                 ? 'Opcional agora — preencha se quiser adiantar revisão.'
@@ -2931,32 +4420,35 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           SizedBox(height: _wizGapBetweenSections),
           _wizardSection(
             theme,
+            icon: Icons.category_rounded,
             title: 'Tipo de imóvel *',
-            subtitle: 'Escolha a categoria que melhor representa o anúncio.',
-            child: Theme(
-              data: theme.copyWith(chipTheme: _wizardChipTheme(theme)),
-              child: Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: PropertyType.values.map((type) {
-                  final isSelected = _selectedType == type;
-                  return ChoiceChip(
-                    label: Text(type.label),
-                    selected: isSelected,
-                    onSelected: (selected) {
-                      if (selected) {
-                        setState(() => _selectedType = type);
-                      }
-                    },
-                  );
-                }).toList(),
-              ),
-            ),
+            subtitle: widget.propertyId == null
+                ? 'Definido no início — toque em "Alterar" para revisar com o endereço.'
+                : 'Escolha a categoria que melhor representa o anúncio.',
+            child: widget.propertyId == null
+                ? _buildTypeSummaryRow(theme)
+                : Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: PropertyType.values.map((type) {
+                      final isSelected = _selectedType == type;
+                      return ChoiceChip(
+                        label: Text(type.label),
+                        selected: isSelected,
+                        onSelected: (selected) {
+                          if (selected) {
+                            _setStateAndPersist(() => _selectedType = type);
+                          }
+                        },
+                      );
+                    }).toList(),
+                  ),
           ),
           if (_formRequiredKeys.contains('teamId') || _formTeams.isNotEmpty) ...[
             SizedBox(height: _wizGapBetweenSections),
             _wizardSection(
               theme,
+              icon: Icons.groups_2_rounded,
               title: _formRequiredKeys.contains('teamId')
                   ? 'Equipe *'
                   : 'Equipe',
@@ -2971,13 +4463,12 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                       ),
                     )
                   : DropdownButtonFormField<String?>(
-                      value: _selectedTeamId,
-                      decoration: InputDecoration(
-                        labelText: 'Selecionar equipe',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
+                      initialValue: _selectedTeamId,
+                      decoration: _wizardDropdownDecoration(
+                        'Selecionar equipe',
+                        icon: Icons.groups_2_rounded,
                       ),
+                      icon: const Icon(Icons.expand_more_rounded, size: 18),
                       isExpanded: true,
                       items: [
                         if (!_formRequiredKeys.contains('teamId'))
@@ -2997,7 +4488,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                       ],
                       onChanged: _formTeams.isEmpty
                           ? null
-                          : (v) => setState(() => _selectedTeamId = v),
+                          : (v) => _setStateAndPersist(() => _selectedTeamId = v),
                       validator: _formRequiredKeys.contains('teamId')
                           ? (v) => (v == null || v.isEmpty)
                               ? 'Selecione uma equipe'
@@ -3009,6 +4500,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           SizedBox(height: _wizGapBetweenSections),
           _wizardSection(
             theme,
+            icon: Icons.lock_outline_rounded,
             title: _formRequiredKeys.contains('internalNotes')
                 ? 'Observações internas *'
                 : 'Observações internas',
@@ -3039,6 +4531,12 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   }
 
   Widget _buildStep2Location(ThemeData theme) {
+    final linkedToCondo =
+        _addressMode == PropertyCreationAddressMode.condominium;
+    final linkedToEmp =
+        _addressMode == PropertyCreationAddressMode.empreendimento;
+    final linked = linkedToCondo || linkedToEmp;
+
     return SingleChildScrollView(
       padding: _wizScrollPadding,
       child: Column(
@@ -3046,8 +4544,18 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         children: [
           _wizardStepHeader(theme),
           SizedBox(height: _wizGapAfterHeader),
+          if (linked) ...[
+            _buildLinkedAddressBanner(
+              theme,
+              isCondo: linkedToCondo,
+              entityName: _addressLinkedEntityName,
+              loading: _isPrefillingFromLinkedEntity,
+            ),
+            SizedBox(height: _wizGapBetweenSections),
+          ],
           _wizardSection(
             theme,
+            icon: Icons.travel_explore_rounded,
             title: 'Busca por CEP',
             subtitle:
                 'Toque na lupa para consultar quando o número estiver completo.',
@@ -3092,6 +4600,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           SizedBox(height: _wizGapBetweenSections),
           _wizardSection(
             theme,
+            icon: Icons.signpost_rounded,
             title: 'Logradouro',
             subtitle: 'Nome da rua, número e opcionalmente complemento.',
             child: Column(
@@ -3156,6 +4665,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           SizedBox(height: _wizGapBetweenSections),
           _wizardSection(
             theme,
+            icon: Icons.holiday_village_rounded,
             title: 'Bairro e região',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -3200,6 +4710,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           SizedBox(height: _wizGapBetweenSections),
           _wizardSection(
             theme,
+            icon: Icons.location_city_rounded,
             title: 'Cidade e UF',
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -3259,17 +4770,22 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
               ],
             ),
           ),
-          if (_formRequiredKeys.contains('condominiumId') ||
-              _formRequiredKeys.contains('empreendimentoId') ||
-              _condominiumOptions.isNotEmpty ||
-              _empreendimentoOptions.isNotEmpty ||
-              (_selectedCondominiumId != null &&
-                  _selectedCondominiumId!.isNotEmpty) ||
-              (_selectedEmpreendimentoId != null &&
-                  _selectedEmpreendimentoId!.isNotEmpty)) ...[
+          // Em criação fresca, o vínculo (condomínio/empreendimento) é
+          // definido no modal de pré-criação — esta seção fica reservada
+          // para edição, onde o usuário pode revisar/trocar manualmente.
+          if (widget.propertyId != null &&
+              (_formRequiredKeys.contains('condominiumId') ||
+                  _formRequiredKeys.contains('empreendimentoId') ||
+                  _condominiumOptions.isNotEmpty ||
+                  _empreendimentoOptions.isNotEmpty ||
+                  (_selectedCondominiumId != null &&
+                      _selectedCondominiumId!.isNotEmpty) ||
+                  (_selectedEmpreendimentoId != null &&
+                      _selectedEmpreendimentoId!.isNotEmpty))) ...[
             SizedBox(height: _wizGapBetweenSections),
             _wizardSection(
               theme,
+              icon: Icons.apartment_rounded,
               title: 'Condomínio e empreendimento',
               subtitle:
                   'Mesma configuração obrigatória opcional do CRM (`propertyFormRequiredFields`).',
@@ -3293,15 +4809,14 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                       (_selectedCondominiumId != null &&
                           _selectedCondominiumId!.isNotEmpty))
                     DropdownButtonFormField<String?>(
-                      value: _selectedCondominiumId,
-                      decoration: InputDecoration(
-                        labelText: _formRequiredKeys.contains('condominiumId')
+                      initialValue: _selectedCondominiumId,
+                      decoration: _wizardDropdownDecoration(
+                        _formRequiredKeys.contains('condominiumId')
                             ? 'Condomínio *'
                             : 'Condomínio',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
+                        icon: Icons.apartment_rounded,
                       ),
+                      icon: const Icon(Icons.expand_more_rounded, size: 18),
                       isExpanded: true,
                       items: [
                         if (!_formRequiredKeys.contains('condominiumId'))
@@ -3323,7 +4838,17 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                           _condominiumOptions.isEmpty && !_formRequiredKeys.contains('condominiumId')
                               ? null
                               : (v) =>
-                                  setState(() => _selectedCondominiumId = v),
+                                  _setStateAndPersist(() {
+                                    _selectedCondominiumId = v;
+                                    // Em edição, sincroniza o modo de
+                                    // endereço com a escolha do dropdown.
+                                    _addressMode = (v != null && v.isNotEmpty)
+                                        ? PropertyCreationAddressMode.condominium
+                                        : (_selectedEmpreendimentoId != null &&
+                                                _selectedEmpreendimentoId!.isNotEmpty)
+                                            ? PropertyCreationAddressMode.empreendimento
+                                            : PropertyCreationAddressMode.standalone;
+                                  }),
                       validator: _formRequiredKeys.contains('condominiumId')
                           ? (v) => (v == null || v.isEmpty)
                               ? 'Selecione um condomínio'
@@ -3347,16 +4872,14 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                           _selectedEmpreendimentoId!.isNotEmpty)) ...[
                     const SizedBox(height: 16),
                     DropdownButtonFormField<String?>(
-                      value: _selectedEmpreendimentoId,
-                      decoration: InputDecoration(
-                        labelText:
-                            _formRequiredKeys.contains('empreendimentoId')
-                                ? 'Empreendimento *'
-                                : 'Empreendimento',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
+                      initialValue: _selectedEmpreendimentoId,
+                      decoration: _wizardDropdownDecoration(
+                        _formRequiredKeys.contains('empreendimentoId')
+                            ? 'Empreendimento *'
+                            : 'Empreendimento',
+                        icon: Icons.location_city_rounded,
                       ),
+                      icon: const Icon(Icons.expand_more_rounded, size: 18),
                       isExpanded: true,
                       items: [
                         if (!_formRequiredKeys.contains('empreendimentoId'))
@@ -3378,7 +4901,15 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                               !_formRequiredKeys.contains('empreendimentoId')
                           ? null
                           : (v) =>
-                              setState(() => _selectedEmpreendimentoId = v),
+                              _setStateAndPersist(() {
+                                _selectedEmpreendimentoId = v;
+                                _addressMode = (v != null && v.isNotEmpty)
+                                    ? PropertyCreationAddressMode.empreendimento
+                                    : (_selectedCondominiumId != null &&
+                                            _selectedCondominiumId!.isNotEmpty)
+                                        ? PropertyCreationAddressMode.condominium
+                                        : PropertyCreationAddressMode.standalone;
+                              }),
                       validator:
                           _formRequiredKeys.contains('empreendimentoId')
                               ? (v) => (v == null || v.isEmpty)
@@ -3406,6 +4937,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           SizedBox(height: _wizGapAfterHeader),
           _wizardSection(
             theme,
+            icon: Icons.straighten_rounded,
             title: 'Metragens',
             subtitle: 'Informe pelo menos a área total livre útil quando souber.',
             child: Row(
@@ -3483,6 +5015,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           SizedBox(height: _wizGapBetweenSections),
           _wizardSection(
             theme,
+            icon: Icons.bed_rounded,
             title: 'Cômodos e vagas',
             subtitle: 'Use zero nos campos que não se aplicam.',
             child: Column(
@@ -3606,19 +5139,14 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           SizedBox(height: _wizGapBetweenSections),
           _wizardSection(
             theme,
+            icon: Icons.star_rounded,
             title: 'Destaques e comodidades',
             subtitle:
                 'Toque para marcar — ajudam filtros internos e a descrição com IA.',
-            child: Theme(
-              data: theme.copyWith(
-                chipTheme: _wizardChipTheme(theme).copyWith(
-                  showCheckmark: true,
-                ),
-              ),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
                   'Ar condicionado',
                   'Aquecimento',
                   'Elevador',
@@ -3669,7 +5197,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                         selected: isSelected,
                         showCheckmark: true,
                         onSelected: (selected) {
-                          setState(() {
+                          _setStateAndPersist(() {
                             if (selected) {
                               _selectedFeatures.add(feature);
                             } else {
@@ -3680,7 +5208,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                       );
                     })
                     .toList(),
-              ),
             ),
           ),
         ],
@@ -3689,9 +5216,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   }
 
   Widget _buildStep4Values(ThemeData theme) {
-    final track = _wizIsDark(context)
-        ? const Color(0xFF2A2A44).withValues(alpha: 0.55)
-        : ThemeHelpers.borderColor(context).withValues(alpha: 0.06);
     return SingleChildScrollView(
       padding: _wizScrollPadding,
       child: Column(
@@ -3701,6 +5225,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           SizedBox(height: _wizGapAfterHeader),
           _wizardSection(
             theme,
+            icon: Icons.payments_rounded,
             title: 'Anúncio',
             subtitle: 'Informe apenas o que o imóvel oferece hoje.',
             child: Column(
@@ -3813,66 +5338,21 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           SizedBox(height: _wizGapBetweenSections),
           _wizardSection(
             theme,
+            icon: Icons.handshake_rounded,
             title: 'Negociação',
             subtitle: 'Opcional — ative para registrar mínimos e respostas automáticas.',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: track,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: _wizIsDark(context)
-                          ? Colors.white.withValues(alpha: 0.08)
-                          : ThemeHelpers.borderColor(context)
-                              .withValues(alpha: 0.22),
-                    ),
-                  ),
-                  child: Theme(
-                    data: theme.copyWith(
-                      switchTheme: SwitchThemeData(
-                        thumbColor: WidgetStateProperty.resolveWith((states) {
-                          if (states.contains(WidgetState.selected)) {
-                            return _wizBrand(context);
-                          }
-                          return null;
-                        }),
-                        trackColor: WidgetStateProperty.resolveWith((states) {
-                          if (states.contains(WidgetState.selected)) {
-                            return Color.lerp(
-                              _wizCool(context),
-                              _wizBrand(context),
-                              0.28,
-                            )!.withValues(alpha: 0.45);
-                          }
-                          return null;
-                        }),
-                      ),
-                    ),
-                    child: SwitchListTile(
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 4,
-                      ),
-                      title: Text(
-                        'Aceita negociação',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      subtitle: Text(
-                        'Permite ofertas entre o valor anunciado e o mínimo definido.',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                          height: 1.35,
-                        ),
-                      ),
-                      value: _acceptsNegotiation,
-                      onChanged: (value) =>
-                          setState(() => _acceptsNegotiation = value),
-                    ),
-                  ),
+                _wizardSwitchRow(
+                  theme,
+                  icon: Icons.handshake_rounded,
+                  title: 'Aceita negociação',
+                  subtitle:
+                      'Permite ofertas entre o valor anunciado e o mínimo definido.',
+                  value: _acceptsNegotiation,
+                  onChanged: (value) =>
+                      _setStateAndPersist(() => _acceptsNegotiation = value),
                 ),
                 if (_acceptsNegotiation) ...[
                   const SizedBox(height: 18),
@@ -3954,20 +5434,26 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                   ),
                   const SizedBox(height: 14),
                   Text(
-                    'Se receber uma oferta abaixo do mínimo',
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
+                    'SE RECEBER OFERTA ABAIXO DO MÍNIMO',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.0,
+                      fontSize: 10,
+                      color: ThemeHelpers.textSecondaryColor(context),
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
                         child: DropdownButtonFormField<String>(
                           initialValue: _offerBelowMinSaleAction,
-                          decoration:
-                              _wizardOutlinedFieldDecoration('Canal — venda'),
+                          decoration: _wizardDropdownDecoration(
+                            'Canal — venda',
+                            icon: Icons.sell_rounded,
+                          ),
+                          icon: const Icon(Icons.expand_more_rounded, size: 18),
                           items: const [
                             DropdownMenuItem(
                               value: 'reject',
@@ -3983,7 +5469,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                             ),
                           ],
                           onChanged: (value) {
-                            setState(() {
+                            _setStateAndPersist(() {
                               _offerBelowMinSaleAction = value;
                             });
                           },
@@ -3993,9 +5479,11 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                       Expanded(
                         child: DropdownButtonFormField<String>(
                           initialValue: _offerBelowMinRentAction,
-                          decoration: _wizardOutlinedFieldDecoration(
+                          decoration: _wizardDropdownDecoration(
                             'Canal — aluguel',
+                            icon: Icons.event_repeat_rounded,
                           ),
+                          icon: const Icon(Icons.expand_more_rounded, size: 18),
                           items: const [
                             DropdownMenuItem(
                               value: 'reject',
@@ -4011,7 +5499,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                             ),
                           ],
                           onChanged: (value) {
-                            setState(() {
+                            _setStateAndPersist(() {
                               _offerBelowMinRentAction = value;
                             });
                           },
@@ -4061,6 +5549,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           SizedBox(height: _wizGapAfterHeader),
           _wizardSection(
             theme,
+            icon: Icons.collections_rounded,
             title: 'Fotos do imóvel',
             subtitle:
                 'Entre $_kMinGalleryImagesWeb e $_kMaxGalleryImagesWeb imagens, como no cadastro web.',
@@ -4351,6 +5840,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           SizedBox(height: _wizGapAfterHeader),
           _wizardSection(
             theme,
+            icon: Icons.badge_rounded,
             title: 'Dados do proprietário',
             subtitle:
                 'Nome e telefone são obrigatórios para enviar ao servidor (mesmo CRM web). Os demais campos são opcionais.',
@@ -4463,6 +5953,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           SizedBox(height: _wizGapBetweenSections),
           _wizardSection(
             theme,
+            icon: Icons.people_alt_rounded,
             title: 'Leads interessados',
             subtitle: 'Opcional — vincule quem já demonstrou interesse.',
             child: Column(
@@ -4550,6 +6041,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           SizedBox(height: _wizGapAfterHeader),
           _wizardSection(
             theme,
+            icon: Icons.auto_awesome_rounded,
             title: 'Sugestões com IA',
             subtitle:
                 'Combina tipo, local, medidas, valores e destaques do formulário.',
@@ -4625,6 +6117,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           SizedBox(height: _wizGapBetweenSections),
           _wizardSection(
             theme,
+            icon: Icons.edit_note_rounded,
             title: 'Texto que vai ao ar',
             subtitle: 'Obrigatório nesta etapa — mesmo que a IA já tenha preenchido.',
             child: Column(
@@ -4672,6 +6165,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           SizedBox(height: _wizGapBetweenSections),
           _wizardSection(
             theme,
+            icon: Icons.public_rounded,
             title: 'Disponibilidade e site',
             subtitle: !_approvalSettingsLoaded
                 ? 'Carregando regras da empresa…'
@@ -4688,59 +6182,58 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                     !_requireApprovalToBeAvailable &&
                     !_requireOwnerAuthorizationToBeAvailable) ...[
                   Text(
-                    'Status após cadastro',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
+                    'STATUS APÓS CADASTRO',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.0,
+                      fontSize: 10,
+                      color: ThemeHelpers.textSecondaryColor(context),
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  SegmentedButton<bool>(
-                    segments: const [
-                      ButtonSegment<bool>(
-                        value: true,
-                        label: Text('Rascunho'),
-                        icon: Icon(Icons.edit_note_outlined),
-                      ),
-                      ButtonSegment<bool>(
-                        value: false,
-                        label: Text('Disponível'),
-                        icon: Icon(Icons.check_circle_outline),
-                      ),
-                    ],
-                    selected: {_listingStatusIsDraft},
-                    onSelectionChanged: (s) {
-                      setState(() {
-                        _listingStatusIsDraft = s.first;
-                      });
-                    },
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment<bool>(
+                          value: true,
+                          label: Text('Rascunho'),
+                          icon: Icon(Icons.edit_note_outlined),
+                        ),
+                        ButtonSegment<bool>(
+                          value: false,
+                          label: Text('Disponível'),
+                          icon: Icon(Icons.check_circle_outline),
+                        ),
+                      ],
+                      selected: {_listingStatusIsDraft},
+                      onSelectionChanged: (s) {
+                        _setStateAndPersist(() {
+                          _listingStatusIsDraft = s.first;
+                        });
+                      },
+                    ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 18),
                 ],
-                SwitchListTile.adaptive(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Destaque interno'),
-                  subtitle: Text(
-                    'Mesmo campo «destaque» do cadastro web.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
-                    ),
-                  ),
+                _wizardSwitchRow(
+                  theme,
+                  icon: Icons.workspace_premium_rounded,
+                  title: 'Destaque interno',
+                  subtitle: 'Mesmo campo «destaque» do cadastro web.',
                   value: _isFeatured,
-                  onChanged: (v) => setState(() => _isFeatured = v),
+                  onChanged: (v) => _setStateAndPersist(() => _isFeatured = v),
                 ),
-                SwitchListTile.adaptive(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Publicar no site'),
-                  subtitle: Text(
-                    _requireApprovalToPublishOnSite
-                        ? 'Empresa pode exigir aprovação específica para publicação — o servidor reforça ao salvar.'
-                        : 'Ao ativar: mínimo de $_kMinGalleryImagesWeb imagens e regras de status como no CRM web.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
-                    ),
-                  ),
+                const SizedBox(height: 4),
+                _wizardSwitchRow(
+                  theme,
+                  icon: Icons.public_rounded,
+                  title: 'Publicar no site',
+                  subtitle: _requireApprovalToPublishOnSite
+                      ? 'Empresa pode exigir aprovação específica para publicação — o servidor reforça ao salvar.'
+                      : 'Ao ativar: mínimo de $_kMinGalleryImagesWeb imagens e regras de status como no CRM web.',
                   value: _publishToSite,
-                  onChanged: (v) => setState(() => _publishToSite = v),
+                  onChanged: (v) => _setStateAndPersist(() => _publishToSite = v),
                 ),
               ],
             ),
@@ -4749,137 +6242,190 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           _wizardSection(
             theme,
             title: 'Resumo rápido',
-            subtitle: 'Use como checklist antes de confirmar.',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _buildReviewCard(theme, 'Tipo', _selectedType.label),
-                const SizedBox(height: 10),
-                _buildReviewCard(
-                  theme,
-                  'Localização',
-                  '${_streetController.text}, ${_numberController.text} · ${_neighborhoodController.text}, ${_cityController.text} · ${_stateController.text}',
-                ),
-                const SizedBox(height: 10),
-                _buildReviewCard(
-                  theme,
-                  'Área total',
-                  '${_totalAreaController.text} m²',
-                ),
-                if (_builtAreaController.text.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  _buildReviewCard(
-                    theme,
-                    'Área construída',
-                    '${_builtAreaController.text} m²',
-                  ),
-                ],
-                if (_bedroomsController.text.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  _buildReviewCard(theme, 'Quartos', _bedroomsController.text),
-                ],
-                if (_bathroomsController.text.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  _buildReviewCard(
-                    theme,
-                    'Banheiros',
-                    _bathroomsController.text,
-                  ),
-                ],
-                if (_salePriceController.text.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  _buildReviewCard(
-                    theme,
-                    'Venda',
-                    'R\$ ${_salePriceController.text}',
-                  ),
-                ],
-                if (_rentPriceController.text.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  _buildReviewCard(
-                    theme,
-                    'Aluguel',
-                    'R\$ ${_rentPriceController.text}',
-                  ),
-                ],
-              ],
-            ),
+            subtitle: 'Conferência antes de confirmar.',
+            icon: Icons.inventory_2_rounded,
+            child: _buildReviewSummary(theme),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildReviewCard(ThemeData theme, String label, String value) {
+  /// Ficha de revisão — agrupa o que está preenchido em metadados visuais
+  /// (chips com ícone) em vez de empilhar muitos cards separados.
+  Widget _buildReviewSummary(ThemeData theme) {
     final isDark = _wizIsDark(context);
-    final cool = _wizCool(context);
-    final strip = Color.lerp(cool, _wizBrand(context), 0.35)!;
+    final accent = _stepAccent(_currentStep);
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 17, vertical: 15),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(17),
-        gradient: isDark
-            ? LinearGradient(
-                colors: [
-                  Colors.white.withValues(alpha: 0.05),
-                  Colors.white.withValues(alpha: 0.02),
-                ],
-              )
-            : null,
-        color: isDark ? null : Colors.white.withValues(alpha: 0.55),
-        border: Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.12)
-              : ThemeHelpers.borderColor(context).withValues(alpha: 0.3),
-        ),
+    final loc = [
+      _streetController.text.trim(),
+      _numberController.text.trim().isNotEmpty
+          ? ', ${_numberController.text.trim()}'
+          : '',
+      _neighborhoodController.text.trim().isNotEmpty
+          ? ' · ${_neighborhoodController.text.trim()}'
+          : '',
+      _cityController.text.trim().isNotEmpty
+          ? ' · ${_cityController.text.trim()}'
+          : '',
+      _stateController.text.trim().isNotEmpty
+          ? '/${_stateController.text.trim()}'
+          : '',
+    ].join().trim();
+
+    final beds = _bedroomsController.text.trim();
+    final baths = _bathroomsController.text.trim();
+    final suites = _suitesController.text.trim();
+    final parking = _parkingSpacesController.text.trim();
+
+    final salePrice = _salePriceController.text.trim();
+    final rentPrice = _rentPriceController.text.trim();
+
+    final totalImgs = _totalSelectableImageCount();
+
+    final tiles = <_ReviewTileData>[
+      _ReviewTileData(
+        icon: Icons.home_rounded,
+        label: 'Tipo',
+        value: _selectedType.label,
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 4,
-            height: 40,
-            margin: const EdgeInsets.only(right: 14, top: 2),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(4),
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  cool.withValues(alpha: 0.95),
-                  strip.withValues(alpha: 0.85),
-                ],
-              ),
-            ),
-          ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      if (loc.isNotEmpty)
+        _ReviewTileData(
+          icon: Icons.place_rounded,
+          label: 'Localização',
+          value: loc,
+        ),
+      _ReviewTileData(
+        icon: Icons.crop_square_rounded,
+        label: 'Área total',
+        value: _totalAreaController.text.isEmpty
+            ? '—'
+            : '${_totalAreaController.text} m²',
+      ),
+      if (_builtAreaController.text.isNotEmpty)
+        _ReviewTileData(
+          icon: Icons.architecture_rounded,
+          label: 'Construída',
+          value: '${_builtAreaController.text} m²',
+        ),
+      if (beds.isNotEmpty)
+        _ReviewTileData(
+          icon: Icons.bed_rounded,
+          label: 'Quartos',
+          value: beds,
+        ),
+      if (baths.isNotEmpty)
+        _ReviewTileData(
+          icon: Icons.bathtub_rounded,
+          label: 'Banheiros',
+          value: baths,
+        ),
+      if (suites.isNotEmpty)
+        _ReviewTileData(
+          icon: Icons.king_bed_rounded,
+          label: 'Suítes',
+          value: suites,
+        ),
+      if (parking.isNotEmpty)
+        _ReviewTileData(
+          icon: Icons.directions_car_rounded,
+          label: 'Vagas',
+          value: parking,
+        ),
+      if (salePrice.isNotEmpty)
+        _ReviewTileData(
+          icon: Icons.local_offer_rounded,
+          label: 'Venda',
+          value: 'R\$ $salePrice',
+          accent: const Color(0xFF10B981),
+        ),
+      if (rentPrice.isNotEmpty)
+        _ReviewTileData(
+          icon: Icons.event_repeat_rounded,
+          label: 'Aluguel',
+          value: 'R\$ $rentPrice',
+          accent: const Color(0xFF0EA5E9),
+        ),
+      _ReviewTileData(
+        icon: Icons.collections_rounded,
+        label: 'Fotos',
+        value: '$totalImgs imagem(ns)',
+        accent: const Color(0xFFA855F7),
+      ),
+      if (_selectedFeatures.isNotEmpty)
+        _ReviewTileData(
+          icon: Icons.star_rounded,
+          label: 'Destaques',
+          value: '${_selectedFeatures.length} marcado(s)',
+        ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, c) {
+        final wide = c.maxWidth >= 460;
+        final crossAxisCount = wide ? 2 : 1;
+        return GridView.count(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          crossAxisCount: crossAxisCount,
+          crossAxisSpacing: 18,
+          mainAxisSpacing: 14,
+          childAspectRatio: wide ? 5.6 : 7.2,
+          children: tiles.map((t) {
+            final tone = t.accent ?? accent;
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Text(
-                  label,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: ThemeHelpers.textSecondaryColor(context),
+                Container(
+                  width: 30,
+                  height: 30,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(9),
+                    color: tone.withValues(alpha: isDark ? 0.18 : 0.12),
                   ),
+                  child: Icon(t.icon, size: 16, color: tone),
                 ),
-                const SizedBox(height: 4),
-                SelectableText(
-                  value.isEmpty ? '—' : value,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    height: 1.35,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        t.label.toUpperCase(),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.0,
+                          fontSize: 10,
+                          color: ThemeHelpers.textSecondaryColor(context),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        t.value,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          height: 1.2,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
-            ),
-          ),
-        ],
-      ),
+            );
+          }).toList(),
+        );
+      },
     );
   }
 
+  /// `_buildFormField` — campo de texto leve do wizard.
+  /// O estilo (fill, borda, foco, padding) é todo herdado de `_wizardFieldTheme`,
+  /// que envolve o conteúdo de cada `_wizardSection`. Aqui só ficam o label
+  /// (acima do input) e os ajustes específicos do `TextFormField`.
   Widget _buildFormField(
     ThemeData theme, {
     required TextEditingController controller,
@@ -4899,11 +6445,13 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         if (label != null) ...[
           Text(
             label,
-            style: theme.textTheme.labelLarge?.copyWith(
-              fontWeight: FontWeight.w600,
+            style: theme.textTheme.labelMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: ThemeHelpers.textSecondaryColor(context),
+              letterSpacing: 0.2,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
         ],
         TextFormField(
           controller: controller,
@@ -4912,135 +6460,125 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           maxLength: maxLength,
           textCapitalization: textCapitalization ?? TextCapitalization.none,
           inputFormatters: inputFormatters,
-          style: theme.textTheme.bodyLarge?.copyWith(
+          style: theme.textTheme.bodyMedium?.copyWith(
             color: theme.colorScheme.onSurface,
+            fontWeight: FontWeight.w600,
           ),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: theme.textTheme.bodyLarge?.copyWith(
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.55),
-            ),
             prefixText: prefixText,
             suffixIcon: suffix,
             counterText: '',
-            filled: true,
-            fillColor: _wizIsDark(context)
-                ? Colors.white.withValues(alpha: 0.056)
-                : Colors.white.withValues(alpha: 0.72),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 17, vertical: 15),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(
-                color: _wizIsDark(context)
-                    ? Colors.white.withValues(alpha: 0.13)
-                    : ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
-              ),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(
-                color: Color.lerp(
-                      _wizCool(context),
-                      _wizBrand(context),
-                      0.45,
-                    ) ??
-                    _wizBrand(context),
-                width: _wizIsDark(context) ? 1.85 : 1.55,
-              ),
-            ),
           ),
         ),
       ],
     );
   }
 
+  /// Footer minimalista com micro-progressão (linha tonal sutil) e ações limpas.
   Widget _buildNavigationButtons(ThemeData theme) {
     final isDark = _wizIsDark(context);
+    final accent = _stepAccent(_currentStep);
     final topLine = isDark
-        ? Colors.white.withValues(alpha: 0.1)
-        : ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
+        ? Colors.white.withValues(alpha: 0.08)
+        : ThemeHelpers.borderColor(context).withValues(alpha: 0.40);
+    final progress =
+        ((_currentStep + 1) / _totalSteps).clamp(0.0, 1.0).toDouble();
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        gradient: isDark
-            ? LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  const Color(0xFF24243A).withValues(alpha: 0.92),
-                  const Color(0xFF1E1E30).withValues(alpha: 0.97),
-                ],
-              )
-            : LinearGradient(
-                colors: [
-                  Colors.white.withValues(alpha: 0.97),
-                  Color.lerp(Colors.white, _wizCool(context), 0.04)!,
-                ],
-              ),
-        border: Border(
-          top: BorderSide(color: topLine),
-        ),
+        color: isDark
+            ? const Color(0xFF1A1A2A).withValues(alpha: 0.96)
+            : Colors.white.withValues(alpha: 0.96),
+        border: Border(top: BorderSide(color: topLine)),
         boxShadow: [
           BoxShadow(
             color: isDark
-                ? Colors.black.withValues(alpha: 0.55)
-                : _wizBrand(context).withValues(alpha: 0.04),
-            blurRadius: isDark ? 22 : 18,
-            offset: const Offset(0, -8),
+                ? Colors.black.withValues(alpha: 0.45)
+                : Colors.black.withValues(alpha: 0.04),
+            blurRadius: isDark ? 18 : 12,
+            offset: const Offset(0, -6),
           ),
         ],
       ),
       child: SafeArea(
         top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(22, 16, 22, 14),
-          child: Row(
-            children: [
-              if (_currentStep > 0)
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _previousStep,
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      side: BorderSide(
-                        color: isDark
-                            ? Colors.white.withValues(alpha: 0.2)
-                            : ThemeHelpers.borderColor(context)
-                                .withValues(alpha: 0.4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ClipRRect(
+              child: SizedBox(
+                height: 2,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ColoredBox(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.05)
+                          : ThemeHelpers.borderColor(context)
+                              .withValues(alpha: 0.30),
+                    ),
+                    FractionallySizedBox(
+                      alignment: Alignment.centerLeft,
+                      widthFactor: progress,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Color.lerp(accent, _wizCool(context), 0.25)!,
+                              accent,
+                            ],
+                          ),
+                        ),
                       ),
                     ),
-                    child: const Text('Voltar'),
-                  ),
+                  ],
                 ),
-              if (_currentStep > 0) const SizedBox(width: 14),
-              Expanded(
-                flex: _currentStep > 0 ? 2 : 1,
-                child: _currentStep < _totalSteps - 1
-                    ? CustomButton(
-                        text: 'Continuar',
-                        onPressed: _nextStep,
-                        icon: Icons.arrow_forward_rounded,
-                      )
-                    : widget.propertyId != null
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+              child: Row(
+                children: [
+                  if (_currentStep > 0)
+                    SizedBox(
+                      height: 48,
+                      child: OutlinedButton.icon(
+                        onPressed: _previousStep,
+                        style: OutlinedButton.styleFrom(
+                          padding:
+                              const EdgeInsets.symmetric(horizontal: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          side: BorderSide(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.18)
+                                : ThemeHelpers.borderColor(context)
+                                    .withValues(alpha: 0.5),
+                          ),
+                        ),
+                        icon: const Icon(Icons.arrow_back_rounded, size: 18),
+                        label: const Text('Voltar'),
+                      ),
+                    ),
+                  if (_currentStep > 0) const SizedBox(width: 12),
+                  Expanded(
+                    child: _currentStep < _totalSteps - 1
                         ? CustomButton(
-                            text: 'Salvar alterações',
-                            onPressed:
-                                _isLoading ? null : () => _saveProperty(),
-                            isLoading: _isLoading,
-                            icon: Icons.check_rounded,
+                            text: 'Continuar',
+                            onPressed: _nextStep,
+                            icon: Icons.arrow_forward_rounded,
                           )
-                        : Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              CustomButton(
+                        : widget.propertyId != null
+                            ? CustomButton(
+                                text: 'Salvar alterações',
+                                onPressed:
+                                    _isLoading ? null : () => _saveProperty(),
+                                isLoading: _isLoading,
+                                icon: Icons.check_rounded,
+                              )
+                            : CustomButton(
                                 text: 'Finalizar cadastro',
                                 onPressed: _isLoading
                                     ? null
@@ -5049,31 +6587,27 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                                 isLoading: _isLoading,
                                 icon: Icons.check_rounded,
                               ),
-                              const SizedBox(height: 10),
-                              OutlinedButton(
-                                onPressed: _isLoading
-                                    ? null
-                                    : _showSaveLocalDraftSheet,
-                                style: OutlinedButton.styleFrom(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 14),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                  side: BorderSide(
-                                    color: isDark
-                                        ? Colors.white.withValues(alpha: 0.2)
-                                        : ThemeHelpers.borderColor(context)
-                                            .withValues(alpha: 0.4),
-                                  ),
-                                ),
-                                child: const Text('Rascunho local · nomear e guardar'),
-                              ),
-                            ],
-                          ),
+                  ),
+                ],
+              ),
+            ),
+            if (_currentStep == _totalSteps - 1 &&
+                widget.propertyId == null) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                child: TextButton.icon(
+                  onPressed: _isLoading ? null : _showSaveLocalDraftSheet,
+                  style: TextButton.styleFrom(
+                    foregroundColor:
+                        ThemeHelpers.textSecondaryColor(context),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                  ),
+                  icon: const Icon(Icons.save_alt_rounded, size: 16),
+                  label: const Text('Salvar como rascunho local'),
+                ),
               ),
             ],
-          ),
+          ],
         ),
       ),
     );
@@ -5265,4 +6799,28 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       ],
     );
   }
+}
+
+/// Resultado de uma validação multi-step — reporta em qual etapa e qual o
+/// motivo, para guiar o usuário ao primeiro problema.
+class _StepValidationFailure {
+  final int step;
+  final String message;
+
+  const _StepValidationFailure({required this.step, required this.message});
+}
+
+/// Dados de uma micro-ficha do resumo final (`_buildReviewSummary`).
+class _ReviewTileData {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color? accent;
+
+  const _ReviewTileData({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.accent,
+  });
 }

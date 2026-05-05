@@ -35,6 +35,7 @@ class ModuleAccessService {
   MyPermissionsResponse? _userPermissions;
   Company? _selectedCompany;
   String? _userRole;
+  String? _userId;
   bool _isLoading = false;
 
   /// Estado de carregamento
@@ -48,6 +49,10 @@ class ModuleAccessService {
 
   /// Role do usuário
   String? get userRole => _userRole;
+
+  /// ID do usuário logado (decodificado do JWT). Usado para checagens de
+  /// vínculo (responsável/captador) que espelham as regras do backend.
+  String? get userId => _userId;
 
   /// Lista de nomes de permissões do usuário
   List<String> get userPermissionNames =>
@@ -68,6 +73,7 @@ class ModuleAccessService {
       final userId = await _getCurrentUserId();
 
       if (userId != null && companyId != null) {
+        _userId = userId;
         // Verificar cache primeiro
         final cacheValid = await permissionService.isCacheValid(
           currentCompanyId: companyId,
@@ -99,6 +105,10 @@ class ModuleAccessService {
                 : null;
           }
         }
+
+        // Garante que o role esteja preenchido mesmo quando vem só do cache de
+        // permissões (importante para a checagem de vínculo do imóvel).
+        _userRole ??= await _getUserRole();
       }
 
       // Carregar empresa selecionada
@@ -129,6 +139,7 @@ class ModuleAccessService {
       if (response.success && response.data != null) {
         _userPermissions = response.data!;
         _userRole = await _getUserRole();
+        _userId ??= await _getCurrentUserId();
         debugPrint('✅ [MODULE_ACCESS] Permissões atualizadas');
       }
     } catch (e) {
@@ -203,6 +214,7 @@ class ModuleAccessService {
     _userPermissions = null;
     _selectedCompany = null;
     _userRole = null;
+    _userId = null;
     _isLoading = false;
     debugPrint('🧹 [MODULE_ACCESS] Dados limpos');
   }

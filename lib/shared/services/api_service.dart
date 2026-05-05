@@ -43,13 +43,29 @@ class ApiService {
     // para evitar limpar tokens que ainda podem ser válidos
   }
 
-  /// Verifica se uma rota é exceção (não exige Company ID obrigatório)
-  /// Rotas de autenticação que NÃO requerem token (login, logout, etc)
+  /// Verifica se uma rota é exceção (não envia X-Company-ID).
+  ///
+  /// Paridade com `imobx-front/src/services/api.ts`:
+  ///   const isAuthRoute = config.url?.includes('/auth/');
+  ///   const isPublicRoute = config.url?.includes('/public/');
+  ///
+  /// Cobre TODO o espaço `/auth/*` (login, logout, refresh, profile, avatar,
+  /// change-password, sessions, 2fa, document-self-service, etc.) e o
+  /// espaço `/public/*`. Refresh proativo de token e header `Authorization`
+  /// também respeitam essa lista nas chamadas de auth sem token.
   bool _isExceptionRoute(String? endpoint) {
     if (endpoint == null) return false;
+    if (endpoint.contains('/auth/')) return true;
+    if (endpoint.startsWith('/public/')) return true;
+    return false;
+  }
 
-    // Rotas de autenticação que NÃO requerem token
-    final authRoutesWithoutToken = [
+  /// Rotas em que o token NÃO deve ser enviado (login/logout/refresh/etc.).
+  /// Subconjunto de `_isExceptionRoute`. As demais `/auth/*` (profile, avatar,
+  /// sessions, etc.) ainda exigem token mas NÃO recebem `X-Company-ID`.
+  bool _isAuthRouteWithoutToken(String? endpoint) {
+    if (endpoint == null) return false;
+    const noTokenRoutes = {
       '/auth/broker/login',
       '/auth/login',
       '/auth/logout',
@@ -58,44 +74,41 @@ class ApiService {
       '/auth/reset-password',
       '/auth/check-2fa',
       '/auth/verify-2fa',
-    ];
-    
-    if (authRoutesWithoutToken.contains(endpoint)) return true;
-
-    // Rotas públicas - NÃO enviar Company ID
-    if (endpoint.startsWith('/public/')) return true;
-
-    return false;
+    };
+    return noTokenRoutes.contains(endpoint);
   }
 
-  /// Verifica se uma rota tem Company ID opcional (enviar se tiver, mas não bloquear se não tiver)
+  /// Verifica se uma rota tem Company ID opcional (envia se tiver, não
+  /// bloqueia se faltar). Paridade direta com o `api.ts` do imobx-front.
   bool _isOptionalCompanyIdRoute(String? endpoint) {
     if (endpoint == null) return false;
 
-    // Listar companies - usado para OBTER Company ID
+    // `/companies` (lista) — usada para OBTER o Company ID, então nunca
+    // bloqueia. Detalhes de uma empresa (`/companies/<id>`) NÃO são
+    // opcionais e seguem o fluxo padrão.
     if (endpoint == ApiConstants.companies || endpoint.endsWith('/companies')) {
       return true;
     }
 
-    // My permissions - pode ser chamado antes de ter Company ID
-    if (endpoint.contains('/permissions/my-permissions')) {
-      return true;
-    }
+    // Permissões do próprio usuário — pode ser chamado antes da seleção
+    // de empresa (`/permissions/my-permissions`).
+    if (endpoint.contains('/permissions/my-permissions')) return true;
 
-    // Rotas de assinatura
+    // Assinaturas / planos — `subscriptions/*`, `plans*`.
     if (endpoint.contains('/subscriptions/') || endpoint.contains('/plans')) {
       return true;
     }
 
-    // Rotas de notificações
-    if (endpoint.contains('/notifications')) {
-      return true;
-    }
+    // Notificações — escopo pessoal pode existir sem empresa.
+    if (endpoint.contains('/notifications')) return true;
 
-    // Rotas de teams
-    if (endpoint.contains('/teams')) {
-      return true;
-    }
+    // Teams — listagem inicial pode acontecer antes do Company ID estar
+    // gravado (corrida de inicialização).
+    if (endpoint.contains('/teams')) return true;
+
+    // Proxy Autentique (assinaturas de proposta/autorização) — Company ID
+    // opcional, paridade `isAutentiqueRoute` no `api.ts` do imobx-front.
+    if (endpoint.contains('/autentique')) return true;
 
     return false;
   }
@@ -125,66 +138,94 @@ class ApiService {
     return null;
   }
 
-  /// Headers padrão para requisições
-  /// [endpoint] - Endpoint da requisição para determinar se deve incluir token e Company ID
+  /// Helper público para serviços que usam `http.MultipartRequest` ou
+  /// `http.get/post/...` direto (fora do `_executeRequest`). Devolve o
+  /// mapa de headers seguindo as **mesmas regras** do interceptor do
+  /// `imobx-front` (Authorization + X-Company-ID quando aplicável).
+  ///
+  /// Use sempre que precisar disparar uma requisição multipart ou outro
+  /// fluxo que não passa pelo `_executeRequest` (ex.: `/gallery/upload`,
+  /// `/properties/import`, `/properties/export`, `/auth/avatar`). Evita
+  /// regredir o bug "Usuário deve estar associado a uma empresa" causado
+  /// por requests sem o header `X-Company-ID`.
+  ///
+  /// Quando `excludeContentType` é `true`, o `Content-Type` não é
+  /// adicionado — útil para multipart, em que o `http.MultipartRequest`
+  /// já define o `Content-Type` com o `boundary` correto.
+  Future<Map<String, String>> buildOutboundHeaders({
+    String? endpoint,
+    bool excludeContentType = false,
+  }) async {
+    final headers = await _getDefaultHeaders(endpoint);
+    if (excludeContentType) {
+      headers.remove(ApiConstants.contentTypeHeader);
+    }
+    return headers;
+  }
+
+  /// Headers padrão para requisições.
+  ///
+  /// Regras (paridade `imobx-front/src/services/api.ts`):
+  ///   - `/auth/*` e `/public/*` → não envia `Authorization` apenas em rotas
+  ///     auth sem token (login/logout/refresh/etc.); não envia `X-Company-ID`
+  ///     em nenhuma `/auth/*` ou `/public/*`.
+  ///   - Rotas opcionais (`_isOptionalCompanyIdRoute`) → envia
+  ///     `X-Company-ID` se houver, sem bloquear quando faltar.
+  ///   - Demais rotas (kanban, properties, dashboard, clients, …) →
+  ///     `X-Company-ID` é obrigatório. Em rotas que podem estar correndo
+  ///     com a inicialização (`_mayReceiveCompanyIdSoon`) aguardamos até
+  ///     2s pelo ID antes de bloquear.
   Future<Map<String, String>> _getDefaultHeaders(String? endpoint) async {
-    final isAuthRoute = _isExceptionRoute(endpoint);
+    final isAuthOrPublic = _isExceptionRoute(endpoint);
+    final isAuthNoToken = _isAuthRouteWithoutToken(endpoint);
     final isOptionalRoute = _isOptionalCompanyIdRoute(endpoint);
     final mayReceiveCompanySoon = _mayReceiveCompanyIdSoon(endpoint);
-    
+
     final headers = <String, String>{
       ApiConstants.contentTypeHeader: ApiConstants.contentTypeJson,
       ApiConstants.acceptHeader: ApiConstants.contentTypeJson,
     };
 
-    // Não incluir token em rotas de autenticação (login, logout, etc)
-    if (_token != null && !isAuthRoute) {
+    // Token: ausente apenas em login/logout/refresh/forgot-password/etc.
+    // Demais rotas `/auth/*` (profile, avatar, sessions…) ainda exigem o
+    // bearer para autenticar a operação do próprio usuário.
+    if (_token != null && !isAuthNoToken) {
       headers[ApiConstants.authorizationHeader] =
           '${ApiConstants.bearerPrefix} $_token';
     }
 
-    // Gerenciar X-Company-ID conforme regras da documentação
-    // Rotas de perfil (/auth/profile, etc) não requerem Company ID
-    final isProfileRoute = endpoint != null && 
-        (endpoint.startsWith('/auth/profile') || 
-         endpoint.startsWith('/auth/avatar') ||
-         endpoint.startsWith('/auth/change-password'));
-    
-    if (!isAuthRoute && !isProfileRoute) {
-      String? companyId = await SecureStorageService.instance.getCompanyId();
+    // X-Company-ID: nunca em `/auth/*` nem `/public/*`.
+    if (isAuthOrPublic) return headers;
 
-      // Para rotas opcionais, enviar se tiver, mas não bloquear se não tiver
-      if (isOptionalRoute) {
-        if (companyId != null && companyId.isNotEmpty) {
-          headers['X-Company-ID'] = companyId;
-        }
-        // Não bloquear - retornar headers normalmente
-      } else {
-        // Para rotas protegidas, Company ID é obrigatório
-        // Se não tiver, aguardar como no imobx-front (dashboard/imóveis/kanban).
-        if (companyId == null || companyId.isEmpty) {
-          // Mesmo padrão do imobx-front: até ~2s para o ID sair do storage após seleção da empresa.
-          if (mayReceiveCompanySoon && _token != null) {
-            debugPrint(
-              '⏳ [API_SERVICE] Aguardando Company ID (dashboard/imóveis/kanban)...',
-            );
-            companyId = await _waitForCompanyId(
-              maxWait: const Duration(milliseconds: 2000),
-            );
-          }
-        }
+    String? companyId = await SecureStorageService.instance.getCompanyId();
 
-        // Se ainda não tem Company ID, bloquear requisição
-        if (companyId == null || companyId.isEmpty) {
-          debugPrint('❌ [API_SERVICE] BLOQUEADO: Tentativa de acessar rota protegida sem Company ID');
-          debugPrint('   Endpoint: $endpoint');
-          throw Exception('Company ID não encontrado. Requisição bloqueada.');
-        }
-
+    if (isOptionalRoute) {
+      if (companyId != null && companyId.isNotEmpty) {
         headers['X-Company-ID'] = companyId;
+      }
+      return headers;
+    }
+
+    // Rotas protegidas — Company ID obrigatório.
+    if (companyId == null || companyId.isEmpty) {
+      if (mayReceiveCompanySoon && _token != null) {
+        debugPrint(
+          '⏳ [API_SERVICE] Aguardando Company ID (dashboard/imóveis/kanban)...',
+        );
+        companyId = await _waitForCompanyId(
+          maxWait: const Duration(milliseconds: 2000),
+        );
       }
     }
 
+    if (companyId == null || companyId.isEmpty) {
+      debugPrint(
+        '❌ [API_SERVICE] BLOQUEADO: rota protegida sem Company ID — endpoint: $endpoint',
+      );
+      throw Exception('Company ID não encontrado. Requisição bloqueada.');
+    }
+
+    headers['X-Company-ID'] = companyId;
     return headers;
   }
 
@@ -365,7 +406,14 @@ class ApiService {
 
       final response = await request();
 
-      // Tratar erros relacionados a Company ID inválido (400/403)
+      // Tratar erros relacionados a Company ID inválido (400/403).
+      //
+      // ATENÇÃO: a heurística precisa ser específica — qualquer mensagem de
+      // validação que mencione "empresa" (ex.: "Campo obrigatório conforme
+      // configuração da empresa: …") foi capturada por engano antes,
+      // apagando o `companyId` do dispositivo e desautenticando o usuário.
+      // Aqui só reagimos a indícios concretos de Company ID inválido /
+      // sem acesso ao recurso da empresa.
       if ((response.statusCode == 400 || response.statusCode == 403) &&
           response.error != null) {
         final errorData = response.error;
@@ -373,8 +421,31 @@ class ApiService {
             ? (errorData['message']?.toString().toLowerCase() ?? '')
             : errorData.toString().toLowerCase();
 
-        if (errorMessage.contains('company') ||
-            errorMessage.contains('empresa')) {
+        bool isCompanyIdProblem;
+        if (response.statusCode == 403) {
+          // 403 com menção a empresa/company normalmente significa "sem
+          // acesso à empresa" — manter o comportamento antigo neste caso.
+          isCompanyIdProblem = errorMessage.contains('company') ||
+              errorMessage.contains('empresa');
+        } else {
+          // 400: precisa ser sobre o Company ID em si, não sobre uma
+          // configuração da empresa qualquer.
+          isCompanyIdProblem = errorMessage.contains('company id') ||
+              errorMessage.contains('company_id') ||
+              errorMessage.contains('company not found') ||
+              errorMessage.contains('invalid company') ||
+              errorMessage.contains('missing company') ||
+              errorMessage.contains('x-company-id') ||
+              errorMessage.contains('empresa não encontrada') ||
+              errorMessage.contains('empresa nao encontrada') ||
+              errorMessage.contains('empresa inválida') ||
+              errorMessage.contains('empresa invalida') ||
+              errorMessage.contains('sem acesso à empresa') ||
+              errorMessage.contains('sem acesso a empresa') ||
+              errorMessage.contains('selecione uma empresa');
+        }
+
+        if (isCompanyIdProblem) {
           debugPrint('⚠️ [API_SERVICE] Erro relacionado a Company ID inválido');
           debugPrint('   Status: ${response.statusCode}');
           debugPrint('   Mensagem: $errorMessage');

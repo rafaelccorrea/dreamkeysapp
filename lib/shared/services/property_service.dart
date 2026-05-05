@@ -3,8 +3,6 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'api_service.dart';
 import '../../core/constants/api_constants.dart';
-import 'secure_storage_service.dart';
-
 /// Resposta pode ser o próprio objeto da propriedade ou envelope `{ data: { ... } }`.
 Map<String, dynamic>? _extractPropertyPayload(Map<String, dynamic>? raw) {
   if (raw == null) return null;
@@ -39,6 +37,44 @@ List<NamedEntityOption> parseNamedEntityListFromPage(Map<String, dynamic> root) 
     }
   }
   return out;
+}
+
+/// Página de resultados de seletor (condomínio / empreendimento) com
+/// metadata para paginação no UI.
+class NamedEntityPage {
+  final List<NamedEntityOption> items;
+  final int page;
+  final int limit;
+  final int total;
+  final int totalPages;
+
+  const NamedEntityPage({
+    required this.items,
+    required this.page,
+    required this.limit,
+    required this.total,
+    required this.totalPages,
+  });
+
+  bool get hasMore => page < totalPages;
+
+  factory NamedEntityPage.fromJson(Map<String, dynamic> root) {
+    final items = parseNamedEntityListFromPage(root);
+    int asInt(dynamic v, [int fallback = 0]) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      if (v is String) return int.tryParse(v) ?? fallback;
+      return fallback;
+    }
+
+    return NamedEntityPage(
+      items: items,
+      page: asInt(root['page'], 1),
+      limit: asInt(root['limit'], items.length),
+      total: asInt(root['total'], items.length),
+      totalPages: asInt(root['totalPages'], 1),
+    );
+  }
 }
 
 /// Resposta de `GET /properties/approval-settings/active` — paridade com `imobx-front` / `imobx`.
@@ -161,6 +197,51 @@ class NamedEntityOption {
   const NamedEntityOption({required this.id, required this.name});
 }
 
+/// Entidade nomeada com endereço — usada para pré-popular endereço da
+/// propriedade quando vinculada a condomínio ou empreendimento (paridade
+/// com `condominiumApi.getCondominiumById` / `empreendimentoApi.getEmpreendimentoById`
+/// do web).
+class NamedEntityWithAddress {
+  final String id;
+  final String name;
+  final String? zipCode;
+  final String? street;
+  final String? number;
+  final String? neighborhood;
+  final String? city;
+  final String? state;
+
+  const NamedEntityWithAddress({
+    required this.id,
+    required this.name,
+    this.zipCode,
+    this.street,
+    this.number,
+    this.neighborhood,
+    this.city,
+    this.state,
+  });
+
+  factory NamedEntityWithAddress.fromJson(Map<String, dynamic> json) {
+    String? str(dynamic v) {
+      if (v == null) return null;
+      final s = v.toString().trim();
+      return s.isEmpty ? null : s;
+    }
+
+    return NamedEntityWithAddress(
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      zipCode: str(json['zipCode']) ?? str(json['zip_code']),
+      street: str(json['street']),
+      number: str(json['number']),
+      neighborhood: str(json['neighborhood']) ?? str(json['district']),
+      city: str(json['city']),
+      state: str(json['state']) ?? str(json['uf']),
+    );
+  }
+}
+
 /// Tipos de propriedade
 enum PropertyType {
   house('house', 'Casa'),
@@ -251,8 +332,18 @@ class Property {
   final bool? isAvailableForSite;
   final String companyId;
   final String responsibleUserId;
+  final List<String>? responsibleUserIds;
   final String? capturedById;
+  final List<String>? capturedByIds;
   final PropertyCapturedBy? capturedBy;
+  /// Status da autorização de venda / contrato de agenciamento do proprietário
+  /// (ex.: `signed`). Quando assinada, responsável/captador deixam de poder
+  /// editar a ficha — apenas gestão (master/admin/manager) e aprovadores.
+  final String? ownerAuthStatus;
+  /// Data ISO em que a autorização de venda / contrato de agenciamento foi
+  /// assinada pelo proprietário. Equivalente a `ownerAuthStatus == 'signed'`
+  /// para fins de bloqueio de edição.
+  final String? ownerAuthSignedAt;
   final String createdAt;
   final String updatedAt;
   final int? imageCount;
@@ -315,8 +406,12 @@ class Property {
     this.isAvailableForSite,
     required this.companyId,
     required this.responsibleUserId,
+    this.responsibleUserIds,
     this.capturedById,
+    this.capturedByIds,
     this.capturedBy,
+    this.ownerAuthStatus,
+    this.ownerAuthSignedAt,
     required this.createdAt,
     required this.updatedAt,
     this.imageCount,
@@ -406,7 +501,31 @@ class Property {
       isAvailableForSite: json['isAvailableForSite'] as bool? ?? json['is_available_for_site'] as bool?,
       companyId: json['companyId']?.toString() ?? json['company_id']?.toString() ?? '',
       responsibleUserId: json['responsibleUserId']?.toString() ?? json['responsible_user_id']?.toString() ?? '',
+      responsibleUserIds: () {
+        final raw = json['responsibleUserIds'] ?? json['responsible_user_ids'];
+        if (raw is List) {
+          return raw
+              .map((e) => e?.toString() ?? '')
+              .where((e) => e.isNotEmpty)
+              .toList();
+        }
+        return null;
+      }(),
       capturedById: json['capturedById']?.toString() ?? json['captured_by_id']?.toString(),
+      capturedByIds: () {
+        final raw = json['capturedByIds'] ?? json['captured_by_ids'];
+        if (raw is List) {
+          return raw
+              .map((e) => e?.toString() ?? '')
+              .where((e) => e.isNotEmpty)
+              .toList();
+        }
+        return null;
+      }(),
+      ownerAuthStatus: json['ownerAuthStatus']?.toString() ??
+          json['owner_auth_status']?.toString(),
+      ownerAuthSignedAt: json['ownerAuthSignedAt']?.toString() ??
+          json['owner_auth_signed_at']?.toString(),
       capturedBy: json['capturedBy'] != null
           ? PropertyCapturedBy.fromJson(json['capturedBy'] as Map<String, dynamic>)
           : json['captured_by'] != null
@@ -861,19 +980,51 @@ class PropertyService {
   Future<ApiResponse<List<NamedEntityOption>>> listCondominiumsBrief({
     int page = 1,
     int limit = 100,
+    String? search,
+  }) async {
+    final r = await listCondominiumsPage(
+      page: page,
+      limit: limit,
+      search: search,
+    );
+    if (r.success && r.data != null) {
+      return ApiResponse.success(
+        data: r.data!.items,
+        statusCode: r.statusCode,
+      );
+    }
+    return ApiResponse.error(
+      message: r.message ?? 'Erro ao listar condomínios',
+      statusCode: r.statusCode,
+      data: r.error,
+    );
+  }
+
+  /// Lista paginada de condomínios com metadata de paginação. Aceita `search`
+  /// para filtrar server-side por nome (paridade com `condominiumApi.listCondominiums`
+  /// no web). Usada pelo seletor com bottom-sheet do fluxo de criação de imóveis.
+  Future<ApiResponse<NamedEntityPage>> listCondominiumsPage({
+    int page = 1,
+    int limit = 25,
+    String? search,
   }) async {
     try {
+      final params = <String, String>{
+        'page': '$page',
+        'limit': '$limit',
+        'isActive': 'true',
+        'sortBy': 'name',
+        'sortOrder': 'ASC',
+      };
+      final s = search?.trim();
+      if (s != null && s.isNotEmpty) params['search'] = s;
       final response = await _apiService.get<Map<String, dynamic>>(
         '/condominiums',
-        queryParameters: {
-          'page': '$page',
-          'limit': '$limit',
-          'isActive': 'true',
-        },
+        queryParameters: params,
       );
       if (response.success && response.data != null) {
         return ApiResponse.success(
-          data: parseNamedEntityListFromPage(response.data!),
+          data: NamedEntityPage.fromJson(response.data!),
           statusCode: response.statusCode,
         );
       }
@@ -891,23 +1042,120 @@ class PropertyService {
     }
   }
 
+  /// Detalhes do condomínio para pré-popular endereço da propriedade
+  /// (paridade `condominiumApi.getCondominiumById`).
+  Future<ApiResponse<NamedEntityWithAddress>> getCondominiumById(
+    String id,
+  ) async {
+    try {
+      final response = await _apiService.get<Map<String, dynamic>>(
+        '/condominiums/$id',
+      );
+      if (response.success && response.data != null) {
+        final raw = response.data!;
+        final map = raw['data'] is Map<String, dynamic>
+            ? raw['data'] as Map<String, dynamic>
+            : raw;
+        return ApiResponse.success(
+          data: NamedEntityWithAddress.fromJson(map),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao buscar condomínio',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [PROPERTY_SERVICE] condominium $id: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Detalhes do empreendimento para pré-popular endereço da propriedade
+  /// (paridade `empreendimentoApi.getEmpreendimentoById`).
+  Future<ApiResponse<NamedEntityWithAddress>> getEmpreendimentoById(
+    String id,
+  ) async {
+    try {
+      final response = await _apiService.get<Map<String, dynamic>>(
+        '/empreendimentos/$id',
+      );
+      if (response.success && response.data != null) {
+        final raw = response.data!;
+        final map = raw['data'] is Map<String, dynamic>
+            ? raw['data'] as Map<String, dynamic>
+            : raw;
+        return ApiResponse.success(
+          data: NamedEntityWithAddress.fromJson(map),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao buscar empreendimento',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [PROPERTY_SERVICE] empreendimento $id: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
   /// Lista mínima para o seletor do wizard (requer permissão de empreendimentos).
   Future<ApiResponse<List<NamedEntityOption>>> listEmpreendimentosBrief({
     int page = 1,
     int limit = 100,
+    String? search,
+  }) async {
+    final r = await listEmpreendimentosPage(
+      page: page,
+      limit: limit,
+      search: search,
+    );
+    if (r.success && r.data != null) {
+      return ApiResponse.success(
+        data: r.data!.items,
+        statusCode: r.statusCode,
+      );
+    }
+    return ApiResponse.error(
+      message: r.message ?? 'Erro ao listar empreendimentos',
+      statusCode: r.statusCode,
+      data: r.error,
+    );
+  }
+
+  /// Lista paginada de empreendimentos com metadata de paginação. Aceita `search`
+  /// para filtrar server-side por nome.
+  Future<ApiResponse<NamedEntityPage>> listEmpreendimentosPage({
+    int page = 1,
+    int limit = 25,
+    String? search,
   }) async {
     try {
+      final params = <String, String>{
+        'page': '$page',
+        'limit': '$limit',
+        'isActive': 'true',
+        'sortBy': 'name',
+        'sortOrder': 'ASC',
+      };
+      final s = search?.trim();
+      if (s != null && s.isNotEmpty) params['search'] = s;
       final response = await _apiService.get<Map<String, dynamic>>(
         '/empreendimentos',
-        queryParameters: {
-          'page': '$page',
-          'limit': '$limit',
-          'isActive': 'true',
-        },
+        queryParameters: params,
       );
       if (response.success && response.data != null) {
         return ApiResponse.success(
-          data: parseNamedEntityListFromPage(response.data!),
+          data: NamedEntityPage.fromJson(response.data!),
           statusCode: response.statusCode,
         );
       }
@@ -1354,15 +1602,13 @@ class PropertyService {
     debugPrint('📊 [PROPERTY_SERVICE] Buscando estatísticas');
 
     try {
-      final companyId = await SecureStorageService.instance.getCompanyId();
-      final queryParameters = <String, String>{};
-      if (companyId != null && companyId.isNotEmpty) {
-        queryParameters['companyId'] = companyId;
-      }
-
+      // Endpoint correto: `/properties/statistics` — paridade com o web
+      // (`propertyApi.getPropertyStats` em `imobx-front/src/services/propertyApi.ts`).
+      // O `companyId` vai pelo header `X-Company-ID` (resolvido pelo `ApiService`),
+      // não como query param — antes a rota errada (`/properties/stats`)
+      // caía no `:id` do controller e quebrava com "Validation failed (uuid is expected)".
       final response = await _apiService.get<Map<String, dynamic>>(
-        '/properties/stats',
-        queryParameters: queryParameters.isEmpty ? null : queryParameters,
+        '/properties/statistics',
       );
 
       if (response.success && response.data != null) {
@@ -1412,25 +1658,19 @@ class PropertyService {
       if (type != null) queryParams['type'] = type;
       if (status != null) queryParams['status'] = status;
 
-      // Para download de arquivo, precisamos usar http diretamente
-      final token = await SecureStorageService.instance.getAccessToken();
-      if (token == null || token.isEmpty) {
-        return ApiResponse.error(
-          message: 'Token de autenticação não encontrado',
-          statusCode: 401,
-        );
-      }
-
       final uri = Uri.parse('${ApiConstants.baseApiUrl}/properties/export')
           .replace(queryParameters: queryParams);
-      
-      final httpResponse = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      ).timeout(const Duration(seconds: 60));
+
+      // Headers padronizados (Authorization + X-Company-ID) — paridade
+      // `imobx-front`. Sem o `X-Company-ID`, o backend responde com 400
+      // "Usuário deve estar associado a uma empresa".
+      final headers = await _apiService.buildOutboundHeaders(
+        endpoint: '/properties/export',
+      );
+
+      final httpResponse = await http.get(uri, headers: headers).timeout(
+            const Duration(seconds: 60),
+          );
 
       if (httpResponse.statusCode >= 200 && httpResponse.statusCode < 300) {
         debugPrint('✅ [PROPERTY_SERVICE] Propriedades exportadas');
@@ -1462,19 +1702,16 @@ class PropertyService {
     debugPrint('📥 [PROPERTY_SERVICE] Importando propriedades');
 
     try {
-      final token = await SecureStorageService.instance.getAccessToken();
-      if (token == null || token.isEmpty) {
-        return ApiResponse.error(
-          message: 'Token de autenticação não encontrado',
-          statusCode: 401,
-        );
-      }
-
       final uri = Uri.parse('${ApiConstants.baseApiUrl}/properties/import');
       final request = http.MultipartRequest('POST', uri);
 
-      request.headers['Authorization'] = 'Bearer $token';
-      
+      // Headers padronizados — paridade `imobx-front`.
+      final headers = await _apiService.buildOutboundHeaders(
+        endpoint: '/properties/import',
+        excludeContentType: true,
+      );
+      request.headers.addAll(headers);
+
       request.files.add(
         http.MultipartFile.fromBytes(
           'file',

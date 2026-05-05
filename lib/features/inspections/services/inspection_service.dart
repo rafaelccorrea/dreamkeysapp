@@ -4,7 +4,6 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../../../core/constants/api_constants.dart';
 import '../../../shared/services/api_service.dart';
-import '../../../shared/services/secure_storage_service.dart';
 import '../models/inspection_model.dart';
 
 /// Serviço para gerenciar vistorias
@@ -400,26 +399,17 @@ class InspectionService {
     try {
       debugPrint('📸 [INSPECTION_SERVICE] Fazendo upload de foto para vistoria: $id');
       
-      final token = await SecureStorageService.instance.getAccessToken();
-      if (token == null || token.isEmpty) {
-        return ApiResponse.error(
-          message: 'Token de autenticação não encontrado',
-          statusCode: 401,
-        );
-      }
-
-      final uri = Uri.parse(
-        '${ApiConstants.baseApiUrl}${ApiConstants.inspectionUploadPhoto(id)}',
-      );
+      final endpoint = ApiConstants.inspectionUploadPhoto(id);
+      final uri = Uri.parse('${ApiConstants.baseApiUrl}$endpoint');
       final request = http.MultipartRequest('POST', uri);
 
-      // Headers
-      request.headers['Authorization'] = 'Bearer $token';
-      
-      final companyId = await SecureStorageService.instance.getCompanyId();
-      if (companyId != null) {
-        request.headers['X-Company-ID'] = companyId;
-      }
+      // Headers padronizados (Authorization + X-Company-ID) — paridade
+      // `imobx-front` via `ApiService.buildOutboundHeaders`.
+      final headers = await _apiService.buildOutboundHeaders(
+        endpoint: endpoint,
+        excludeContentType: true,
+      );
+      request.headers.addAll(headers);
       
       // Adicionar arquivo
       final fileStream = http.ByteStream(file.openRead());

@@ -1014,11 +1014,16 @@ class UpdateTaskDto {
 
 class MoveTaskDto {
   final String taskId;
+  /// Coluna de origem (atual) da tarefa antes do drop. O backend valida
+  /// (`MoveTaskDto.fromColumnId @IsUUID`) e retorna 400 se ausente ou se não
+  /// corresponder à `task.columnId` no servidor.
+  final String fromColumnId;
   final String targetColumnId;
   final int targetPosition;
 
   MoveTaskDto({
     required this.taskId,
+    required this.fromColumnId,
     required this.targetColumnId,
     required this.targetPosition,
   });
@@ -1026,6 +1031,7 @@ class MoveTaskDto {
   Map<String, dynamic> toJson() {
     return {
       'taskId': taskId,
+      'fromColumnId': fromColumnId,
       'targetColumnId': targetColumnId,
       'targetPosition': targetPosition,
     };
