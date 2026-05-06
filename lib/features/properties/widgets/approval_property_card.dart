@@ -872,28 +872,28 @@ class _PrimaryButton extends StatelessWidget {
         backgroundColor: color,
         foregroundColor: Colors.white,
         elevation: 0,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
         minimumSize: Size.zero,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         visualDensity: VisualDensity.compact,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(13),
         ),
-        textStyle: Theme.of(context).textTheme.labelMedium?.copyWith(
+        textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
               fontWeight: FontWeight.w800,
               letterSpacing: 0.1,
             ),
       ),
       icon: loading
           ? const SizedBox(
-              width: 14,
-              height: 14,
+              width: 16,
+              height: 16,
               child: CircularProgressIndicator(
                 strokeWidth: 2,
                 color: Colors.white,
               ),
             )
-          : Icon(icon, size: 16),
+          : Icon(icon, size: 18),
       label: Text(label),
     );
   }
@@ -918,19 +918,19 @@ class _GhostButton extends StatelessWidget {
       onPressed: onTap,
       style: OutlinedButton.styleFrom(
         foregroundColor: color,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
         minimumSize: Size.zero,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         visualDensity: VisualDensity.compact,
         side: BorderSide(color: color.withValues(alpha: 0.55)),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(13),
         ),
-        textStyle: Theme.of(context).textTheme.labelMedium?.copyWith(
+        textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
               fontWeight: FontWeight.w800,
             ),
       ),
-      icon: Icon(icon, size: 16),
+      icon: Icon(icon, size: 18),
       label: Text(label),
     );
   }
