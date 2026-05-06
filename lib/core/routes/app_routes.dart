@@ -15,6 +15,7 @@ import '../../features/properties/pages/create_property_page.dart';
 import '../../features/properties/pages/property_drafts_list_page.dart';
 import '../../features/properties/pages/property_offers_page.dart';
 import '../../features/properties/pages/offer_details_page.dart';
+import '../../features/properties/pages/property_approvals_page.dart';
 import '../../features/appointments/pages/calendar_page.dart';
 import '../../features/appointments/pages/create_appointment_page.dart';
 import '../../features/appointments/pages/edit_appointment_page.dart';
@@ -59,6 +60,10 @@ class AppRoutes {
   /// Rascunhos de cadastro armazenados só no dispositivo.
   static const String propertyDraftsLocal = '/properties/drafts-local';
   static const String propertyOffers = '/properties/offers';
+  /// Fila de aprovação de imóveis (paridade com `/properties/pending-approvals`
+  /// no `imobx-front`). Lista pendentes de disponibilidade, publicação,
+  /// autorização do proprietário e recusados.
+  static const String propertyApprovals = '/properties/pending-approvals';
   static const String notifications = '/notifications';
   static const String calendar = '/calendar';
   static const String calendarCreate = '/calendar/create';
@@ -197,6 +202,11 @@ class AppRoutes {
       // IMPORTANTE: Esta rota deve vir ANTES da verificação genérica de /properties/
       debugPrint('🛣️ [ROUTES] Navegando para PropertyOffersPage');
       return _buildRoute(const PropertyOffersPage(), settings);
+    } else if (routeName == AppRoutes.propertyApprovals) {
+      // IMPORTANTE: deve vir ANTES da regex de /properties/:id senão o
+      // segmento "pending-approvals" é tratado como UUID e cai em
+      // PropertyDetailsPage.
+      return _buildRoute(const PropertyApprovalsPage(), settings);
     } else if (routeName != null &&
         routeName.startsWith('/properties/offers/')) {
       // Detalhes de oferta: /properties/offers/:offerId

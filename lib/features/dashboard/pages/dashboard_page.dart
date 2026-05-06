@@ -7,6 +7,7 @@ import '../../../../core/theme/shell_visual_tokens.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../../../../shared/services/dashboard_service.dart';
+import '../../../../shared/services/module_access_service.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/minimal_body_chrome.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
@@ -1805,12 +1806,67 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _buildStatsCards(BuildContext context, ThemeData theme) {
     final stats = _dashboardData?.stats ?? DashboardStats.empty;
+    final moduleAccess = ModuleAccessService.instance;
+
+    // Helper que retorna `null` quando o usuário NÃO pode acessar a rota
+    // (módulo não disponível na empresa OU sem permissão de role) — assim
+    // o card vira "informativo" sem ação ao toque, em vez de levar para
+    // uma tela bloqueada. Respeita as regras já existentes de
+    // `ModuleAccessService` (mesmas usadas pelo Drawer/módulos).
+    VoidCallback? routeTap(String route) {
+      if (!moduleAccess.canAccessRoutePath(route)) return null;
+      return () => Navigator.of(context).pushNamed(route);
+    }
+
+    // "Comissões" ainda não tem tela própria no mobile — toque mostra um
+    // toast informando que está em desenvolvimento, em vez de navegar pra
+    // lugar nenhum. Quando a tela existir, basta substituir por `routeTap`.
+    void onCommissionsTap() {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Tela de comissões em breve no app.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
 
     final cards = [
-      _buildSummaryCard(context: context, theme: theme, title: 'Imóveis', value: _formatNumber(stats.myProperties), icon: Icons.home_work_outlined, color: const Color(0xFF6366F1)),
-      _buildSummaryCard(context: context, theme: theme, title: 'Clientes', value: _formatNumber(stats.myClients), icon: Icons.groups_2_outlined, color: const Color(0xFF10B981)),
-      _buildSummaryCard(context: context, theme: theme, title: 'Vistorias', value: _formatNumber(stats.myInspections), icon: Icons.fact_check_outlined, color: const Color(0xFFF59E0B)),
-      _buildSummaryCard(context: context, theme: theme, title: 'Comissões', value: _formatCurrency(stats.myCommissions), icon: Icons.payments_outlined, color: const Color(0xFFEC4899)),
+      _buildSummaryCard(
+        context: context,
+        theme: theme,
+        title: 'Imóveis',
+        value: _formatNumber(stats.myProperties),
+        icon: Icons.home_work_outlined,
+        color: const Color(0xFF6366F1),
+        onTap: routeTap(AppRoutes.properties),
+      ),
+      _buildSummaryCard(
+        context: context,
+        theme: theme,
+        title: 'Clientes',
+        value: _formatNumber(stats.myClients),
+        icon: Icons.groups_2_outlined,
+        color: const Color(0xFF10B981),
+        onTap: routeTap(AppRoutes.clients),
+      ),
+      _buildSummaryCard(
+        context: context,
+        theme: theme,
+        title: 'Vistorias',
+        value: _formatNumber(stats.myInspections),
+        icon: Icons.fact_check_outlined,
+        color: const Color(0xFFF59E0B),
+        onTap: routeTap(AppRoutes.inspections),
+      ),
+      _buildSummaryCard(
+        context: context,
+        theme: theme,
+        title: 'Comissões',
+        value: _formatCurrency(stats.myCommissions),
+        icon: Icons.payments_outlined,
+        color: const Color(0xFFEC4899),
+        onTap: onCommissionsTap,
+      ),
     ];
 
     return LayoutBuilder(
@@ -3333,7 +3389,11 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _buildUpcomingAppointments(BuildContext context, ThemeData theme) {
     final appointments = _dashboardData?.upcomingAppointments ?? [];
-    final slice = appointments.take(5).toList();
+    // Sempre limitamos o footprint visual a 3 compromissos. Mais que isso
+    // vira "Ver todos os N" — a sessão NUNCA cresce com a quantidade real
+    // de agendamentos, mantendo o dashboard previsível.
+    const visibleLimit = 3;
+    final slice = appointments.take(visibleLimit).toList();
     final isDark = theme.brightness == Brightness.dark;
     final accent = _dashboardAccentColor(context);
 
@@ -3348,23 +3408,326 @@ class _DashboardPageState extends State<DashboardPage> {
         theme: theme,
         accent: accent,
         isDark: isDark,
-        count: slice.length,
+        count: appointments.length,
         onTap: () => Navigator.of(context).pushNamed(AppRoutes.calendar),
       ),
       child: slice.isNotEmpty
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (var i = 0; i < slice.length; i++)
-                  _buildAppointmentCard(
-                    context: context,
-                    theme: theme,
-                    appointment: slice[i],
-                    isLast: i == slice.length - 1,
-                  ),
-              ],
+          ? _buildAppointmentsTimeline(
+              context: context,
+              theme: theme,
+              accent: accent,
+              isDark: isDark,
+              shown: slice,
+              total: appointments.length,
             )
           : _buildAgendaEmptyState(context, theme),
+    );
+  }
+
+  /// Timeline vertical premium da agenda. Cada compromisso é uma "linha"
+  /// conectada à anterior por uma linha vertical sutil + bullet colorido
+  /// pelo tipo. Layout editorial em 2 linhas tipográficas (header + corpo)
+  /// — sem cards quadrados.
+  Widget _buildAppointmentsTimeline({
+    required BuildContext context,
+    required ThemeData theme,
+    required Color accent,
+    required bool isDark,
+    required List<DashboardAppointment> shown,
+    required int total,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < shown.length; i++)
+          _buildAppointmentTimelineRow(
+            context: context,
+            theme: theme,
+            isDark: isDark,
+            appointment: shown[i],
+            isLast: i == shown.length - 1,
+          ),
+        // ── Footer "Ver todos os N compromissos" ───────────────────────
+        if (total > shown.length) ...[
+          const SizedBox(height: 4),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () =>
+                  Navigator.of(context).pushNamed(AppRoutes.calendar),
+              borderRadius: BorderRadius.circular(13),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 12, 8, 12),
+                child: Row(
+                  children: [
+                    // Bullet vazio só pra alinhar com a timeline acima.
+                    SizedBox(
+                      width: 38,
+                      child: Center(
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: accent.withValues(
+                                alpha: isDark ? 0.5 : 0.4,
+                              ),
+                              width: 1.4,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        'Ver todos os $total compromissos',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: accent,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.1,
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      Icons.arrow_forward_rounded,
+                      size: 18,
+                      color: accent,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// Linha tipográfica de compromisso (timeline). Estrutura:
+  /// ```
+  /// ●─── HOJE · 14h30                            [Visita]
+  /// │    Visita ao apartamento Rua Gomes…
+  /// │    Ana Beatriz Silva
+  /// │
+  /// ```
+  /// Bullet 14×14 colorido pelo tipo + linha vertical 2px tracejada
+  /// conectando até o próximo. Sem caixinha — fluido, premium.
+  Widget _buildAppointmentTimelineRow({
+    required BuildContext context,
+    required ThemeData theme,
+    required bool isDark,
+    required DashboardAppointment appointment,
+    required bool isLast,
+  }) {
+    final visual = _appointmentTypeVisual(appointment.type);
+    final color = visual.color;
+    final proximity = _appointmentProximity(appointment.date);
+    final hasClient = appointment.client.trim().isNotEmpty;
+
+    // Header da linha — combina proximidade humanizada + horário em um
+    // único label uppercase estilizado: "HOJE · 14:30" / "AMANHÃ · 09:00".
+    String headerLabel;
+    if (proximity != null) {
+      headerLabel = appointment.time.trim().isNotEmpty
+          ? '${proximity.label.toUpperCase()} · ${appointment.time}'
+          : proximity.label.toUpperCase();
+    } else {
+      final dateChip = _appointmentDateChip(appointment.date);
+      headerLabel = appointment.time.trim().isNotEmpty
+          ? '${dateChip.day} ${dateChip.month.toUpperCase()} · ${appointment.time}'
+          : '${dateChip.day} ${dateChip.month.toUpperCase()}';
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(13),
+        onTap: () => Navigator.of(context).pushNamed(
+          AppRoutes.calendarDetails(appointment.id),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 12, 8, 12),
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── Coluna timeline (bullet + linha vertical) ───────────
+                SizedBox(
+                  width: 38,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      // Bullet com ring e glow
+                      Container(
+                        width: 14,
+                        height: 14,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: color,
+                          border: Border.all(
+                            color: ThemeHelpers.cardBackgroundColor(context),
+                            width: 2,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: color.withValues(
+                                alpha: isDark ? 0.55 : 0.35,
+                              ),
+                              blurRadius: 8,
+                              spreadRadius: 0,
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Linha vertical até o próximo (tracejada via
+                      // gradient stops). Não desenha na última linha.
+                      if (!isLast)
+                        Expanded(
+                          child: Container(
+                            margin: const EdgeInsets.only(top: 4),
+                            width: 2,
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  color.withValues(
+                                    alpha: isDark ? 0.45 : 0.32,
+                                  ),
+                                  ThemeHelpers.borderColor(context)
+                                      .withValues(alpha: 0.5),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // ── Conteúdo da linha ────────────────────────────────────
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Header: proximidade · horário · pill do tipo (à dir)
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              headerLabel,
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.6,
+                                color: color,
+                                fontSize: 11,
+                                height: 1.1,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          _buildAppointmentTypeChip(
+                            theme: theme,
+                            isDark: isDark,
+                            visual: visual,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      // Título — protagonista
+                      Text(
+                        appointment.title.isEmpty
+                            ? '— sem título —'
+                            : appointment.title,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.25,
+                          height: 1.25,
+                          color: ThemeHelpers.textColor(context),
+                          fontSize: 14.5,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      // Cliente (se houver) — secundário
+                      if (hasClient) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.person_outline_rounded,
+                              size: 12,
+                              color: ThemeHelpers.textSecondaryColor(context),
+                            ),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                appointment.client,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: ThemeHelpers.textSecondaryColor(
+                                    context,
+                                  ),
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 11.5,
+                                  height: 1.25,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Pílula do tipo de compromisso (Visita, Reunião, Vistoria…) —
+  /// minimal, fundo tinted na cor do tipo + ícone + label.
+  Widget _buildAppointmentTypeChip({
+    required ThemeData theme,
+    required bool isDark,
+    required ({IconData icon, Color color, String label}) visual,
+  }) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 4, 9, 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: visual.color.withValues(alpha: isDark ? 0.16 : 0.10),
+        border: Border.all(
+          color: visual.color.withValues(alpha: isDark ? 0.32 : 0.22),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(visual.icon, size: 11, color: visual.color),
+          const SizedBox(width: 4),
+          Text(
+            visual.label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: visual.color,
+              fontSize: 10,
+              letterSpacing: 0.1,
+              height: 1.1,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -3724,452 +4087,6 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  /// Tile estilo widget de calendário (mês ▌ dia ▌ weekday).
-  Widget _appointmentDateTile({
-    required BuildContext context,
-    required ThemeData theme,
-    required Color color,
-    required ({String day, String month, String? weekday}) chip,
-    required bool isDark,
-  }) {
-    return Container(
-      width: 56,
-      height: 70,
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.05)
-            : ShellVisualTokens.dashboardGlassFill(context),
-        border: Border.all(
-          color: color.withValues(alpha: isDark ? 0.42 : 0.36),
-        ),
-        boxShadow: isDark
-            ? null
-            : [
-                BoxShadow(
-                  color: color.withValues(alpha: 0.08),
-                  blurRadius: 10,
-                  offset: const Offset(0, 3),
-                  spreadRadius: -4,
-                ),
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.022),
-                  blurRadius: 4,
-                  offset: const Offset(0, 1),
-                ),
-              ],
-      ),
-      child: Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  color.withValues(alpha: isDark ? 0.85 : 0.95),
-                  color.withValues(alpha: isDark ? 0.55 : 0.7),
-                ],
-              ),
-            ),
-            child: Text(
-              chip.month,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: Colors.white,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1.3,
-                fontSize: 10,
-                height: 1.1,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Center(
-              child: Text(
-                chip.day,
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: ThemeHelpers.textColor(context),
-                  letterSpacing: -1,
-                  height: 1,
-                ),
-              ),
-            ),
-          ),
-          if (chip.weekday != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Text(
-                chip.weekday!,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.4,
-                  fontSize: 9.5,
-                  height: 1,
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAppointmentCard({
-    required BuildContext context,
-    required ThemeData theme,
-    required DashboardAppointment appointment,
-    required bool isLast,
-  }) {
-    final isDark = theme.brightness == Brightness.dark;
-    final visual = _appointmentTypeVisual(appointment.type);
-    final color = visual.color;
-    final dateChip = _appointmentDateChip(appointment.date);
-    final proximity = _appointmentProximity(appointment.date);
-    final isToday = proximity?.label == 'Hoje';
-    final hasClient = appointment.client.trim().isNotEmpty;
-
-    return Padding(
-      padding: EdgeInsets.only(bottom: isLast ? 0 : 8),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: () => Navigator.of(context).pushNamed(
-            AppRoutes.calendarDetails(appointment.id),
-          ),
-          child: Container(
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  color.withValues(alpha: isDark ? 0.18 : 0.10),
-                  color.withValues(alpha: isDark ? 0.05 : 0.03),
-                ],
-              ),
-              border: Border.all(
-                color: color.withValues(
-                  alpha: isToday
-                      ? (isDark ? 0.55 : 0.5)
-                      : (isDark ? 0.32 : 0.32),
-                ),
-                width: isToday ? 1.4 : 1,
-              ),
-              boxShadow: isDark
-                  ? null
-                  : [
-                      BoxShadow(
-                        color: color.withValues(
-                          alpha: isToday ? 0.12 : 0.065,
-                        ),
-                        blurRadius: isToday ? 14 : 12,
-                        offset: const Offset(0, 5),
-                        spreadRadius: -8,
-                      ),
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.02),
-                        blurRadius: 5,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-            ),
-            child: Stack(
-              children: [
-                // Faixa lateral colorida (acento de evento)
-                Positioned(
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
-                  width: 4,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          color.withValues(alpha: 0.95),
-                          color.withValues(alpha: 0.45),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                // Orbe sutil no canto (profundidade)
-                if (!isDark)
-                  Positioned(
-                    right: -16,
-                    top: -22,
-                    child: IgnorePointer(
-                      child: Container(
-                        width: 64,
-                        height: 64,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: color.withValues(alpha: 0.06),
-                        ),
-                      ),
-                    ),
-                  ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      _appointmentDateTile(
-                        context: context,
-                        theme: theme,
-                        color: color,
-                        chip: dateChip,
-                        isDark: isDark,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // Linha 1: pills (proximidade + tipo) — alinhado à direita do tile.
-                            Wrap(
-                              spacing: 6,
-                              runSpacing: 6,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: [
-                                if (proximity != null)
-                                  _appointmentProximityPill(
-                                    context: context,
-                                    theme: theme,
-                                    label: proximity.label,
-                                    color: proximity.color,
-                                    icon: proximity.icon,
-                                    isDark: isDark,
-                                    elevated: isToday,
-                                  ),
-                                _appointmentTypePill(
-                                  context: context,
-                                  theme: theme,
-                                  label: visual.label,
-                                  icon: visual.icon,
-                                  color: color,
-                                  isDark: isDark,
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              appointment.title,
-                              style: theme.textTheme.titleSmall?.copyWith(
-                                fontWeight: FontWeight.w900,
-                                color: ThemeHelpers.textColor(context),
-                                letterSpacing: -0.3,
-                                height: 1.2,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 6),
-                            // Meta (cliente · hora) com ícones discretos
-                            Row(
-                              children: [
-                                Icon(
-                                  Icons.access_time_rounded,
-                                  size: 13,
-                                  color: color.withValues(alpha: 0.92),
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  appointment.time,
-                                  style: theme.textTheme.labelMedium?.copyWith(
-                                    color: ThemeHelpers.textColor(context),
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: 0.1,
-                                  ),
-                                ),
-                                if (hasClient) ...[
-                                  const SizedBox(width: 8),
-                                  Container(
-                                    width: 3,
-                                    height: 3,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: ThemeHelpers.textSecondaryColor(
-                                        context,
-                                      ).withValues(alpha: 0.55),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Icon(
-                                    Icons.person_rounded,
-                                    size: 13,
-                                    color: ThemeHelpers.textSecondaryColor(
-                                      context,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Expanded(
-                                    child: Text(
-                                      appointment.client,
-                                      style: theme.textTheme.bodySmall
-                                          ?.copyWith(
-                                            color:
-                                                ThemeHelpers.textSecondaryColor(
-                                                  context,
-                                                ),
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      Container(
-                        width: 28,
-                        height: 28,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: color.withValues(
-                            alpha: isDark ? 0.22 : 0.14,
-                          ),
-                          border: Border.all(
-                            color: color.withValues(
-                              alpha: isDark ? 0.4 : 0.32,
-                            ),
-                          ),
-                        ),
-                        child: Icon(
-                          Icons.chevron_right_rounded,
-                          size: 18,
-                          color: color.withValues(alpha: 0.95),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _appointmentProximityPill({
-    required BuildContext context,
-    required ThemeData theme,
-    required String label,
-    required Color color,
-    required IconData icon,
-    required bool isDark,
-    required bool elevated,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        gradient: elevated
-            ? LinearGradient(
-                colors: [
-                  color.withValues(alpha: isDark ? 0.55 : 0.32),
-                  color.withValues(alpha: isDark ? 0.32 : 0.2),
-                ],
-              )
-            : null,
-        color: elevated
-            ? null
-            : color.withValues(alpha: isDark ? 0.22 : 0.14),
-        border: Border.all(
-          color: color.withValues(alpha: isDark ? 0.5 : 0.42),
-        ),
-        boxShadow: elevated
-            ? [
-                BoxShadow(
-                  color: color.withValues(
-                    alpha: isDark ? 0.32 : 0.14,
-                  ),
-                  blurRadius: isDark ? 10 : 6,
-                  offset: Offset(0, isDark ? 3 : 2),
-                  spreadRadius: isDark ? 0 : -1,
-                ),
-              ]
-            : null,
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            icon,
-            size: 12,
-            color: elevated
-                ? Colors.white
-                : color.withValues(alpha: 0.96),
-          ),
-          const SizedBox(width: 4),
-          Text(
-            label.toUpperCase(),
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: elevated
-                  ? Colors.white
-                  : color.withValues(alpha: 0.96),
-              fontWeight: FontWeight.w900,
-              letterSpacing: 1,
-              fontSize: 10,
-              height: 1,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _appointmentTypePill({
-    required BuildContext context,
-    required ThemeData theme,
-    required String label,
-    required IconData icon,
-    required Color color,
-    required bool isDark,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        color: ThemeHelpers.textSecondaryColor(context).withValues(
-          alpha: isDark ? 0.12 : 0.06,
-        ),
-        border: Border.all(
-          color: ShellVisualTokens.dashboardGlassBorder(context),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 12, color: color.withValues(alpha: 0.92)),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.1,
-              fontSize: 10,
-              height: 1,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildMonthlyGoalsSection(BuildContext context, ThemeData theme) {
     final goals = _dashboardData?.monthlyGoals;
     final hasGoals = goals != null && (goals.sales != null || goals.commissions != null);
@@ -4192,91 +4109,385 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildGoalsContent(BuildContext context, ThemeData theme, DashboardMonthlyGoals goals) {
+  Widget _buildGoalsContent(
+    BuildContext context,
+    ThemeData theme,
+    DashboardMonthlyGoals goals,
+  ) {
+    // Dias restantes do mês — adiciona contexto motivacional ("ainda dá tempo").
+    final now = DateTime.now();
+    final lastDay = DateTime(now.year, now.month + 1, 0).day;
+    final daysLeft = (lastDay - now.day).clamp(0, 31);
+
     return LayoutBuilder(
       builder: (context, c) {
-        final sideBySide = c.maxWidth >= 480 && goals.sales != null && goals.commissions != null;
-        if (sideBySide) {
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: _buildGoalProgress(
-                  context: context,
-                  theme: theme,
-                  label: 'Vendas',
-                  current: goals.sales!.current.toInt(),
-                  target: goals.sales!.target.toInt(),
-                  percentage: goals.sales!.percentage,
-                  icon: Icons.home_work_outlined,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _buildGoalProgress(
-                  context: context,
-                  theme: theme,
-                  label: 'Comissões',
-                  current: goals.commissions!.current.toInt(),
-                  target: goals.commissions!.target.toInt(),
-                  percentage: goals.commissions!.percentage,
-                  icon: Icons.payments_outlined,
-                  isCurrency: true,
-                ),
-              ),
-            ],
-          );
-        }
+        final sideBySide = c.maxWidth >= 480 &&
+            goals.sales != null &&
+            goals.commissions != null;
+        final tiles = <Widget>[
+          if (goals.sales != null)
+            _buildGoalProgress(
+              context: context,
+              theme: theme,
+              label: 'Vendas',
+              current: goals.sales!.current.toDouble(),
+              target: goals.sales!.target.toDouble(),
+              percentage: goals.sales!.percentage,
+              icon: Icons.home_work_rounded,
+            ),
+          if (goals.commissions != null)
+            _buildGoalProgress(
+              context: context,
+              theme: theme,
+              label: 'Comissões',
+              current: goals.commissions!.current.toDouble(),
+              target: goals.commissions!.target.toDouble(),
+              percentage: goals.commissions!.percentage,
+              icon: Icons.payments_rounded,
+              isCurrency: true,
+            ),
+        ];
+
         return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (goals.sales != null)
-              _buildGoalProgress(context: context, theme: theme, label: 'Vendas', current: goals.sales!.current.toInt(), target: goals.sales!.target.toInt(), percentage: goals.sales!.percentage, icon: Icons.home_work_outlined),
-            if (goals.sales != null && goals.commissions != null) const SizedBox(height: 12),
-            if (goals.commissions != null)
-              _buildGoalProgress(context: context, theme: theme, label: 'Comissões', current: goals.commissions!.current.toInt(), target: goals.commissions!.target.toInt(), percentage: goals.commissions!.percentage, icon: Icons.payments_outlined, isCurrency: true),
+            // Footer motivacional — dias restantes.
+            _buildGoalsTimelineHeader(
+              context: context,
+              theme: theme,
+              daysLeft: daysLeft,
+            ),
+            const SizedBox(height: 12),
+            if (sideBySide && tiles.length == 2)
+              IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(child: tiles[0]),
+                    const SizedBox(width: 10),
+                    Expanded(child: tiles[1]),
+                  ],
+                ),
+              )
+            else
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var i = 0; i < tiles.length; i++) ...[
+                    if (i > 0) const SizedBox(height: 10),
+                    tiles[i],
+                  ],
+                ],
+              ),
           ],
         );
       },
     );
   }
 
-  Widget _buildGoalProgress({
+  /// Faixa "ainda dá tempo" no topo das metas — situa o usuário no mês
+  /// (dias restantes) sem precisar abrir o calendário.
+  Widget _buildGoalsTimelineHeader({
     required BuildContext context,
     required ThemeData theme,
-    required String label,
-    required int current,
-    required int target,
-    required double percentage,
-    required IconData icon,
-    bool isCurrency = false,
+    required int daysLeft,
   }) {
-    final color = percentage >= 100 ? AppColors.status.success : _dashboardAccentColor(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = _dashboardAccentColor(context);
+    const cool = Color(0xFF0891B2);
+
+    final monthName =
+        DateFormat("MMMM 'de' yyyy", 'pt_BR').format(DateTime.now());
+
     return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: ShellVisualTokens.inlineTileDecoration(context, color, radius: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(13),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: isDark
+              ? [
+                  accent.withValues(alpha: 0.12),
+                  cool.withValues(alpha: 0.07),
+                ]
+              : [
+                  accent.withValues(alpha: 0.07),
+                  cool.withValues(alpha: 0.04),
+                ],
+        ),
+        border: Border.all(
+          color: accent.withValues(alpha: isDark ? 0.32 : 0.22),
+        ),
+      ),
+      child: Row(
         children: [
-          Row(
-            children: [
-              _buildIconBadge(context, icon, color, size: 38, iconSize: 18),
-              const SizedBox(width: 8),
-              Expanded(child: Text(label, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900, color: ThemeHelpers.textColor(context)))),
-              Text('${percentage.toStringAsFixed(1)}%', style: theme.textTheme.titleSmall?.copyWith(color: color, fontWeight: FontWeight.w900)),
-            ],
-          ),
-          const SizedBox(height: 10),
-          _buildProgressStrip(
-            context: context,
-            label: isCurrency ? '${_formatCurrency(current.toDouble())} / ${_formatCurrency(target.toDouble())}' : '${_formatNumber(current)} / ${_formatNumber(target)}',
-            valueLabel: '${percentage.toStringAsFixed(1)}% concluído',
-            value: (percentage / 100).clamp(0.0, 1.0).toDouble(),
-            color: color,
+          Icon(Icons.schedule_rounded, size: 16, color: accent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: daysLeft == 0
+                        ? 'Último dia '
+                        : (daysLeft == 1
+                            ? 'Falta apenas 1 dia '
+                            : 'Faltam $daysLeft dias '),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: ThemeHelpers.textColor(context),
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.05,
+                    ),
+                  ),
+                  TextSpan(
+                    text: 'em $monthName',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: ThemeHelpers.textSecondaryColor(context),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
     );
+  }
+
+  /// Tile de progresso de meta — gauge circular + dados textuais.
+  ///
+  /// Visual:
+  /// - Gauge circular grande (~64px) com a porcentagem no centro
+  /// - Cor dinâmica conforme progresso (vermelho/âmbar/cyan/verde)
+  /// - Coluna direita: ícone tinted + label + valor atual / alvo + faltante
+  /// - Estado "meta batida" (>= 100%): glow verde + label "Meta superada!"
+  Widget _buildGoalProgress({
+    required BuildContext context,
+    required ThemeData theme,
+    required String label,
+    required double current,
+    required double target,
+    required double percentage,
+    required IconData icon,
+    bool isCurrency = false,
+  }) {
+    final isDark = theme.brightness == Brightness.dark;
+    final color = _goalProgressColor(percentage);
+    final clamped = (percentage / 100).clamp(0.0, 1.0).toDouble();
+    final overShoot = percentage >= 100;
+    final remaining = (target - current).clamp(0, double.infinity).toDouble();
+
+    // Texto auxiliar — muda de tom conforme o progresso.
+    final String helperText;
+    if (overShoot) {
+      helperText = 'Meta superada · +${(percentage - 100).toStringAsFixed(0)}%';
+    } else if (remaining <= 0) {
+      helperText = 'Falta zero · siga em frente';
+    } else if (isCurrency) {
+      helperText = 'Faltam ${_formatCurrency(remaining)}';
+    } else {
+      helperText = 'Faltam ${_formatNumber(remaining.toInt())}';
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(13, 13, 13, 13),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: ThemeHelpers.cardBackgroundColor(context),
+        border: Border.all(
+          color: color.withValues(alpha: isDark ? 0.4 : 0.28),
+          width: overShoot ? 1.4 : 1,
+        ),
+        boxShadow: overShoot
+            ? [
+                BoxShadow(
+                  color: color.withValues(alpha: isDark ? 0.32 : 0.18),
+                  blurRadius: 16,
+                  spreadRadius: -4,
+                  offset: const Offset(0, 6),
+                ),
+              ]
+            : (isDark
+                ? null
+                : [
+                    BoxShadow(
+                      color: color.withValues(alpha: 0.06),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                      spreadRadius: -6,
+                    ),
+                  ]),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // ── Gauge circular ──────────────────────────────────────────────
+          SizedBox(
+            width: 70,
+            height: 70,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // Anel de fundo (cor base levemente tinted)
+                SizedBox(
+                  width: 70,
+                  height: 70,
+                  child: CircularProgressIndicator(
+                    value: 1,
+                    strokeWidth: 7,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      color.withValues(alpha: isDark ? 0.16 : 0.12),
+                    ),
+                  ),
+                ),
+                // Anel de progresso
+                SizedBox(
+                  width: 70,
+                  height: 70,
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0, end: clamped),
+                    duration: const Duration(milliseconds: 700),
+                    curve: Curves.easeOutCubic,
+                    builder: (context, v, _) => CircularProgressIndicator(
+                      value: v,
+                      strokeWidth: 7,
+                      strokeCap: StrokeCap.round,
+                      valueColor: AlwaysStoppedAnimation<Color>(color),
+                    ),
+                  ),
+                ),
+                // % no centro
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      overShoot
+                          ? '✓'
+                          : '${percentage.toStringAsFixed(0)}',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: color,
+                        height: 1,
+                        letterSpacing: -0.6,
+                      ),
+                    ),
+                    if (!overShoot)
+                      Text(
+                        '%',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: color,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 10,
+                          letterSpacing: 0.4,
+                          height: 1,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 14),
+          // ── Coluna direita: dados textuais ──────────────────────────────
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(7),
+                        color: color.withValues(alpha: isDark ? 0.22 : 0.14),
+                        border: Border.all(
+                          color: color.withValues(alpha: isDark ? 0.38 : 0.28),
+                        ),
+                      ),
+                      child: Icon(icon, color: color, size: 13),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        label.toUpperCase(),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: ThemeHelpers.textSecondaryColor(context),
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.8,
+                          fontSize: 9.5,
+                          height: 1,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                // Valor atual (grande) + alvo
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: isCurrency
+                              ? _formatCurrency(current)
+                              : _formatNumber(current.toInt()),
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            color: ThemeHelpers.textColor(context),
+                            letterSpacing: -0.4,
+                            height: 1.05,
+                          ),
+                        ),
+                        TextSpan(
+                          text: '  / ${isCurrency ? _formatCurrency(target) : _formatNumber(target.toInt())}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: ThemeHelpers.textSecondaryColor(context),
+                            letterSpacing: -0.1,
+                          ),
+                        ),
+                      ],
+                    ),
+                    maxLines: 1,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  helperText,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: color,
+                    fontSize: 11,
+                    letterSpacing: -0.05,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Cor dinâmica do progresso de meta:
+  /// - >= 100%: verde (objetivo atingido)
+  /// - >=  70%: cyan (no caminho certo)
+  /// - >=  40%: âmbar (atenção)
+  /// - <   40%: rosa accent (alerta)
+  Color _goalProgressColor(double percentage) {
+    if (percentage >= 100) return const Color(0xFF10B981);
+    if (percentage >= 70) return const Color(0xFF0891B2);
+    if (percentage >= 40) return const Color(0xFFF59E0B);
+    return const Color(0xFFEC4899);
   }
 
   Widget _buildConversionMetrics(BuildContext context, ThemeData theme) {
@@ -5054,6 +5265,7 @@ class _DashboardPageState extends State<DashboardPage> {
     required String value,
     required IconData icon,
     required Color color,
+    VoidCallback? onTap,
   }) {
     // Altura fixa: filhos de `Wrap` têm altura máxima ilimitada — `Spacer`/`Expanded`
     // no eixo vertical quebram o layout e podem deixar o dashboard em branco.
@@ -5065,7 +5277,7 @@ class _DashboardPageState extends State<DashboardPage> {
       height: 1.05,
       fontFeatures: const [FontFeature.tabularFigures()],
     );
-    return Container(
+    final card = Container(
       height: 128,
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
@@ -5220,6 +5432,24 @@ class _DashboardPageState extends State<DashboardPage> {
         ],
       ),
     );
+
+    if (onTap == null) return card;
+
+    // Quando há `onTap`, envolvemos em Material+InkWell pra ganhar ripple
+    // e indicar visualmente que o card é interativo. ClipRRect respeita o
+    // borderRadius original do Container.
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          splashColor: color.withValues(alpha: 0.18),
+          highlightColor: color.withValues(alpha: 0.08),
+          child: card,
+        ),
+      ),
+    );
   }
 
   Widget _buildIconBadge(BuildContext context, IconData icon, Color color, {double size = 44, double iconSize = 22}) {
@@ -5244,43 +5474,6 @@ class _DashboardPageState extends State<DashboardPage> {
         ],
       ),
       child: Icon(icon, color: Colors.white, size: iconSize),
-    );
-  }
-
-  Widget _buildProgressStrip({
-    required BuildContext context,
-    required String label,
-    required String valueLabel,
-    required double value,
-    required Color color,
-  }) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(child: Text(label, style: theme.textTheme.bodySmall?.copyWith(color: ThemeHelpers.textSecondaryColor(context), fontWeight: FontWeight.w800))),
-            Text(valueLabel, style: theme.textTheme.bodySmall?.copyWith(color: color, fontWeight: FontWeight.w900)),
-          ],
-        ),
-        const SizedBox(height: 8),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(999),
-          child: Stack(
-            children: [
-              Container(height: 9, color: color.withOpacity(0.12)),
-              FractionallySizedBox(
-                widthFactor: value,
-                child: Container(
-                  height: 9,
-                  decoration: BoxDecoration(gradient: LinearGradient(colors: [color.withOpacity(0.75), color])),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 

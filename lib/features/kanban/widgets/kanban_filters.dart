@@ -193,133 +193,167 @@ class _PremiumSearchField extends StatelessWidget {
     final focused = focusNode.hasFocus;
     final highlighted = focused || hasText;
 
+    // Refino minimalista premium:
+    // - Card sólido em idle (sem aspecto "apagado")
+    // - Tint accent muito sutil ao focar
+    // - Sombra com cor accent quando ativo (eleva o componente)
+    // - Stripe degradê fininho no rodapé do campo quando ativo (detalhe premium)
     return AnimatedContainer(
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOutCubic,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        gradient: highlighted
-            ? LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: isDark
-                    ? [
-                        accent.withValues(alpha: 0.16),
-                        accent.withValues(alpha: 0.08),
-                        ThemeHelpers.cardBackgroundColor(context),
-                      ]
-                    : [
-                        accent.withValues(alpha: 0.07),
-                        accent.withValues(alpha: 0.035),
-                        Colors.white,
-                      ],
-                stops: const [0.0, 0.4, 1.0],
-              )
-            : null,
+        borderRadius: BorderRadius.circular(14),
         color: highlighted
-            ? null
-            : ThemeHelpers.cardBackgroundColor(context)
-                .withValues(alpha: isDark ? 0.6 : 0.7),
+            ? Color.alphaBlend(
+                accent.withValues(alpha: isDark ? 0.10 : 0.05),
+                ThemeHelpers.cardBackgroundColor(context),
+              )
+            : ThemeHelpers.cardBackgroundColor(context),
         border: Border.all(
           color: highlighted
-              ? accent.withValues(alpha: isDark ? 0.65 : 0.45)
-              : ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
+              ? accent.withValues(alpha: isDark ? 0.6 : 0.42)
+              : ThemeHelpers.borderColor(context),
           width: highlighted ? 1.4 : 1,
         ),
         boxShadow: highlighted
             ? [
                 BoxShadow(
-                  color: accent.withValues(alpha: isDark ? 0.18 : 0.1),
-                  blurRadius: 16,
-                  spreadRadius: -4,
-                  offset: const Offset(0, 6),
+                  color: accent.withValues(alpha: isDark ? 0.18 : 0.08),
+                  blurRadius: 14,
+                  spreadRadius: -3,
+                  offset: const Offset(0, 5),
                 ),
               ]
             : [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: isDark ? 0.18 : 0.03),
+                  color: Colors.black.withValues(alpha: isDark ? 0.18 : 0.025),
                   blurRadius: 6,
                   offset: const Offset(0, 2),
                 ),
               ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: Row(
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(4),
+      child: Stack(
+        children: [
+          // Stripe inferior degradê (detalhe premium minimalista) — só ao focar.
+          // Indica visualmente o estado ativo sem precisar pintar o fundo todo.
+          if (highlighted)
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: 0,
               child: Container(
-                width: 32,
-                height: 32,
+                height: 1.5,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(2),
                   gradient: LinearGradient(
                     colors: [
-                      accent.withValues(alpha: isDark ? 0.32 : 0.16),
-                      cool.withValues(alpha: isDark ? 0.32 : 0.16),
+                      accent.withValues(alpha: 0.0),
+                      accent.withValues(alpha: 0.55),
+                      cool.withValues(alpha: 0.45),
+                      accent.withValues(alpha: 0.0),
                     ],
+                    stops: const [0.0, 0.32, 0.68, 1.0],
                   ),
-                  border: Border.all(
-                    color: accent.withValues(alpha: isDark ? 0.4 : 0.28),
-                  ),
-                ),
-                child: Icon(
-                  Icons.search_rounded,
-                  size: 18,
-                  color: accent,
                 ),
               ),
             ),
-            Expanded(
-              child: TextField(
-                controller: controller,
-                focusNode: focusNode,
-                textInputAction: TextInputAction.search,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  height: 1.2,
-                  color: ThemeHelpers.textColor(context),
-                ),
-                decoration: InputDecoration(
-                  hintText: 'Buscar lead, título ou descrição…',
-                  hintStyle: theme.textTheme.bodyMedium?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    fontWeight: FontWeight.w500,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Row(
+              children: [
+                // Caixinha do ícone — monocromática (não duo-tone como antes),
+                // mas com leve gradient interno quando ativa para dar profundidade.
+                Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      gradient: highlighted
+                          ? LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                accent.withValues(alpha: isDark ? 0.28 : 0.16),
+                                accent.withValues(alpha: isDark ? 0.14 : 0.08),
+                              ],
+                            )
+                          : null,
+                      color: highlighted
+                          ? null
+                          : ThemeHelpers.borderColor(context)
+                              .withValues(alpha: isDark ? 0.22 : 0.18),
+                      border: Border.all(
+                        color: highlighted
+                            ? accent.withValues(alpha: isDark ? 0.42 : 0.32)
+                            : ThemeHelpers.borderColor(context)
+                                .withValues(alpha: 0.5),
+                        width: 0.9,
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.search_rounded,
+                      size: 18,
+                      color: highlighted
+                          ? accent
+                          : ThemeHelpers.textSecondaryColor(context),
+                    ),
                   ),
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  errorBorder: InputBorder.none,
-                  disabledBorder: InputBorder.none,
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 4,
-                    vertical: 14,
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: TextField(
+                    controller: controller,
+                    focusNode: focusNode,
+                    textInputAction: TextInputAction.search,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      height: 1.2,
+                      color: ThemeHelpers.textColor(context),
+                    ),
+                    decoration: InputDecoration(
+                      hintText: 'Buscar lead, título ou descrição…',
+                      hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                        color: ThemeHelpers.textSecondaryColor(context),
+                        fontWeight: FontWeight.w500,
+                      ),
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      errorBorder: InputBorder.none,
+                      disabledBorder: InputBorder.none,
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 14,
+                      ),
+                    ),
+                    onChanged: onChanged,
                   ),
                 ),
-                onChanged: onChanged,
-              ),
+                if (hasText)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: IconButton(
+                      icon: Icon(
+                        Icons.clear_rounded,
+                        size: 18,
+                        color: ThemeHelpers.textSecondaryColor(context),
+                      ),
+                      onPressed: onClear,
+                      tooltip: 'Limpar busca',
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints:
+                          const BoxConstraints(minWidth: 36, minHeight: 36),
+                    ),
+                  ),
+              ],
             ),
-            if (hasText)
-              Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: IconButton(
-                  icon: Icon(
-                    Icons.clear_rounded,
-                    size: 18,
-                    color: ThemeHelpers.textSecondaryColor(context),
-                  ),
-                  onPressed: onClear,
-                  tooltip: 'Limpar busca',
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints:
-                      const BoxConstraints(minWidth: 36, minHeight: 36),
-                ),
-              ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -343,93 +377,170 @@ class _PriorityTrigger extends StatelessWidget {
     final selected = value != null;
     final color = selected ? _priorityColor(value!) : accent;
 
+    // Refino minimalista premium:
+    // - Card sólido com leve tint quando selecionado
+    // - Stripe lateral 3px colorido (acento de prioridade) — detalhe premium
+    //   que reforça visualmente a prioridade selecionada sem encher o card
+    // - Ícone num quadradinho com gradient interno suave quando ativo
+    // - Sombra com a cor da prioridade ao selecionar
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         child: Ink(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(14),
             color: selected
-                ? color.withValues(alpha: isDark ? 0.16 : 0.08)
-                : ThemeHelpers.cardBackgroundColor(context)
-                    .withValues(alpha: isDark ? 0.6 : 0.7),
+                ? Color.alphaBlend(
+                    color.withValues(alpha: isDark ? 0.12 : 0.06),
+                    ThemeHelpers.cardBackgroundColor(context),
+                  )
+                : ThemeHelpers.cardBackgroundColor(context),
             border: Border.all(
               color: selected
-                  ? color.withValues(alpha: isDark ? 0.6 : 0.4)
-                  : ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
+                  ? color.withValues(alpha: isDark ? 0.55 : 0.4)
+                  : ThemeHelpers.borderColor(context),
               width: selected ? 1.4 : 1,
             ),
             boxShadow: selected
                 ? [
                     BoxShadow(
-                      color: color.withValues(alpha: isDark ? 0.22 : 0.12),
+                      color: color.withValues(alpha: isDark ? 0.18 : 0.10),
                       blurRadius: 14,
-                      spreadRadius: -4,
-                      offset: const Offset(0, 6),
+                      spreadRadius: -3,
+                      offset: const Offset(0, 5),
                     ),
                   ]
-                : null,
-          ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 11, 10, 11),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10),
-                    color: color.withValues(alpha: isDark ? 0.28 : 0.16),
-                    border: Border.all(
-                      color: color.withValues(alpha: isDark ? 0.5 : 0.34),
-                    ),
-                  ),
-                  child: Icon(
-                    selected
-                        ? Icons.flag_rounded
-                        : Icons.tune_rounded,
-                    color: color,
-                    size: 18,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Prioridade',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.1,
-                        color: selected
-                            ? color
-                            : ThemeHelpers.textSecondaryColor(context),
-                        height: 1,
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(
+                        alpha: isDark ? 0.18 : 0.025,
                       ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      selected ? value!.label : 'Todas',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.2,
-                        height: 1.1,
-                        color: ThemeHelpers.textColor(context),
-                      ),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
                     ),
                   ],
-                ),
-                const SizedBox(width: 8),
-                Icon(
-                  Icons.expand_more_rounded,
-                  color: selected
-                      ? color
-                      : ThemeHelpers.textSecondaryColor(context),
-                  size: 20,
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: Stack(
+              children: [
+                // Stripe esquerda — só aparece quando há prioridade
+                // selecionada. Conecta visualmente com o stripe do card de
+                // tarefa (mesma cor da prioridade).
+                if (selected)
+                  Positioned(
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: 3,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            color.withValues(alpha: 0.95),
+                            color.withValues(alpha: 0.55),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    selected ? 13 : 12,
+                    10,
+                    10,
+                    10,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(10),
+                          gradient: selected
+                              ? LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    color.withValues(
+                                      alpha: isDark ? 0.32 : 0.18,
+                                    ),
+                                    color.withValues(
+                                      alpha: isDark ? 0.16 : 0.08,
+                                    ),
+                                  ],
+                                )
+                              : null,
+                          color: selected
+                              ? null
+                              : ThemeHelpers.borderColor(context).withValues(
+                                  alpha: isDark ? 0.22 : 0.18,
+                                ),
+                          border: Border.all(
+                            color: selected
+                                ? color.withValues(
+                                    alpha: isDark ? 0.55 : 0.38,
+                                  )
+                                : ThemeHelpers.borderColor(context).withValues(
+                                    alpha: 0.5,
+                                  ),
+                            width: 0.9,
+                          ),
+                        ),
+                        child: Icon(
+                          selected ? Icons.flag_rounded : Icons.tune_rounded,
+                          color: selected
+                              ? color
+                              : ThemeHelpers.textSecondaryColor(context),
+                          size: 18,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'PRIORIDADE',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 1.1,
+                              color: selected
+                                  ? color
+                                  : ThemeHelpers.textSecondaryColor(context),
+                              height: 1,
+                              fontSize: 10,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            selected ? value!.label : 'Todas',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.2,
+                              height: 1.1,
+                              color: ThemeHelpers.textColor(context),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(width: 8),
+                      Icon(
+                        Icons.expand_more_rounded,
+                        color: selected
+                            ? color.withValues(alpha: 0.85)
+                            : ThemeHelpers.textSecondaryColor(context),
+                        size: 20,
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),

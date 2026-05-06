@@ -43,7 +43,7 @@
 -dontwarn com.google.android.gms.**
 
 # Keep custom model classes
--keep class com.intellisys.corretor.** { *; }
+-keep class com.dreamkeys.corretor.** { *; }
 
 # Google Play Core (necessário para Flutter)
 -keep class com.google.android.play.core.** { *; }

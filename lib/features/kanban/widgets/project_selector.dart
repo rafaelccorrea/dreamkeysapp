@@ -184,7 +184,7 @@ class _ProjectTriggerCard extends StatelessWidget {
             ),
             boxShadow: [
               BoxShadow(
-                color: accent.withValues(alpha: isDark ? 0.22 : 0.1),
+                color: accent.withValues(alpha: isDark ? 0.22 : 0.10),
                 blurRadius: 16,
                 spreadRadius: -4,
                 offset: const Offset(0, 6),
@@ -346,8 +346,7 @@ class _FunnelGlyph extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       width: 44,
       height: 44,

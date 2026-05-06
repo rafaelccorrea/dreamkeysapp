@@ -36,6 +36,6 @@ class DefaultFirebaseOptions {
     messagingSenderId: 'REPLACE_WITH_SENDER_ID',
     projectId: 'REPLACE_WITH_PROJECT_ID',
     storageBucket: 'REPLACE_WITH_PROJECT_ID.appspot.com',
-    iosBundleId: 'com.intellisys.corretor',
+    iosBundleId: 'com.dreamkeys.corretor',
   );
 }

@@ -1,6 +1,12 @@
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, debugPrint, defaultTargetPlatform, kDebugMode, kIsWeb;
+    show
+        TargetPlatform,
+        debugPrint,
+        defaultTargetPlatform,
+        kDebugMode,
+        kIsWeb,
+        kReleaseMode;
 import 'package:flutter/services.dart' show rootBundle;
 
 import 'dev_network_config.dart';
@@ -16,11 +22,13 @@ class ApiConstants {
   ///
   /// Prioridade:
   /// 1. `--dart-define=API_BASE_URL=https://...` (URL completa, máxima prioridade)
-  /// 2. `assets/config/api_target.txt` — primeira linha útil: `production` →
+  /// 2. **Build de release** (`kReleaseMode`) — força [DevNetworkConfig.productionApiBaseUrl],
+  ///    ignorando `api_target.txt`. Garante que `.aab` publicado nunca aponte para `lan`.
+  /// 3. `assets/config/api_target.txt` — primeira linha útil: `production` →
   ///    [DevNetworkConfig.productionApiBaseUrl]; `lan` → resolve IP local (abaixo)
-  /// 3. Modo **lan**: emulador Android `10.0.2.2`, físico + `dev_lan_host.txt`, etc.
+  /// 4. Modo **lan**: emulador Android `10.0.2.2`, físico + `dev_lan_host.txt`, etc.
   ///
-  /// Para API no PC, mude `api_target.txt` para `lan`.
+  /// Para API no PC, mude `api_target.txt` para `lan` (apenas em debug/profile).
   static Future<void> ensureInitialized() async {
     if (_didInit) return;
 
@@ -29,6 +37,16 @@ class ApiConstants {
       _baseUrl = _normalizeBaseUrl(fromEnvFull);
       _didInit = true;
       debugPrint('📡 [API] API_BASE_URL (dart-define) → $_baseUrl');
+      return;
+    }
+
+    // Trava de segurança: builds de release SEMPRE usam produção, ignorando
+    // `api_target.txt`. Evita que um `.aab` publicado por engano aponte para
+    // `127.0.0.1`/LAN só porque o asset ficou em `lan` na máquina do dev.
+    if (kReleaseMode) {
+      _baseUrl = _normalizeBaseUrl(DevNetworkConfig.productionApiBaseUrl);
+      _didInit = true;
+      debugPrint('📡 [API] release build → produção fixa → $_baseUrl');
       return;
     }
 

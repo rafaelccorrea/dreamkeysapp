@@ -277,6 +277,7 @@ class _KanbanPageState extends State<KanbanPage> {
     final theme = Theme.of(context);
     final accent = _kanbanAccentColor(context);
     final n = controller.displayColumns.length;
+    final canCreateTask = controller.permissions?.canCreateTasks ?? true;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -284,6 +285,7 @@ class _KanbanPageState extends State<KanbanPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Icon(
                 Icons.view_kanban_rounded,
@@ -292,28 +294,54 @@ class _KanbanPageState extends State<KanbanPage> {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  'Quadro · $n etapas',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.35,
-                    height: 1.1,
-                    color: ThemeHelpers.textColor(context),
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Quadro · $n etapas',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.35,
+                        height: 1.1,
+                        color: ThemeHelpers.textColor(context),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Arraste cards entre colunas.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: ThemeHelpers.textSecondaryColor(context),
+                        height: 1.35,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
               ),
+              const SizedBox(width: 10),
+              if (canCreateTask) ...[
+                _kanbanQuickAction(
+                  context,
+                  icon: Icons.add_rounded,
+                  label: 'Cria',
+                  isPrimary: true,
+                  onPressed: () =>
+                      _openHeroCreateNegotiationModal(context, controller),
+                ),
+                const SizedBox(width: 8),
+              ],
+              _kanbanIconAction(
+                context,
+                icon: Icons.refresh_rounded,
+                tooltip: 'Atualizar',
+                onPressed: () => controller.loadBoard(),
+              ),
             ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Arraste cards entre colunas.',
-            style: theme.textTheme.bodySmall?.copyWith(
-              fontWeight: FontWeight.w600,
-              color: ThemeHelpers.textSecondaryColor(context),
-              height: 1.35,
-            ),
           ),
           const SizedBox(height: 10),
           Divider(
@@ -324,6 +352,45 @@ class _KanbanPageState extends State<KanbanPage> {
         ],
       ),
     );
+  }
+
+  /// Botão de ação só com ícone (usado pro "Atualizar" no header do quadro).
+  /// Mantém alinhamento visual com `_kanbanQuickAction` (mesmo border-radius e
+  /// borda) sem ocupar largura com texto.
+  Widget _kanbanIconAction(
+    BuildContext context, {
+    required IconData icon,
+    required VoidCallback onPressed,
+    String? tooltip,
+  }) {
+    final accent = _kanbanAccentColor(context);
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    final button = Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: ThemeHelpers.cardBackgroundColor(context),
+            border: Border.all(
+              color: ThemeHelpers.borderColor(context).withValues(
+                alpha: isDark ? 0.55 : 0.5,
+              ),
+            ),
+          ),
+          child: Icon(icon, size: 18, color: accent),
+        ),
+      ),
+    );
+
+    if (tooltip == null) return button;
+    return Tooltip(message: tooltip, child: button);
   }
 
   Widget _buildKanbanBoard(KanbanController controller) {
@@ -646,64 +713,6 @@ class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
-  Widget _kanbanHeroPill(BuildContext context, IconData icon, String label) {
-    final accent = _kanbanAccentColor(context);
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.045)
-            : ThemeHelpers.backgroundColor(context),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: isDark
-              ? accent.withValues(alpha: 0.2)
-              : ThemeHelpers.borderColor(context).withValues(alpha: 0.42),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 15, color: accent),
-          const SizedBox(width: 7),
-          Text(
-            label,
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: ThemeHelpers.textColor(context),
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.12,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  List<Widget> _kanbanHeroContextPills(
-    BuildContext context,
-    KanbanController controller, {
-    required bool gatedGlobal,
-    required bool compact,
-  }) {
-    final n = controller.displayColumns.length;
-    final stepLabel =
-        compact && n >= 100 ? '$n etapas' : '$n etapas · funil ativo';
-    return [
-      _kanbanHeroPill(
-        context,
-        gatedGlobal ? Icons.layers_outlined : Icons.filter_alt_outlined,
-        gatedGlobal ? 'Quadro inteiro' : 'Filtro refinado',
-      ),
-      _kanbanHeroPill(
-        context,
-        Icons.linear_scale_rounded,
-        stepLabel,
-      ),
-    ];
-  }
-
   Widget _kanbanQuickAction(
     BuildContext context, {
     required IconData icon,
@@ -961,16 +970,23 @@ class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
+  /// Cor "gerencial" do modo de seleção em lote — indigo. Diferente do accent
+  /// rosa do app, pra criar um contexto visual distinto ("modo edição/admin")
+  /// e quebrar a sensação de tela 100% preto-e-vermelho.
+  static const Color _kBulkManageColor = Color(0xFF6366F1);
+
   Widget _kanbanBulkToggleButton(
     BuildContext context,
     KanbanController controller,
   ) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final accent = _kanbanAccentColor(context);
     final active = controller.bulkSelectionActive;
     final disabled = controller.bulkDeleteEligibilityLoading;
-    final color = active ? theme.colorScheme.error : accent;
+
+    // Quando ativo: cor "âmbar de aviso" (você está em um modo especial,
+    // saiba que clicar = sair). Quando inativo: indigo gerencial.
+    final color = active ? const Color(0xFFD97706) : _kBulkManageColor;
 
     return Material(
       color: Colors.transparent,
@@ -988,28 +1004,40 @@ class _KanbanPageState extends State<KanbanPage> {
         child: Ink(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
-            color: color.withValues(alpha: isDark ? 0.14 : 0.08),
-            border: Border.all(
-              color: color.withValues(alpha: isDark ? 0.45 : 0.32),
+            color: Color.alphaBlend(
+              color.withValues(alpha: isDark ? 0.14 : 0.08),
+              ThemeHelpers.cardBackgroundColor(context),
             ),
+            border: Border.all(
+              color: color.withValues(alpha: isDark ? 0.5 : 0.35),
+              width: active ? 1.4 : 1,
+            ),
+            boxShadow: active
+                ? [
+                    BoxShadow(
+                      color: color.withValues(alpha: isDark ? 0.22 : 0.12),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                      spreadRadius: -3,
+                    ),
+                  ]
+                : null,
           ),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 8, 12, 8),
+            padding: const EdgeInsets.fromLTRB(11, 8, 13, 8),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
                   active
                       ? Icons.close_rounded
-                      : Icons.checklist_rounded,
-                  size: 16,
+                      : Icons.library_add_check_outlined,
+                  size: 17,
                   color: color,
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: 7),
                 Text(
-                  active
-                      ? 'Sair da seleção em massa'
-                      : 'Seleção em massa',
+                  active ? 'Sair do modo seleção' : 'Modo seleção',
                   style: theme.textTheme.labelMedium?.copyWith(
                     fontWeight: FontWeight.w800,
                     color: color,
@@ -1039,7 +1067,6 @@ class _KanbanPageState extends State<KanbanPage> {
     final hasFilters = controller.filterPriority != null ||
         (controller.filterAssigneeId != null &&
             controller.filterAssigneeId!.trim().isNotEmpty);
-    final gatedGlobal = !hasSearch && !hasFilters;
 
     final teamName = controller.team?.name;
     final q = controller.searchQuery?.trim() ?? '';
@@ -1057,28 +1084,6 @@ class _KanbanPageState extends State<KanbanPage> {
     final headline = hasSearch ? 'Radar de leads' : 'Pipeline de leads';
 
     final spread = width >= 480;
-    final actionsTop = width >= 640;
-
-    final canCreateTask =
-        controller.permissions?.canCreateTasks ?? true;
-
-    final quickActions = <Widget>[
-      if (canCreateTask)
-        _kanbanQuickAction(
-          context,
-          icon: Icons.add_rounded,
-          label: 'Cria',
-          isPrimary: true,
-          onPressed: () =>
-              _openHeroCreateNegotiationModal(context, controller),
-        ),
-      _kanbanQuickAction(
-        context,
-        icon: Icons.refresh_rounded,
-        label: 'Atualizar',
-        onPressed: () => controller.loadBoard(),
-      ),
-    ];
 
     final mainTitles = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1110,104 +1115,24 @@ class _KanbanPageState extends State<KanbanPage> {
       textAlign: spread ? TextAlign.right : TextAlign.start,
     );
 
-    Widget pillRow() => Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: _kanbanHeroContextPills(
-            context,
-            controller,
-            gatedGlobal: gatedGlobal,
-            compact: compact,
-          ),
-        );
-
-    Widget actionsBar() => Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          alignment: WrapAlignment.end,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: quickActions,
-        );
-
-    late final Widget heroTop;
-    if (!spread) {
-      heroTop = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    final Widget heroTop = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _kanbanHeroLeadingIcon(context),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              _kanbanHeroLeadingIcon(context),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    mainTitles,
-                    const SizedBox(height: 6),
-                    dateLineWidget,
-                  ],
-                ),
-              ),
+              mainTitles,
+              const SizedBox(height: 6),
+              dateLineWidget,
             ],
           ),
-          const SizedBox(height: 14),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(child: pillRow()),
-              const SizedBox(width: 8),
-              actionsBar(),
-            ],
-          ),
-        ],
-      );
-    } else {
-      heroTop = Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _kanbanHeroLeadingIcon(context),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(flex: 52, child: mainTitles),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      flex: 48,
-                      child: Align(
-                        alignment: Alignment.topRight,
-                        child: dateLineWidget,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (actionsTop) ...[
-                const SizedBox(width: 12),
-                actionsBar(),
-              ],
-            ],
-          ),
-          const SizedBox(height: 16),
-          if (actionsTop)
-            pillRow()
-          else
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(child: pillRow()),
-                const SizedBox(width: 8),
-                actionsBar(),
-              ],
-            ),
-        ],
-      );
-    }
+        ),
+      ],
+    );
 
     return Padding(
       padding: EdgeInsets.fromLTRB(
@@ -2399,91 +2324,366 @@ class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
+  /// Dock do modo de seleção — sticky no rodapé. Visual de modal premium:
+  /// header colorido com gradient indigo + contador + ações com paleta
+  /// distinta por intent (azul = seleção total, neutro = limpar, vermelho =
+  /// excluir). Quebra a tela "preto-e-vermelho" introduzindo indigo/cyan.
   Widget _buildBulkSelectionDock(
     BuildContext context,
     KanbanController controller,
   ) {
     final theme = Theme.of(context);
-    final border = ThemeHelpers.borderColor(context);
+    final isDark = theme.brightness == Brightness.dark;
+    const manage = _kBulkManageColor; // indigo
+    const cyan = Color(0xFF0891B2);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+
+    final selected = controller.bulkSelectedCount;
+    final hasSelection = selected > 0;
+    final disabled = controller.bulkDeleting;
 
     return Material(
-      elevation: 12,
-      color: ThemeHelpers.cardBackgroundColor(context),
+      elevation: 18,
+      color: Colors.transparent,
       child: SafeArea(
         top: false,
         child: Container(
+          margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
           decoration: BoxDecoration(
-            border: Border(
-              top: BorderSide(color: border.withValues(alpha: 0.45)),
+            color: ThemeHelpers.cardBackgroundColor(context),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: manage.withValues(alpha: isDark ? 0.32 : 0.22),
+              width: 1.2,
             ),
+            boxShadow: [
+              BoxShadow(
+                color: manage.withValues(alpha: isDark ? 0.22 : 0.12),
+                blurRadius: 22,
+                spreadRadius: -4,
+                offset: const Offset(0, 10),
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.42 : 0.08),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
+              ),
+            ],
           ),
-          padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      controller.bulkSelectedCount == 0
-                          ? 'Nenhum card selecionado'
-                          : '${controller.bulkSelectedCount} card(s) selecionado(s)',
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // ── Header gradient (modo ativo) ──────────────────────────
+                Container(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: isDark
+                          ? [
+                              manage.withValues(alpha: 0.22),
+                              cyan.withValues(alpha: 0.12),
+                            ]
+                          : [
+                              manage.withValues(alpha: 0.12),
+                              cyan.withValues(alpha: 0.06),
+                            ],
+                    ),
+                    border: Border(
+                      bottom: BorderSide(
+                        color: manage.withValues(alpha: 0.18),
                       ),
                     ),
                   ),
-                  IconButton(
-                    tooltip: 'Fechar modo de seleção',
-                    onPressed: controller.bulkDeleting
-                        ? null
-                        : () => controller.exitBulkSelectionMode(),
-                    icon: const Icon(Icons.close_rounded),
+                  child: Row(
+                    children: [
+                      // Glyph com badge de contador
+                      Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [
+                                  manage,
+                                  Color.lerp(manage, cyan, 0.5)!,
+                                ],
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: manage.withValues(alpha: 0.45),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 3),
+                                  spreadRadius: -2,
+                                ),
+                              ],
+                            ),
+                            child: const Icon(
+                              Icons.library_add_check_rounded,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                          ),
+                          if (hasSelection)
+                            Positioned(
+                              right: -4,
+                              top: -4,
+                              child: Container(
+                                constraints: const BoxConstraints(
+                                  minWidth: 20,
+                                  minHeight: 20,
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 5,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(999),
+                                  color: const Color(0xFF10B981),
+                                  border: Border.all(
+                                    color: ThemeHelpers.cardBackgroundColor(
+                                      context,
+                                    ),
+                                    width: 1.5,
+                                  ),
+                                ),
+                                child: Text(
+                                  selected > 99 ? '99+' : '$selected',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w900,
+                                    height: 1.1,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'MODO SELEÇÃO',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.6,
+                                color: manage,
+                                fontSize: 9.5,
+                                height: 1,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              hasSelection
+                                  ? '$selected ${selected == 1 ? "card selecionado" : "cards selecionados"}'
+                                  : 'Toque nos cards para selecionar',
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.2,
+                                color: ThemeHelpers.textColor(context),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Sair do modo seleção',
+                        onPressed: disabled
+                            ? null
+                            : () => controller.exitBulkSelectionMode(),
+                        icon: Icon(
+                          Icons.close_rounded,
+                          color: muted,
+                        ),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                alignment: WrapAlignment.start,
-                children: [
-                  OutlinedButton(
-                    onPressed: controller.bulkDeleting
-                        ? null
-                        : controller.bulkSelectAllCurrentTasks,
-                    child: const Text('Selecionar todos'),
+                ),
+                // ── Ações ─────────────────────────────────────────────────
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                  child: Row(
+                    children: [
+                      // Selecionar todos — cyan info
+                      Expanded(
+                        child: _buildBulkActionButton(
+                          context,
+                          icon: Icons.done_all_rounded,
+                          label: 'Todos',
+                          color: cyan,
+                          onPressed: disabled
+                              ? null
+                              : controller.bulkSelectAllCurrentTasks,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Limpar — neutro
+                      Expanded(
+                        child: _buildBulkActionButton(
+                          context,
+                          icon: Icons.clear_rounded,
+                          label: 'Limpar',
+                          color: muted,
+                          neutral: true,
+                          onPressed: (disabled || !hasSelection)
+                              ? null
+                              : controller.clearBulkTaskSelection,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Excluir — único filled vermelho (intent destrutivo)
+                      Expanded(
+                        flex: 2,
+                        child: _buildBulkActionButton(
+                          context,
+                          icon: Icons.delete_outline_rounded,
+                          label: 'Excluir',
+                          color: theme.colorScheme.error,
+                          filled: true,
+                          onPressed: (disabled || !hasSelection)
+                              ? null
+                              : () => _confirmBulkDelete(context, controller),
+                        ),
+                      ),
+                    ],
                   ),
-                  OutlinedButton(
-                    onPressed: controller.bulkDeleting ||
-                            controller.bulkSelectedCount == 0
-                        ? null
-                        : controller.clearBulkTaskSelection,
-                    child: const Text('Limpar'),
-                  ),
-                  FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: theme.colorScheme.error,
-                      foregroundColor: theme.colorScheme.onError,
+                ),
+                if (disabled) ...[
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: manage,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Excluindo cards selecionados…',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: muted,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    onPressed: controller.bulkDeleting ||
-                            controller.bulkSelectedCount == 0
-                        ? null
-                        : () => _confirmBulkDelete(context, controller),
-                    child: const Text('Excluir'),
                   ),
                 ],
-              ),
-              if (controller.bulkDeleting) ...[
-                const SizedBox(height: 10),
-                LinearProgressIndicator(
-                  backgroundColor:
-                      theme.colorScheme.primary.withValues(alpha: 0.12),
-                  color: theme.colorScheme.primary,
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Botão de ação do dock — pílula com ícone + label.
+  /// `filled=true` → fundo na cor `color` com texto branco (intent forte).
+  /// `neutral=true` → outline cinza (intent neutro/secundário).
+  /// padrão → outline tinted na cor (intent informativo).
+  Widget _buildBulkActionButton(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback? onPressed,
+    bool filled = false,
+    bool neutral = false,
+  }) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final disabled = onPressed == null;
+    final borderCol = ThemeHelpers.borderColor(context);
+
+    final bg = filled
+        ? color.withValues(alpha: disabled ? 0.45 : 1)
+        : Color.alphaBlend(
+            (neutral ? borderCol : color)
+                .withValues(alpha: isDark ? 0.14 : 0.08),
+            ThemeHelpers.cardBackgroundColor(context),
+          );
+    final fg = filled
+        ? Colors.white
+        : (neutral
+              ? ThemeHelpers.textColor(context).withValues(alpha: 0.85)
+              : color);
+    final borderColor = filled
+        ? Colors.transparent
+        : (neutral
+              ? borderCol
+              : color.withValues(alpha: isDark ? 0.45 : 0.32));
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(12),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: borderColor,
+              width: 1,
+            ),
+            boxShadow: filled && !disabled
+                ? [
+                    BoxShadow(
+                      color: color.withValues(alpha: 0.32),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                      spreadRadius: -2,
+                    ),
+                  ]
+                : null,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: 11,
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 17, color: fg),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: fg,
+                      fontSize: 13,
+                      letterSpacing: 0.05,
+                    ),
+                  ),
                 ),
               ],
-            ],
+            ),
           ),
         ),
       ),

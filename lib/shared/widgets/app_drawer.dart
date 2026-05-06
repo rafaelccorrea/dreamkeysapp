@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:provider/provider.dart';
+import '../../../core/constants/app_permissions.dart';
 import '../../../core/navigation/app_navigator.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../services/module_access_service.dart';
 import '../services/auth_service.dart';
 import '../services/token_refresh_service.dart';
 import '../services/company_service.dart';
@@ -74,6 +76,7 @@ class _AppDrawerState extends State<AppDrawer> {
 
     // Verificar se algum item de Gestão de Negócios está ativo
     if (activeRoute == AppRoutes.properties ||
+        activeRoute == AppRoutes.propertyApprovals ||
         activeRoute == AppRoutes.clients ||
         activeRoute == AppRoutes.matches ||
         activeRoute == AppRoutes.calendar ||
@@ -865,11 +868,18 @@ class _AppDrawerState extends State<AppDrawer> {
 
     final gestaoGroupActive =
         activeRoute == AppRoutes.properties ||
+        activeRoute == AppRoutes.propertyApprovals ||
         activeRoute == AppRoutes.clients ||
         activeRoute == AppRoutes.matches ||
         activeRoute == AppRoutes.calendar ||
         activeRoute == AppRoutes.kanban ||
         activeRoute.startsWith('/clients');
+
+    // Paridade com `Drawer.tsx` do web: item "Aprovações" só aparece se o
+    // usuário tem `view`, `create`, `approve_*` ou `manage_approval_settings`
+    // — com bypass admin/master/manager via `hasAnyPermission`.
+    final canSeeApprovalsMenu = ModuleAccessService.instance
+        .hasAnyPermission(AppPermissions.approvalQueueMenu);
 
     final documentosGroupActive =
         activeRoute == AppRoutes.documents ||
@@ -994,6 +1004,29 @@ class _AppDrawerState extends State<AppDrawer> {
                                   },
                                   isSubItem: true,
                                 ),
+                                if (canSeeApprovalsMenu)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.propertyApprovals,
+                                    icon: LucideIcons.shieldCheck,
+                                    activeIcon: LucideIcons.shieldCheck,
+                                    title: 'Aprovações',
+                                    accent: accent,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute ==
+                                          AppRoutes.propertyApprovals) {
+                                        return;
+                                      }
+                                      Navigator.of(context)
+                                          .pushNamedAndRemoveUntil(
+                                        AppRoutes.propertyApprovals,
+                                        (route) => false,
+                                      );
+                                    },
+                                    isSubItem: true,
+                                  ),
                                 _buildDrawerItem(
                                   context: context,
                                   currentRoute: activeRoute,

@@ -11,7 +11,7 @@ plugins {
 }
 
 android {
-    namespace = "com.intellisys.corretor"
+    namespace = "com.dreamkeys.corretor"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -26,7 +26,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.intellisys.corretor"
+        applicationId = "com.dreamkeys.corretor"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

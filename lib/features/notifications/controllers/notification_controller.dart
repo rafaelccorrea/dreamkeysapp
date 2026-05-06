@@ -1,5 +1,8 @@
-import 'package:flutter/foundation.dart';
+import 'dart:async';
 import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
+
 import '../models/notification_model.dart';
 import '../services/notification_service.dart';
 import '../services/notification_websocket_service.dart';
@@ -341,21 +344,43 @@ class NotificationController extends ChangeNotifier {
     }
   }
 
-  /// Marca todas como lidas
+  /// Marca todas como lidas.
+  ///
+  /// IMPORTANTE: o backend trata `companyId` ausente como "marcar APENAS
+  /// notificações pessoais (`companyId IS NULL`)". Por isso, se o usuário
+  /// não escolheu filtro explícito, usamos a empresa atualmente selecionada
+  /// (via [SecureStorageService]). Sem isso, ao chamar a rota o backend
+  /// não persiste nada para usuários cujas notificações vêm todas da
+  /// empresa, e ao recarregar elas voltam como não lidas.
   Future<bool> markAllAsRead() async {
     try {
+      String? effectiveCompanyId = _filterCompanyId;
+      if (effectiveCompanyId == null || effectiveCompanyId.isEmpty) {
+        effectiveCompanyId =
+            await SecureStorageService.instance.getCompanyId();
+      }
+
       final response = await _notificationService.markAllAsRead(
-        companyId: _filterCompanyId,
+        companyId: effectiveCompanyId,
       );
 
       if (response.success && response.data != null) {
-        // Atualizar todas na lista local
+        // Update otimista local
         _notifications = _notifications
             .map((n) => n.copyWith(read: true))
             .toList();
 
         _unreadCount = response.data!.unreadCount;
         notifyListeners();
+
+        // Garante consistência com o backend mesmo se o WS estiver mudo:
+        // recarrega a primeira página + contador canônico. Sem isso, ao
+        // entrar de novo na tela / abrir o overlay, vínhamos com uma cópia
+        // ainda não lida do servidor caso a chamada tivesse afetado 0
+        // registros (cenário do bug original).
+        unawaited(loadNotifications(reset: true));
+        unawaited(refreshUnreadCount());
+
         return true;
       } else {
         _error = response.message ?? 'Erro ao marcar todas como lidas';

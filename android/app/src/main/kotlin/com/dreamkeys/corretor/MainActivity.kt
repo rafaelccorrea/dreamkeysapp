@@ -1,4 +1,4 @@
-package com.intellisys.corretor
+package com.dreamkeys.corretor
 
 import io.flutter.embedding.android.FlutterFragmentActivity
 

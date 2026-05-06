@@ -1,10 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/notification_model.dart';
-import '../utils/notification_navigation.dart';
+import '../utils/notification_type_style.dart';
 import '../../../core/theme/app_colors.dart';
 
 /// Item individual de notificação
+///
+/// Estilização espelha o intellisys-web:
+/// - Border-left colorido por **tipo** de notificação (lead, sistema, etc.)
+/// - Ícone temático em chip com fundo `tinted` na cor do tipo
+/// - Pequeno chip com a categoria (ex.: "Lead", "Sistema", "Tarefa")
+/// - Dot pulsante quando não lida
 class NotificationItem extends StatelessWidget {
   final NotificationModel notification;
   final VoidCallback? onTap;
@@ -21,12 +27,14 @@ class NotificationItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final style = NotificationTypeStyle.fromType(notification.type);
 
-    final backgroundColor = notification.read
-        ? Colors.transparent
-        : (isDark
-            ? AppColors.background.backgroundSecondaryDarkMode.withOpacity(0.3)
-            : AppColors.primary.primary.withOpacity(0.05));
+    final unreadBg = isDark
+        ? Colors.white.withValues(alpha: 0.03)
+        : style.color.withValues(alpha: 0.05);
+
+    final backgroundColor =
+        notification.read ? Colors.transparent : unreadBg;
 
     return Dismissible(
       key: Key(notification.id),
@@ -53,10 +61,13 @@ class NotificationItem extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           child: Container(
-            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: backgroundColor,
               border: Border(
+                left: BorderSide(
+                  color: style.color,
+                  width: 3,
+                ),
                 bottom: BorderSide(
                   color: isDark
                       ? AppColors.border.borderDarkMode
@@ -65,34 +76,33 @@ class NotificationItem extends StatelessWidget {
                 ),
               ),
             ),
+            padding: const EdgeInsets.fromLTRB(13, 13, 16, 13),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Ícone de prioridade
-                _PriorityIcon(priority: notification.priority),
+                _TypeIconChip(style: style),
                 const SizedBox(width: 12),
-                // Conteúdo
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Título
                       Text(
                         notification.title,
                         style: theme.textTheme.titleSmall?.copyWith(
                           fontWeight: notification.read
-                              ? FontWeight.normal
-                              : FontWeight.bold,
+                              ? FontWeight.w600
+                              : FontWeight.w700,
+                          letterSpacing: -0.1,
                           color: isDark
                               ? AppColors.text.textDarkMode
                               : AppColors.text.text,
                         ),
                       ),
                       const SizedBox(height: 4),
-                      // Mensagem
                       Text(
                         notification.message,
                         style: theme.textTheme.bodySmall?.copyWith(
+                          height: 1.4,
                           color: isDark
                               ? AppColors.text.textSecondaryDarkMode
                               : AppColors.text.textSecondary,
@@ -101,40 +111,21 @@ class NotificationItem extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 8),
-                      // Data e tipo
                       Row(
                         children: [
-                          Text(
-                            _formatDate(notification.createdAt),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              fontSize: 11,
-                              color: isDark
-                                  ? AppColors.text.textLightDarkMode
-                                  : AppColors.text.textLight,
-                            ),
-                          ),
+                          _CategoryChip(style: style),
                           const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: isDark
-                                  ? AppColors.background.backgroundTertiaryDarkMode
-                                  : AppColors.background.backgroundTertiary,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
+                          Flexible(
                             child: Text(
-                              NotificationNavigation.getNotificationTypeLabel(
-                                notification.type,
-                              ),
+                              _formatDate(notification.createdAt),
                               style: theme.textTheme.bodySmall?.copyWith(
-                                fontSize: 10,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
                                 color: isDark
-                                    ? AppColors.text.textSecondaryDarkMode
-                                    : AppColors.text.textSecondary,
+                                    ? AppColors.text.textLightDarkMode
+                                    : AppColors.text.textLight,
                               ),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                         ],
@@ -142,15 +133,20 @@ class NotificationItem extends StatelessWidget {
                     ],
                   ),
                 ),
-                // Indicador de não lida
                 if (!notification.read)
                   Container(
                     width: 8,
                     height: 8,
-                    margin: const EdgeInsets.only(left: 8),
+                    margin: const EdgeInsets.only(left: 8, top: 6),
                     decoration: BoxDecoration(
-                      color: _getPriorityColor(notification.priority, isDark),
+                      color: style.color,
                       shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: style.color.withValues(alpha: 0.55),
+                          blurRadius: 6,
+                        ),
+                      ],
                     ),
                   ),
               ],
@@ -181,90 +177,81 @@ class NotificationItem extends StatelessWidget {
       return DateFormat('dd/MM/yyyy').format(date);
     }
   }
-
-  Color _getPriorityColor(NotificationPriority priority, bool isDark) {
-    switch (priority) {
-      case NotificationPriority.urgent:
-        return isDark
-            ? AppColors.status.errorDarkMode
-            : AppColors.status.error;
-      case NotificationPriority.high:
-        return isDark
-            ? AppColors.status.warningDarkMode
-            : AppColors.status.warning;
-      case NotificationPriority.medium:
-        return isDark
-            ? AppColors.status.infoDarkMode
-            : AppColors.status.info;
-      case NotificationPriority.low:
-        return isDark
-            ? AppColors.text.textLightDarkMode
-            : AppColors.text.textLight;
-    }
-  }
 }
 
-/// Ícone de prioridade
-class _PriorityIcon extends StatelessWidget {
-  final NotificationPriority priority;
+/// Chip do ícone à esquerda com fundo `tinted` na cor do tipo.
+class _TypeIconChip extends StatelessWidget {
+  final NotificationTypeStyle style;
 
-  const _PriorityIcon({
-    required this.priority,
-  });
+  const _TypeIconChip({required this.style});
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final color = _getPriorityColor(priority, isDark);
-    final icon = _getPriorityIcon(priority);
-
     return Container(
       width: 40,
       height: 40,
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        shape: BoxShape.circle,
+        color: style.color.withValues(alpha: isDark ? 0.18 : 0.12),
+        borderRadius: BorderRadius.circular(11),
+        border: Border.all(
+          color: style.color.withValues(alpha: isDark ? 0.32 : 0.22),
+          width: 1,
+        ),
       ),
       child: Icon(
-        icon,
-        color: color,
+        style.icon,
+        color: style.color,
         size: 20,
       ),
     );
   }
-
-  Color _getPriorityColor(NotificationPriority priority, bool isDark) {
-    switch (priority) {
-      case NotificationPriority.urgent:
-        return isDark
-            ? AppColors.status.errorDarkMode
-            : AppColors.status.error;
-      case NotificationPriority.high:
-        return isDark
-            ? AppColors.status.warningDarkMode
-            : AppColors.status.warning;
-      case NotificationPriority.medium:
-        return isDark
-            ? AppColors.status.infoDarkMode
-            : AppColors.status.info;
-      case NotificationPriority.low:
-        return isDark
-            ? AppColors.text.textLightDarkMode
-            : AppColors.text.textLight;
-    }
-  }
-
-  IconData _getPriorityIcon(NotificationPriority priority) {
-    switch (priority) {
-      case NotificationPriority.urgent:
-        return Icons.error;
-      case NotificationPriority.high:
-        return Icons.warning;
-      case NotificationPriority.medium:
-        return Icons.info;
-      case NotificationPriority.low:
-        return Icons.message;
-    }
-  }
 }
 
+/// Chip da categoria (label + ponto de cor) ao lado da data.
+class _CategoryChip extends StatelessWidget {
+  final NotificationTypeStyle style;
+
+  const _CategoryChip({required this.style});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: style.color.withValues(alpha: isDark ? 0.16 : 0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: style.color.withValues(alpha: isDark ? 0.32 : 0.22),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(
+              color: style.color,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            style.category.label,
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.1,
+              color: style.color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

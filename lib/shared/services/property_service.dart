@@ -344,6 +344,29 @@ class Property {
   /// assinada pelo proprietário. Equivalente a `ownerAuthStatus == 'signed'`
   /// para fins de bloqueio de edição.
   final String? ownerAuthSignedAt;
+  // ─── Fila de aprovação: disponibilidade ───────────────────────────────
+  /// Data ISO em que a disponibilidade foi recusada (item ainda na fila
+  /// aguardando reenvio para nova análise). Quando preenchida com status
+  /// `pending_approval` indica "recusado, aguardando reenvio".
+  final String? availabilityRejectedAt;
+  /// Motivo livre informado por quem recusou a disponibilidade.
+  final String? availabilityRejectionReason;
+  /// Data ISO da aprovação da disponibilidade (após a fila).
+  final String? availabilityApprovedAt;
+  // ─── Fila de aprovação: publicação no site ────────────────────────────
+  /// Data ISO em que a publicação no site foi solicitada (entrou na fila).
+  final String? publicationRequestedAt;
+  /// Data ISO da aprovação da publicação no site.
+  final String? publicationApprovedAt;
+  /// Data ISO em que a publicação foi recusada (item permanece em
+  /// `available` mas com `isAvailableForSite: false`).
+  final String? publicationRejectedAt;
+  /// Motivo livre informado por quem recusou a publicação.
+  final String? publicationRejectionReason;
+  /// Indica que o usuário deseja publicar no site mas a empresa exige
+  /// aprovação para publicação. Útil para distinguir "rascunho privado"
+  /// vs "rascunho com intenção de publicar".
+  final bool? sitePublicationApprovalDesired;
   final String createdAt;
   final String updatedAt;
   final int? imageCount;
@@ -412,6 +435,14 @@ class Property {
     this.capturedBy,
     this.ownerAuthStatus,
     this.ownerAuthSignedAt,
+    this.availabilityRejectedAt,
+    this.availabilityRejectionReason,
+    this.availabilityApprovedAt,
+    this.publicationRequestedAt,
+    this.publicationApprovedAt,
+    this.publicationRejectedAt,
+    this.publicationRejectionReason,
+    this.sitePublicationApprovalDesired,
     required this.createdAt,
     required this.updatedAt,
     this.imageCount,
@@ -526,6 +557,25 @@ class Property {
           json['owner_auth_status']?.toString(),
       ownerAuthSignedAt: json['ownerAuthSignedAt']?.toString() ??
           json['owner_auth_signed_at']?.toString(),
+      availabilityRejectedAt: json['availabilityRejectedAt']?.toString() ??
+          json['availability_rejected_at']?.toString(),
+      availabilityRejectionReason: json['availabilityRejectionReason']
+              ?.toString() ??
+          json['availability_rejection_reason']?.toString(),
+      availabilityApprovedAt: json['availabilityApprovedAt']?.toString() ??
+          json['availability_approved_at']?.toString(),
+      publicationRequestedAt: json['publicationRequestedAt']?.toString() ??
+          json['publication_requested_at']?.toString(),
+      publicationApprovedAt: json['publicationApprovedAt']?.toString() ??
+          json['publication_approved_at']?.toString(),
+      publicationRejectedAt: json['publicationRejectedAt']?.toString() ??
+          json['publication_rejected_at']?.toString(),
+      publicationRejectionReason: json['publicationRejectionReason']
+              ?.toString() ??
+          json['publication_rejection_reason']?.toString(),
+      sitePublicationApprovalDesired:
+          json['sitePublicationApprovalDesired'] as bool? ??
+              json['site_publication_approval_desired'] as bool?,
       capturedBy: json['capturedBy'] != null
           ? PropertyCapturedBy.fromJson(json['capturedBy'] as Map<String, dynamic>)
           : json['captured_by'] != null

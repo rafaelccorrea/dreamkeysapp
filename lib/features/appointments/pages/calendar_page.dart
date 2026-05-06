@@ -1383,14 +1383,26 @@ class _CalendarPageState extends State<CalendarPage>
 }
 
 // ===========================================================================
-// PREMIUM HERO — fluid background + responsive layout + entrance animation
+// AGENDA HEADER — fluido, sem caixa, identidade própria.
+//
+// Esta tela NÃO usa o padrão "hero card" do Dashboard / CRM / Imóveis
+// (eyebrow + título + subtítulo dentro de um container retângular). Aqui
+// o conteúdo é solto, com hierarquia tipográfica editorial:
+//
+//   AGENDA · QUARTA-FEIRA                              ● 14:32
+//
+//   15 de outubro                                          ← manchete
+//   3 compromissos hoje · 2 amanhã                        ← contexto
+//
+//   ─────────────────────────────────────────────         ← divisor gradient
+//
+//   PRÓXIMO · em 1h12
+//
+//   15:45 │ Visita ao apartamento Rua Gomes              ← tap → details
+//         │ ● Visita    📍 Vila Olímpia                   →
 // ===========================================================================
 
-/// Cabeçalho premium da Agenda. Apresenta saudação, contexto do dia e o
-/// próximo compromisso de forma orgânica: fundo com orbs em movimento lento,
-/// camada de vidro translúcido e tipografia hierárquica que se adapta ao
-/// espaço disponível (FittedBox, LayoutBuilder).
-class _PremiumHero extends StatefulWidget {
+class _PremiumHero extends StatelessWidget {
   final Appointment? next;
   final int todayCount;
   final int tomorrowCount;
@@ -1405,33 +1417,20 @@ class _PremiumHero extends StatefulWidget {
     required this.onTapEmpty,
   });
 
-  @override
-  State<_PremiumHero> createState() => _PremiumHeroState();
-}
-
-class _PremiumHeroState extends State<_PremiumHero>
-    with TickerProviderStateMixin {
-  late final AnimationController _bg;
-  late final AnimationController _enter;
-
-  @override
-  void initState() {
-    super.initState();
-    _bg = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 18),
-    )..repeat();
-    _enter = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 650),
-    )..forward();
-  }
-
-  @override
-  void dispose() {
-    _bg.dispose();
-    _enter.dispose();
-    super.dispose();
+  String _buildContextLine() {
+    final parts = <String>[];
+    if (todayCount > 0) {
+      parts.add(
+        '$todayCount ${todayCount == 1 ? "compromisso" : "compromissos"} hoje',
+      );
+    }
+    if (tomorrowCount > 0) {
+      parts.add('$tomorrowCount amanhã');
+    }
+    if (parts.isEmpty) {
+      return 'Dia livre — bom momento para focar nos seus leads';
+    }
+    return parts.join(' · ');
   }
 
   @override
@@ -1439,310 +1438,151 @@ class _PremiumHeroState extends State<_PremiumHero>
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final primary = AppColors.primary.primary;
-    final accent = widget.next != null
-        ? AppointmentVisuals.colorFromHex(widget.next!.color)
-        : primary;
+    final now = DateTime.now();
+    final weekday = DateFormat('EEEE', 'pt_BR').format(now);
+    final monthDay = DateFormat("d 'de' MMMM", 'pt_BR').format(now);
+    final timeNow = DateFormat('HH:mm').format(now);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-      child: AnimatedBuilder(
-        animation: Listenable.merge([_bg, _enter]),
-        builder: (context, _) {
-          final t = _bg.value;
-          final e = Curves.easeOutCubic.transform(_enter.value);
-
-          return Transform.translate(
-            offset: Offset(0, 18 * (1 - e)),
-            child: Opacity(
-              opacity: e,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(28),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? const Color(0xFF13131F)
-                        : Colors.white,
-                    border: Border.all(
-                      color: accent.withOpacity(isDark ? 0.22 : 0.14),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: accent.withOpacity(isDark ? 0.18 : 0.10),
-                        blurRadius: 32,
-                        offset: const Offset(0, 16),
-                        spreadRadius: -4,
-                      ),
-                    ],
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── Eyebrow + relógio (fluido, sem container) ───────────────
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Text(
+                  'AGENDA · ${weekday.toUpperCase()}',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: primary,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.6,
+                    fontSize: 10,
                   ),
-                  child: Stack(
-                    children: [
-                      // Orbs animados como background fluido
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          child: CustomPaint(
-                            painter: _HeroFluidPainter(
-                              t: t,
-                              accent: accent,
-                              isDark: isDark,
-                            ),
-                          ),
-                        ),
-                      ),
-                      // Gradiente de "fade" que apoia legibilidade
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                                colors: isDark
-                                    ? [
-                                        Colors.white.withOpacity(0.02),
-                                        Colors.transparent,
-                                      ]
-                                    : [
-                                        Colors.white.withOpacity(0.55),
-                                        Colors.white.withOpacity(0.10),
-                                      ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      // Conteúdo
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
-                        child: _Content(
-                          next: widget.next,
-                          todayCount: widget.todayCount,
-                          tomorrowCount: widget.tomorrowCount,
-                          accent: accent,
-                          isDark: isDark,
-                          onTapNext: widget.onTapNext,
-                          onTapEmpty: widget.onTapEmpty,
-                        ),
-                      ),
-                    ],
-                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
+              const SizedBox(width: 8),
+              _AgendaLiveClock(time: timeNow, color: primary),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // ── Manchete: data por extenso ───────────────────────────────
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              monthDay,
+              style: theme.textTheme.displaySmall?.copyWith(
+                fontWeight: FontWeight.w900,
+                letterSpacing: -1.4,
+                color: ThemeHelpers.textColor(context),
+                height: 1,
+                fontSize: 38,
+              ),
             ),
-          );
-        },
+          ),
+          const SizedBox(height: 10),
+          // ── Contexto do dia ───────────────────────────────────────────
+          Text(
+            _buildContextLine(),
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: ThemeHelpers.textSecondaryColor(context),
+              fontWeight: FontWeight.w600,
+              height: 1.35,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 22),
+          // ── Divisor gradient (linha fina horizontal, fade) ───────────
+          Container(
+            height: 1,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  primary.withOpacity(isDark ? 0.55 : 0.4),
+                  ThemeHelpers.borderColor(context).withOpacity(0.4),
+                  Colors.transparent,
+                ],
+                stops: const [0.0, 0.42, 1.0],
+              ),
+            ),
+          ),
+          const SizedBox(height: 22),
+          // ── Próximo compromisso ou estado vazio ──────────────────────
+          if (next != null)
+            _AgendaNextFluid(
+              next: next!,
+              isDark: isDark,
+              onTap: onTapNext,
+            )
+          else
+            _AgendaEmptyFluid(
+              todayCount: todayCount,
+              tomorrowCount: tomorrowCount,
+              onTap: onTapEmpty,
+            ),
+        ],
       ),
     );
   }
 }
 
-class _Content extends StatelessWidget {
-  final Appointment? next;
-  final int todayCount;
-  final int tomorrowCount;
-  final Color accent;
-  final bool isDark;
-  final VoidCallback onTapNext;
-  final VoidCallback onTapEmpty;
-
-  const _Content({
-    required this.next,
-    required this.todayCount,
-    required this.tomorrowCount,
-    required this.accent,
-    required this.isDark,
-    required this.onTapNext,
-    required this.onTapEmpty,
-  });
-
-  IconData _greetingIcon(int hour) {
-    if (hour < 6) return Icons.bedtime_rounded;
-    if (hour < 12) return Icons.wb_sunny_rounded;
-    if (hour < 18) return Icons.light_mode_rounded;
-    return Icons.nights_stay_rounded;
-  }
+/// Relógio vivo no topo do hero — bullet pulsante + horário monospace.
+class _AgendaLiveClock extends StatelessWidget {
+  final String time;
+  final Color color;
+  const _AgendaLiveClock({required this.time, required this.color});
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    final theme = Theme.of(context);
+    return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _GreetingRow(
-          greetingIcon: _greetingIcon(now.hour),
-          todayCount: todayCount,
-          now: now,
-        ),
-        const SizedBox(height: 16),
-        if (next == null)
-          _EmptyStateSurface(
-            todayCount: todayCount,
-            tomorrowCount: tomorrowCount,
-            onTap: onTapEmpty,
-          )
-        else
-          _NextSurface(
-            next: next!,
-            accent: accent,
-            isDark: isDark,
-            onTap: onTapNext,
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: color,
+            boxShadow: [
+              BoxShadow(
+                color: color.withOpacity(0.55),
+                blurRadius: 6,
+                spreadRadius: 1,
+              ),
+            ],
           ),
+        ),
+        const SizedBox(width: 7),
+        Text(
+          time,
+          style: theme.textTheme.labelLarge?.copyWith(
+            color: ThemeHelpers.textColor(context),
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.4,
+            fontFeatures: const [FontFeature.tabularFigures()],
+            fontSize: 13,
+          ),
+        ),
       ],
     );
   }
 }
 
-/// Linha superior — saudação + contador do dia. Fully responsive.
-class _GreetingRow extends StatelessWidget {
-  final IconData greetingIcon;
-  final int todayCount;
-  final DateTime now;
-  const _GreetingRow({
-    required this.greetingIcon,
-    required this.todayCount,
-    required this.now,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final color = todayCount > 0
-        ? AppColors.primary.primary
-        : AppColors.status.success;
-
-    return LayoutBuilder(builder: (context, c) {
-      final tight = c.maxWidth < 320;
-      final greetingText = '${AppointmentVisuals.greeting()}, corretor';
-
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.primary.withOpacity(0.10),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: AppColors.primary.primary.withOpacity(0.20),
-                  ),
-                ),
-                child: Icon(
-                  greetingIcon,
-                  size: 13,
-                  color: AppColors.primary.primary,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  greetingText,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: ThemeHelpers.textColor(context),
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.1,
-                  ),
-                ),
-              ),
-              if (!tight) ...[
-                const SizedBox(width: 10),
-                _DayPulse(
-                  count: todayCount,
-                  color: color,
-                ),
-              ],
-            ],
-          ),
-          const SizedBox(height: 8),
-          // Data grande responsiva — encolhe sem quebrar
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              AppointmentVisuals.formattedFullDate(now),
-              maxLines: 1,
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                fontSize: 24,
-                height: 1.05,
-                letterSpacing: -0.7,
-              ),
-            ),
-          ),
-          if (tight) ...[
-            const SizedBox(height: 8),
-            _DayPulse(count: todayCount, color: color),
-          ],
-        ],
-      );
-    });
-  }
-}
-
-/// Pílula viva ("3 hoje" / "Dia livre") com glow.
-class _DayPulse extends StatelessWidget {
-  final int count;
-  final Color color;
-  const _DayPulse({required this.count, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.10),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withOpacity(0.32)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 7,
-            height: 7,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: color.withOpacity(0.6),
-                  blurRadius: 6,
-                  spreadRadius: 1,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            count > 0 ? '$count hoje' : 'Dia livre',
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w800,
-              fontSize: 11.5,
-              letterSpacing: 0.1,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Superfície fluida do "próximo compromisso" — vidro translúcido sobre os
-/// orbs, com pillar de horário, título e localização opcional.
-class _NextSurface extends StatelessWidget {
+/// Próximo compromisso fluido — sem caixa. Layout horizontal:
+/// [hora gigante] [linha vertical fina] [info] [chevron].
+class _AgendaNextFluid extends StatelessWidget {
   final Appointment next;
-  final Color accent;
   final bool isDark;
   final VoidCallback onTap;
-
-  const _NextSurface({
+  const _AgendaNextFluid({
     required this.next,
-    required this.accent,
     required this.isDark,
     required this.onTap,
   });
@@ -1750,146 +1590,184 @@ class _NextSurface extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final color = AppointmentVisuals.colorFromHex(next.color);
     final now = DateTime.now();
     final isHappening =
         now.isAfter(next.startDate) && now.isBefore(next.endDate);
     final relative =
         AppointmentVisuals.relativeTimeLabel(next.startDate, next.endDate);
+    final timeStr = AppointmentVisuals.formattedTime(next.startDate);
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            color: isDark
-                ? Colors.white.withOpacity(0.05)
-                : Colors.white.withOpacity(0.65),
-            border: Border.all(color: accent.withOpacity(0.28)),
-          ),
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Tag superior + relative
+              // Eyebrow: PRÓXIMO · em 1h12 (ou AO VIVO)
               Row(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: accent.withOpacity(0.16),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: accent.withOpacity(0.35)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          isHappening
-                              ? Icons.bolt_rounded
-                              : Icons.schedule_rounded,
-                          size: 11,
-                          color: accent,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          isHappening ? 'AO VIVO' : 'PRÓXIMO',
-                          style: TextStyle(
-                            color: accent,
-                            fontWeight: FontWeight.w900,
-                            fontSize: 10,
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                      ],
-                    ),
+                  Icon(
+                    isHappening
+                        ? Icons.bolt_rounded
+                        : Icons.schedule_rounded,
+                    size: 13,
+                    color: color,
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
+                  const SizedBox(width: 5),
+                  Flexible(
                     child: Text(
-                      relative,
+                      isHappening
+                          ? 'AO VIVO · ${relative.toLowerCase()}'
+                          : 'PRÓXIMO · ${relative.toLowerCase()}',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: color,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.2,
+                        fontSize: 10.5,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.right,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: ThemeHelpers.textSecondaryColor(context),
-                        fontWeight: FontWeight.w700,
-                      ),
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 12),
-              LayoutBuilder(builder: (context, c) {
-                final pillar = _TimePillar(
-                  start: next.startDate,
-                  end: next.endDate,
-                  accent: accent,
-                );
-                final body = _NextBody(next: next, accent: accent);
-
-                if (c.maxWidth < 260) {
-                  // Empilhado quando muito apertado
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(children: [pillar]),
-                      const SizedBox(height: 10),
-                      body,
-                    ],
-                  );
-                }
-
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
+              // Linha principal: hora + linha vertical fina + info + chevron
+              IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    pillar,
-                    const SizedBox(width: 14),
-                    Expanded(child: body),
-                    const SizedBox(width: 6),
-                    Icon(Icons.chevron_right_rounded,
-                        color: accent, size: 22),
-                  ],
-                );
-              }),
-              if (next.location != null && next.location!.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: accent.withOpacity(0.06),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: accent.withOpacity(0.14)),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.place_outlined,
-                          size: 13,
-                          color:
-                              ThemeHelpers.textSecondaryColor(context)),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          next.location!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color:
-                                ThemeHelpers.textSecondaryColor(context),
-                            fontWeight: FontWeight.w600,
-                          ),
+                    Text(
+                      timeStr,
+                      style: theme.textTheme.displaySmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: color,
+                        letterSpacing: -1.5,
+                        height: 1,
+                        fontSize: 44,
+                        fontFeatures: const [
+                          FontFeature.tabularFigures(),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Container(
+                      width: 2,
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            color.withOpacity(isDark ? 0.55 : 0.42),
+                            color.withOpacity(0),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            next.title,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.3,
+                              height: 1.2,
+                              color: ThemeHelpers.textColor(context),
+                              fontSize: 16,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 6,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    AppointmentVisuals.iconFor(next.type),
+                                    size: 13,
+                                    color: color,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    next.type.label,
+                                    style: theme.textTheme.labelMedium
+                                        ?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                      color: color,
+                                      fontSize: 11,
+                                      letterSpacing: 0.1,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (next.location != null &&
+                                  next.location!.trim().isNotEmpty)
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.place_outlined,
+                                      size: 13,
+                                      color: ThemeHelpers
+                                              .textSecondaryColor(
+                                            context,
+                                          ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    ConstrainedBox(
+                                      constraints: const BoxConstraints(
+                                        maxWidth: 200,
+                                      ),
+                                      child: Text(
+                                        next.location!,
+                                        style: theme.textTheme.bodySmall
+                                            ?.copyWith(
+                                          color: ThemeHelpers
+                                                  .textSecondaryColor(
+                                                context,
+                                              ),
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 12,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Icon(
+                        Icons.arrow_forward_rounded,
+                        color: color.withOpacity(isDark ? 0.85 : 0.7),
+                        size: 18,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ],
           ),
         ),
@@ -1898,137 +1776,12 @@ class _NextSurface extends StatelessWidget {
   }
 }
 
-class _NextBody extends StatelessWidget {
-  final Appointment next;
-  final Color accent;
-  const _NextBody({required this.next, required this.accent});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          children: [
-            Icon(
-              AppointmentVisuals.iconFor(next.type),
-              color: accent,
-              size: 13,
-            ),
-            const SizedBox(width: 5),
-            Flexible(
-              child: Text(
-                next.type.label.toUpperCase(),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: accent,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 10.5,
-                  letterSpacing: 1.0,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          next.title,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.2,
-            height: 1.2,
-            fontSize: 16,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Pillar do horário (início → término) — foco visual do hero.
-class _TimePillar extends StatelessWidget {
-  final DateTime start;
-  final DateTime end;
-  final Color accent;
-  const _TimePillar({
-    required this.start,
-    required this.end,
-    required this.accent,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      width: 70,
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            accent.withOpacity(0.20),
-            accent.withOpacity(0.06),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: accent.withOpacity(0.32)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              AppointmentVisuals.formattedTime(start),
-              style: theme.textTheme.titleLarge?.copyWith(
-                color: accent,
-                fontWeight: FontWeight.w900,
-                fontSize: 20,
-                letterSpacing: -0.8,
-                height: 1.0,
-              ),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Container(
-            width: 22,
-            height: 1.5,
-            decoration: BoxDecoration(
-              color: accent.withOpacity(0.5),
-              borderRadius: BorderRadius.circular(1),
-            ),
-          ),
-          const SizedBox(height: 4),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              AppointmentVisuals.formattedTime(end),
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: accent.withOpacity(0.85),
-                fontWeight: FontWeight.w700,
-                fontSize: 12,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Estado vazio fluido — quando o corretor não tem nada agendado.
-class _EmptyStateSurface extends StatelessWidget {
+/// Estado vazio fluido — sem caixa, mantém a linguagem editorial da tela.
+class _AgendaEmptyFluid extends StatelessWidget {
   final int todayCount;
   final int tomorrowCount;
   final VoidCallback onTap;
-
-  const _EmptyStateSurface({
+  const _AgendaEmptyFluid({
     required this.todayCount,
     required this.tomorrowCount,
     required this.onTap,
@@ -2040,73 +1793,88 @@ class _EmptyStateSurface extends StatelessWidget {
     final hasToday = todayCount > 0;
     final color = AppColors.status.success;
 
+    final eyebrow = hasToday
+        ? 'DIA CONCLUÍDO'
+        : (tomorrowCount > 0 ? 'AMANHÃ NA SUA AGENDA' : 'AGENDA LIVRE');
+    final headline = hasToday
+        ? 'Sem mais compromissos hoje'
+        : (tomorrowCount > 0
+            ? 'Hoje livre — $tomorrowCount amanhã'
+            : 'Sem compromissos à vista');
+    final subtitle = hasToday
+        ? 'Aproveite para revisar leads ou planejar amanhã.'
+        : 'Toque abaixo para criar um novo compromisso.';
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            color: color.withOpacity(0.06),
-            border: Border.all(color: color.withOpacity(0.25)),
-          ),
-          child: Row(
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.14),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  hasToday
-                      ? Icons.celebration_rounded
-                      : Icons.beach_access_rounded,
-                  color: color,
-                  size: 22,
+              Row(
+                children: [
+                  Icon(
+                    hasToday
+                        ? Icons.celebration_rounded
+                        : Icons.add_circle_outline_rounded,
+                    size: 13,
+                    color: color,
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    eyebrow,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: color,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.2,
+                      fontSize: 10.5,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                headline,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.4,
+                  height: 1.15,
+                  color: ThemeHelpers.textColor(context),
+                  fontSize: 22,
                 ),
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      hasToday
-                          ? 'Você concluiu o dia'
-                          : 'Nenhum compromisso à vista',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      tomorrowCount > 0
-                          ? 'Amanhã: $tomorrowCount agendamento${tomorrowCount > 1 ? 's' : ''}'
-                          : 'Toque para criar um novo agendamento',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: ThemeHelpers.textSecondaryColor(context),
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
+              const SizedBox(height: 6),
+              Text(
+                subtitle,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: ThemeHelpers.textSecondaryColor(context),
+                  fontWeight: FontWeight.w600,
+                  height: 1.35,
                 ),
               ),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.18),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(Icons.add_rounded, color: color, size: 18),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Text(
+                    'Criar compromisso',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: color,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.1,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Icon(
+                    Icons.arrow_forward_rounded,
+                    size: 16,
+                    color: color,
+                  ),
+                ],
               ),
             ],
           ),
@@ -2114,84 +1882,6 @@ class _EmptyStateSurface extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Painter dos orbs vermelhos blurrados que orbitam lentamente — gera a
-/// sensação de fluido orgânico no fundo do hero.
-class _HeroFluidPainter extends CustomPainter {
-  final double t;
-  final Color accent;
-  final bool isDark;
-
-  _HeroFluidPainter({
-    required this.t,
-    required this.accent,
-    required this.isDark,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    final twoPi = 2 * math.pi;
-
-    final orbs = <_Orb>[
-      _Orb(
-        cx: w * (0.18 + 0.05 * math.sin(t * twoPi)),
-        cy: h * (0.28 + 0.10 * math.cos(t * twoPi)),
-        r: w * 0.36,
-        opacity: isDark ? 0.22 : 0.10,
-      ),
-      _Orb(
-        cx: w * (0.86 + 0.06 * math.cos(t * twoPi + math.pi / 3)),
-        cy: h * (0.22 + 0.08 * math.sin(t * twoPi + math.pi / 4)),
-        r: w * 0.30,
-        opacity: isDark ? 0.18 : 0.08,
-      ),
-      _Orb(
-        cx: w * (0.55 + 0.04 * math.sin(t * twoPi + math.pi / 2)),
-        cy: h * (0.92 + 0.06 * math.cos(t * twoPi + math.pi)),
-        r: w * 0.42,
-        opacity: isDark ? 0.14 : 0.07,
-      ),
-    ];
-
-    for (final orb in orbs) {
-      final paint = Paint()
-        ..color = accent.withOpacity(orb.opacity)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 50);
-      canvas.drawCircle(Offset(orb.cx, orb.cy), orb.r, paint);
-    }
-
-    // Linha sutil de "highlight" diagonal — toque editorial
-    final highlight = Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [
-          Colors.white.withOpacity(isDark ? 0.04 : 0.10),
-          Colors.transparent,
-        ],
-      ).createShader(Rect.fromLTWH(0, 0, w, h * 0.5));
-    canvas.drawRect(Rect.fromLTWH(0, 0, w, h * 0.5), highlight);
-  }
-
-  @override
-  bool shouldRepaint(covariant _HeroFluidPainter old) =>
-      old.t != t || old.accent != accent || old.isDark != isDark;
-}
-
-class _Orb {
-  final double cx;
-  final double cy;
-  final double r;
-  final double opacity;
-  _Orb({
-    required this.cx,
-    required this.cy,
-    required this.r,
-    required this.opacity,
-  });
 }
 
 /// Linha de timeline para um agendamento dentro do dia selecionado.

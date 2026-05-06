@@ -60,10 +60,17 @@ class _NotificationCenterState extends State<NotificationCenter> {
 
     final size = renderBox.size;
     final offset = renderBox.localToGlobal(Offset.zero);
+    final screenWidth = MediaQuery.sizeOf(context).width;
+
+    // Distância da extremidade direita do botão até a borda direita da tela.
+    final anchorRight = (screenWidth - (offset.dx + size.width))
+        .clamp(8.0, double.infinity)
+        .toDouble();
 
     _overlayEntry = OverlayEntry(
       builder: (context) => _NotificationOverlayPanel(
         anchorTop: offset.dy + size.height + 8,
+        anchorRight: anchorRight,
         onClose: _closeOverlay,
       ),
     );
@@ -203,13 +210,24 @@ class _NotificationCenterState extends State<NotificationCenter> {
 /// Altura reservada do cabeçalho + listagem (lista usa o restante).
 const double _kNotificationPanelHeaderBlock = 108;
 
+/// Largura ideal do painel (em telas estreitas reduz para caber).
+const double _kNotificationPanelWidth = 360;
+
+/// Margem mínima entre o painel e as bordas laterais da tela.
+const double _kNotificationPanelSideMargin = 12;
+
+/// Altura máxima do painel (limita para não ocupar a tela toda).
+const double _kNotificationPanelMaxHeight = 480;
+
 /// Painel dropdown de notificações — overlay animado com blur, profundidade e detalhes de marca.
 class _NotificationOverlayPanel extends StatefulWidget {
   final double anchorTop;
+  final double anchorRight;
   final VoidCallback onClose;
 
   const _NotificationOverlayPanel({
     required this.anchorTop,
+    required this.anchorRight,
     required this.onClose,
   });
 
@@ -252,12 +270,32 @@ class _NotificationOverlayPanelState extends State<_NotificationOverlayPanel>
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final screenHeight = MediaQuery.sizeOf(context).height;
+    final mediaSize = MediaQuery.sizeOf(context);
+    final screenWidth = mediaSize.width;
+    final screenHeight = mediaSize.height;
     final padding = MediaQuery.paddingOf(context);
     final bottomNavHeight = 56.0 + padding.bottom;
+
+    // Largura: limitada a ~360px, com margens laterais em telas estreitas.
+    final maxAvailableWidth = screenWidth - (_kNotificationPanelSideMargin * 2);
+    final panelWidth =
+        _kNotificationPanelWidth.clamp(0.0, maxAvailableWidth).toDouble();
+
+    // Garante que o anchorRight respeite a margem mínima.
+    final effectiveRight = widget.anchorRight.clamp(
+      _kNotificationPanelSideMargin,
+      (screenWidth - panelWidth - _kNotificationPanelSideMargin)
+          .clamp(_kNotificationPanelSideMargin, double.infinity)
+          .toDouble(),
+    );
+
+    // Altura: limita a um valor confortável (não toma a tela inteira).
     final availableHeight =
         screenHeight - widget.anchorTop - bottomNavHeight - 8;
-    final maxHeight = availableHeight.clamp(220.0, screenHeight * 0.72);
+    final maxHeight = availableHeight
+        .clamp(220.0, _kNotificationPanelMaxHeight)
+        .toDouble();
+
     final primary = isDark
         ? AppColors.primary.primaryDarkMode
         : AppColors.primary.primary;
@@ -271,20 +309,15 @@ class _NotificationOverlayPanelState extends State<_NotificationOverlayPanel>
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // Camada escurecida + blur (toque fora fecha)
+          // Camada escurecida + blur leve (toque fora fecha)
           Positioned.fill(
             child: ClipRect(
               child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.black.withValues(alpha: isDark ? 0.52 : 0.28),
-                        Colors.black.withValues(alpha: isDark ? 0.38 : 0.16),
-                      ],
+                    color: Colors.black.withValues(
+                      alpha: isDark ? 0.32 : 0.18,
                     ),
                   ),
                 ),
@@ -292,9 +325,9 @@ class _NotificationOverlayPanelState extends State<_NotificationOverlayPanel>
             ),
           ),
           Positioned(
-            left: 0,
-            right: 0,
+            right: effectiveRight,
             top: widget.anchorTop,
+            width: panelWidth,
             child: GestureDetector(
               onTap: () {},
               child: AnimatedBuilder(
@@ -306,7 +339,7 @@ class _NotificationOverlayPanelState extends State<_NotificationOverlayPanel>
                       position: _slide,
                       child: ScaleTransition(
                         scale: _scale,
-                        alignment: Alignment.topCenter,
+                        alignment: Alignment.topRight,
                         child: child,
                       ),
                     ),
@@ -348,14 +381,8 @@ class _NotificationPanelChrome extends StatelessWidget {
         ? AppColors.background.cardBackgroundDarkMode
         : AppColors.background.cardBackground;
 
-    const panelShape = BorderRadius.only(
-      bottomLeft: Radius.circular(26),
-      bottomRight: Radius.circular(26),
-    );
-    const innerRadii = BorderRadius.only(
-      bottomLeft: Radius.circular(24.65),
-      bottomRight: Radius.circular(24.65),
-    );
+    const panelShape = BorderRadius.all(Radius.circular(22));
+    const innerRadii = BorderRadius.all(Radius.circular(20.65));
 
     return Container(
       width: double.infinity,
