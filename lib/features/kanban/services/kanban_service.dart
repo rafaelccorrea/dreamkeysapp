@@ -1132,6 +1132,43 @@ class KanbanService {
     }
   }
 
+  /// `GET /kanban/tasks/:taskId/fields` — carrega os dados completos do
+  /// **card (KanbanTask)** a partir do id. Usado quando o usuário entra no
+  /// detalhe a partir de outra tela (ex.: lista global de tarefas).
+  Future<ApiResponse<KanbanTask>> getTaskById(String taskId) async {
+    try {
+      final response = await _apiService.get<Map<String, dynamic>>(
+        '/kanban/tasks/$taskId/fields',
+      );
+      if (response.success && response.data != null) {
+        try {
+          return ApiResponse.success(
+            data: KanbanTask.fromJson(response.data!),
+            statusCode: response.statusCode,
+          );
+        } catch (e) {
+          debugPrint('❌ [KANBAN_SERVICE] parse task $taskId: $e');
+          return ApiResponse.error(
+            message: 'Erro ao processar dados da negociação.',
+            statusCode: response.statusCode,
+            data: response.error,
+          );
+        }
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Negociação não encontrada',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [KANBAN_SERVICE] getTaskById $taskId: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
   /// Obtém histórico de uma tarefa
   Future<ApiResponse<List<HistoryEntry>>> getTaskHistory(String taskId) async {
     try {

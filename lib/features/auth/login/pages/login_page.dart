@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../../../core/notifications/app_toast.dart';
+import '../../../../core/push/app_push_service.dart';
 import '../../../../shared/services/auth_service.dart';
 import '../../../../shared/services/biometric_service.dart';
 import '../../../../shared/services/secure_storage_service.dart';
@@ -99,29 +101,9 @@ class _LoginPageState extends State<LoginPage> {
     // Validar formulário
     if (!_formKey.currentState!.validate()) {
       debugPrint('❌ [LOGIN] Validação do formulário falhou');
-      // Feedback de validação via SnackBar ao invés de quebrar layout
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Row(
-            children: [
-              Icon(Icons.info_outline, color: Colors.white, size: 20),
-              SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Por favor, preencha todos os campos corretamente',
-                  style: TextStyle(color: Colors.white, fontSize: 14),
-                ),
-              ),
-            ],
-          ),
-          backgroundColor: AppColors.status.warning,
-          behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.all(16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          duration: const Duration(seconds: 3),
-        ),
+      AppToast.warning(
+        context,
+        'Preencha todos os campos corretamente',
       );
       return;
     }
@@ -165,6 +147,23 @@ class _LoginPageState extends State<LoginPage> {
         }
         if (!mounted) return;
 
+        // ────────────────────────────────────────────────────────────────
+        // Permissões do sistema PRIMEIRO (notificações + token FCM).
+        //
+        // Antes isso só rodava no splash — então em produção, no PRIMEIRO
+        // login da vida do app, nenhum popup de permissão aparecia: o
+        // usuário precisaria reabrir o app pra ver o prompt. Agora pedimos
+        // imediatamente após login, antes de qualquer outro popup nosso,
+        // pra não sobrepor o popup nativo do SO.
+        try {
+          await AppPushService.instance.syncWithBackendIfAuthenticated();
+        } catch (e) {
+          debugPrint('⚠️ [LOGIN] Falha ao sincronizar permissões push: $e');
+        }
+        if (!mounted) return;
+
+        // Oferta de biometria (UI nossa) só DEPOIS que os popups nativos
+        // de permissão foram resolvidos.
         final savedBio = await showBiometricEnrollmentOffer(
           context,
           email: email,
@@ -186,33 +185,7 @@ class _LoginPageState extends State<LoginPage> {
       } else {
         debugPrint('❌ [LOGIN] Login falhou: ${result.message}');
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Row(
-                children: [
-                  const Icon(
-                    Icons.error_outline,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      result.message,
-                      style: const TextStyle(color: Colors.white, fontSize: 14),
-                    ),
-                  ),
-                ],
-              ),
-              backgroundColor: AppColors.status.error,
-              behavior: SnackBarBehavior.floating,
-              margin: const EdgeInsets.all(16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              duration: const Duration(seconds: 4),
-            ),
-          );
+          AppToast.error(context, result.message);
         }
       }
     } catch (e, stackTrace) {
@@ -221,28 +194,9 @@ class _LoginPageState extends State<LoginPage> {
       debugPrint('📚 [LOGIN] StackTrace: $stackTrace');
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.error_outline, color: Colors.white, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Erro ao conectar com o servidor. Tente novamente.',
-                    style: const TextStyle(color: Colors.white, fontSize: 14),
-                  ),
-                ),
-              ],
-            ),
-            backgroundColor: AppColors.status.error,
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.all(16),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            duration: const Duration(seconds: 4),
-          ),
+        AppToast.error(
+          context,
+          'Erro ao conectar com o servidor. Tente novamente.',
         );
       }
     } finally {
@@ -414,12 +368,7 @@ class _LoginPageState extends State<LoginPage> {
         debugPrint('❌ [BIOMETRIA] Biometria não disponível na verificação final');
         _isBiometricLoginInProgress = false;
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Biometria não disponível no momento'),
-              backgroundColor: AppColors.status.error,
-            ),
-          );
+          AppToast.error(context, 'Biometria não disponível no momento');
         }
         return;
       }
@@ -511,33 +460,10 @@ class _LoginPageState extends State<LoginPage> {
           setState(() {
             _hasSavedCredentials = false;
           });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Row(
-                children: [
-                  const Icon(
-                    Icons.error_outline,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      response.message ??
-                          'Credenciais inválidas. Faça login novamente.',
-                      style: const TextStyle(color: Colors.white, fontSize: 14),
-                    ),
-                  ),
-                ],
-              ),
-              backgroundColor: AppColors.status.error,
-              behavior: SnackBarBehavior.floating,
-              margin: const EdgeInsets.all(16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              duration: const Duration(seconds: 4),
-            ),
+          AppToast.error(
+            context,
+            response.message ??
+                'Credenciais inválidas. Faça login novamente.',
           );
         }
       }
@@ -549,29 +475,7 @@ class _LoginPageState extends State<LoginPage> {
       debugPrint('📚 [BIOMETRIA] StackTrace: $stackTrace');
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.error_outline, color: Colors.white, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Erro ao autenticar com $_biometricType',
-                    style: const TextStyle(color: Colors.white, fontSize: 14),
-                  ),
-                ),
-              ],
-            ),
-            backgroundColor: AppColors.status.error,
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.all(16),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            duration: const Duration(seconds: 3),
-          ),
-        );
+        AppToast.error(context, 'Erro ao autenticar com $_biometricType');
       }
     } finally {
       debugPrint('🏁 [BIOMETRIA] Finalizando processo de login com biometria');
@@ -586,15 +490,23 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
+    final mediaQuery = MediaQuery.of(context);
+    final screenHeight = mediaQuery.size.height;
+    final screenWidth = mediaQuery.size.width;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    final headerHeight = screenHeight * 0.36;
+    final headerHeight = screenHeight * 0.32;
     final heroTotalHeight = headerHeight + 24;
-    final formSheetTop = heroTotalHeight - 28;
+    final formSheetTop = heroTotalHeight - 32;
     final pageBg =
         isDark ? AppColors.background.backgroundDarkMode : Colors.white;
+
+    // Inset do sistema (barra de gestos ou 3 botões). Como o SafeArea está
+    // com bottom:false (pra a sheet arrematar visualmente até a borda),
+    // somamos o inset no padding inferior do conteúdo pra o footer
+    // "Powered by Intellisys" não ficar por baixo da nav system em
+    // celulares maiores com botões de navegação.
+    final systemBottomInset = mediaQuery.padding.bottom;
 
     return LoadingOverlay(
       isLoading: _isLoading,
@@ -639,9 +551,9 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                           padding: EdgeInsets.fromLTRB(
                             screenWidth * 0.08,
-                            28,
+                            18,
                             screenWidth * 0.08,
-                            screenHeight * 0.035,
+                            screenHeight * 0.035 + systemBottomInset,
                           ),
                           child: Form(
                             key: _formKey,
@@ -649,9 +561,9 @@ class _LoginPageState extends State<LoginPage> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 _buildAccentLine(isDark),
-                                const SizedBox(height: 18),
+                                const SizedBox(height: 12),
                                 _buildWelcomeTitle(context, isDark),
-                                SizedBox(height: screenHeight * 0.012),
+                                SizedBox(height: screenHeight * 0.008),
                                 Text(
                                   'Entre na sua conta para continuar',
                                   style: GoogleFonts.poppins(
@@ -725,6 +637,11 @@ class _LoginPageState extends State<LoginPage> {
                                 ),
                                 SizedBox(height: screenHeight * 0.022),
                                 _buildLoginButton(screenHeight, isDark),
+                                // Só mostra o caminho de biometria quando há
+                                // credenciais salvas (botão grande + divider
+                                // "ou"). Sem credenciais, não polui a UI: o
+                                // enrollment é oferecido após o primeiro
+                                // login bem-sucedido.
                                 if (_biometricAvailable &&
                                     _hasSavedCredentials &&
                                     !_isLoading) ...[
@@ -1408,4 +1325,5 @@ class _LoginPageState extends State<LoginPage> {
       ),
     );
   }
+
 }

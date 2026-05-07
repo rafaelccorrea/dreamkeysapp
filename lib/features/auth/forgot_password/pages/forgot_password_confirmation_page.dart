@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../core/notifications/app_toast.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../shared/services/auth_service.dart';
@@ -23,12 +24,7 @@ class _ForgotPasswordConfirmationPageState
 
   Future<void> _handleResend() async {
     if (widget.email == null || widget.email!.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Email não disponível para reenvio'),
-          backgroundColor: AppColors.status.error,
-        ),
-      );
+      AppToast.error(context, 'Email não disponível para reenvio');
       return;
     }
 
@@ -40,63 +36,20 @@ class _ForgotPasswordConfirmationPageState
       final authService = AuthService.instance;
       final response = await authService.forgotPassword(widget.email!);
 
+      if (!mounted) return;
+
       if (response.success) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Row(
-              children: [
-                Icon(Icons.check_circle, color: Colors.white, size: 20),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Email reenviado com sucesso!',
-                    style: TextStyle(color: Colors.white, fontSize: 14),
-                  ),
-                ),
-              ],
-            ),
-            backgroundColor: AppColors.status.success,
-            behavior: SnackBarBehavior.floating,
-            margin: EdgeInsets.all(16),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            duration: Duration(seconds: 3),
-          ),
-        );
+        AppToast.success(context, 'Email reenviado com sucesso!');
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              response.message ?? 'Erro ao reenviar email',
-              style: const TextStyle(color: Colors.white, fontSize: 14),
-            ),
-            backgroundColor: AppColors.status.error,
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.all(16),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            duration: const Duration(seconds: 3),
-          ),
+        AppToast.error(
+          context,
+          response.message ?? 'Erro ao reenviar email',
         );
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text(
-            'Erro ao reenviar email. Tente novamente.',
-            style: TextStyle(color: Colors.white, fontSize: 14),
-          ),
-          backgroundColor: AppColors.status.error,
-          behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.all(16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          duration: const Duration(seconds: 3),
-        ),
-      );
+      if (mounted) {
+        AppToast.error(context, 'Erro ao reenviar email. Tente novamente.');
+      }
     } finally {
       if (mounted) {
         setState(() {

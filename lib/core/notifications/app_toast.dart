@@ -1,15 +1,33 @@
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import '../navigation/app_navigator.dart';
 import '../theme/app_colors.dart';
 
-/// Toasts estilo Intellisys — painel em vidro, faixa de accent, ícone, label tipográfica
-/// e barra de tempo; entra por cima com blur local (não usa SnackBar nativo).
+/// Toasts limpos no padrão moderno (estilo Linear/Vercel/Notion):
+/// pill compacta no rodapé, sem ruído visual.
+///
+/// O design anterior tinha **muito** elemento competindo por atenção em
+/// cada toast: faixa accent vertical, ícone-plate quadrado de 46px, label
+/// uppercase tipo "CONFIRMADO/INTELLISYS", barra de countdown progressiva
+/// e ainda um ícone de swipe-down. Para um aviso passageiro de 3 segundos
+/// isso é overkill — o toast é justamente algo que não deve dominar a
+/// tela. Esta reescrita reduz ao essencial:
+///
+/// - **Posição**: rodapé (mais discreto que topo, padrão moderno).
+/// - **Forma**: pill compacta com fundo escuro/claro adaptativo, borda
+///   sutil e sombra leve com tint do accent.
+/// - **Conteúdo**: ícone circular compacto (28px) + mensagem em uma linha
+///   peso 600 + subtítulo opcional menor.
+/// - **Sem ruído**: sem labels uppercase, sem barra de countdown visível,
+///   sem hint de swipe — o usuário descobre por instinto que pode tocar
+///   ou arrastar pra fechar.
+/// - **Animação**: slide-up + fade (entrada) e slide-down + fade (saída).
+///
+/// API pública mantida igual: `AppToast.success/error/warning/info` e
+/// extension `context.showToast(...)`. Quem chamava antes não muda nada.
 enum AppToastKind {
   success,
   error,
@@ -33,33 +51,29 @@ class AppToast {
     required String message,
     AppToastKind kind = AppToastKind.info,
     String? subtitle,
-    Duration duration = const Duration(milliseconds: 3400),
+    Duration duration = const Duration(milliseconds: 3200),
     VoidCallback? onTap,
   }) {
     final theme = Theme.of(context);
-    final overlay = Overlay.maybeOf(context) ?? appNavigatorKey.currentState?.overlay;
+    final overlay =
+        Overlay.maybeOf(context) ?? appNavigatorKey.currentState?.overlay;
     if (overlay == null) return;
 
     dismiss();
 
     late OverlayEntry entry;
     entry = OverlayEntry(
-      builder: (ctx) => Stack(
-        fit: StackFit.expand,
-        children: [
-          _IntellisysToastLayer(
-            theme: theme,
-            message: message,
-            subtitle: subtitle,
-            kind: kind,
-            duration: duration,
-            onTap: onTap,
-            onDispose: () {
-              entry.remove();
-              if (_entry == entry) _entry = null;
-            },
-          ),
-        ],
+      builder: (ctx) => _ToastLayer(
+        theme: theme,
+        message: message,
+        subtitle: subtitle,
+        kind: kind,
+        duration: duration,
+        onTap: onTap,
+        onDispose: () {
+          entry.remove();
+          if (_entry == entry) _entry = null;
+        },
       ),
     );
     _entry = entry;
@@ -84,60 +98,59 @@ extension AppToastBuildContext on BuildContext {
     String message, {
     AppToastKind kind = AppToastKind.info,
     String? subtitle,
-    Duration duration = const Duration(milliseconds: 3400),
+    Duration duration = const Duration(milliseconds: 3200),
   }) {
-    AppToast.show(this, message: message, kind: kind, subtitle: subtitle, duration: duration);
+    AppToast.show(
+      this,
+      message: message,
+      kind: kind,
+      subtitle: subtitle,
+      duration: duration,
+    );
   }
 }
 
-class _ToastStyle {
-  const _ToastStyle({
-    required this.accent,
-    required this.icon,
-    required this.label,
-  });
+// ───────────────────────────────────────────────────────────────────────
+// Estilos por tipo. Cada tipo tem **um** accent — a paleta do toast em
+// si é neutra (escuro no dark / claro no light) pra não competir com o
+// app por atenção. Só o ícone circular reflete a "natureza" do toast.
 
+class _ToastStyle {
+  const _ToastStyle({required this.accent, required this.icon});
   final Color accent;
   final IconData icon;
-  final String label;
 }
 
 _ToastStyle _styleFor(AppToastKind kind, Brightness brightness) {
+  final isDark = brightness == Brightness.dark;
   switch (kind) {
     case AppToastKind.success:
       return _ToastStyle(
-        accent: brightness == Brightness.dark
-            ? AppColors.status.successDarkMode
-            : AppColors.status.success,
+        accent: isDark ? const Color(0xFF22C55E) : const Color(0xFF16A34A),
         icon: Icons.check_rounded,
-        label: 'CONFIRMADO',
       );
     case AppToastKind.error:
       return _ToastStyle(
-        accent: brightness == Brightness.dark
-            ? AppColors.status.errorDarkMode
-            : AppColors.status.error,
-        icon: Icons.error_outline_rounded,
-        label: 'ATENÇÃO',
+        accent: isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626),
+        icon: Icons.priority_high_rounded,
       );
     case AppToastKind.warning:
-      return const _ToastStyle(
-        accent: Color(0xFFF59E0B),
-        icon: Icons.flash_on_rounded,
-        label: 'ALERTA',
+      return _ToastStyle(
+        accent: isDark ? const Color(0xFFFBBF24) : const Color(0xFFF59E0B),
+        icon: Icons.bolt_rounded,
       );
     case AppToastKind.info:
       return _ToastStyle(
-        accent:
-            brightness == Brightness.dark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary,
-        icon: Icons.auto_awesome_rounded,
-        label: 'INTELLISYS',
+        accent: isDark
+            ? AppColors.primary.primaryDarkMode
+            : AppColors.primary.primary,
+        icon: Icons.info_outline_rounded,
       );
   }
 }
 
-class _IntellisysToastLayer extends StatefulWidget {
-  const _IntellisysToastLayer({
+class _ToastLayer extends StatefulWidget {
+  const _ToastLayer({
     required this.theme,
     required this.message,
     required this.subtitle,
@@ -156,23 +169,26 @@ class _IntellisysToastLayer extends StatefulWidget {
   final VoidCallback onDispose;
 
   @override
-  State<_IntellisysToastLayer> createState() => _IntellisysToastLayerState();
+  State<_ToastLayer> createState() => _ToastLayerState();
 }
 
-class _IntellisysToastLayerState extends State<_IntellisysToastLayer> with SingleTickerProviderStateMixin {
+class _ToastLayerState extends State<_ToastLayer>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 520),
-    reverseDuration: const Duration(milliseconds: 320),
+    duration: const Duration(milliseconds: 360),
+    reverseDuration: const Duration(milliseconds: 240),
   );
+
   late final Animation<double> _slide = CurvedAnimation(
     parent: _controller,
     curve: const Cubic(0.22, 1, 0.36, 1),
     reverseCurve: Curves.easeInCubic,
   );
+
   late final Animation<double> _fade = CurvedAnimation(
     parent: _controller,
-    curve: const Interval(0.0, 0.65, curve: Curves.easeOut),
+    curve: const Interval(0, 0.7, curve: Curves.easeOut),
     reverseCurve: Curves.easeIn,
   );
 
@@ -205,168 +221,135 @@ class _IntellisysToastLayerState extends State<_IntellisysToastLayer> with Singl
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
-    final top = media.padding.top + 10;
     final brightness = widget.theme.brightness;
     final isDark = brightness == Brightness.dark;
     final style = _styleFor(widget.kind, brightness);
 
-    final fg = isDark ? AppColors.text.textDarkMode : AppColors.text.text;
-    final fgSec = isDark ? AppColors.text.textSecondaryDarkMode : AppColors.text.textSecondary;
-    final glassTop = isDark ? const Color(0xFF1A1924).withValues(alpha: 0.82) : Colors.white.withValues(alpha: 0.86);
-    final glassBot = isDark ? const Color(0xFF12111A).withValues(alpha: 0.88) : const Color(0xFFF1F5F9).withValues(alpha: 0.92);
+    // Fundo da pill: escuro no dark mode, off-white no light. Sólido,
+    // sem glass — glass tinha sombra "borrada" demais e ficava lendo
+    // como caixa de erro do sistema.
+    final bg = isDark
+        ? const Color(0xFF1A1A1F)
+        : const Color(0xFFFFFFFF);
+    final fg = isDark ? Colors.white : const Color(0xFF0F1216);
+    final fgSec = isDark
+        ? Colors.white.withValues(alpha: 0.62)
+        : const Color(0xFF0F1216).withValues(alpha: 0.6);
     final borderCol = isDark
-        ? Colors.white.withValues(alpha: 0.12)
-        : AppColors.border.border.withValues(alpha: 0.55);
+        ? Colors.white.withValues(alpha: 0.08)
+        : Colors.black.withValues(alpha: 0.08);
+
+    final bottom = media.padding.bottom + 18 - _dragY;
 
     return Positioned(
-      top: top + _dragY,
-      left: 16,
-      right: 16,
-      child: SlideTransition(
-        position: Tween<Offset>(begin: const Offset(0, -1.1), end: Offset.zero).animate(_slide),
-        child: FadeTransition(
-          opacity: _fade,
-          child: Semantics(
-            liveRegion: true,
-            label: '${style.label}. ${widget.message}',
-            child: GestureDetector(
-              onTap: () {
-                widget.onTap?.call();
-                _animateOut();
-              },
-              onVerticalDragUpdate: (d) {
-                setState(() {
-                  _dragY = (_dragY + d.delta.dy).clamp(-24.0, 120.0);
-                });
-              },
-              onVerticalDragEnd: (d) {
-                if (d.velocity.pixelsPerSecond.dy < -220 || _dragY < -8) {
-                  _animateOut();
-                } else {
-                  setState(() => _dragY = 0);
-                }
-              },
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(22),
-                  boxShadow: [
-                    BoxShadow(
-                      color: style.accent.withValues(alpha: isDark ? 0.22 : 0.14),
-                      blurRadius: 24,
-                      offset: const Offset(0, 12),
-                      spreadRadius: -8,
-                    ),
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: isDark ? 0.45 : 0.08),
-                      blurRadius: 20,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(22),
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(22),
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [glassTop, glassBot],
-                        ),
-                        border: Border.all(color: borderCol, width: 1),
-                      ),
-                      child: Stack(
-                      children: [
-                        Positioned(
-                          left: 0,
-                          top: 0,
-                          bottom: 0,
-                          width: 5,
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [
-                                  style.accent.withValues(alpha: 0.95),
-                                  style.accent.withValues(alpha: 0.45),
-                                ],
-                              ),
-                            ),
+      left: 0,
+      right: 0,
+      bottom: bottom,
+      child: SafeArea(
+        top: false,
+        child: Center(
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 0.4),
+              end: Offset.zero,
+            ).animate(_slide),
+            child: FadeTransition(
+              opacity: _fade,
+              child: Semantics(
+                liveRegion: true,
+                label: widget.message,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    widget.onTap?.call();
+                    _animateOut();
+                  },
+                  onVerticalDragUpdate: (d) {
+                    setState(() {
+                      _dragY = (_dragY - d.delta.dy).clamp(-120.0, 24.0);
+                    });
+                  },
+                  onVerticalDragEnd: (d) {
+                    if (d.velocity.pixelsPerSecond.dy > 220 || _dragY < -8) {
+                      _animateOut();
+                    } else {
+                      setState(() => _dragY = 0);
+                    }
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 16),
+                    constraints: const BoxConstraints(maxWidth: 540),
+                    decoration: BoxDecoration(
+                      color: bg,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: borderCol, width: 1),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(
+                            alpha: isDark ? 0.42 : 0.10,
                           ),
+                          blurRadius: 24,
+                          offset: const Offset(0, 12),
+                          spreadRadius: -8,
                         ),
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 14, 16, 18),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _IconPulse(
-                                accent: style.accent,
-                                icon: style.icon,
-                                isDark: isDark,
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      style.label,
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: 1.35,
-                                        color: style.accent.withValues(alpha: 0.95),
-                                        height: 1,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      widget.message,
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 14.5,
-                                        fontWeight: FontWeight.w700,
-                                        height: 1.25,
-                                        letterSpacing: -0.2,
-                                        color: fg,
-                                      ),
-                                    ),
-                                    if (widget.subtitle != null) ...[
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        widget.subtitle!,
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 12.5,
-                                          fontWeight: FontWeight.w500,
-                                          height: 1.2,
-                                          color: fgSec,
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                              Icon(
-                                Icons.swipe_vertical_rounded,
-                                size: 18,
-                                color: fgSec.withValues(alpha: 0.45),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Positioned(
-                          left: 20,
-                          right: 16,
-                          bottom: 6,
-                          child: _ToastCountdownBar(
-                            accent: style.accent,
-                            duration: widget.duration,
-                          ),
+                        BoxShadow(
+                          color: style.accent
+                              .withValues(alpha: isDark ? 0.18 : 0.08),
+                          blurRadius: 20,
+                          offset: const Offset(0, 8),
+                          spreadRadius: -10,
                         ),
                       ],
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 16, 12),
+                      child: Row(
+                        crossAxisAlignment: widget.subtitle != null
+                            ? CrossAxisAlignment.start
+                            : CrossAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _RoundIcon(
+                            accent: style.accent,
+                            icon: style.icon,
+                          ),
+                          const SizedBox(width: 12),
+                          Flexible(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  widget.message,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: fg,
+                                    height: 1.3,
+                                    letterSpacing: -0.1,
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                if (widget.subtitle != null) ...[
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    widget.subtitle!,
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w500,
+                                      color: fgSec,
+                                      height: 1.35,
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -375,141 +358,46 @@ class _IntellisysToastLayerState extends State<_IntellisysToastLayer> with Singl
           ),
         ),
       ),
-    ),
     );
   }
 }
 
-class _IconPulse extends StatefulWidget {
-  const _IconPulse({required this.accent, required this.icon, required this.isDark});
+/// Ícone circular compacto à esquerda — único elemento "colorido" do
+/// toast, é o que diferencia visualmente success/error/warning/info.
+class _RoundIcon extends StatelessWidget {
+  const _RoundIcon({required this.accent, required this.icon});
 
   final Color accent;
   final IconData icon;
-  final bool isDark;
-
-  @override
-  State<_IconPulse> createState() => _IconPulseState();
-}
-
-class _IconPulseState extends State<_IconPulse> with SingleTickerProviderStateMixin {
-  late final AnimationController _a = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 680),
-  );
-
-  @override
-  void initState() {
-    super.initState();
-    _a.forward();
-  }
-
-  @override
-  void dispose() {
-    _a.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
-    return ScaleTransition(
-      scale: Tween<double>(begin: 0.82, end: 1).animate(CurvedAnimation(parent: _a, curve: Curves.easeOutCubic)),
-      child: Container(
-        width: 46,
-        height: 46,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(15),
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              widget.accent.withValues(alpha: widget.isDark ? 0.45 : 0.35),
-              widget.accent.withValues(alpha: widget.isDark ? 0.2 : 0.14),
-            ],
-          ),
-          border: Border.all(color: widget.accent.withValues(alpha: 0.55)),
-          boxShadow: [
-            BoxShadow(
-              color: widget.accent.withValues(alpha: widget.isDark ? 0.35 : 0.22),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
+    return Container(
+      width: 28,
+      height: 28,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            accent,
+            Color.lerp(accent, Colors.black, 0.18) ?? accent,
           ],
         ),
-        child: Icon(widget.icon, color: Colors.white.withValues(alpha: 0.95), size: 24),
-      ),
-    );
-  }
-}
-
-class _ToastCountdownBar extends StatefulWidget {
-  const _ToastCountdownBar({
-    required this.accent,
-    required this.duration,
-  });
-
-  final Color accent;
-  final Duration duration;
-
-  @override
-  State<_ToastCountdownBar> createState() => _ToastCountdownBarState();
-}
-
-class _ToastCountdownBarState extends State<_ToastCountdownBar> with SingleTickerProviderStateMixin {
-  late final AnimationController _progress = AnimationController(
-    vsync: this,
-    duration: widget.duration,
-  );
-
-  @override
-  void initState() {
-    super.initState();
-    _progress.forward();
-  }
-
-  @override
-  void dispose() {
-    _progress.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _progress,
-      builder: (context, _) {
-        final remaining = 1.0 - _progress.value;
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(99),
-          child: SizedBox(
-            height: 3,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                ColoredBox(
-                  color: widget.accent.withValues(alpha: 0.12),
-                ),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: FractionallySizedBox(
-                    widthFactor: remaining.clamp(0.0, 1.0),
-                    alignment: Alignment.centerLeft,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            widget.accent.withValues(alpha: 0.95),
-                            widget.accent.withValues(alpha: 0.4),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withValues(alpha: 0.42),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
           ),
-        );
-      },
+        ],
+      ),
+      child: Icon(
+        icon,
+        size: 16,
+        color: Colors.white,
+      ),
     );
   }
 }

@@ -2,12 +2,29 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../../core/constants/app_assets.dart';
+import '../../../../core/notifications/app_toast.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../shared/services/biometric_service.dart';
 import '../../../../shared/services/secure_storage_service.dart';
 
 /// Convite pós-login para gravar credenciais e usar biometria nos próximos acessos.
 ///
-/// Retorna `true` se o utilizador aceitou e as credenciais foram guardadas.
+/// Retorna `true` se o utilizador aceitou, **confirmou a biometria** e
+/// as credenciais foram guardadas.
+///
+/// Comportamento:
+/// - Se o hardware não suporta biometria → não exibe.
+/// - Se já há credenciais salvas → não exibe (já está ativo).
+/// - **Se o usuário clicou "Agora não" antes:** ainda assim oferece de novo
+///   quando logar manualmente. Antes a recusa era persistida pra sempre, o
+///   que deixava muitos usuários "presos" sem nenhuma forma de reativar.
+///   Agora, toda vez que ele loga digitando senha (sinal claro de que NÃO
+///   tem biometria ativa), oferecemos a ativação de novo.
+/// - **Após "Sim, ativar" o sistema dispara o prompt nativo de biometria**
+///   (impressão digital / Face ID) — só salvamos as credenciais se a
+///   confirmação for bem-sucedida. Antes salvávamos direto, o que deixava
+///   o login biométrico configurado sem o usuário ter confirmado a
+///   biometria do dispositivo (ghost feature clássica).
 Future<bool> showBiometricEnrollmentOffer(
   BuildContext context, {
   required String email,
@@ -18,7 +35,6 @@ Future<bool> showBiometricEnrollmentOffer(
   if (!biometricHardwareAvailable) return false;
   final storage = SecureStorageService.instance;
   if (await storage.hasSavedCredentials()) return false;
-  if (await storage.isBiometricEnrollmentDeclined()) return false;
 
   if (!context.mounted) return false;
 
@@ -35,12 +51,66 @@ Future<bool> showBiometricEnrollmentOffer(
 
   if (!context.mounted) return false;
 
-  if (accept) {
-    await storage.saveCredentials(email: email, password: password);
-    return true;
+  if (!accept) {
+    // Mantemos o flag por uma futura otimização (ex.: respeitar a recusa
+    // por alguns logins), mas atualmente o `showBiometricEnrollmentOffer`
+    // não usa mais ele pra bloquear — o convite reaparece toda vez que o
+    // user logar manualmente sem credenciais salvas.
+    await storage.setBiometricEnrollmentDeclined(true);
+    return false;
   }
-  await storage.setBiometricEnrollmentDeclined(true);
-  return false;
+
+  // ───────────────────────────────────────────────────────────────────
+  // Confirmação biométrica nativa OBRIGATÓRIA antes de salvar credenciais.
+  //
+  // Esse passo:
+  //  1. Garante que o usuário tem biometria realmente cadastrada no
+  //     dispositivo (não basta o sensor existir).
+  //  2. Confirma a presença/identidade dele agora — caso contrário,
+  //     qualquer um com a senha do app poderia "ativar biometria" pra
+  //     outra pessoa.
+  //  3. Da feedback claro: o popup "Sim, ativar" leva imediatamente ao
+  //     prompt do SO. Sem isso, a feature parecia fantasma — o user
+  //     clicava ativar e não acontecia nada visível.
+  // ───────────────────────────────────────────────────────────────────
+  final isFace = biometricTypeLabel.toLowerCase().contains('face');
+  final reason = isFace
+      ? 'Confirme com Face ID para ativar o login biométrico'
+      : 'Confirme sua biometria para ativar o login rápido';
+
+  final confirmed = await BiometricService.instance.authenticate(
+    reason: reason,
+  );
+
+  if (!context.mounted) return false;
+
+  if (!confirmed) {
+    // Não salva — o user cancelou ou a biometria falhou. Mostramos um
+    // feedback inline para deixar claro que NADA foi configurado e que
+    // ele pode tentar de novo no próximo login.
+    AppToast.error(
+      context,
+      isFace
+          ? 'Face ID não confirmado. Login biométrico não foi ativado.'
+          : 'Biometria não confirmada. Login biométrico não foi ativado.',
+    );
+    return false;
+  }
+
+  await storage.saveCredentials(email: email, password: password);
+  await storage.setBiometricEnrollmentDeclined(false);
+
+  if (context.mounted) {
+    AppToast.success(
+      context,
+      isFace ? 'Face ID ativado' : 'Biometria ativada',
+      subtitle: isFace
+          ? 'Use seu rosto no próximo login.'
+          : 'Use seu dedo no próximo login.',
+    );
+  }
+
+  return true;
 }
 
 class _BiometricEnrollmentDialog extends StatelessWidget {

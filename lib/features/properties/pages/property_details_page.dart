@@ -18,7 +18,9 @@ import '../../../../core/constants/api_constants.dart';
 import '../../../../shared/services/api_service.dart';
 import '../../keys/services/key_service.dart';
 import '../../keys/models/key_model.dart' as key_models;
+import '../../../../shared/services/gallery_service.dart';
 import '../../../../shared/services/module_access_service.dart';
+import '../../../../core/constants/app_permissions.dart';
 import '../utils/property_edit_permissions.dart';
 
 // Formatter de moeda
@@ -125,6 +127,24 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       userRole: access.userRole,
       hasPermission: access.hasPermission,
     );
+  }
+
+  /// Pode deletar imagens individuais do imóvel direto pelo carrossel
+  /// fullscreen (paridade com `imobx-front/PropertyGalleryFullscreenPage`).
+  ///
+  /// Espelha exatamente a regra do web:
+  ///   `master/admin OR property:approve_publication OR property:approve_availability`
+  ///
+  /// Backend: `DELETE /gallery/:id` valida ownership pela company; o front
+  /// é quem decide se o botão aparece. Útil pra reprovar fotos individuais
+  /// (não-quadradas, categoria errada) sem precisar mandar a publicação
+  /// inteira de volta pra fila.
+  bool get _canDeletePropertyImages {
+    final access = ModuleAccessService.instance;
+    final role = access.userRole?.toLowerCase() ?? '';
+    if (role == 'master' || role == 'admin') return true;
+    return access.hasPermission(AppPermissions.propertyApprovePublication) ||
+        access.hasPermission(AppPermissions.propertyApproveAvailability);
   }
 
   @override
@@ -903,8 +923,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   }
 
   void _openFullscreenGallery(List<PropertyImage> images, int initial) {
-    Navigator.of(context).push(
-      PageRouteBuilder(
+    Navigator.of(context)
+        .push<bool>(
+      PageRouteBuilder<bool>(
         opaque: false,
         barrierColor: Colors.black,
         transitionDuration: const Duration(milliseconds: 250),
@@ -913,11 +934,19 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           images: images,
           initialIndex: initial,
           propertyId: _property?.id ?? '',
+          canDelete: _canDeletePropertyImages,
         ),
         transitionsBuilder: (_, anim, __, child) =>
             FadeTransition(opacity: anim, child: child),
       ),
-    );
+    )
+        .then((didMutate) {
+      // Quando o user deleta uma ou mais fotos pelo fullscreen, recarregamos
+      // o property pra refletir nova `mainImage`/`images` (e contadores).
+      if (didMutate == true && mounted) {
+        _loadProperty();
+      }
+    });
   }
 
   Widget _buildHeroFallback(BuildContext context, ThemeData theme) {
@@ -5746,17 +5775,32 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   }
 }
 
-/// Visualizador fullscreen com swipe horizontal e dots; tap fora ou ←/✕ fecha.
+/// Visualizador fullscreen — paridade com `imobx-front/PropertyGalleryFullscreenPage`.
+///
+/// - **`BoxFit.contain`**: a imagem é mostrada nas suas dimensões reais
+///   (com letterbox em volta). Isso permite ao avaliador ver se a foto é
+///   quadrada/retangular antes de aprovar — `cover` cortava as bordas e
+///   escondia desproporções.
+/// - **Pinch + double-tap zoom** via `InteractiveViewer` (até 5x).
+/// - **Pill de metadados** (categoria + dimensões + ratio + badge "QUADRADA"
+///   ou "NÃO QUADRADA") — ajuda o avaliador a decidir rapidamente.
+/// - **Botão de excluir** disponível para usuários com permissão
+///   `propertyApprovePublication`/`propertyApproveAvailability` ou roles
+///   master/admin. Confirmação obrigatória antes do delete.
+/// - Retorna `true` no pop quando alguma imagem foi deletada — a página
+///   pai usa isso pra recarregar o property.
 class _FullscreenGallery extends StatefulWidget {
   const _FullscreenGallery({
     required this.images,
     required this.initialIndex,
     required this.propertyId,
+    this.canDelete = false,
   });
 
   final List<PropertyImage> images;
   final int initialIndex;
   final String propertyId;
+  final bool canDelete;
 
   @override
   State<_FullscreenGallery> createState() => _FullscreenGalleryState();
@@ -5764,13 +5808,22 @@ class _FullscreenGallery extends StatefulWidget {
 
 class _FullscreenGalleryState extends State<_FullscreenGallery> {
   late final PageController _controller;
+  late List<PropertyImage> _images;
   late int _index;
+  bool _didMutate = false;
+  bool _deleting = false;
+
+  /// Cache de dimensões reais (decodificadas) por url. Evita resolver de
+  /// novo a cada rebuild e permite mostrar o ratio na barra inferior.
+  final Map<String, Size> _resolvedSizes = {};
 
   @override
   void initState() {
     super.initState();
-    _index = widget.initialIndex.clamp(0, widget.images.length - 1);
+    _images = List.of(widget.images);
+    _index = widget.initialIndex.clamp(0, _images.length - 1);
     _controller = PageController(initialPage: _index);
+    _resolveSizeFor(_currentImage);
   }
 
   @override
@@ -5779,70 +5832,299 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
     super.dispose();
   }
 
+  PropertyImage? get _currentImage =>
+      (_images.isEmpty || _index < 0 || _index >= _images.length)
+          ? null
+          : _images[_index];
+
+  /// Resolve dimensões reais via `Image.image.resolve(...)` — apenas uma
+  /// vez por URL. Útil pro badge "QUADRADA"/"NÃO QUADRADA" e pra mostrar
+  /// "1920×1080" na pill inferior.
+  void _resolveSizeFor(PropertyImage? img) {
+    if (img == null) return;
+    if (_resolvedSizes.containsKey(img.url)) return;
+    final provider = NetworkImage(img.url);
+    final stream = provider.resolve(const ImageConfiguration());
+    late ImageStreamListener listener;
+    listener = ImageStreamListener(
+      (info, _) {
+        if (!mounted) return;
+        setState(() {
+          _resolvedSizes[img.url] = Size(
+            info.image.width.toDouble(),
+            info.image.height.toDouble(),
+          );
+        });
+        stream.removeListener(listener);
+      },
+      onError: (_, __) {
+        stream.removeListener(listener);
+      },
+    );
+    stream.addListener(listener);
+  }
+
+  bool _isApproximatelySquare(Size size) {
+    if (size.width == 0 || size.height == 0) return false;
+    final ratio = size.width / size.height;
+    // Toleramos ±2% pra absorver compressões e arredondamentos JPEG.
+    return (ratio - 1.0).abs() <= 0.02;
+  }
+
+  String _categoryLabel(String? raw) {
+    if (raw == null || raw.isEmpty) return 'Geral';
+    switch (raw.toLowerCase()) {
+      case 'general':
+        return 'Geral';
+      case 'living_room':
+      case 'sala':
+        return 'Sala';
+      case 'kitchen':
+      case 'cozinha':
+        return 'Cozinha';
+      case 'bedroom':
+      case 'quarto':
+        return 'Quarto';
+      case 'bathroom':
+      case 'banheiro':
+        return 'Banheiro';
+      case 'facade':
+      case 'fachada':
+        return 'Fachada';
+      case 'plant':
+      case 'planta':
+        return 'Planta';
+      case 'leisure':
+      case 'lazer':
+        return 'Lazer';
+      default:
+        return raw[0].toUpperCase() + raw.substring(1);
+    }
+  }
+
+  Future<void> _confirmAndDelete() async {
+    if (!widget.canDelete || _deleting) return;
+    final img = _currentImage;
+    if (img == null || img.id.isEmpty) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+        ),
+        title: const Text(
+          'Excluir esta foto?',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+        ),
+        content: Text(
+          img.isMain
+              ? 'Esta é a foto principal. Ao excluir, a próxima imagem assume como principal automaticamente. Esta ação não pode ser desfeita.'
+              : 'A imagem será removida do imóvel e do armazenamento. Esta ação não pode ser desfeita.',
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.78),
+            height: 1.4,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.white.withValues(alpha: 0.7),
+            ),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.status.error,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+
+    setState(() => _deleting = true);
+
+    final res = await GalleryService.instance.deleteImage(img.id);
+
+    if (!mounted) return;
+
+    if (!res.success) {
+      setState(() => _deleting = false);
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          backgroundColor: AppColors.status.error,
+          behavior: SnackBarBehavior.floating,
+          content: Text(
+            res.message ?? 'Não foi possível excluir a imagem.',
+            style: const TextStyle(color: Colors.white),
+          ),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _images.removeAt(_index);
+      _didMutate = true;
+      if (_images.isEmpty) {
+        _index = 0;
+      } else if (_index >= _images.length) {
+        _index = _images.length - 1;
+      }
+      _deleting = false;
+    });
+
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      const SnackBar(
+        backgroundColor: Color(0xFF3FA66B),
+        behavior: SnackBarBehavior.floating,
+        content: Text(
+          'Foto excluída com sucesso.',
+          style: TextStyle(color: Colors.white),
+        ),
+      ),
+    );
+
+    if (_images.isEmpty) {
+      Navigator.of(context).pop(_didMutate);
+      return;
+    }
+
+    // Garante que o PageController acompanhe o novo índice
+    _controller.jumpToPage(_index);
+    _resolveSizeFor(_currentImage);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final total = widget.images.length;
+    final total = _images.length;
+    final current = _currentImage;
+    final size = current != null ? _resolvedSizes[current.url] : null;
+    final isSquare = size != null && _isApproximatelySquare(size);
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
         child: Stack(
           children: [
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => Navigator.of(context).pop(),
-              child: PageView.builder(
-                controller: _controller,
-                itemCount: total,
-                onPageChanged: (i) => setState(() => _index = i),
-                itemBuilder: (_, i) {
-                  return Hero(
-                    tag: 'property-image-${widget.propertyId}-$i',
-                    child: InteractiveViewer(
-                      minScale: 1,
-                      maxScale: 4,
-                      child: SizedBox.expand(
-                        child: ShimmerImage(
-                          imageUrl: widget.images[i].url,
-                          width: double.infinity,
-                          height: double.infinity,
-                          fit: BoxFit.cover,
+            // ───────── Imagem em dimensões reais (BoxFit.contain) ─────────
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => Navigator.of(context).pop(_didMutate),
+                child: PageView.builder(
+                  controller: _controller,
+                  itemCount: total,
+                  onPageChanged: (i) {
+                    setState(() => _index = i);
+                    _resolveSizeFor(_currentImage);
+                  },
+                  itemBuilder: (_, i) {
+                    return Hero(
+                      tag: 'property-image-${widget.propertyId}-$i',
+                      child: InteractiveViewer(
+                        minScale: 1,
+                        maxScale: 5,
+                        child: Center(
+                          child: ShimmerImage(
+                            imageUrl: _images[i].url,
+                            // `contain` revela letterbox/pillarbox =
+                            // o avaliador percebe imagens não-quadradas
+                            // só de olhar.
+                            fit: BoxFit.contain,
+                            width: double.infinity,
+                            height: double.infinity,
+                          ),
                         ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
             ),
+
+            // ───────── Top bar (fechar + counter + delete) ─────────
             Positioned(
               top: 8,
               left: 8,
-              child: _GalleryRoundIconButton(
-                icon: Icons.close_rounded,
-                onTap: () => Navigator.of(context).pop(),
-              ),
-            ),
-            Positioned(
-              top: 16,
-              right: 16,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(13),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-                ),
-                child: Text(
-                  '${_index + 1} / $total',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w800,
-                    height: 1,
-                    fontFeatures: [FontFeature.tabularFigures()],
+              right: 8,
+              child: Row(
+                children: [
+                  _GalleryRoundIconButton(
+                    icon: Icons.close_rounded,
+                    onTap: () => Navigator.of(context).pop(_didMutate),
                   ),
-                ),
+                  const Spacer(),
+                  if (total > 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 11,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(13),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.2),
+                        ),
+                      ),
+                      child: Text(
+                        '${_index + 1} / $total',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w800,
+                          height: 1,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                  if (widget.canDelete && current != null) ...[
+                    const SizedBox(width: 10),
+                    _GalleryRoundIconButton(
+                      icon: Icons.delete_outline_rounded,
+                      onTap: _confirmAndDelete,
+                      // Vermelho semitransparente — "destrutivo" sem
+                      // berrar como vermelho puro num fundo preto.
+                      tint: AppColors.status.error,
+                      busy: _deleting,
+                    ),
+                  ],
+                ],
               ),
             ),
+
+            // ───────── Badge de proporção (NÃO QUADRADA) ─────────
+            // Aparece só quando temos as dimensões e a foto NÃO é quadrada.
+            // Quadrada não recebe badge — evita ruído visual.
+            if (size != null && !isSquare)
+              Positioned(
+                top: 60,
+                right: 16,
+                child: _RatioWarningBadge(),
+              ),
+
+            // ───────── Pill de metadados (bottom) ─────────
+            if (current != null)
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: total > 1 ? 60 : 26,
+                child: _MetaPill(
+                  category: _categoryLabel(current.category),
+                  size: size,
+                  isSquare: size != null ? isSquare : null,
+                  isMain: current.isMain,
+                ),
+              ),
+
+            // ───────── Dots (paginação) ─────────
             if (total > 1)
               Positioned(
                 left: 0,
@@ -5875,28 +6157,215 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
   }
 }
 
+/// Pill com metadados (categoria + dimensões + ratio + foto principal).
+///
+/// Renderiza tudo em uma linha só — fluido. Os "chips" internos têm cores
+/// distintas por função: categoria neutra, dimensões accent-cinza, ratio
+/// verde se quadrada/cinza se desconhecido, "PRINCIPAL" amarelo.
+class _MetaPill extends StatelessWidget {
+  const _MetaPill({
+    required this.category,
+    required this.size,
+    required this.isSquare,
+    required this.isMain,
+  });
+
+  final String category;
+  final Size? size;
+  final bool? isSquare;
+  final bool isMain;
+
+  @override
+  Widget build(BuildContext context) {
+    final w = size?.width.toInt();
+    final h = size?.height.toInt();
+    final dimsLabel = (w != null && h != null) ? '$w × $h' : null;
+    String? ratioLabel;
+    if (size != null && size!.height > 0) {
+      final r = size!.width / size!.height;
+      ratioLabel = '${r.toStringAsFixed(2)}:1';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          _MetaChip(
+            icon: Icons.category_outlined,
+            label: category,
+          ),
+          if (dimsLabel != null)
+            _MetaChip(
+              icon: Icons.aspect_ratio_rounded,
+              label: dimsLabel,
+            ),
+          if (ratioLabel != null)
+            _MetaChip(
+              icon: isSquare == true
+                  ? Icons.crop_square_rounded
+                  : Icons.crop_landscape_rounded,
+              label: ratioLabel,
+              tint: isSquare == true
+                  ? const Color(0xFF3FA66B)
+                  : const Color(0xFFE0AA3E),
+            ),
+          if (isMain)
+            const _MetaChip(
+              icon: Icons.star_rounded,
+              label: 'PRINCIPAL',
+              tint: Color(0xFFE0AA3E),
+              emphasized: true,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MetaChip extends StatelessWidget {
+  const _MetaChip({
+    required this.icon,
+    required this.label,
+    this.tint,
+    this.emphasized = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color? tint;
+  final bool emphasized;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = tint ?? Colors.white.withValues(alpha: 0.85);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: emphasized
+            ? c.withValues(alpha: 0.2)
+            : Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: c.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: c),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: c,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w800,
+              letterSpacing: emphasized ? 1.2 : 0.2,
+              height: 1,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Badge "NÃO QUADRADA" — chama atenção pro avaliador no canto superior
+/// direito quando a imagem foge da proporção quadrada (regra prioritária
+/// pedida pelo time de aprovação).
+class _RatioWarningBadge extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE0AA3E).withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFFE0AA3E)),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.warning_amber_rounded,
+            size: 14,
+            color: Color(0xFFE0AA3E),
+          ),
+          SizedBox(width: 6),
+          Text(
+            'NÃO QUADRADA',
+            style: TextStyle(
+              color: Color(0xFFE0AA3E),
+              fontSize: 10.5,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.2,
+              height: 1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _GalleryRoundIconButton extends StatelessWidget {
-  const _GalleryRoundIconButton({required this.icon, required this.onTap});
+  const _GalleryRoundIconButton({
+    required this.icon,
+    required this.onTap,
+    this.tint,
+    this.busy = false,
+  });
 
   final IconData icon;
   final VoidCallback onTap;
 
+  /// Cor de destaque opcional (usada na ação destrutiva de excluir).
+  /// Quando setada, o botão herda essa cor no fundo (com alpha) e na borda.
+  final Color? tint;
+
+  /// Quando `true`, mostra spinner em lugar do ícone e desabilita o tap.
+  final bool busy;
+
   @override
   Widget build(BuildContext context) {
+    final hasTint = tint != null;
+    final fg = hasTint ? tint! : Colors.white;
+    final bg = hasTint
+        ? tint!.withValues(alpha: 0.18)
+        : Colors.black.withValues(alpha: 0.55);
+    final borderColor = hasTint
+        ? tint!.withValues(alpha: 0.6)
+        : Colors.white.withValues(alpha: 0.18);
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: onTap,
+        onTap: busy ? null : onTap,
         borderRadius: BorderRadius.circular(22),
         child: Container(
           width: 44,
           height: 44,
           decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.55),
+            color: bg,
             shape: BoxShape.circle,
-            border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+            border: Border.all(color: borderColor),
           ),
-          child: Icon(icon, color: Colors.white, size: 22),
+          child: busy
+              ? Padding(
+                  padding: const EdgeInsets.all(11),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: fg,
+                  ),
+                )
+              : Icon(icon, color: fg, size: 22),
         ),
       ),
     );

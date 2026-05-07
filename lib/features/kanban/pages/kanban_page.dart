@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/widgets/app_scaffold.dart';
@@ -956,17 +957,91 @@ class _KanbanPageState extends State<KanbanPage> {
             _kanbanToolsHeader(context),
             const SizedBox(height: 14),
             mainBlock,
-            if (controller.showBulkSelectionEntry &&
-                (controller.board?.columns.isNotEmpty ?? false)) ...[
-              const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: _kanbanBulkToggleButton(context, controller),
-              ),
-            ],
+            // Linha de ações utilitárias do CRM — sempre exibe "Tarefas"
+            // (lista global de subtarefas), e o "Modo seleção" só aparece
+            // quando o controller habilita (regra antiga preservada).
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _kanbanTasksButton(context),
+                if (controller.showBulkSelectionEntry &&
+                    (controller.board?.columns.isNotEmpty ?? false))
+                  _kanbanBulkToggleButton(context, controller),
+              ],
+            ),
           ],
         );
       },
+    );
+  }
+
+  /// Cor do botão de Tarefas — usa o accent de oportunidades (vermelho da
+  /// marca) com leve tom roxo via gradiente para sinalizar "produtividade".
+  Color _kanbanTasksButtonColor(BuildContext context) {
+    return Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFFFF4D67)
+        : AppColors.primary.primary;
+  }
+
+  Widget _kanbanTasksButton(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final color = _kanbanTasksButtonColor(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => Navigator.of(context).pushNamed(AppRoutes.kanbanSubtasks),
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                color.withValues(alpha: isDark ? 0.22 : 0.13),
+                color.withValues(alpha: isDark ? 0.10 : 0.06),
+              ],
+            ),
+            border: Border.all(
+              color: color.withValues(alpha: isDark ? 0.5 : 0.4),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: color.withValues(alpha: isDark ? 0.18 : 0.10),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+                spreadRadius: -3,
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(11, 8, 13, 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.checklist_rounded,
+                  size: 17,
+                  color: color,
+                ),
+                const SizedBox(width: 7),
+                Text(
+                  'Tarefas',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: color,
+                    letterSpacing: 0.1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 

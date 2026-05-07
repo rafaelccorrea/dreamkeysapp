@@ -10,6 +10,7 @@ import '../../../shared/services/secure_storage_service.dart';
 import '../../../shared/utils/jwt_utils.dart';
 import '../models/kanban_models.dart';
 import '../services/kanban_service.dart';
+import 'subtask_manager.dart';
 
 /// Modal completo de detalhes do card.
 ///
@@ -53,7 +54,7 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _tabController.addListener(_onTabChanged);
     _commentController.addListener(() {
       if (mounted) setState(() => _commentLength = _commentController.text.length);
@@ -66,7 +67,10 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
   void _onTabChanged() {
     if (!mounted) return;
     setState(() {});
-    if (_tabController.index == 2 && _history.isEmpty && !_loadingHistory) {
+    // Aba "Histórico" agora é o índice 3 (depois de Detalhes=0, Tarefas=1,
+    // Conversas=2). Mantemos lazy-load: só busca quando a aba é aberta
+    // pela primeira vez.
+    if (_tabController.index == 3 && _history.isEmpty && !_loadingHistory) {
       _loadHistory();
     }
   }
@@ -360,6 +364,10 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
               tabs: [
                 _TabItem(icon: Icons.article_outlined, label: 'Detalhes'),
                 _TabItem(
+                  icon: Icons.checklist_rounded,
+                  label: 'Tarefas',
+                ),
+                _TabItem(
                   icon: Icons.forum_outlined,
                   label: 'Conversas',
                   badge: _comments.length,
@@ -379,6 +387,17 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
                 physics: const ClampingScrollPhysics(),
                 children: [
                   _buildDetailsTab(context, theme, state),
+                  // Aba Tarefas — checklist do card (subtarefas).
+                  // Visualmente convivendo com o resto do modal: scrollável,
+                  // mesmo padding lateral, e gerenciador completo
+                  // (carregamento, criar, toggle, excluir).
+                  SingleChildScrollView(
+                    physics: const ClampingScrollPhysics(),
+                    child: SubTaskManager(
+                      taskId: task.id,
+                      parentCardTitle: task.title,
+                    ),
+                  ),
                   _buildCommentsTab(context, theme),
                   _buildHistoryTab(context, theme),
                 ],

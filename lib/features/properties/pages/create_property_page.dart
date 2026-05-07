@@ -1038,21 +1038,19 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           imageQuality: 85,
         );
         if (photo != null && mounted) {
-          // Abrir crop de imagem (formato retangular livre para imagens de imóvel)
-          final croppedFile = await ImageCropHelper.cropImageRect(
+          // Crop premium 1:1 — única opção pra imóvel.
+          //
+          // Comportamento ajustado: se o user CANCELAR o crop, a foto
+          // original NÃO é adicionada (antes adicionávamos mesmo assim,
+          // o que burlava o lock 1:1). Agora ou ele recorta em quadrado
+          // ou nada vai pra fila — alinhado com o que a fila de
+          // aprovação espera.
+          final croppedFile = await ImageCropHelper.cropImageSquare(
+            context: context,
             imagePath: photo.path,
-            compressQuality: 85,
           );
-          
           if (croppedFile != null && mounted) {
-            setState(() {
-              _selectedImages.add(croppedFile);
-            });
-          } else if (croppedFile == null && mounted) {
-            // Usuário cancelou o crop, mas mantém a imagem original
-            setState(() {
-              _selectedImages.add(File(photo.path));
-            });
+            setState(() => _selectedImages.add(croppedFile));
           }
         }
       } else {
@@ -1061,25 +1059,14 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           imageQuality: 85,
         );
         if (images.isNotEmpty && mounted) {
-          // Processar cada imagem com crop individualmente
           for (final xFile in images) {
             if (!mounted) break;
-            
-            // Abrir crop de imagem (formato retangular livre para imagens de imóvel)
-            final croppedFile = await ImageCropHelper.cropImageRect(
+            final croppedFile = await ImageCropHelper.cropImageSquare(
+              context: context,
               imagePath: xFile.path,
-              compressQuality: 85,
             );
-            
             if (croppedFile != null && mounted) {
-              setState(() {
-                _selectedImages.add(croppedFile);
-              });
-            } else if (croppedFile == null && mounted) {
-              // Usuário cancelou o crop, mas mantém a imagem original
-              setState(() {
-                _selectedImages.add(File(xFile.path));
-              });
+              setState(() => _selectedImages.add(croppedFile));
             }
           }
         }
@@ -5620,18 +5607,13 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                                   );
                                   if (photo != null && mounted) {
                                     final croppedFile =
-                                        await ImageCropHelper.cropImageRect(
+                                        await ImageCropHelper.cropImageSquare(
+                                      context: context,
                                       imagePath: photo.path,
-                                      compressQuality: 85,
                                     );
-
                                     if (croppedFile != null && mounted) {
                                       setState(() {
                                         _selectedImages.add(croppedFile);
-                                      });
-                                    } else if (croppedFile == null && mounted) {
-                                      setState(() {
-                                        _selectedImages.add(File(photo.path));
                                       });
                                     }
                                   }

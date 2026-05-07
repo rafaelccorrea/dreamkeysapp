@@ -184,6 +184,10 @@ class KanbanController extends ChangeNotifier {
   }
 
   /// Lista unificada de funis (`ProjectSelect`): equipes permitidas + pessoais + sem equipe.
+  ///
+  /// Otimização: as 3 chamadas (`getProjectsByTeams`, `getPersonalWorkspace`,
+  /// `getProjectsWithoutTeam`) são totalmente independentes — antes rodavam
+  /// sequencialmente (~3x latência). Agora vão em paralelo via `Future.wait`.
   Future<void> loadAccessibleProjects({
     bool refreshKanbanTeams = false,
   }) async {
@@ -200,29 +204,45 @@ class KanbanController extends ChangeNotifier {
       final byId = <String, KanbanProject>{};
       final teamIds =
           _kanbanTeams.map((t) => t.id).where((id) => id.isNotEmpty).toList();
-      if (teamIds.isNotEmpty) {
-        final batch = await _kanbanService.getProjectsByTeams(teamIds);
-        if (batch.success && batch.data != null) {
-          for (final p in batch.data!) {
-            if (p.id.isNotEmpty) byId[p.id] = p;
-          }
-        } else {
-          debugPrint(
-            '📋 [KANBAN_CTRL] getProjectsByTeams: ${batch.message}',
-          );
+
+      // Roda os 3 fetches em paralelo. Cada um tolera falha
+      // individualmente para não derrubar a lista combinada.
+      final batchFuture = teamIds.isNotEmpty
+          ? _kanbanService.getProjectsByTeams(teamIds)
+          : Future.value(null);
+      final personalFuture = _kanbanService.getPersonalWorkspace();
+      final orphanFuture = _kanbanService.getProjectsWithoutTeam();
+
+      final results = await Future.wait<dynamic>([
+        batchFuture,
+        personalFuture,
+        orphanFuture,
+      ]);
+
+      final batchResp = results[0];
+      final personalResp = results[1];
+      final orphanResp = results[2];
+
+      if (batchResp != null &&
+          batchResp.success == true &&
+          batchResp.data != null) {
+        for (final p in batchResp.data! as List<KanbanProject>) {
+          if (p.id.isNotEmpty) byId[p.id] = p;
         }
+      } else if (batchResp != null) {
+        debugPrint(
+          '📋 [KANBAN_CTRL] getProjectsByTeams: ${batchResp.message}',
+        );
       }
 
-      final personalResp = await _kanbanService.getPersonalWorkspace();
       if (personalResp.success && personalResp.data != null) {
-        for (final p in personalResp.data!) {
+        for (final p in personalResp.data! as List<KanbanProject>) {
           if (p.id.isNotEmpty) byId[p.id] = p;
         }
       }
 
-      final orphanResp = await _kanbanService.getProjectsWithoutTeam();
       if (orphanResp.success && orphanResp.data != null) {
-        for (final p in orphanResp.data!) {
+        for (final p in orphanResp.data! as List<KanbanProject>) {
           if (p.id.isNotEmpty) byId[p.id] = p;
         }
       }
@@ -420,10 +440,18 @@ class KanbanController extends ChangeNotifier {
 
         _updateState(board: board, loading: false);
 
+        // Otimização: a lista de funis e o eligibility check de bulk
+        // delete são independentes do board renderizado. Antes rodavam
+        // sequencialmente DEPOIS do board pintar, segurando o "loading"
+        // do project-selector mais tempo do que precisava. Agora vão em
+        // paralelo — sem await — para que a UI já reaja.
+        // (Errors são tolerados internamente em cada método.)
         if (_teamId != null) {
-          await loadAccessibleProjects();
+          // ignore: unawaited_futures
+          loadAccessibleProjects();
         }
-        await refreshBulkDeleteEligibility();
+        // ignore: unawaited_futures
+        refreshBulkDeleteEligibility();
       } else {
         if (response.statusCode == 404 && !recovery404) {
           debugPrint(

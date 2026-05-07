@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../core/notifications/app_toast.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../shared/services/auth_service.dart';
@@ -67,29 +68,10 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
         debugPrint('📋 [FORGOT_PASSWORD] Mensagem: ${response.message}');
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Row(
-                children: [
-                  const Icon(Icons.error_outline, color: Colors.white, size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      response.message ??
-                          'Erro ao enviar email de recuperação. Tente novamente.',
-                      style: const TextStyle(color: Colors.white, fontSize: 14),
-                    ),
-                  ),
-                ],
-              ),
-              backgroundColor: AppColors.status.error,
-              behavior: SnackBarBehavior.floating,
-              margin: const EdgeInsets.all(16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              duration: const Duration(seconds: 4),
-            ),
+          AppToast.error(
+            context,
+            response.message ??
+                'Erro ao enviar email de recuperação. Tente novamente.',
           );
         }
       }
@@ -99,28 +81,9 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
       debugPrint('📚 [FORGOT_PASSWORD] StackTrace: $stackTrace');
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.error_outline, color: Colors.white, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Erro ao conectar com o servidor. Tente novamente.',
-                    style: const TextStyle(color: Colors.white, fontSize: 14),
-                  ),
-                ),
-              ],
-            ),
-            backgroundColor: AppColors.status.error,
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.all(16),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            duration: const Duration(seconds: 4),
-          ),
+        AppToast.error(
+          context,
+          'Erro ao conectar com o servidor. Tente novamente.',
         );
       }
     } finally {

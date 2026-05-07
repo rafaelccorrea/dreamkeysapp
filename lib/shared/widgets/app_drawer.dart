@@ -15,6 +15,7 @@ import '../services/profile_service.dart';
 import '../services/dashboard_service.dart';
 import '../services/permission_service.dart';
 import '../services/secure_storage_service.dart';
+import 'skeleton_box.dart';
 import '../../features/notifications/controllers/notification_controller.dart';
 import '../../features/chat/controllers/chat_unread_controller.dart';
 
@@ -39,14 +40,12 @@ class AppDrawer extends StatefulWidget {
 
 class _AppDrawerState extends State<AppDrawer> {
   String? _companyName;
-  bool _isLoadingCompany = true;
   bool _companyIsMatrix = false;
 
   // Dados do usuário carregados do serviço
   String? _loadedUserName;
   String? _loadedUserEmail;
   String? _loadedUserAvatar;
-  bool _isLoadingProfile = false;
   String? _heroRole;
   String? _heroPhone;
 
@@ -57,17 +56,96 @@ class _AppDrawerState extends State<AppDrawer> {
 
   /// Lista para o seletor de empresa (Master)
   List<Company> _masterCompanies = [];
-  bool _loadingMasterCompanies = false;
+
+  /// Único estado de loading do drawer.
+  ///
+  /// Antes existiam 3 flags independentes (`_isLoadingCompany`,
+  /// `_isLoadingProfile`, `_loadingMasterCompanies`) — cada seção
+  /// mostrava seu próprio spinner pequeno. Resultado: o usuário via
+  /// avatar carregando, depois empresa carregando, depois badge piscando…
+  /// um por um. Visualmente "ridículo".
+  ///
+  /// Agora unificamos: enquanto `_isInitializing == true`, o drawer
+  /// inteiro mostra skeleton (header + body). Vira `false` somente quando
+  /// **todas** as cargas em paralelo terminam.
+  bool _isInitializing = true;
+
+  /// Sinaliza troca de empresa em curso — também ativa o skeleton geral
+  /// (mesma estética de "carregando tudo de novo").
+  bool _isSwitchingCompany = false;
+  String? _switchingCompanyLabel;
 
   @override
   void initState() {
     super.initState();
-    _loadCompany();
-    // Sempre tentar carregar perfil, mas priorizar dados fornecidos
+    // Reage a mudanças de permissões/empresa do `ModuleAccessService`
+    // (login, troca de empresa, refresh) — itens do drawer com gating
+    // (ex.: "Aprovações") aparecem/somem ao vivo, sem precisar restart.
+    ModuleAccessService.instance.addListener(_onModuleAccessChanged);
+    _bootstrap();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadProfile();
       _checkActiveRoutes();
     });
+  }
+
+  void _onModuleAccessChanged() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  @override
+  void dispose() {
+    ModuleAccessService.instance.removeListener(_onModuleAccessChanged);
+    super.dispose();
+  }
+
+  /// Inicialização paralela — dispara perfil, empresa e permissões
+  /// simultaneamente, e só desliga o skeleton quando todos terminam.
+  /// Cada `_silent*` é tolerante a falhas: nunca lança, só atualiza
+  /// estado interno.
+  ///
+  /// Carregar permissões aqui é defensivo — se o usuário entrou direto
+  /// pelo `LoginPage` (sem passar pelo `SplashPage` que chama
+  /// `initialize()`), o `ModuleAccessService` em memória estaria vazio
+  /// e itens com gating (ex.: "Aprovações") só apareceriam após restart.
+  Future<void> _bootstrap() async {
+    final futures = <Future<void>>[
+      _loadCompany(),
+      _loadProfile(),
+      _ensureModuleAccessReady(),
+    ];
+    await Future.wait(futures);
+
+    // Lista de empresas master é necessária pra mostrar o picker.
+    // Roda em paralelo só DEPOIS que o profile terminou (precisamos saber
+    // se é master), mas não bloqueamos o `_isInitializing` por isso —
+    // se demorar, o drawer já abre e o picker é habilitado depois.
+    if (_isMasterUser) {
+      // ignore: unawaited_futures
+      _loadCompaniesForMaster();
+    }
+
+    if (mounted) {
+      setState(() {
+        _isInitializing = false;
+      });
+    }
+  }
+
+  /// Garante `ModuleAccessService` populado quando o drawer monta. Se já
+  /// está com permissões carregadas (boot via splash), só refresca em
+  /// background; senão, espera o fetch terminar pra evitar item de menu
+  /// "piscando" depois da primeira renderização.
+  Future<void> _ensureModuleAccessReady() async {
+    final svc = ModuleAccessService.instance;
+    if (svc.userPermissions == null) {
+      await svc.initialize();
+    } else {
+      // Refresh assíncrono em background — listener no
+      // `_onModuleAccessChanged` re-renderiza se algo mudar.
+      // ignore: unawaited_futures
+      svc.refreshPermissions();
+    }
   }
 
   void _checkActiveRoutes() {
@@ -120,51 +198,36 @@ class _AppDrawerState extends State<AppDrawer> {
     }
   }
 
+  /// Carrega dados do perfil sem manipular `_isInitializing` — quem
+  /// controla isso é o `_bootstrap()`. Tolerante a falha (nunca rethrow).
   Future<void> _loadProfile() async {
-    // Se já temos os dados completos via parâmetros, não precisa carregar
+    // Se já temos os dados completos via parâmetros, fetch só metadata
     if (widget.userName != null &&
         widget.userName!.isNotEmpty &&
         widget.userEmail != null &&
         widget.userEmail!.isNotEmpty) {
-      debugPrint(
-        '✅ [APP_DRAWER] Dados do usuário já fornecidos via parâmetros',
-      );
-      // Limpar dados carregados anteriormente se agora temos via parâmetros
       if (_loadedUserName != null || _loadedUserEmail != null) {
-        setState(() {
-          _loadedUserName = null;
-          _loadedUserEmail = null;
-          _loadedUserAvatar = null;
-          _heroRole = null;
-          _heroPhone = null;
-        });
+        if (mounted) {
+          setState(() {
+            _loadedUserName = null;
+            _loadedUserEmail = null;
+            _loadedUserAvatar = null;
+            _heroRole = null;
+            _heroPhone = null;
+          });
+        }
       }
-      _fetchHeroProfileMetadata();
+      await _fetchHeroProfileMetadata();
       return;
     }
 
-    // Se já temos dados carregados, não precisa recarregar
-    if (_loadedUserName != null &&
-        _loadedUserEmail != null &&
-        !_isLoadingProfile) {
-      debugPrint('✅ [APP_DRAWER] Dados do usuário já carregados anteriormente');
+    if (_loadedUserName != null && _loadedUserEmail != null) {
       return;
     }
-
-    debugPrint('📡 [APP_DRAWER] Carregando perfil do usuário...');
-
-    setState(() {
-      _isLoadingProfile = true;
-    });
 
     try {
       // Tentar primeiro o ProfileService
-      final profileService = ProfileService.instance;
-      final profileResponse = await profileService.getProfile();
-
-      debugPrint(
-        '📡 [APP_DRAWER] Resposta do perfil: success=${profileResponse.success}',
-      );
+      final profileResponse = await ProfileService.instance.getProfile();
 
       if (profileResponse.success && profileResponse.data != null) {
         if (mounted) {
@@ -174,75 +237,43 @@ class _AppDrawerState extends State<AppDrawer> {
             _loadedUserName = p.name;
             _loadedUserEmail = p.email;
             _loadedUserAvatar = p.avatar;
-            debugPrint(
-              '✅ [APP_DRAWER] Perfil carregado via ProfileService: ${p.name} (${p.email})',
-            );
-            _isLoadingProfile = false;
           });
-          _loadCompaniesForMaster();
         }
         return;
       }
 
-      // Se ProfileService falhou, tentar DashboardService como fallback
-      debugPrint(
-        '⚠️ [APP_DRAWER] ProfileService falhou, tentando DashboardService como fallback...',
-      );
-      final dashboardService = DashboardService.instance;
-      final dashboardResponse = await dashboardService.getUserDashboard();
-
-      if (mounted) {
+      // Fallback: DashboardService
+      final dashboardResponse =
+          await DashboardService.instance.getUserDashboard();
+      if (mounted &&
+          dashboardResponse.success &&
+          dashboardResponse.data != null) {
+        final u = dashboardResponse.data!.user;
         setState(() {
-          if (dashboardResponse.success && dashboardResponse.data != null) {
-            final u = dashboardResponse.data!.user;
-            _loadedUserName = u.name;
-            _loadedUserEmail = u.email;
-            _loadedUserAvatar = u.avatar;
-            final rr = u.role.trim();
-            _heroRole = rr.isNotEmpty ? rr : null;
-            _heroPhone = null;
-            debugPrint(
-              '✅ [APP_DRAWER] Perfil carregado via DashboardService: ${u.name} (${u.email})',
-            );
-          } else {
-            debugPrint(
-              '❌ [APP_DRAWER] Erro ao carregar perfil (ambos os serviços falharam): ${dashboardResponse.message}',
-            );
-          }
-          _isLoadingProfile = false;
+          _loadedUserName = u.name;
+          _loadedUserEmail = u.email;
+          _loadedUserAvatar = u.avatar;
+          final rr = u.role.trim();
+          _heroRole = rr.isNotEmpty ? rr : null;
+          _heroPhone = null;
         });
-        _loadCompaniesForMaster();
       }
-    } catch (e, stackTrace) {
+    } catch (e) {
       debugPrint('❌ [APP_DRAWER] Erro ao carregar perfil: $e');
-      debugPrint('📚 [APP_DRAWER] StackTrace: $stackTrace');
-      if (mounted) {
-        setState(() {
-          _isLoadingProfile = false;
-        });
-      }
     }
   }
 
   Future<void> _loadCompany() async {
     try {
-      final companyService = CompanyService.instance;
-      final response = await companyService.getSelectedCompany();
-
+      final response = await CompanyService.instance.getSelectedCompany();
       if (mounted) {
         setState(() {
           _companyName = response.data?.name;
           _companyIsMatrix = response.data?.isMatrix ?? false;
-          _isLoadingCompany = false;
         });
       }
     } catch (e) {
       debugPrint('❌ [APP_DRAWER] Erro ao carregar empresa: $e');
-      if (mounted) {
-        setState(() {
-          _isLoadingCompany = false;
-        });
-      }
     }
   }
 
@@ -292,17 +323,15 @@ class _AppDrawerState extends State<AppDrawer> {
 
   Future<void> _loadCompaniesForMaster() async {
     if (!_isMasterUser || !mounted) return;
-    setState(() => _loadingMasterCompanies = true);
     final res = await CompanyService.instance.getCompanies();
     if (!mounted) return;
     setState(() {
-      _loadingMasterCompanies = false;
       _masterCompanies = res.success && res.data != null ? res.data! : [];
     });
   }
 
   void _openProfileDrawerHeader() {
-    if (_isLoadingProfile) return;
+    if (_isInitializing) return;
     Navigator.pop(context);
     Navigator.of(context).pushNamed(AppRoutes.profile);
   }
@@ -310,7 +339,7 @@ class _AppDrawerState extends State<AppDrawer> {
   Future<void> _showCompanyPickerSheet(BuildContext parentContext) async {
     if (!_isMasterUser) return;
 
-    if (_masterCompanies.isEmpty && !_loadingMasterCompanies) {
+    if (_masterCompanies.isEmpty) {
       await _loadCompaniesForMaster();
     }
     if (!mounted || !parentContext.mounted) return;
@@ -331,71 +360,21 @@ class _AppDrawerState extends State<AppDrawer> {
     final currentId = await SecureStorageService.instance.getCompanyId();
     if (!parentContext.mounted) return;
 
-    final maxHeight = MediaQuery.sizeOf(parentContext).height * 0.42;
-
     await showModalBottomSheet<void>(
       context: parentContext,
-      showDragHandle: true,
       isScrollControlled: true,
       useSafeArea: true,
+      backgroundColor: Colors.transparent,
       builder: (sheetContext) {
-        return Padding(
-          padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(sheetContext).bottom),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
-                child: Text(
-                  'Trocar de empresa',
-                  style: Theme.of(sheetContext).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                child: Text(
-                  'Painel e dados seguirão o contexto selecionado.',
-                  style: Theme.of(sheetContext).textTheme.bodySmall?.copyWith(
-                        color: ThemeHelpers.textSecondaryColor(sheetContext),
-                      ),
-                ),
-              ),
-              SizedBox(
-                height: maxHeight,
-                child: ListView(
-                  shrinkWrap: true,
-                  children: [
-                    for (final c in _masterCompanies)
-                      ListTile(
-                        leading: Icon(
-                          c.id == currentId ? Icons.check_circle_rounded : Icons.apartment_rounded,
-                          color: _drawerAccentColor(sheetContext),
-                        ),
-                        title: Text(c.name),
-                        subtitle: c.isMatrix ? const Text('Matriz') : null,
-                        trailing: c.id == currentId
-                            ? Text(
-                                'Ativa',
-                                style: Theme.of(sheetContext).textTheme.labelSmall?.copyWith(
-                                      fontWeight: FontWeight.w800,
-                                      color: ThemeHelpers.textSecondaryColor(sheetContext),
-                                    ),
-                              )
-                            : null,
-                        onTap: () async {
-                          Navigator.pop(sheetContext);
-                          if (!parentContext.mounted) return;
-                          await _applyCompanySwitch(parentContext, c);
-                        },
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+        return _CompanyPickerSheet(
+          companies: _masterCompanies,
+          currentId: currentId,
+          accent: _drawerAccentColor(sheetContext),
+          onPick: (c) async {
+            Navigator.pop(sheetContext);
+            if (!parentContext.mounted) return;
+            await _applyCompanySwitch(parentContext, c);
+          },
         );
       },
     );
@@ -407,36 +386,64 @@ class _AppDrawerState extends State<AppDrawer> {
 
     if (oldId == company.id) return;
 
+    // Liga o skeleton geral imediatamente: o drawer inteiro vira
+    // skeleton com a faixa "Trocando para X…" enquanto roda toda a
+    // cadeia de invalidações e refetches em background.
+    if (mounted) {
+      setState(() {
+        _isSwitchingCompany = true;
+        _switchingCompanyLabel = 'Trocando para ${company.name}…';
+      });
+    }
+
     final res = await CompanyService.instance.setSelectedCompany(company.id);
     if (!parentContext.mounted) return;
 
     if (!res.success) {
+      if (mounted) {
+        setState(() {
+          _isSwitchingCompany = false;
+          _switchingCompanyLabel = null;
+        });
+      }
       messenger?.showSnackBar(
         SnackBar(content: Text(res.message ?? 'Não foi possível trocar de empresa')),
       );
       return;
     }
 
+    // Roda invalidações em paralelo (antes eram sequenciais).
     if (oldId != null && oldId.isNotEmpty) {
       NotificationController.instance.unsubscribeCompany(oldId);
     }
     NotificationController.instance.subscribeCompany(company.id);
     NotificationController.instance.clear();
-    await NotificationController.instance.refreshUnreadCount();
 
+    // 1) Limpa o cache local de permissões (storage) ANTES de
+    //    `refreshPermissions` — assim a próxima leitura via `_getMyPermissions`
+    //    pega da API com o `X-Company-ID` da empresa nova.
     await PermissionService.instance.clearPermissionsCache();
-    await ChatUnreadController.instance.reconnectForCompanyChange();
 
-    if (mounted) {
-      await _loadCompany();
-      setState(() {});
-    }
+    // 2) Roda em paralelo: refetch real das permissões da nova empresa,
+    //    notification badge, chat reconnect e dados da empresa exibidos
+    //    no header. O `refreshPermissions` notifica listeners do
+    //    `ModuleAccessService` automaticamente — itens do drawer com
+    //    gating (ex.: "Aprovações") ressurgem/somem na hora.
+    await Future.wait<void>([
+      ModuleAccessService.instance.refreshPermissions(),
+      NotificationController.instance.refreshUnreadCount(),
+      ChatUnreadController.instance.reconnectForCompanyChange(),
+      _loadCompany(),
+    ]);
 
     if (!parentContext.mounted) return;
     messenger?.showSnackBar(
       SnackBar(content: Text('Empresa ativa: ${company.name}')),
     );
 
+    // Importante: NÃO desligamos `_isSwitchingCompany` aqui — o drawer
+    // permanece em skeleton até a Home assumir, evitando "flash" do
+    // conteúdo antigo entre a troca e a navegação.
     Navigator.of(parentContext).pushNamedAndRemoveUntil(
       AppRoutes.home,
       (route) => false,
@@ -447,8 +454,7 @@ class _AppDrawerState extends State<AppDrawer> {
     if (_companyName != null && _companyName!.isNotEmpty) {
       final label =
           _companyIsMatrix ? '${_companyName!} · Matriz' : _companyName!;
-      final allowPicker =
-          _isMasterUser && _masterCompanies.length > 1 && !_loadingMasterCompanies;
+      final allowPicker = _isMasterUser && _masterCompanies.length > 1;
       final chip = _buildDrawerHeroChip(
         context,
         icon: LucideIcons.building2,
@@ -479,16 +485,7 @@ class _AppDrawerState extends State<AppDrawer> {
         ),
       );
     }
-    if (_isLoadingCompany) {
-      return SizedBox(
-        width: 20,
-        height: 20,
-        child: CircularProgressIndicator(
-          strokeWidth: 2,
-          color: accent,
-        ),
-      );
-    }
+    // Sem company carregada: nada (skeleton geral cobre essa fase).
     return const SizedBox.shrink();
   }
 
@@ -684,7 +681,7 @@ class _AppDrawerState extends State<AppDrawer> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     InkWell(
-                      onTap: _isLoadingProfile ? null : openProfile,
+                      onTap: _isInitializing ? null : openProfile,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -700,17 +697,10 @@ class _AppDrawerState extends State<AppDrawer> {
                           Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (_isLoadingProfile)
-                          const SizedBox(
-                            width: 72,
-                            height: 72,
-                            child: Padding(
-                              padding: EdgeInsets.all(16),
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          )
-                        else
-                          Container(
+                        // Skeleton geral (`_isInitializing`) cobre essa
+                        // fase — quando renderizamos o header real, os
+                        // dados já estão disponíveis.
+                        Container(
                             width: 72,
                             height: 72,
                             decoration: BoxDecoration(
@@ -756,20 +746,7 @@ class _AppDrawerState extends State<AppDrawer> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              if (_isLoadingProfile)
-                                const SizedBox(
-                                  height: 48,
-                                  child: Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: SizedBox(
-                                      width: 160,
-                                      height: 4,
-                                      child: LinearProgressIndicator(),
-                                    ),
-                                  ),
-                                )
-                              else ...[
-                                Text(
+                              Text(
                                   fullName,
                                   style: theme.textTheme.titleLarge?.copyWith(
                                     fontWeight: FontWeight.w900,
@@ -799,7 +776,6 @@ class _AppDrawerState extends State<AppDrawer> {
                                     letterSpacing: 0.2,
                                   ),
                                 ),
-                              ],
                             ],
                           ),
                         ),
@@ -832,7 +808,7 @@ class _AppDrawerState extends State<AppDrawer> {
                     ),
                     const SizedBox(height: 10),
                     InkWell(
-                      onTap: _isLoadingProfile ? null : openProfile,
+                      onTap: _isInitializing ? null : openProfile,
                       child: Row(
                         children: [
                           Text(
@@ -860,11 +836,52 @@ class _AppDrawerState extends State<AppDrawer> {
     );
   }
 
+  /// Skeleton geral do drawer — header (avatar + linhas + chips) e body
+  /// (linhas de menu) animados em pulso suave. Usado tanto na inicialização
+  /// quanto na troca de empresa, mantendo a estrutura visual estável.
+  Widget _buildDrawerSkeleton(
+    BuildContext context,
+    ThemeData theme,
+    Color accent, {
+    String? switchingMessage,
+  }) {
+    return Drawer(
+      backgroundColor: Colors.transparent,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          DecoratedBox(
+            decoration: ThemeHelpers.shellBackgroundDecoration(context),
+          ),
+          ..._drawerAmbientHighlights(context),
+          SafeArea(
+            child: _DrawerSkeletonShell(
+              accent: accent,
+              switchingMessage: switchingMessage,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final activeRoute = _getCurrentRoute();
     final accent = _drawerAccentColor(context);
+
+    // Skeleton geral: cobre tanto o boot inicial quanto a transição
+    // de empresa. Substitui os 3 spinners pequenos antigos por uma
+    // estrutura única, sincronizada e estável visualmente.
+    if (_isInitializing || _isSwitchingCompany) {
+      return _buildDrawerSkeleton(
+        context,
+        theme,
+        accent,
+        switchingMessage: _isSwitchingCompany ? _switchingCompanyLabel : null,
+      );
+    }
 
     final gestaoGroupActive =
         activeRoute == AppRoutes.properties ||
@@ -1614,5 +1631,600 @@ class _AppDrawerState extends State<AppDrawer> {
     } else {
       debugPrint('ℹ️ [LOGOUT] Logout cancelado pelo usuário');
     }
+  }
+}
+
+/// Sheet premium de troca de empresa.
+///
+/// - Header editorial (eyebrow + título grande + subtítulo).
+/// - Busca embutida (aparece só com 6+ empresas) para não poluir
+///   quando o usuário tem 2-3 contas.
+/// - Tiles fluidas: monograma colorido, nome, badge "Matriz", e um
+///   chip "ATIVA" quando é o contexto atual.
+class _CompanyPickerSheet extends StatefulWidget {
+  const _CompanyPickerSheet({
+    required this.companies,
+    required this.currentId,
+    required this.accent,
+    required this.onPick,
+  });
+
+  final List<Company> companies;
+  final String? currentId;
+  final Color accent;
+  final void Function(Company company) onPick;
+
+  @override
+  State<_CompanyPickerSheet> createState() => _CompanyPickerSheetState();
+}
+
+class _CompanyPickerSheetState extends State<_CompanyPickerSheet> {
+  late TextEditingController _searchController;
+  String _query = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  /// Paleta determinística por nome — cada empresa ganha um tom único
+  /// no monograma, evitando o mar de "chip único" e ajudando o
+  /// reconhecimento visual quando há muitas contas.
+  Color _monogramColor(String name) {
+    const palette = [
+      Color(0xFF6366F1), // indigo
+      Color(0xFF22C55E), // green
+      Color(0xFFEA580C), // orange
+      Color(0xFF06B6D4), // cyan
+      Color(0xFFA855F7), // purple
+      Color(0xFFF59E0B), // amber
+      Color(0xFFEC4899), // pink
+      Color(0xFF14B8A6), // teal
+    ];
+    final code = name.codeUnits.fold<int>(0, (a, b) => a + b);
+    return palette[code % palette.length];
+  }
+
+  String _initials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty) return '?';
+    if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
+    return (parts.first[0] + parts.last[0]).toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final viewport = MediaQuery.sizeOf(context).height;
+    final filtered = _query.isEmpty
+        ? widget.companies
+        : widget.companies
+            .where((c) =>
+                c.name.toLowerCase().contains(_query.toLowerCase().trim()))
+            .toList();
+    final showSearch = widget.companies.length >= 6;
+
+    return Padding(
+      padding: EdgeInsets.only(top: MediaQuery.paddingOf(context).top + 24),
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        child: Container(
+          constraints: BoxConstraints(maxHeight: viewport * 0.82),
+          decoration: BoxDecoration(
+            color: ThemeHelpers.cardBackgroundColor(context),
+            border: Border(
+              top: BorderSide(
+                color: ThemeHelpers.borderLightColor(context),
+                width: 1,
+              ),
+            ),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Drag handle
+                Padding(
+                  padding: const EdgeInsets.only(top: 10, bottom: 6),
+                  child: Container(
+                    width: 44,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: ThemeHelpers.borderLightColor(context),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+
+                // Header editorial
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(22, 14, 22, 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'CONTEXTO',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: widget.accent,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 2.4,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Trocar de empresa',
+                              style: theme.textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.w900,
+                                color: ThemeHelpers.textColor(context),
+                                height: 1.05,
+                                letterSpacing: -0.4,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              '${widget.companies.length} empresas disponíveis · painel e dados seguem o contexto.',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color:
+                                    ThemeHelpers.textSecondaryColor(context),
+                                height: 1.35,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Botão fechar discreto
+                      InkWell(
+                        onTap: () => Navigator.pop(context),
+                        borderRadius: BorderRadius.circular(999),
+                        child: Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: ThemeHelpers.borderLightColor(context)
+                                .withValues(alpha: isDark ? 0.16 : 0.08),
+                          ),
+                          child: Icon(
+                            Icons.close_rounded,
+                            size: 18,
+                            color: ThemeHelpers.textSecondaryColor(context),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Search (só com muitas empresas)
+                if (showSearch)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(22, 12, 22, 4),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: ThemeHelpers.borderLightColor(context)
+                            .withValues(alpha: isDark ? 0.12 : 0.05),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: ThemeHelpers.borderLightColor(context),
+                        ),
+                      ),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.search_rounded,
+                            size: 18,
+                            color: ThemeHelpers.textSecondaryColor(context),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: TextField(
+                              controller: _searchController,
+                              onChanged: (v) => setState(() => _query = v),
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: ThemeHelpers.textColor(context),
+                              ),
+                              decoration: InputDecoration(
+                                hintText: 'Buscar empresa…',
+                                hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                                  color:
+                                      ThemeHelpers.textSecondaryColor(context),
+                                ),
+                                border: InputBorder.none,
+                                isDense: true,
+                                contentPadding:
+                                    const EdgeInsets.symmetric(vertical: 12),
+                              ),
+                            ),
+                          ),
+                          if (_query.isNotEmpty)
+                            InkWell(
+                              onTap: () {
+                                _searchController.clear();
+                                setState(() => _query = '');
+                              },
+                              borderRadius: BorderRadius.circular(999),
+                              child: Padding(
+                                padding: const EdgeInsets.all(4),
+                                child: Icon(
+                                  Icons.close_rounded,
+                                  size: 16,
+                                  color:
+                                      ThemeHelpers.textSecondaryColor(context),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                // Lista
+                Flexible(
+                  child: filtered.isEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.fromLTRB(22, 32, 22, 40),
+                          child: Center(
+                            child: Text(
+                              'Nenhuma empresa encontrada',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color:
+                                    ThemeHelpers.textSecondaryColor(context),
+                              ),
+                            ),
+                          ),
+                        )
+                      : ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(14, 12, 14, 22),
+                          itemCount: filtered.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 8),
+                          itemBuilder: (_, i) {
+                            final c = filtered[i];
+                            final isActive = c.id == widget.currentId;
+                            return _CompanyPickerTile(
+                              company: c,
+                              isActive: isActive,
+                              accent: widget.accent,
+                              monogramColor: _monogramColor(c.name),
+                              initials: _initials(c.name),
+                              onTap: () => widget.onPick(c),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CompanyPickerTile extends StatelessWidget {
+  const _CompanyPickerTile({
+    required this.company,
+    required this.isActive,
+    required this.accent,
+    required this.monogramColor,
+    required this.initials,
+    required this.onTap,
+  });
+
+  final Company company;
+  final bool isActive;
+  final Color accent;
+  final Color monogramColor;
+  final String initials;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            // Fundo sutil quando ativa, transparente nas demais — evita o
+            // efeito "lista de cards iguais" quando há muitas empresas.
+            color: isActive
+                ? accent.withValues(alpha: isDark ? 0.10 : 0.06)
+                : Colors.transparent,
+            border: Border.all(
+              color: isActive
+                  ? accent.withValues(alpha: isDark ? 0.45 : 0.32)
+                  : ThemeHelpers.borderLightColor(context)
+                      .withValues(alpha: isDark ? 0.6 : 0.5),
+              width: isActive ? 1.4 : 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              // Monograma com cor própria por empresa
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      monogramColor.withValues(alpha: 0.95),
+                      monogramColor.withValues(alpha: 0.75),
+                    ],
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: monogramColor.withValues(alpha: 0.28),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  initials,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      company.name,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: ThemeHelpers.textColor(context),
+                        fontWeight: FontWeight.w800,
+                        height: 1.15,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (company.isMatrix) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Matriz',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: ThemeHelpers.textSecondaryColor(context),
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.4,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              if (isActive)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(999),
+                    color: accent,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.check_rounded,
+                        size: 12,
+                        color: Colors.white,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'ATIVA',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.8,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  size: 14,
+                  color: ThemeHelpers.textSecondaryColor(context),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Esqueleto editorial do drawer — pulsa suavemente. Reproduz a estrutura
+/// real (header com avatar + nome + chips, depois menu) para que a
+/// transição para o conteúdo real seja imperceptível visualmente.
+///
+/// Mostra também uma faixa "Trocando para X..." durante a troca de empresa.
+/// Skeleton **minimalista** do drawer — usa o `SkeletonBox` shared (mesmo
+/// shimmer das outras telas do app) para um carregamento discreto e
+/// coerente, no light e no dark.
+///
+/// Sem pulses sólidos, sem chips ruidosas: silhueta enxuta do hero
+/// (eyebrow + avatar + linhas de identidade) + uma única linha de chip
+/// (badge da empresa) + lista compacta de itens de menu.
+class _DrawerSkeletonShell extends StatelessWidget {
+  const _DrawerSkeletonShell({
+    required this.accent,
+    this.switchingMessage,
+  });
+
+  final Color accent;
+  final String? switchingMessage;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final switchMsg = switchingMessage;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // ─── Hero compacto ──────────────────────────────────────────────
+        Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            18,
+            20,
+            switchMsg != null && switchMsg.isNotEmpty ? 14 : 18,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonBox(width: 90, height: 9, borderRadius: 999),
+              const SizedBox(height: 14),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  SkeletonBox(width: 64, height: 64, borderRadius: 32),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SkeletonBox(
+                          width: double.infinity,
+                          height: 16,
+                          borderRadius: 6,
+                        ),
+                        const SizedBox(height: 7),
+                        SkeletonBox(width: 150, height: 11, borderRadius: 4),
+                        const SizedBox(height: 6),
+                        SkeletonBox(width: 90, height: 9, borderRadius: 4),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  SkeletonBox(width: 130, height: 24, borderRadius: 999),
+                  const SizedBox(width: 8),
+                  SkeletonBox(width: 70, height: 24, borderRadius: 999),
+                ],
+              ),
+            ],
+          ),
+        ),
+
+        // ─── Banner fininho de "trocando empresa" ───────────────────────
+        if (switchMsg != null && switchMsg.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(13),
+                color: accent.withValues(alpha: isDark ? 0.10 : 0.06),
+                border: Border.all(
+                  color: accent.withValues(alpha: isDark ? 0.28 : 0.20),
+                ),
+              ),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.8,
+                      color: accent,
+                    ),
+                  ),
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Text(
+                      switchMsg,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: ThemeHelpers.textColor(context),
+                        fontWeight: FontWeight.w700,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+        // ─── Divider quase invisível ────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Container(
+            height: 1,
+            color: ThemeHelpers.borderLightColor(context).withValues(
+              alpha: 0.5,
+            ),
+          ),
+        ),
+
+        // ─── Itens do menu — silhueta enxuta ────────────────────────────
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+            itemCount: 7,
+            itemBuilder: (_, i) {
+              // Larguras com ritmo orgânico (sem repetição estridente).
+              const widths = [148.0, 124.0, 168.0, 110.0, 156.0, 132.0, 142.0];
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 9),
+                child: Row(
+                  children: [
+                    SkeletonBox(width: 22, height: 22, borderRadius: 7),
+                    const SizedBox(width: 14),
+                    SkeletonBox(
+                      width: widths[i % widths.length],
+                      height: 11,
+                      borderRadius: 4,
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
   }
 }

@@ -27,6 +27,8 @@ import '../../features/clients/pages/client_details_page.dart';
 import '../../features/clients/pages/client_form_page.dart';
 import '../../features/matches/pages/matches_page.dart';
 import '../../features/kanban/pages/kanban_page.dart';
+import '../../features/kanban/pages/kanban_subtasks_list_page.dart';
+import '../../features/kanban/pages/kanban_task_details_page.dart';
 import '../../features/documents/pages/documents_page.dart';
 import '../../features/documents/pages/create_document_page.dart';
 import '../../features/documents/pages/document_details_page.dart';
@@ -84,6 +86,14 @@ class AppRoutes {
 
   // Kanban (Tarefas)
   static const String kanban = '/kanban';
+  /// Lista global de tarefas do CRM (subtarefas dos cards). Paridade com
+  /// `/kanban/tarefas` do `imobx-front` — usuário pode ver pendentes, hoje,
+  /// atrasadas, concluídas e todas.
+  static const String kanbanSubtasks = '/kanban/tarefas';
+  /// Deep-link para a negociação (card do funil) — abre o `TaskDetailsModal`
+  /// automaticamente após carregar a `KanbanTask` por id. Paridade com
+  /// `/kanban/task/:taskId` do `imobx-front`.
+  static String kanbanTaskDetails(String taskId) => '/kanban/task/$taskId';
 
   // Documentos
   static const String documents = '/documents';
@@ -253,6 +263,19 @@ class AppRoutes {
       return _buildRoute(const MatchesPage(), settings);
     } else if (routeName == AppRoutes.kanban) {
       return _buildRoute(const KanbanPage(), settings);
+    } else if (routeName == AppRoutes.kanbanSubtasks) {
+      return _buildRoute(const KanbanSubtasksListPage(), settings);
+    } else if (routeName != null &&
+        routeName.startsWith('/kanban/task/')) {
+      // /kanban/task/:taskId — IMPORTANTE: deve vir antes da regex genérica
+      // de /kanban/ se houver outras. Aqui só prefixo dedicado, sem ambiguidade.
+      final segments = routeName.split('/');
+      if (segments.length == 4) {
+        final taskId = segments[3];
+        if (taskId.isNotEmpty) {
+          return _buildRoute(KanbanTaskDetailsPage(taskId: taskId), settings);
+        }
+      }
     } else if (routeName == AppRoutes.inspections) {
       return _buildRoute(const InspectionsPage(), settings);
     } else if (routeName == AppRoutes.inspectionCreate) {

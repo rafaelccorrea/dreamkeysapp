@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../../../../../shared/services/auth_service.dart';
 import '../../../../../shared/services/login_flow_service.dart';
 import '../../../../../shared/services/biometric_service.dart';
+import '../../../../../core/notifications/app_toast.dart';
 import '../../../../../core/push/app_push_service.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../shared/widgets/image_curve_clipper.dart';
@@ -62,12 +63,7 @@ class _TwoFactorPageState extends State<TwoFactorPage> {
 
     final code = _codeControllers.map((c) => c.text).join();
     if (code.length != 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Por favor, preencha todos os dígitos'),
-          backgroundColor: AppColors.status.error,
-        ),
-      );
+      AppToast.warning(context, 'Preencha todos os dígitos');
       return;
     }
 
@@ -85,15 +81,10 @@ class _TwoFactorPageState extends State<TwoFactorPage> {
         await _handleAuthSuccess(response.data!, code);
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                response.message ?? 'Código inválido. Tente novamente.',
-              ),
-              backgroundColor: AppColors.status.error,
-            ),
+          AppToast.error(
+            context,
+            response.message ?? 'Código inválido. Tente novamente.',
           );
-          // Limpar campos
           for (var controller in _codeControllers) {
             controller.clear();
           }
@@ -102,12 +93,7 @@ class _TwoFactorPageState extends State<TwoFactorPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao verificar código: ${e.toString()}'),
-            backgroundColor: AppColors.status.error,
-          ),
-        );
+        AppToast.error(context, 'Erro ao verificar código: ${e.toString()}');
       }
     } finally {
       if (mounted) {
@@ -130,6 +116,18 @@ class _TwoFactorPageState extends State<TwoFactorPage> {
         if (mounted) {
           setState(() => _isLoading = false);
         }
+        if (!mounted) return;
+
+        // Permissões nativas (notificação + token FCM) PRIMEIRO — para
+        // não sobrepor o popup nativo de biometria que dispararemos a
+        // seguir caso o usuário aceite a oferta de enrollment.
+        try {
+          await AppPushService.instance.syncWithBackendIfAuthenticated();
+        } catch (e) {
+          debugPrint('⚠️ [2FA] Falha ao sincronizar permissões push: $e');
+        }
+        if (!mounted) return;
+
         final bio = BiometricService.instance;
         final hasBio = await bio.hasBiometrics();
         final biometricLabel = await bio.getBiometricTypeDescription();
@@ -143,8 +141,6 @@ class _TwoFactorPageState extends State<TwoFactorPage> {
         );
 
         if (mounted) {
-          await AppPushService.instance.syncWithBackendIfAuthenticated();
-          if (!mounted) return;
           Navigator.of(context).pushNamedAndRemoveUntil(
             result.route!,
             (route) => false,
@@ -152,22 +148,12 @@ class _TwoFactorPageState extends State<TwoFactorPage> {
         }
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(result.message),
-              backgroundColor: AppColors.status.error,
-            ),
-          );
+          AppToast.error(context, result.message);
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao processar login: ${e.toString()}'),
-            backgroundColor: AppColors.status.error,
-          ),
-        );
+        AppToast.error(context, 'Erro ao processar login: ${e.toString()}');
       }
     }
   }

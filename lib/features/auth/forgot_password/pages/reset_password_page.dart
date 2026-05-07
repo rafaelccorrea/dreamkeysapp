@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../core/notifications/app_toast.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../shared/services/auth_service.dart';
@@ -48,12 +49,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
 
     final token = widget.token;
     if (token == null || token.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Token inválido. Solicite um novo link.'),
-          backgroundColor: AppColors.status.error,
-        ),
-      );
+      AppToast.error(context, 'Token inválido. Solicite um novo link.');
       return;
     }
 
@@ -83,31 +79,8 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
       if (response.success) {
         debugPrint('✅ [RESET_PASSWORD] Senha redefinida com sucesso');
 
-        // Mostrar mensagem de sucesso
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Row(
-                children: [
-                  Icon(Icons.check_circle, color: Colors.white, size: 20),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Senha alterada com sucesso!',
-                      style: TextStyle(color: Colors.white, fontSize: 14),
-                    ),
-                  ),
-                ],
-              ),
-              backgroundColor: AppColors.status.success,
-              behavior: SnackBarBehavior.floating,
-              margin: EdgeInsets.all(16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              duration: Duration(seconds: 3),
-            ),
-          );
+          AppToast.success(context, 'Senha alterada com sucesso!');
         }
 
         // Navegar para login após 2 segundos
@@ -122,33 +95,10 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
         debugPrint('📋 [RESET_PASSWORD] Mensagem: ${response.message}');
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Row(
-                children: [
-                  const Icon(
-                    Icons.error_outline,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      response.message ??
-                          'Erro ao redefinir senha. Verifique o token ou tente novamente.',
-                      style: const TextStyle(color: Colors.white, fontSize: 14),
-                    ),
-                  ),
-                ],
-              ),
-              backgroundColor: AppColors.status.error,
-              behavior: SnackBarBehavior.floating,
-              margin: const EdgeInsets.all(16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              duration: const Duration(seconds: 4),
-            ),
+          AppToast.error(
+            context,
+            response.message ??
+                'Erro ao redefinir senha. Verifique o token ou tente novamente.',
           );
         }
       }
@@ -158,28 +108,9 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
       debugPrint('📚 [RESET_PASSWORD] StackTrace: $stackTrace');
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.error_outline, color: Colors.white, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Erro ao conectar com o servidor. Tente novamente.',
-                    style: const TextStyle(color: Colors.white, fontSize: 14),
-                  ),
-                ),
-              ],
-            ),
-            backgroundColor: AppColors.status.error,
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.all(16),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            duration: const Duration(seconds: 4),
-          ),
+        AppToast.error(
+          context,
+          'Erro ao conectar com o servidor. Tente novamente.',
         );
       }
     } finally {

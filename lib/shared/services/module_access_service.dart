@@ -26,8 +26,16 @@ class ModuleInfo {
 }
 
 /// Serviço unificado para gerenciar permissões e módulos
-/// Similar ao useModuleAccess do React
-class ModuleAccessService {
+/// Similar ao useModuleAccess do React.
+///
+/// Implementa `ChangeNotifier` — quem renderiza UI baseada em permissões
+/// (ex.: o `AppDrawer` para esconder/mostrar item "Aprovações") deve
+/// envolver o trecho num `ListenableBuilder(listenable: instance, …)`
+/// pra reagir automaticamente a:
+///   - login (initialize),
+///   - troca de empresa (refreshPermissions),
+///   - logout (clear).
+class ModuleAccessService extends ChangeNotifier {
   ModuleAccessService._();
 
   static final ModuleAccessService instance = ModuleAccessService._();
@@ -126,10 +134,16 @@ class ModuleAccessService {
       debugPrint('📚 [MODULE_ACCESS] StackTrace: $stackTrace');
     } finally {
       _isLoading = false;
+      // Notifica QUALQUER listener (drawer, etc) — mesmo em caso de
+      // erro/falha o estado mudou (ex.: `_isLoading` voltou pra false).
+      notifyListeners();
     }
   }
 
-  /// Atualiza permissões manualmente
+  /// Atualiza permissões manualmente. **Sempre chame após troca de
+  /// empresa**, depois de invalidar `PermissionService.clearPermissionsCache()`.
+  /// Os listeners (drawer, etc) são notificados automaticamente para
+  /// re-renderizar itens dependentes de permissão (ex.: "Aprovações").
   Future<void> refreshPermissions() async {
     try {
       _isLoading = true;
@@ -146,6 +160,7 @@ class ModuleAccessService {
       debugPrint('❌ [MODULE_ACCESS] Erro ao atualizar permissões: $e');
     } finally {
       _isLoading = false;
+      notifyListeners();
     }
   }
 
@@ -158,6 +173,7 @@ class ModuleAccessService {
         if (companyResponse.success && companyResponse.data != null) {
           _selectedCompany = companyResponse.data!;
           debugPrint('✅ [MODULE_ACCESS] Empresa atualizada');
+          notifyListeners();
         }
       }
     } catch (e) {
@@ -217,6 +233,7 @@ class ModuleAccessService {
     _userId = null;
     _isLoading = false;
     debugPrint('🧹 [MODULE_ACCESS] Dados limpos');
+    notifyListeners();
   }
 
   /// Verifica se role tem bypass
