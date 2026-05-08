@@ -1,6 +1,8 @@
 /// Modelos de dados para Chat
 library;
 
+import '../../../shared/utils/avatar_url_resolver.dart';
+
 /// Tipo de Sala de Chat
 enum ChatRoomType {
   direct('direct', 'Direto'),
@@ -316,14 +318,24 @@ class ChatMessage {
           json['sender_name']?.toString() ??
           '',
       senderAvatar:
-          json['senderAvatar']?.toString() ?? json['sender_avatar']?.toString(),
+          AvatarUrlResolver.resolve(
+            json['senderAvatar']?.toString() ??
+                json['sender_avatar']?.toString(),
+          ),
       content: json['content']?.toString() ?? '',
-      imageUrl: json['imageUrl']?.toString() ?? json['image_url']?.toString(),
-      fileUrl: json['fileUrl']?.toString() ?? json['file_url']?.toString(),
+      imageUrl: AvatarUrlResolver.resolve(
+        json['imageUrl']?.toString() ?? json['image_url']?.toString(),
+      ),
+      fileUrl: AvatarUrlResolver.resolve(
+        json['fileUrl']?.toString() ?? json['file_url']?.toString(),
+      ),
       fileName: json['fileName']?.toString() ?? json['file_name']?.toString(),
       fileType: json['fileType']?.toString() ?? json['file_type']?.toString(),
       documentUrl:
-          json['documentUrl']?.toString() ?? json['document_url']?.toString(),
+          AvatarUrlResolver.resolve(
+            json['documentUrl']?.toString() ??
+                json['document_url']?.toString(),
+          ),
       documentName:
           json['documentName']?.toString() ?? json['document_name']?.toString(),
       documentMimeType:
@@ -430,7 +442,7 @@ class CompanyUser {
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
       email: json['email']?.toString() ?? '',
-      avatar: json['avatar']?.toString(),
+      avatar: AvatarUrlResolver.resolve(json['avatar']?.toString()),
       phone: json['phone']?.toString(),
       role: json['role']?.toString() ?? '',
       isOnline:

@@ -41,6 +41,7 @@ import '../../features/inspections/pages/create_inspection_page.dart';
 import '../../features/inspections/pages/edit_inspection_page.dart';
 import '../../features/keys/pages/keys_page.dart';
 import '../../features/keys/pages/create_key_page.dart';
+import '../../shared/services/property_service.dart';
 
 /// Rotas da aplicação com transições customizadas
 class AppRoutes {
@@ -125,7 +126,7 @@ class AppRoutes {
   static String propertyDetails(String id) => '/properties/$id';
 
   /// Gera rota de edição da propriedade
-  static String propertyEdit(String id) => '/properties/edit/$id';
+  static String propertyEdit(String id) => '/properties/$id/edit';
 
   /// Autenticação sempre em tema claro (independente do modo escuro do app).
   static Widget _authLightTheme(Widget child) =>
@@ -232,7 +233,14 @@ class AppRoutes {
         final id = segments[2];
         if (segments.length == 3) {
           // Detalhes: /properties/:id
-          return _buildRoute(PropertyDetailsPage(propertyId: id), settings);
+          final args = settings.arguments;
+          final initialProperty = args is Map<String, dynamic>
+              ? args['property'] as Property?
+              : null;
+          return _buildRoute(
+            PropertyDetailsPage(propertyId: id, initialProperty: initialProperty),
+            settings,
+          );
         } else if (segments.length == 4 && segments[3] == 'edit') {
           // Edição: /properties/:id/edit
           return _buildRoute(CreatePropertyPage(propertyId: id), settings);

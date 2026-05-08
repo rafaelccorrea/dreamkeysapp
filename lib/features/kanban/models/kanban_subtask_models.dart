@@ -535,15 +535,78 @@ class SubTasksListStats {
       return 0;
     }
 
+    int readInt(Map<String, dynamic> map, List<String> keys) {
+      for (final k in keys) {
+        if (map.containsKey(k)) {
+          return asInt(map[k]);
+        }
+      }
+      return 0;
+    }
+
+    int? readIntOrNull(Map<String, dynamic> map, List<String> keys) {
+      for (final k in keys) {
+        if (map.containsKey(k)) {
+          return asInt(map[k]);
+        }
+      }
+      return null;
+    }
+
+    Map<String, dynamic> asMap(dynamic raw) {
+      if (raw is Map<String, dynamic>) return raw;
+      if (raw is Map) return Map<String, dynamic>.from(raw);
+      return const <String, dynamic>{};
+    }
+
     final byKind = json['byKind'];
     final byKindMap =
         byKind is Map ? Map<String, dynamic>.from(byKind) : <String, dynamic>{};
+    final countsMap = asMap(json['counts']);
+    final statusMap = asMap(json['status']);
+    final byStatusMap = asMap(json['byStatus']);
+
+    final total = readIntOrNull(json, ['total', 'totalCount', 'total_count']) ??
+        readInt(
+          countsMap,
+          ['total', 'all', 'totalCount', 'total_count'],
+        );
+    final completed =
+        readIntOrNull(json, ['completed', 'completedCount', 'completed_count']) ??
+            readIntOrNull(
+              statusMap,
+              ['completed', 'done', 'completedCount', 'completed_count'],
+            ) ??
+            readInt(
+              byStatusMap,
+              ['completed', 'done', 'completedCount', 'completed_count'],
+            );
+    final pending =
+        readIntOrNull(json, ['pending', 'pendingCount', 'pending_count']) ??
+            readIntOrNull(
+              statusMap,
+              ['pending', 'open', 'todo', 'pendingCount', 'pending_count'],
+            ) ??
+            readInt(
+              byStatusMap,
+              ['pending', 'open', 'todo', 'pendingCount', 'pending_count'],
+            );
+    final overdue =
+        readIntOrNull(json, ['overdue', 'overdueCount', 'overdue_count']) ??
+            readIntOrNull(
+              statusMap,
+              ['overdue', 'late', 'overdueCount', 'overdue_count'],
+            ) ??
+            readInt(
+              byStatusMap,
+              ['overdue', 'late', 'overdueCount', 'overdue_count'],
+            );
 
     return SubTasksListStats(
-      total: asInt(json['total']),
-      completed: asInt(json['completed']),
-      pending: asInt(json['pending']),
-      overdue: asInt(json['overdue']),
+      total: total,
+      completed: completed,
+      pending: pending,
+      overdue: overdue,
       byKindLigar: asInt(byKindMap['ligar']),
       byKindTarefa: asInt(byKindMap['tarefa']),
       byKindOther: asInt(byKindMap['other']),
@@ -585,7 +648,60 @@ class SubTasksListResponse {
       return fallback;
     }
 
-    final raw = json['data'];
+    Map<String, dynamic> asMap(dynamic raw) {
+      if (raw is Map<String, dynamic>) return raw;
+      if (raw is Map) return Map<String, dynamic>.from(raw);
+      return const <String, dynamic>{};
+    }
+
+    SubTasksListStats inferStatsFromData(List<KanbanSubTask> items) {
+      final total = items.length;
+      final completed = items.where((e) => e.isCompleted).length;
+      final pending = items.where((e) => !e.isCompleted).length;
+      final overdue = items.where((e) => e.isOverdue).length;
+      final byKindLigar = items.where((e) => e.taskType == SubTaskType.ligar).length;
+      final byKindTarefa = items.where((e) => e.taskType == SubTaskType.tarefa).length;
+      final byKindOther = total - byKindLigar - byKindTarefa;
+      return SubTasksListStats(
+        total: total,
+        completed: completed,
+        pending: pending,
+        overdue: overdue,
+        byKindLigar: byKindLigar,
+        byKindTarefa: byKindTarefa,
+        byKindOther: byKindOther < 0 ? 0 : byKindOther,
+      );
+    }
+
+    final maybeEnvelopeData = asMap(json['data']);
+    final hasLikelyEnvelope =
+        json.containsKey('success') ||
+        json.containsKey('statusCode') ||
+        (json['data'] is Map &&
+            (maybeEnvelopeData.containsKey('data') ||
+                maybeEnvelopeData.containsKey('items') ||
+                maybeEnvelopeData.containsKey('results') ||
+                maybeEnvelopeData.containsKey('stats') ||
+                maybeEnvelopeData.containsKey('meta')));
+    final payload = hasLikelyEnvelope && maybeEnvelopeData.isNotEmpty
+        ? maybeEnvelopeData
+        : json;
+
+    final nestedDataMap = asMap(payload['data']);
+    final meta = asMap(payload['meta']).isNotEmpty
+        ? asMap(payload['meta'])
+        : asMap(nestedDataMap['meta']);
+    final pagination = asMap(payload['pagination']).isNotEmpty
+        ? asMap(payload['pagination'])
+        : asMap(nestedDataMap['pagination']);
+
+    final raw =
+        (payload['data'] is List ? payload['data'] : null) ??
+        payload['items'] ??
+        payload['results'] ??
+        nestedDataMap['data'] ??
+        nestedDataMap['items'] ??
+        nestedDataMap['results'];
     final list = raw is List
         ? raw
             .whereType<Map>()
@@ -593,18 +709,59 @@ class SubTasksListResponse {
             .toList()
         : <KanbanSubTask>[];
 
+    final rawStats =
+        payload['stats'] ??
+        nestedDataMap['stats'] ??
+        meta['stats'] ??
+        payload['summary'] ??
+        nestedDataMap['summary'];
+    final parsedStats = rawStats is Map
+        ? SubTasksListStats.fromJson(Map<String, dynamic>.from(rawStats))
+        : SubTasksListStats.zero;
+    final statsLooksEmpty =
+        parsedStats.total == 0 &&
+        parsedStats.completed == 0 &&
+        parsedStats.pending == 0 &&
+        parsedStats.overdue == 0;
+    final effectiveStats =
+        (statsLooksEmpty && list.isNotEmpty) ? inferStatsFromData(list) : parsedStats;
+
     return SubTasksListResponse(
       data: list,
-      total: asInt(json['total'], list.length),
-      page: asInt(json['page'], 1),
-      limit: asInt(json['limit'], list.length),
+      total: asInt(
+        payload['total'] ??
+            nestedDataMap['total'] ??
+            meta['total'] ??
+            pagination['total'],
+        list.length,
+      ),
+      page: asInt(
+        payload['page'] ??
+            nestedDataMap['page'] ??
+            meta['page'] ??
+            pagination['page'],
+        1,
+      ),
+      limit: asInt(
+        payload['limit'] ??
+            nestedDataMap['limit'] ??
+            meta['limit'] ??
+            pagination['limit'],
+        list.length,
+      ),
       totalPages:
-          asInt(json['totalPages'] ?? json['total_pages'], 1),
-      stats: json['stats'] is Map
-          ? SubTasksListStats.fromJson(
-              Map<String, dynamic>.from(json['stats'] as Map),
-            )
-          : SubTasksListStats.zero,
+          asInt(
+            payload['totalPages'] ??
+                payload['total_pages'] ??
+                nestedDataMap['totalPages'] ??
+                nestedDataMap['total_pages'] ??
+                meta['totalPages'] ??
+                meta['total_pages'] ??
+                pagination['totalPages'] ??
+                pagination['total_pages'],
+            1,
+          ),
+      stats: effectiveStats,
     );
   }
 }

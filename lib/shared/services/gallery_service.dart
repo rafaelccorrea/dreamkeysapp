@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'api_service.dart';
 import '../../core/constants/api_constants.dart';
+import '../utils/avatar_url_resolver.dart';
 /// Modelo de imagem da galeria
 class GalleryImage {
   final String id;
@@ -34,8 +35,15 @@ class GalleryImage {
     return GalleryImage(
       id: json['id']?.toString() ?? '',
       propertyId: json['propertyId']?.toString() ?? json['property_id']?.toString() ?? '',
-      url: json['url']?.toString() ?? '',
-      thumbnailUrl: json['thumbnailUrl']?.toString() ?? json['thumbnail_url']?.toString(),
+      url: AvatarUrlResolver.resolve(
+            json['url']?.toString() ??
+                json['imageUrl']?.toString() ??
+                json['image_url']?.toString(),
+          ) ??
+          '',
+      thumbnailUrl: AvatarUrlResolver.resolve(
+        json['thumbnailUrl']?.toString() ?? json['thumbnail_url']?.toString(),
+      ),
       alt: json['alt']?.toString(),
       category: json['category']?.toString() ?? 'general',
       isMain: json['isMain'] as bool? ?? json['is_main'] as bool? ?? false,

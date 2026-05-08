@@ -368,6 +368,7 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
 
   @override
   Widget build(BuildContext context) {
+    final viewportHeight = MediaQuery.sizeOf(context).height;
     return AppScaffold(
       title: 'Tarefas',
       showBottomNavigation: false,
@@ -376,52 +377,49 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
           : RefreshIndicator(
               color: _accentColor(context),
               onRefresh: _refresh,
-              child: LayoutBuilder(
-                builder: (context, constraints) => SingleChildScrollView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  child: ConstrainedBox(
-                    constraints:
-                        BoxConstraints(minHeight: constraints.maxHeight),
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        ..._ambientHighlights(context),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(
-                                _kPagePadH,
-                                _kPagePadTop,
-                                _kPagePadH,
-                                0,
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  _buildGreeting(context),
-                                  const SizedBox(height: 14),
-                                  _buildKpiInline(context),
-                                  const SizedBox(height: _kSectionGap),
-                                  _buildSearchField(context),
-                                  const SizedBox(height: _kSectionGap + 1),
-                                ],
-                              ),
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: viewportHeight),
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      ..._ambientHighlights(context),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(
+                              _kPagePadH,
+                              _kPagePadTop,
+                              _kPagePadH,
+                              0,
                             ),
-                            _buildBucketsRail(context),
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(
-                                _kPagePadH,
-                                _kSectionGap + 1,
-                                _kPagePadH,
-                                _kPagePadBottom,
-                              ),
-                              child: _buildBody(context),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _buildGreeting(context),
+                                const SizedBox(height: 14),
+                                _buildKpiInline(context),
+                                const SizedBox(height: _kSectionGap),
+                                _buildSearchField(context),
+                                const SizedBox(height: _kSectionGap + 1),
+                              ],
                             ),
-                          ],
-                        ),
-                      ],
-                    ),
+                          ),
+                          _buildBucketsRail(context),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(
+                              _kPagePadH,
+                              _kSectionGap + 1,
+                              _kPagePadH,
+                              _kPagePadBottom,
+                            ),
+                            child: _buildBody(context),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -435,11 +433,19 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
     final theme = Theme.of(context);
     final accent = _accentColor(context);
     final isDark = theme.brightness == Brightness.dark;
-    final pending = _response.stats.pending;
-    final overdue = _response.stats.overdue;
+    final stats = _response.stats;
+    final pending = stats.pending;
+    final overdue = stats.overdue;
+    final completed = stats.completed;
+    final total = stats.total;
+    final completionPct = total > 0 ? ((completed * 100) / total).round() : 0;
     final danger = isDark
         ? AppColors.status.errorDarkMode
         : AppColors.status.error;
+    final subtitleColor = ThemeHelpers.textSecondaryColor(context);
+    final updatedAtLabel = _formatHeroTimestamp(DateTime.now());
+    final activeBucketLabel = _bucketLabel(_activeBucket);
+    final hasSearch = _appliedSearch.trim().isNotEmpty;
 
     final headline = pending == 0
         ? 'Tudo em dia por aqui'
@@ -449,88 +455,136 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              gradient: LinearGradient(
-                colors: [accent, const Color(0xFF7C3AED)],
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  gradient: LinearGradient(
+                    colors: [accent, const Color(0xFF7C3AED)],
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: isDark
+                          ? accent.withValues(alpha: 0.35)
+                          : accent.withValues(alpha: 0.22),
+                      blurRadius: isDark ? 14 : 11,
+                      offset: Offset(0, isDark ? 8 : 4),
+                      spreadRadius: isDark ? 0 : -1,
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  LucideIcons.checkSquare,
+                  color: Colors.white,
+                  size: 22,
+                ),
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: isDark
-                      ? accent.withValues(alpha: 0.35)
-                      : accent.withValues(alpha: 0.22),
-                  blurRadius: isDark ? 14 : 11,
-                  offset: Offset(0, isDark ? 8 : 4),
-                  spreadRadius: isDark ? 0 : -1,
-                ),
-              ],
-            ),
-            child: const Icon(
-              LucideIcons.checkSquare,
-              color: Colors.white,
-              size: 22,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'TAREFAS DO CRM',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: accent,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 2.2,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  headline,
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    color: ThemeHelpers.textColor(context),
-                    height: 1.05,
-                    letterSpacing: -0.4,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                if (overdue > 0)
-                  Row(
-                    children: [
-                      _PulseDot(color: danger),
-                      const SizedBox(width: 7),
-                      Expanded(
-                        child: Text(
-                          '$overdue ${overdue == 1 ? 'tarefa atrasada' : 'tarefas atrasadas'}',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: danger,
-                            fontWeight: FontWeight.w800,
-                          ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'TAREFAS DO CRM',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: accent,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 2.2,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      headline,
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: ThemeHelpers.textColor(context),
+                        height: 1.05,
+                        letterSpacing: -0.4,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Atualizado às $updatedAtLabel • Visão: $activeBucketLabel • Progresso: $completionPct%',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: subtitleColor,
+                        height: 1.3,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (hasSearch) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Filtro ativo: "${_appliedSearch.trim()}"',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: accent,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ],
-                  )
-                else
-                  Text(
-                    'Lembretes do que fazer com cada lead.',
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (overdue > 0) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                _PulseDot(color: danger),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    '$overdue ${overdue == 1 ? 'tarefa atrasada' : 'tarefas atrasadas'}',
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
-                      height: 1.3,
+                      color: danger,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
+                ),
               ],
             ),
-          ),
+          ] else ...[
+            const SizedBox(height: 10),
+            Text(
+              'Lembretes do que fazer com cada lead.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: subtitleColor,
+                height: 1.3,
+              ),
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  String _bucketLabel(_Bucket bucket) {
+    switch (bucket) {
+      case _Bucket.all:
+        return 'todas';
+      case _Bucket.pending:
+        return 'pendentes';
+      case _Bucket.today:
+        return 'hoje';
+      case _Bucket.overdue:
+        return 'atrasadas';
+      case _Bucket.completed:
+        return 'concluídas';
+    }
+  }
+
+  String _formatHeroTimestamp(DateTime dt) {
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${two(dt.hour)}:${two(dt.minute)}';
   }
 
   // ─── KPI inline (sem card) ───────────────────────────────────────────
@@ -540,6 +594,7 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
   /// Sem card glass, sem caixa: respiro total e leitura imediata.
   Widget _buildKpiInline(BuildContext context) {
     final theme = Theme.of(context);
+    final screenWidth = MediaQuery.sizeOf(context).width;
     final isDark = theme.brightness == Brightness.dark;
     final accent = _accentColor(context);
     final ok = isDark
@@ -562,13 +617,13 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
 
     return Padding(
       padding: const EdgeInsets.only(top: 2),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
+      child: Builder(
+        builder: (context) {
           // Em telas largas distribuímos no espaço total; em telas
           // estreitas mantemos scroll horizontal pra não estourar.
           final dividerColor = ThemeHelpers.borderColor(context)
               .withValues(alpha: 0.32);
-          if (constraints.maxWidth < 360) {
+          if (screenWidth < 360) {
             return SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               physics: const BouncingScrollPhysics(),

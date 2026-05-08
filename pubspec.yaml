@@ -61,10 +61,6 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/images/logo.png
-    - assets/images/logo-dark.png
-    - assets/images/background.jpg
-    - assets/images/intellisys_logo.png
-    - assets/images/launcher_icon_from_favicon.png
+    - assets/images/
     - assets/config/dev_lan_host.txt
     - assets/config/api_target.txt

@@ -29,6 +29,14 @@ final FlutterLocalNotificationsPlugin _localNotifications =
 
 bool _firebaseCoreReady = false;
 bool _listenersAttached = false;
+bool _isDuplicateDefaultFirebaseAppError(Object error) {
+  if (error is FirebaseException) {
+    return error.code == 'duplicate-app';
+  }
+  final message = error.toString();
+  return message.contains('[core/duplicate-app]') &&
+      message.contains('already exists');
+}
 
 bool _firebaseOptionsLookLikePlaceholder() {
   const k = 'REPLACE_WITH';
@@ -59,8 +67,13 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       );
     }
   } catch (e) {
-    debugPrint('📱 [PUSH] Background Firebase init: $e');
-    return;
+    if (_isDuplicateDefaultFirebaseAppError(e)) {
+      // Em hot-restart/reanexo de isolate o app default pode já existir.
+      debugPrint('📱 [PUSH] Background Firebase já inicializado (duplicate-app).');
+    } else {
+      debugPrint('📱 [PUSH] Background Firebase init: $e');
+      return;
+    }
   }
 
   debugPrint(
@@ -133,11 +146,16 @@ class AppPushService {
       }
       _firebaseCoreReady = true;
     } catch (e, st) {
-      _firebaseCoreReady = false;
-      debugPrint(
-        '📱 [PUSH] Firebase não disponível (configure Firebase / google-services): $e',
-      );
-      debugPrint('$st');
+      if (_isDuplicateDefaultFirebaseAppError(e)) {
+        _firebaseCoreReady = true;
+        debugPrint('📱 [PUSH] Firebase já inicializado (duplicate-app).');
+      } else {
+        _firebaseCoreReady = false;
+        debugPrint(
+          '📱 [PUSH] Firebase não disponível (configure Firebase / google-services): $e',
+        );
+        debugPrint('$st');
+      }
     }
   }
 

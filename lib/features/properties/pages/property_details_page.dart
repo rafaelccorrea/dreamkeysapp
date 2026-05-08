@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -60,8 +61,13 @@ extension on _DetailsTab {
 /// Página de detalhes da propriedade
 class PropertyDetailsPage extends StatefulWidget {
   final String propertyId;
+  final Property? initialProperty;
 
-  const PropertyDetailsPage({super.key, required this.propertyId});
+  const PropertyDetailsPage({
+    super.key,
+    required this.propertyId,
+    this.initialProperty,
+  });
 
   @override
   State<PropertyDetailsPage> createState() => _PropertyDetailsPageState();
@@ -102,6 +108,100 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   /// Controlador da rolagem — controla FAB "voltar ao topo".
   final ScrollController _detailsScrollController = ScrollController();
   bool _showScrollTopFab = false;
+  String? _lastImageDiagnosticsSignature;
+
+  Map<String, dynamic>? _asStringKeyedMap(dynamic value) {
+    if (value is Map<String, dynamic>) return value;
+    if (value is Map) {
+      return value.map(
+        (key, entryValue) => MapEntry(key.toString(), entryValue),
+      );
+    }
+    return null;
+  }
+
+  double? _asDouble(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toDouble();
+    if (value is String) {
+      return double.tryParse(value.replaceAll(',', '.'));
+    }
+    return null;
+  }
+
+  List<dynamic> _extractChecklists(dynamic payload) {
+    if (payload is List) return payload;
+    final rootMap = _asStringKeyedMap(payload);
+    if (rootMap == null) return const [];
+
+    final directCandidates = [
+      rootMap['checklists'],
+      rootMap['data'],
+      rootMap['items'],
+      rootMap['results'],
+    ];
+    for (final candidate in directCandidates) {
+      if (candidate is List) return candidate;
+    }
+
+    final nestedData = _asStringKeyedMap(rootMap['data']);
+    if (nestedData != null) {
+      final nestedCandidates = [
+        nestedData['checklists'],
+        nestedData['data'],
+        nestedData['items'],
+        nestedData['results'],
+      ];
+      for (final candidate in nestedCandidates) {
+        if (candidate is List) return candidate;
+      }
+    }
+
+    return const [];
+  }
+
+  double _extractChecklistCompletionPercentage(Map<String, dynamic> checklist) {
+    final stats =
+        _asStringKeyedMap(checklist['statistics']) ??
+        _asStringKeyedMap(checklist['stats']) ??
+        _asStringKeyedMap(checklist['metrics']);
+
+    final directPercentage =
+        _asDouble(stats?['completionPercentage']) ??
+        _asDouble(stats?['completion_percentage']) ??
+        _asDouble(stats?['progressPercentage']) ??
+        _asDouble(stats?['progress_percentage']) ??
+        _asDouble(stats?['completion']) ??
+        _asDouble(checklist['completionPercentage']) ??
+        _asDouble(checklist['completion_percentage']);
+
+    if (directPercentage != null) {
+      return directPercentage.clamp(0, 100).toDouble();
+    }
+
+    final totalTasks =
+        _asDouble(stats?['totalTasks']) ??
+        _asDouble(stats?['total_tasks']) ??
+        _asDouble(stats?['total']) ??
+        _asDouble(checklist['totalTasks']) ??
+        _asDouble(checklist['total_tasks']);
+    final completedTasks =
+        _asDouble(stats?['completedTasks']) ??
+        _asDouble(stats?['completed_tasks']) ??
+        _asDouble(stats?['doneTasks']) ??
+        _asDouble(stats?['done_tasks']) ??
+        _asDouble(stats?['completed']) ??
+        _asDouble(checklist['completedTasks']) ??
+        _asDouble(checklist['completed_tasks']) ??
+        _asDouble(checklist['doneTasks']) ??
+        _asDouble(checklist['done_tasks']);
+
+    if (totalTasks != null && totalTasks > 0 && completedTasks != null) {
+      return ((completedTasks / totalTasks) * 100).clamp(0, 100).toDouble();
+    }
+
+    return 0;
+  }
 
   /// Avaliação alinhada às regras do backend (master/admin/manager, aprovador
   /// na matriz, vínculo como responsável/captador, ou autorização de venda
@@ -150,6 +250,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   @override
   void initState() {
     super.initState();
+    _property = widget.initialProperty;
+    // Sempre inicia em loading para evitar "tela vazia" com `initialProperty`
+    // parcial e garantir feedback visual consistente.
+    _isLoading = true;
     _loadProperty();
     _detailsScrollController.addListener(_handleDetailsScroll);
   }
@@ -211,15 +315,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         setState(() {
           _isLoadingChecklists = false;
           if (response.success && response.data != null) {
-            if (response.data is List) {
-              _checklists = response.data as List<dynamic>;
-            } else if (response.data is Map<String, dynamic>) {
-              final data = response.data as Map<String, dynamic>;
-              _checklists =
-                  data['checklists'] as List<dynamic>? ??
-                  data['data'] as List<dynamic>? ??
-                  [];
-            }
+            _checklists = _extractChecklists(response.data);
           }
         });
       }
@@ -321,6 +417,14 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   }
 
   Future<void> _loadProperty() async {
+    if (widget.propertyId.trim().isEmpty) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'ID do imóvel inválido.';
+      });
+      return;
+    }
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -333,10 +437,22 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
       if (mounted) {
         if (response.success && response.data != null) {
+          final property = response.data!;
+          if (property.id.trim().isEmpty) {
+            setState(() {
+              _errorMessage = 'Imóvel retornou sem identificador válido.';
+              _isLoading = false;
+            });
+            return;
+          }
           setState(() {
-            _property = response.data;
+            _property = property;
             _isLoading = false;
           });
+          _debugLogPropertyImageDiagnostics(
+            property,
+            source: 'loadProperty.success',
+          );
           // Carregar dados relacionados após carregar propriedade
           _loadDocuments();
           _loadChecklists();
@@ -344,7 +460,12 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           _loadKeys();
         } else {
           setState(() {
-            _errorMessage = response.message ?? 'Erro ao carregar propriedade';
+            // Se já existe algum snapshot local da propriedade, mantém a tela
+            // renderizada em vez de trocar para estado de erro cheio.
+            if (_property == null) {
+              _errorMessage =
+                  response.message ?? 'Erro ao carregar propriedade';
+            }
             _isLoading = false;
           });
         }
@@ -353,10 +474,48 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       debugPrint('❌ [PROPERTY_DETAILS] Erro: $e');
       if (mounted) {
         setState(() {
-          _errorMessage = 'Erro ao conectar com o servidor';
+          if (_property == null) {
+            _errorMessage = 'Erro ao conectar com o servidor';
+          }
           _isLoading = false;
         });
       }
+    }
+  }
+
+  void _debugLogPropertyImageDiagnostics(
+    Property property, {
+    required String source,
+  }) {
+    if (!kDebugMode) return;
+    final allImages = property.images ?? const <PropertyImage>[];
+    final validImages =
+        allImages.where((img) => img.url.trim().isNotEmpty).toList();
+    final mainUrl = property.mainImage?.url.trim() ?? '';
+    final signature =
+        '${property.id}|${allImages.length}|${validImages.length}|$mainUrl|'
+        '${allImages.take(3).map((e) => e.url).join('|')}';
+    if (_lastImageDiagnosticsSignature == signature) return;
+    _lastImageDiagnosticsSignature = signature;
+
+    debugPrint('🖼️ [PROPERTY_DETAILS] Diagnóstico de imagens ($source)');
+    debugPrint('   - propertyId: ${property.id}');
+    debugPrint('   - imageCount(api): ${property.imageCount}');
+    debugPrint('   - images.length(raw): ${allImages.length}');
+    debugPrint('   - images.length(valid): ${validImages.length}');
+    debugPrint(
+      '   - mainImage.id/url: ${property.mainImage?.id ?? '-'} / '
+      '${mainUrl.isEmpty ? '(vazio)' : mainUrl}',
+    );
+    if (allImages.isEmpty) {
+      debugPrint('   - image list veio vazia');
+      return;
+    }
+    for (var i = 0; i < allImages.length && i < 5; i++) {
+      final img = allImages[i];
+      debugPrint(
+        '   - image[$i] id=${img.id} | isMain=${img.isMain} | url="${img.url}"',
+      );
     }
   }
 
@@ -572,32 +731,40 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           ? _buildSkeleton(context)
           : _errorMessage != null
           ? _buildErrorState(context, theme)
-          : _property != null
-          ? Stack(
-              children: [
-                Positioned.fill(
-                  child: _buildPropertyDetails(context, theme, _property!),
-                ),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: _buildBottomActionBar(context, theme, _property!),
-                ),
-                AnimatedPositioned(
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeOut,
-                  right: 16,
-                  bottom: _showScrollTopFab ? 92 : -64,
-                  child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 220),
-                    opacity: _showScrollTopFab ? 1 : 0,
-                    child: _buildScrollTopButton(context, theme),
+          : () {
+              final property = _property;
+              if (property == null) {
+                return _buildErrorState(
+                  context,
+                  theme,
+                  message: 'Não foi possível carregar os detalhes do imóvel.',
+                );
+              }
+              return Stack(
+                children: [
+                  Positioned.fill(
+                    child: _buildPropertyDetails(context, theme, property),
                   ),
-                ),
-              ],
-            )
-          : const SizedBox.shrink(),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: _buildBottomActionBar(context, theme, property),
+                  ),
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOut,
+                    right: 16,
+                    bottom: _showScrollTopFab ? 92 : -64,
+                    child: AnimatedOpacity(
+                      duration: const Duration(milliseconds: 220),
+                      opacity: _showScrollTopFab ? 1 : 0,
+                      child: _buildScrollTopButton(context, theme),
+                    ),
+                  ),
+                ],
+              );
+            }(),
     );
   }
 
@@ -671,7 +838,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  Widget _buildErrorState(BuildContext context, ThemeData theme) {
+  Widget _buildErrorState(
+    BuildContext context,
+    ThemeData theme, {
+    String? message,
+  }) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24.0),
@@ -681,7 +852,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             Icon(Icons.error_outline, size: 64, color: AppColors.status.error),
             const SizedBox(height: 16),
             Text(
-              _errorMessage ?? 'Erro ao carregar propriedade',
+              message ?? _errorMessage ?? 'Erro ao carregar propriedade',
               style: theme.textTheme.titleMedium?.copyWith(
                 color: ThemeHelpers.textSecondaryColor(context),
               ),
@@ -801,7 +972,33 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     ThemeData theme,
     Property property,
   ) {
-    final images = property.images ?? [];
+    final rawImages = property.images ?? const <PropertyImage>[];
+    final validImages =
+        rawImages.where((img) => img.url.trim().isNotEmpty).toList();
+    final hasValidMainImage =
+        property.mainImage?.url.trim().isNotEmpty == true;
+    // Alguns payloads chegam com `mainImage` válida e `images` vazia.
+    final images = validImages.isNotEmpty
+        ? validImages
+        : (hasValidMainImage
+            ? <PropertyImage>[property.mainImage!]
+            : const <PropertyImage>[]);
+    final safeCurrentIndex = images.isEmpty
+        ? 0
+        : _currentImageIndex.clamp(0, images.length - 1);
+    if (kDebugMode && rawImages.length != validImages.length) {
+      debugPrint(
+        '⚠️ [PROPERTY_DETAILS] Imagens com URL inválida/vazia: '
+        '${rawImages.length - validImages.length} de ${rawImages.length}',
+      );
+    }
+    if (kDebugMode && images.isEmpty) {
+      debugPrint(
+        '⚠️ [PROPERTY_DETAILS] Hero sem imagem renderizável. '
+        'mainImage="${property.mainImage?.url ?? '(null)'}" '
+        'imagesRaw=${rawImages.length}',
+      );
+    }
     final mediaCount = property.imageCount ?? images.length;
     const heroH = 340.0;
     final isDark = theme.brightness == Brightness.dark;
@@ -810,7 +1007,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           behavior: HitTestBehavior.opaque,
           onTap: images.isEmpty
               ? null
-              : () => _openFullscreenGallery(images, _currentImageIndex),
+              : () => _openFullscreenGallery(images, safeCurrentIndex),
           child: images.isEmpty
               ? _buildHeroFallback(context, theme)
               : PageView.builder(
@@ -870,7 +1067,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               right: 16,
               top: 16,
               child: _buildHeroMediaCounter(
-                images.isEmpty ? 1 : _currentImageIndex + 1,
+                images.isEmpty ? 1 : safeCurrentIndex + 1,
                 mediaCount,
               ),
             ),
@@ -882,7 +1079,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             ),
 
           // Setas laterais para navegação entre fotos
-          if (images.length > 1 && _currentImageIndex > 0)
+          if (images.length > 1 && safeCurrentIndex > 0)
             Positioned(
               left: 8,
               top: 0,
@@ -897,7 +1094,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                 ),
               ),
             ),
-          if (images.length > 1 && _currentImageIndex < images.length - 1)
+          if (images.length > 1 && safeCurrentIndex < images.length - 1)
             Positioned(
               right: 8,
               top: 0,
@@ -928,7 +1125,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               right: 0,
               bottom: 8,
               child: Center(
-                child: _buildHeroDots(images.length, _currentImageIndex),
+                child: _buildHeroDots(images.length, safeCurrentIndex),
               ),
             ),
         ],
@@ -2553,74 +2750,72 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         : AppColors.border.border;
     final muted = ThemeHelpers.textSecondaryColor(context);
 
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (var i = 0; i < items.length; i++) ...[
-            Expanded(
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-                decoration: BoxDecoration(
-                  color: cardBg,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: borderColor.withValues(alpha: isDark ? 0.55 : 0.78),
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(7),
-                          decoration: BoxDecoration(
-                            color: items[i].color.withValues(alpha: isDark ? 0.18 : 0.12),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Icon(items[i].icon, size: 14, color: items[i].color),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            items[i].label.toUpperCase(),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: muted,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 0.6,
-                              fontSize: 9.5,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        _currencyFormatter.format(items[i].value),
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          color: ThemeHelpers.textColor(context),
-                          fontWeight: FontWeight.w900,
-                          height: 1.05,
-                          letterSpacing: -0.4,
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                    ),
-                  ],
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < items.length; i++) ...[
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+              decoration: BoxDecoration(
+                color: cardBg,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: borderColor.withValues(alpha: isDark ? 0.55 : 0.78),
                 ),
               ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: BoxDecoration(
+                          color: items[i].color.withValues(alpha: isDark ? 0.18 : 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(items[i].icon, size: 14, color: items[i].color),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          items[i].label.toUpperCase(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: muted,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.6,
+                            fontSize: 9.5,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      _currencyFormatter.format(items[i].value),
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        color: ThemeHelpers.textColor(context),
+                        fontWeight: FontWeight.w900,
+                        height: 1.05,
+                        letterSpacing: -0.4,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-            if (i < items.length - 1) const SizedBox(width: 10),
-          ],
+          ),
+          if (i < items.length - 1) const SizedBox(width: 10),
         ],
-      ),
+      ],
     );
   }
 
@@ -3612,13 +3807,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               )
             else
               ...(_checklists.take(5).map((checklist) {
-                final chk = checklist as Map<String, dynamic>;
+                final chk = _asStringKeyedMap(checklist) ?? const <String, dynamic>{};
                 final checklistId = chk['id']?.toString() ?? '';
                 final type = chk['type']?.toString() ?? 'sale';
                 final status = chk['status']?.toString() ?? 'pending';
-                final stats = chk['statistics'] as Map<String, dynamic>?;
-                final completionPercentage =
-                    stats?['completionPercentage']?.toDouble() ?? 0.0;
+                final completionPercentage = _extractChecklistCompletionPercentage(
+                  chk,
+                );
                 final client = chk['client'] as Map<String, dynamic>?;
                 final clientName =
                     client?['name']?.toString() ?? 'Cliente não informado';
@@ -6466,91 +6661,82 @@ class _ExpandableDescriptionState extends State<_ExpandableDescription>
       fontWeight: FontWeight.w500,
     );
 
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Régua accent fina à esquerda — referência editorial discreta
-          Container(
-            width: 3,
-            margin: const EdgeInsets.only(right: 14),
-            decoration: BoxDecoration(
-              color: accent.withValues(alpha: 0.55),
-              borderRadius: BorderRadius.circular(99),
-            ),
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Régua accent fina à esquerda — referência editorial discreta
+        Container(
+          width: 3,
+          margin: const EdgeInsets.only(right: 14),
+          decoration: BoxDecoration(
+            color: accent.withValues(alpha: 0.55),
+            borderRadius: BorderRadius.circular(99),
           ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    // Mede se o texto extrapola N linhas pra decidir se
-                    // mostra o botão "Ver mais"/"Ver menos".
-                    final tp = TextPainter(
-                      text: TextSpan(text: cleaned, style: textStyle),
-                      maxLines: _ExpandableDescription._kCollapsedMaxLines,
-                      textDirection: Directionality.of(context),
-                    )..layout(maxWidth: constraints.maxWidth);
+        ),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // Mede se o texto extrapola N linhas pra decidir se
+              // mostra o botão "Ver mais"/"Ver menos".
+              final tp = TextPainter(
+                text: TextSpan(text: cleaned, style: textStyle),
+                maxLines: _ExpandableDescription._kCollapsedMaxLines,
+                textDirection: Directionality.of(context),
+              )..layout(maxWidth: constraints.maxWidth);
 
-                    final overflow = tp.didExceedMaxLines;
+              final overflow = tp.didExceedMaxLines;
 
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        AnimatedSize(
-                          duration: const Duration(milliseconds: 220),
-                          alignment: Alignment.topLeft,
-                          curve: Curves.easeOut,
-                          child: _expanded || !overflow
-                              ? SelectableText(
-                                  cleaned,
-                                  style: textStyle,
-                                )
-                              : ShaderMask(
-                                  shaderCallback: (rect) {
-                                    return LinearGradient(
-                                      begin: Alignment.topCenter,
-                                      end: Alignment.bottomCenter,
-                                      colors: const [
-                                        Colors.white,
-                                        Colors.white,
-                                        Colors.transparent,
-                                      ],
-                                      stops: const [0.0, 0.7, 1.0],
-                                    ).createShader(rect);
-                                  },
-                                  blendMode: BlendMode.dstIn,
-                                  child: Text(
-                                    cleaned,
-                                    maxLines: _ExpandableDescription
-                                        ._kCollapsedMaxLines,
-                                    overflow: TextOverflow.clip,
-                                    style: textStyle,
-                                  ),
-                                ),
-                        ),
-                        if (overflow) ...[
-                          const SizedBox(height: 6),
-                          _ExpandToggle(
-                            expanded: _expanded,
-                            accent: accent,
-                            onTap: () {
-                              setState(() => _expanded = !_expanded);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 220),
+                    alignment: Alignment.topLeft,
+                    curve: Curves.easeOut,
+                    child: _expanded || !overflow
+                        ? SelectableText(
+                            cleaned,
+                            style: textStyle,
+                          )
+                        : ShaderMask(
+                            shaderCallback: (rect) {
+                              return LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: const [
+                                  Colors.white,
+                                  Colors.white,
+                                  Colors.transparent,
+                                ],
+                                stops: const [0.0, 0.7, 1.0],
+                              ).createShader(rect);
                             },
+                            blendMode: BlendMode.dstIn,
+                            child: Text(
+                              cleaned,
+                              maxLines: _ExpandableDescription._kCollapsedMaxLines,
+                              overflow: TextOverflow.clip,
+                              style: textStyle,
+                            ),
                           ),
-                        ],
-                      ],
-                    );
-                  },
-                ),
-              ],
-            ),
+                  ),
+                  if (overflow) ...[
+                    const SizedBox(height: 6),
+                    _ExpandToggle(
+                      expanded: _expanded,
+                      accent: accent,
+                      onTap: () {
+                        setState(() => _expanded = !_expanded);
+                      },
+                    ),
+                  ],
+                ],
+              );
+            },
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

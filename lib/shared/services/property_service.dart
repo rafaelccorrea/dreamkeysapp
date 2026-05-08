@@ -3,16 +3,92 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'api_service.dart';
 import '../../core/constants/api_constants.dart';
+import '../utils/avatar_url_resolver.dart';
+
+String _readAnyId(
+  Map<String, dynamic> map, {
+  List<String> preferredKeys = const ['id', '_id'],
+}) {
+  for (final key in preferredKeys) {
+    final raw = map[key];
+    final value = raw?.toString().trim() ?? '';
+    if (value.isNotEmpty) return value;
+  }
+  return '';
+}
+
+String _normalizeMediaUrl(dynamic raw) {
+  final value = raw?.toString().trim() ?? '';
+  if (value.isEmpty) return '';
+  if (value.startsWith('data:') || value.startsWith('file:')) return value;
+  if (value.startsWith('//')) return 'https:$value';
+  return AvatarUrlResolver.resolve(value) ?? '';
+}
+
+bool _looksLikePropertyPayload(Map<String, dynamic> map) {
+  // Evita escolher envelopes genéricos que possuem `id` mas não os campos
+  // da entidade imóvel em si.
+  const signalKeys = <String>{
+    'title',
+    'description',
+    'type',
+    'status',
+    'address',
+    'street',
+    'city',
+    'state',
+    'zipCode',
+    'zip_code',
+    'salePrice',
+    'sale_price',
+    'rentPrice',
+    'rent_price',
+    'images',
+    'mainImage',
+    'main_image',
+  };
+  for (final key in signalKeys) {
+    if (map.containsKey(key)) return true;
+  }
+  return false;
+}
+
 /// Resposta pode ser o próprio objeto da propriedade ou envelope `{ data: { ... } }`.
 Map<String, dynamic>? _extractPropertyPayload(Map<String, dynamic>? raw) {
   if (raw == null) return null;
 
   Map<String, dynamic>? pick(Map<String, dynamic> m) {
-    if (m['id'] != null) return m;
-    final nested = m['data'];
-    if (nested is Map<String, dynamic> && nested['id'] != null) return nested;
-    if (nested is Map && nested['id'] != null) {
-      return Map<String, dynamic>.from(nested);
+    Map<String, dynamic>? fromAnyMap(dynamic v) {
+      if (v is Map<String, dynamic>) return v;
+      if (v is Map) return Map<String, dynamic>.from(v);
+      return null;
+    }
+
+    // Prioriza payloads aninhados primeiro (padrão de várias respostas),
+    // depois cai para o root somente se ele realmente parecer um imóvel.
+    final candidates = <Map<String, dynamic>>[];
+
+    final data = fromAnyMap(m['data']);
+    if (data != null) {
+      final nestedProperty = fromAnyMap(data['property']);
+      if (nestedProperty != null) candidates.add(nestedProperty);
+      candidates.add(data);
+    }
+
+    final rootProperty = fromAnyMap(m['property']);
+    if (rootProperty != null) candidates.add(rootProperty);
+
+    candidates.add(m);
+
+    for (final candidate in candidates) {
+      if (_readAnyId(candidate).isEmpty) continue;
+      if (_looksLikePropertyPayload(candidate)) return candidate;
+    }
+
+    for (final candidate in candidates) {
+      if (_readAnyId(candidate).isNotEmpty) {
+        return candidate;
+      }
     }
     return null;
   }
@@ -492,7 +568,10 @@ class Property {
     }
 
     return Property(
-      id: json['id']?.toString() ?? '',
+      id: _readAnyId(
+        json,
+        preferredKeys: const ['id', '_id', 'propertyId', 'property_id'],
+      ),
       code: json['code']?.toString(),
       title: json['title']?.toString() ?? '',
       description: json['description']?.toString() ?? '',
@@ -667,10 +746,23 @@ class PropertyImage {
   });
 
   factory PropertyImage.fromJson(Map<String, dynamic> json) {
+    final rawUrl = json['url'] ??
+        json['imageUrl'] ??
+        json['image_url'] ??
+        json['src'] ??
+        json['path'];
     return PropertyImage(
-      id: json['id']?.toString() ?? '',
-      url: json['url']?.toString() ?? '',
-      thumbnailUrl: json['thumbnailUrl']?.toString() ?? json['thumbnail_url']?.toString(),
+      id: _readAnyId(
+        json,
+        preferredKeys: const ['id', '_id', 'imageId', 'image_id'],
+      ),
+      url: _normalizeMediaUrl(rawUrl),
+      thumbnailUrl: _normalizeMediaUrl(
+        json['thumbnailUrl'] ??
+            json['thumbnail_url'] ??
+            json['thumbUrl'] ??
+            json['thumb_url'],
+      ),
       category: json['category']?.toString() ?? 'general',
       isMain: json['isMain'] as bool? ?? json['is_main'] as bool? ?? false,
       createdAt: json['createdAt']?.toString() ?? json['created_at']?.toString() ?? '',

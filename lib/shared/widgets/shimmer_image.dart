@@ -70,6 +70,9 @@ class ShimmerImage extends StatelessWidget {
           );
         },
         errorBuilder: (context, error, stackTrace) {
+          debugPrint(
+            '🖼️ [SHIMMER_IMAGE] Falha ao carregar imagem: "$imageUrl" | erro: $error',
+          );
           return errorWidget ??
               Container(
                 width: width,

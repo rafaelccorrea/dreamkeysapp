@@ -2262,7 +2262,10 @@ class _PropertiesPageState extends State<PropertiesPage> {
       color: Colors.transparent,
       child: InkWell(
         onTap: () => Navigator.of(context)
-            .pushNamed(AppRoutes.propertyDetails(property.id)),
+            .pushNamed(
+              AppRoutes.propertyDetails(property.id),
+              arguments: {'property': property},
+            ),
         onLongPress: () {
           HapticFeedback.mediumImpact();
           _showPropertyQuickActionsSheet(context, theme, property);
@@ -2996,7 +2999,10 @@ class _PropertiesPageState extends State<PropertiesPage> {
         color: Colors.transparent,
         child: InkWell(
           onTap: () =>
-              Navigator.of(context).pushNamed(AppRoutes.propertyDetails(property.id)),
+              Navigator.of(context).pushNamed(
+                AppRoutes.propertyDetails(property.id),
+                arguments: {'property': property},
+              ),
           onLongPress: () {
             HapticFeedback.mediumImpact();
             _showPropertyQuickActionsSheet(context, theme, property);
@@ -3294,6 +3300,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
             if (!mounted || !parentContext.mounted) return;
             Navigator.of(parentContext).pushNamed(
               AppRoutes.propertyDetails(property.id),
+              arguments: {'property': property},
             );
           });
         },

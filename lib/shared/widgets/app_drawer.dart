@@ -15,6 +15,7 @@ import '../services/profile_service.dart';
 import '../services/dashboard_service.dart';
 import '../services/permission_service.dart';
 import '../services/secure_storage_service.dart';
+import '../utils/avatar_url_resolver.dart';
 import 'skeleton_box.dart';
 import '../../features/notifications/controllers/notification_controller.dart';
 import '../../features/chat/controllers/chat_unread_controller.dart';
@@ -727,7 +728,10 @@ class _AppDrawerState extends State<AppDrawer> {
                               backgroundColor:
                                   ThemeHelpers.cardBackgroundColor(context),
                               backgroundImage: _userAvatar != null
-                                  ? NetworkImage(_userAvatar!)
+                                  ? NetworkImage(
+                                      AvatarUrlResolver.resolve(_userAvatar) ??
+                                          _userAvatar!,
+                                    )
                                   : null,
                               child: _userAvatar == null
                                   ? Text(
