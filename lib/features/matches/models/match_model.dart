@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../shared/utils/avatar_url_resolver.dart';
 
 Map<String, dynamic> _convertToMap(dynamic value) {
   if (value == null) return <String, dynamic>{};
@@ -210,7 +211,7 @@ class ClientSummary {
       name: json['name']?.toString() ?? '',
       phone: json['phone']?.toString(),
       email: json['email']?.toString(),
-      avatar: json['avatar']?.toString(),
+      avatar: AvatarUrlResolver.resolve(json['avatar']?.toString()),
       cpf: json['cpf']?.toString(),
       type: json['type']?.toString(),
     );

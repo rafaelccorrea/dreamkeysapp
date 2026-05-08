@@ -1,6 +1,8 @@
 /// Modelos de dados do sistema Kanban
 library;
 
+import '../../../shared/utils/avatar_url_resolver.dart';
+
 /// Prioridade da tarefa
 enum KanbanPriority {
   low,
@@ -498,7 +500,7 @@ class KanbanUser {
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
       email: json['email']?.toString() ?? '',
-      avatar: json['avatar']?.toString(),
+      avatar: AvatarUrlResolver.resolve(json['avatar']?.toString()),
     );
   }
 

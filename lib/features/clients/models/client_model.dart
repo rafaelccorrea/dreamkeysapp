@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import '../../../shared/utils/avatar_url_resolver.dart';
 
 /// Modelos de dados para Clientes
 
@@ -666,7 +667,7 @@ class UserInfo {
       name: json['name']?.toString() ?? '',
       email: json['email']?.toString() ?? '',
       phone: json['phone']?.toString(),
-      avatar: json['avatar']?.toString(),
+      avatar: AvatarUrlResolver.resolve(json['avatar']?.toString()),
     );
   }
 }

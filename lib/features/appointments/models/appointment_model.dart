@@ -1,3 +1,5 @@
+import '../../../shared/utils/avatar_url_resolver.dart';
+
 /// Modelo de dados para Agendamento
 class Appointment {
   final String id;
@@ -263,7 +265,7 @@ class Participant {
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
       email: json['email']?.toString() ?? '',
-      avatar: json['avatar']?.toString(),
+      avatar: AvatarUrlResolver.resolve(json['avatar']?.toString()),
       phone: json['phone']?.toString(),
       role: json['role']?.toString() ?? '',
     );
