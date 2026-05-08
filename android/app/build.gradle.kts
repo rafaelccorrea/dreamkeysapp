@@ -1,5 +1,3 @@
-import java.io.File
-import java.io.FileInputStream
 import java.util.Properties
 
 plugins {
@@ -48,18 +46,41 @@ android {
                 storePassword = keystoreProperties["storePassword"] as String
                 keyAlias = keystoreProperties["keyAlias"] as String
                 keyPassword = keystoreProperties["keyPassword"] as String
+            } else {
+                // Fallback por variável de ambiente para build em CI/outra máquina.
+                val envStoreFile = System.getenv("DK_STORE_FILE")
+                val envStorePassword = System.getenv("DK_STORE_PASSWORD")
+                val envKeyAlias = System.getenv("DK_KEY_ALIAS")
+                val envKeyPassword = System.getenv("DK_KEY_PASSWORD")
+                if (!envStoreFile.isNullOrBlank() &&
+                    !envStorePassword.isNullOrBlank() &&
+                    !envKeyAlias.isNullOrBlank() &&
+                    !envKeyPassword.isNullOrBlank()
+                ) {
+                    storeFile = file(envStoreFile)
+                    storePassword = envStorePassword
+                    keyAlias = envKeyAlias
+                    keyPassword = envKeyPassword
+                }
             }
         }
     }
 
     buildTypes {
         release {
-            // Usar assinatura de release se key.properties existir, senão usar debug
-            signingConfig = if (rootProject.file("key.properties").exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            val hasKeyProps = rootProject.file("key.properties").exists()
+            val hasEnvSigning = !System.getenv("DK_STORE_FILE").isNullOrBlank() &&
+                !System.getenv("DK_STORE_PASSWORD").isNullOrBlank() &&
+                !System.getenv("DK_KEY_ALIAS").isNullOrBlank() &&
+                !System.getenv("DK_KEY_PASSWORD").isNullOrBlank()
+            if (!hasKeyProps && !hasEnvSigning) {
+                throw GradleException(
+                    "Release sem chave de assinatura. " +
+                        "Crie android/key.properties ou defina DK_STORE_FILE, DK_STORE_PASSWORD, " +
+                        "DK_KEY_ALIAS e DK_KEY_PASSWORD."
+                )
             }
+            signingConfig = signingConfigs.getByName("release")
             
             // Habilitar minificação e otimização
             isMinifyEnabled = true
