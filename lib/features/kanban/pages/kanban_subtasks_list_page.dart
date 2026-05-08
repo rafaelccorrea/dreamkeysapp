@@ -10,6 +10,7 @@ import '../../../core/theme/shell_visual_tokens.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import '../../../shared/services/module_access_service.dart';
 import '../models/kanban_subtask_models.dart';
 import '../services/kanban_subtask_service.dart';
 import '../widgets/subtask_card.dart';
@@ -31,7 +32,7 @@ enum _Bucket { all, pending, today, overdue, completed }
 
 class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
   static const double _kSectionGap = 11;
-  static const double _kPagePadH = 20;
+  static const double _kPagePadH = 16;
   static const double _kPagePadTop = 10;
   static const double _kPagePadBottom = 88;
 
@@ -41,10 +42,14 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
   /// hero) pra não dar a sensação de "tela inteira piscando" cada vez.
   bool _bootLoading = true;
   bool _silentLoading = false;
+  bool _loadingMore = false;
   String? _error;
   SubTasksListResponse _response = SubTasksListResponse.empty;
+  SubTasksListStats _heroStats = SubTasksListStats.zero;
 
   _Bucket _activeBucket = _Bucket.pending;
+  int _pagingGeneration = 0;
+  final ScrollController _scrollController = ScrollController();
 
   // IDs em ação (toggle / delete) para mostrar loader inline.
   final Set<String> _busyIds = <String>{};
@@ -57,6 +62,7 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     _bootstrap();
   }
 
@@ -64,22 +70,32 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
   /// quando a primeira resposta chega — evita layout shift e dá uma
   /// sensação mais fluida que "skeleton no meio do hero pronto".
   Future<void> _bootstrap() async {
+    final generation = ++_pagingGeneration;
     final res = await KanbanSubtaskService.instance.getMySubTasks(
       filters: _filtersFor(_activeBucket),
+      useCache: false,
     );
     if (!mounted) return;
     setState(() {
       _bootLoading = false;
+      _loadingMore = false;
+      if (res.success && res.data != null) {
+        _heroStats = res.data!.stats;
+      }
       if (res.success && res.data != null) {
         _response = res.data!;
       } else {
         _error = res.message ?? 'Erro ao carregar tarefas';
       }
     });
+    if (generation != _pagingGeneration) return;
   }
 
   @override
   void dispose() {
+    _scrollController
+      ..removeListener(_onScroll)
+      ..dispose();
     _searchController.dispose();
     _searchDebounce?.cancel();
     super.dispose();
@@ -87,47 +103,89 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
 
   // ─── Filters por bucket ──────────────────────────────────────────────
 
+  bool get _isMasterOrAdmin {
+    final role = ModuleAccessService.instance.userRole?.toLowerCase().trim() ?? '';
+    return role == 'master' || role == 'admin';
+  }
+
+  bool get _isManager {
+    final role = ModuleAccessService.instance.userRole?.toLowerCase().trim() ?? '';
+    return role == 'manager';
+  }
+
+  /// Escopo por role:
+  /// - master/admin: empresa inteira
+  /// - manager: equipe(s) acessíveis no backend (não força `onlyMine`)
+  /// - demais: somente minhas
+  SubTasksListFilters _baseScopeFilters({
+    required int page,
+    required int limit,
+    String? cardSearch,
+  }) {
+    final isPrivileged = _isMasterOrAdmin || _isManager;
+    return SubTasksListFilters(
+      onlyMine: !isPrivileged,
+      cardSearch: cardSearch,
+      page: page,
+      limit: limit,
+    );
+  }
+
+  bool get _hasMorePages => _response.page < _response.totalPages;
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final pos = _scrollController.position;
+    if (pos.pixels >= pos.maxScrollExtent - 280) {
+      unawaited(_loadNextPage());
+    }
+  }
+
   SubTasksListFilters _filtersFor(_Bucket bucket) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final yesterday = today.subtract(const Duration(days: 1));
     switch (bucket) {
       case _Bucket.all:
-        return SubTasksListFilters(
+        return _baseScopeFilters(
           cardSearch: _appliedSearch,
           page: 1,
-          limit: 100,
+          limit: 30,
         );
       case _Bucket.pending:
-        return SubTasksListFilters(
-          isCompleted: false,
+        return _baseScopeFilters(
           cardSearch: _appliedSearch,
           page: 1,
-          limit: 100,
+          limit: 30,
+        ).copyWith(
+          isCompleted: false,
         );
       case _Bucket.today:
-        return SubTasksListFilters(
+        return _baseScopeFilters(
+          cardSearch: _appliedSearch,
+          page: 1,
+          limit: 30,
+        ).copyWith(
           isCompleted: false,
           dueDateFrom: today,
           dueDateTo: today,
-          cardSearch: _appliedSearch,
-          page: 1,
-          limit: 100,
         );
       case _Bucket.overdue:
-        return SubTasksListFilters(
+        return _baseScopeFilters(
+          cardSearch: _appliedSearch,
+          page: 1,
+          limit: 30,
+        ).copyWith(
           isCompleted: false,
           dueDateTo: yesterday,
-          cardSearch: _appliedSearch,
-          page: 1,
-          limit: 100,
         );
       case _Bucket.completed:
-        return SubTasksListFilters(
-          isCompleted: true,
+        return _baseScopeFilters(
           cardSearch: _appliedSearch,
           page: 1,
-          limit: 100,
+          limit: 30,
+        ).copyWith(
+          isCompleted: true,
         );
     }
   }
@@ -137,21 +195,67 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
   /// Refetch que cobre a tela inteira com skeleton (uso restrito ao
   /// pull-to-refresh quando o usuário pediu explicitamente "atualizar").
   Future<void> _refresh() async {
+    final generation = ++_pagingGeneration;
     setState(() {
       _silentLoading = true;
+      _loadingMore = false;
       _error = null;
     });
     final res = await KanbanSubtaskService.instance.getMySubTasks(
       filters: _filtersFor(_activeBucket),
+      useCache: false,
     );
     if (!mounted) return;
     setState(() {
       _silentLoading = false;
+      _loadingMore = false;
+      if (res.success && res.data != null) {
+        _heroStats = res.data!.stats;
+      }
       if (res.success && res.data != null) {
         _response = res.data!;
       } else {
         _error = res.message ?? 'Erro ao carregar tarefas';
       }
+    });
+    if (generation != _pagingGeneration) return;
+  }
+
+  Future<void> _loadNextPage() async {
+    if (!mounted || _bootLoading || _silentLoading || _loadingMore) return;
+    if (!_hasMorePages) return;
+
+    final generation = _pagingGeneration;
+    final current = _response;
+    final nextPage = current.page + 1;
+    final limit = current.limit > 0 ? current.limit : 30;
+
+    setState(() => _loadingMore = true);
+    final res = await KanbanSubtaskService.instance.getMySubTasks(
+      filters: _filtersFor(_activeBucket).copyWith(page: nextPage, limit: limit),
+    );
+    if (!mounted || generation != _pagingGeneration) return;
+
+    setState(() {
+      _loadingMore = false;
+      if (!res.success || res.data == null) return;
+      _heroStats = res.data!.stats;
+      final merged = <KanbanSubTask>[];
+      final seen = <String>{};
+      for (final item in current.data) {
+        if (seen.add(item.id)) merged.add(item);
+      }
+      for (final item in res.data!.data) {
+        if (seen.add(item.id)) merged.add(item);
+      }
+      _response = SubTasksListResponse(
+        data: merged,
+        total: res.data!.total,
+        page: res.data!.page,
+        limit: res.data!.limit,
+        totalPages: res.data!.totalPages,
+        stats: res.data!.stats,
+      );
     });
   }
 
@@ -378,6 +482,7 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
               color: _accentColor(context),
               onRefresh: _refresh,
               child: SingleChildScrollView(
+                controller: _scrollController,
                 physics: const AlwaysScrollableScrollPhysics(),
                 child: ConstrainedBox(
                   constraints: BoxConstraints(minHeight: viewportHeight),
@@ -410,9 +515,9 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
                           _buildBucketsRail(context),
                           Padding(
                             padding: const EdgeInsets.fromLTRB(
-                              _kPagePadH,
+                              14,
                               _kSectionGap + 1,
-                              _kPagePadH,
+                              14,
                               _kPagePadBottom,
                             ),
                             child: _buildBody(context),
@@ -433,7 +538,7 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
     final theme = Theme.of(context);
     final accent = _accentColor(context);
     final isDark = theme.brightness == Brightness.dark;
-    final stats = _response.stats;
+    final stats = _heroStats;
     final pending = stats.pending;
     final overdue = stats.overdue;
     final completed = stats.completed;
@@ -607,7 +712,7 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
         ? AppColors.status.errorDarkMode
         : AppColors.status.error;
 
-    final stats = _response.stats;
+    final stats = _heroStats;
     final items = [
       _KpiItem(label: 'Total', value: stats.total, color: accent),
       _KpiItem(label: 'Pendentes', value: stats.pending, color: warn),
@@ -723,7 +828,7 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
         ? AppColors.status.errorDarkMode
         : AppColors.status.error;
 
-    final stats = _response.stats;
+    final stats = _heroStats;
 
     final tabs = <_BucketSpec>[
       _BucketSpec(
@@ -766,7 +871,7 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(_kPagePadH, 0, _kPagePadH, 0),
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 0),
       child: Row(
         children: [
           for (var i = 0; i < tabs.length; i++) ...[
@@ -807,6 +912,9 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
     if (_silentLoading && _response.data.isEmpty) return _buildListSkeleton();
     if (_error != null && _response.data.isEmpty) return _buildError();
     if (_response.data.isEmpty) return _buildEmpty();
+    final theme = Theme.of(context);
+    final accent = _accentColor(context);
+    final hintColor = ThemeHelpers.textSecondaryColor(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -832,6 +940,60 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
                 curve: Curves.easeOutCubic,
               ),
           if (i < _response.data.length - 1) const SubTaskDivider(),
+        ],
+        if (_hasMorePages || _loadingMore) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: accent.withValues(alpha: 0.18)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (_loadingMore)
+                  SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.2,
+                      color: accent,
+                    ),
+                  )
+                else
+                  Icon(
+                    LucideIcons.chevronsDown,
+                    size: 16,
+                    color: hintColor,
+                  ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _loadingMore
+                        ? 'Carregando mais tarefas...'
+                        : 'Role para carregar mais tarefas',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: _loadingMore ? accent : hintColor,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Página ${_response.page} de ${_response.totalPages}',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: hintColor,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
         ],
       ],
     );

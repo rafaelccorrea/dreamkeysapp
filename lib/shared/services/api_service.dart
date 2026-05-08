@@ -562,11 +562,16 @@ class ApiService {
   ApiResponse<T> _handleResponse<T>(http.Response response) {
     final statusCode = response.statusCode;
     final rawBody = response.body;
+    String preview(String s, {int max = 280}) {
+      if (s.length <= max) return s;
+      return '${s.substring(0, max)}...<truncated ${s.length - max} chars>';
+    }
     
     debugPrint('📥 [API_SERVICE] _handleResponse');
     debugPrint('   - statusCode: $statusCode');
     debugPrint('   - rawBody length: ${rawBody.length}');
-    debugPrint('   - rawBody: $rawBody');
+    // Evita custo absurdo de log para payloads grandes (ex.: listas de subtarefas).
+    debugPrint('   - rawBody preview: ${preview(rawBody)}');
     
     dynamic body;
     if (rawBody.isNotEmpty) {
