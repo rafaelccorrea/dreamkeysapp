@@ -707,33 +707,58 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final muted = ThemeHelpers.textSecondaryColor(context);
     final isDark = theme.brightness == Brightness.dark;
 
+    // Layout reformulado em estilo editorial:
+    //
+    // 1. Hero edge-to-edge (sem bordas arredondadas, sem padding lateral)
+    //    — a foto é o protagonista e ocupa toda a largura da tela.
+    // 2. Bloco "headline" (tipo + código + título + endereço) sem caixa.
+    // 3. Quick stats em strip horizontal.
+    // 4. Preço em destaque tipográfico (sem caixa).
+    // 5. Ações rápidas.
+    // 6. Tabs + conteúdo da aba.
+    //
+    // Essa ordem coloca a informação mais importante (foto → título →
+    // preço) com hierarquia visual real, em vez de "card dentro de card
+    // dentro de card" que era o layout antigo.
     return CustomScrollView(
       controller: _detailsScrollController,
       physics: const BouncingScrollPhysics(
         parent: AlwaysScrollableScrollPhysics(),
       ),
       slivers: [
+        // 1. HERO sem padding lateral, edge-to-edge
         SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: _buildDetailsHero(context, theme, property),
-          ),
+          child: _buildDetailsHero(context, theme, property),
         ),
+        // 2. IDENTIDADE — sem caixa, só tipografia
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
             child: _buildIdentityCard(context, theme, property, muted, isDark),
           ),
         ),
+        // 3. STATS strip
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
             child: _buildQuickStatsStrip(context, theme, property),
           ),
         ),
+        // Divisor sutil antes do preço — separa "identidade" de "valor"
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+            child: Container(
+              height: 1,
+              color: ThemeHelpers.borderLightColor(context)
+                  .withValues(alpha: 0.55),
+            ),
+          ),
+        ),
+        // 4. PREÇO em destaque tipográfico
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
             child: _buildPriceShowcase(context, theme, property, isDark),
           ),
         ),
@@ -745,7 +770,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ),
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.only(top: 12),
+            padding: const EdgeInsets.only(top: 14),
             child: _buildSectionTabs(context, theme),
           ),
         ),
@@ -761,6 +786,16 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   // ────────────────────────────── HERO ──────────────────────────────
 
+  /// Hero **edge-to-edge** — a foto é o protagonista da tela.
+  ///
+  /// Mudanças em relação à versão anterior:
+  /// - Sem `borderRadius: 20` — bordas retas, full-width
+  /// - Sem `Material elevation` + sombra — fica visualmente "preso" ao topo
+  /// - Sem `padding lateral 16` — ocupa 100% da largura da tela
+  /// - Altura de **340px** (era 248) pra dar mais peso visual à foto
+  /// - **Título do imóvel + endereço sobrepostos** no rodapé da imagem
+  ///   (estilo Airbnb/Booking) com gradiente bottom mais forte
+  /// - Featured/contador/dots reposicionados pra não brigar com o título
   Widget _buildDetailsHero(
     BuildContext context,
     ThemeData theme,
@@ -768,9 +803,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   ) {
     final images = property.images ?? [];
     final mediaCount = property.imageCount ?? images.length;
-    const heroH = 248.0;
+    const heroH = 340.0;
     final isDark = theme.brightness == Brightness.dark;
-    final accent = isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
 
     Widget imageLayer() => GestureDetector(
           behavior: HitTestBehavior.opaque,
@@ -796,101 +830,203 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                 ),
         );
 
-    return Material(
-      color: isDark ? AppColors.background.cardBackgroundDarkMode : AppColors.background.cardBackground,
-      elevation: isDark ? 2 : 3,
-      shadowColor: accent.withValues(alpha: isDark ? 0.35 : 0.22),
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-        side: BorderSide(color: accent.withValues(alpha: isDark ? 0.32 : 0.18)),
-      ),
-      child: SizedBox(
-        height: heroH,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(child: imageLayer()),
-            IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    stops: const [0.0, 0.38, 0.72, 1.0],
-                    colors: [
-                      Colors.black.withValues(alpha: 0.42),
-                      Colors.transparent,
-                      Colors.black.withValues(alpha: 0.28),
-                      Colors.black.withValues(alpha: 0.62),
-                    ],
+    return SizedBox(
+      width: double.infinity,
+      height: heroH,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned.fill(child: imageLayer()),
+
+          // Gradient bottom mais forte — necessário pro título sobreposto
+          // ler bem em fotos claras. Top também tem um leve "veneer" pra
+          // contadores/featured chip.
+          IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  stops: const [0.0, 0.32, 0.6, 1.0],
+                  colors: [
+                    Colors.black.withValues(alpha: isDark ? 0.5 : 0.38),
+                    Colors.transparent,
+                    Colors.black.withValues(alpha: 0.18),
+                    Colors.black.withValues(alpha: 0.78),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          if (property.isFeatured)
+            Positioned(
+              top: 16,
+              right: 16,
+              child: _buildHeroFeaturedChip(),
+            ),
+          if (mediaCount > 1)
+            Positioned(
+              right: 16,
+              top: 16,
+              child: _buildHeroMediaCounter(
+                images.isEmpty ? 1 : _currentImageIndex + 1,
+                mediaCount,
+              ),
+            ),
+          if (images.isNotEmpty)
+            Positioned(
+              left: 16,
+              top: 16,
+              child: _buildExpandHint(),
+            ),
+
+          // Setas laterais para navegação entre fotos
+          if (images.length > 1 && _currentImageIndex > 0)
+            Positioned(
+              left: 8,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: _buildHeroNavArrow(
+                  Icons.chevron_left_rounded,
+                  () => _imagePageController.previousPage(
+                    duration: const Duration(milliseconds: 280),
+                    curve: Curves.easeOut,
                   ),
                 ),
               ),
             ),
-            if (property.isFeatured)
-              Positioned(
-                top: 14,
-                right: 14,
-                child: _buildHeroFeaturedChip(),
-              ),
-            if (mediaCount > 1)
-              Positioned(
-                right: 14,
-                bottom: 60,
-                child: _buildHeroMediaCounter(
-                  images.isEmpty ? 1 : _currentImageIndex + 1,
-                  mediaCount,
-                ),
-              ),
-            if (images.isNotEmpty)
-              Positioned(
-                left: 14,
-                bottom: 60,
-                child: _buildExpandHint(),
-              ),
-            if (images.length > 1)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 22,
-                child: Center(
-                  child: _buildHeroDots(images.length, _currentImageIndex),
-                ),
-              ),
-            if (images.length > 1 && _currentImageIndex > 0)
-              Positioned(
-                left: 8,
-                top: 0,
-                bottom: 0,
-                child: Center(
-                  child: _buildHeroNavArrow(
-                    Icons.chevron_left_rounded,
-                    () => _imagePageController.previousPage(
-                      duration: const Duration(milliseconds: 280),
-                      curve: Curves.easeOut,
-                    ),
+          if (images.length > 1 && _currentImageIndex < images.length - 1)
+            Positioned(
+              right: 8,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: _buildHeroNavArrow(
+                  Icons.chevron_right_rounded,
+                  () => _imagePageController.nextPage(
+                    duration: const Duration(milliseconds: 280),
+                    curve: Curves.easeOut,
                   ),
                 ),
               ),
-            if (images.length > 1 && _currentImageIndex < images.length - 1)
-              Positioned(
-                right: 8,
-                top: 0,
-                bottom: 0,
-                child: Center(
-                  child: _buildHeroNavArrow(
-                    Icons.chevron_right_rounded,
-                    () => _imagePageController.nextPage(
-                      duration: const Duration(milliseconds: 280),
-                      curve: Curves.easeOut,
-                    ),
-                  ),
+            ),
+
+          // Título + endereço sobrepostos no rodapé
+          Positioned(
+            left: 20,
+            right: 20,
+            bottom: images.length > 1 ? 28 : 20,
+            child: _buildHeroOverlay(theme, property),
+          ),
+
+          // Dots no fim (apenas quando há mais de uma imagem)
+          if (images.length > 1)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 8,
+              child: Center(
+                child: _buildHeroDots(images.length, _currentImageIndex),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Overlay de título no rodapé da hero — substitui o que era "linha de
+  /// chips de tipo + título grande" do antigo `_buildIdentityCard` (que
+  /// vinha em CIMA de outro container abaixo da foto).
+  ///
+  /// Branco-sobre-foto-com-gradiente é o padrão de Airbnb/Booking pra
+  /// "fichas" de imóvel — a foto é a protagonista, o nome dela aparece
+  /// como manchete sobreposta.
+  Widget _buildHeroOverlay(ThemeData theme, Property property) {
+    final fullAddress = property.neighborhood.isNotEmpty
+        ? '${property.neighborhood} · ${property.city}/${property.state}'
+        : '${property.city}/${property.state}';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Tipo do imóvel como eyebrow accent claro
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.18),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.32),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                _typeIcon(property.type),
+                size: 11,
+                color: Colors.white,
+              ),
+              const SizedBox(width: 5),
+              Text(
+                property.type.label.toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.3,
+                  color: Colors.white,
+                  height: 1,
                 ),
               ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          property.title,
+          style: theme.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.5,
+            height: 1.1,
+            color: Colors.white,
+            shadows: [
+              Shadow(
+                offset: const Offset(0, 1),
+                blurRadius: 4,
+                color: Colors.black.withValues(alpha: 0.4),
+              ),
+            ],
+          ),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            Icon(
+              Icons.place_rounded,
+              size: 14,
+              color: Colors.white.withValues(alpha: 0.85),
+            ),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                fullAddress,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.92),
+                  fontWeight: FontWeight.w600,
+                  height: 1.25,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ],
         ),
-      ),
+      ],
     );
   }
 
@@ -1052,7 +1188,54 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
+  /// Indicadores de página da hero.
+  ///
+  /// Antes usava um `Row` com `total` dots — quebrava em overflow quando
+  /// o imóvel tinha 12+ fotos (ex.: 20 dots × ~12px = 240px+ que estoura
+  /// telas estreitas). Agora aplicamos uma regra adaptativa:
+  ///
+  /// - Até **8 fotos**: mostra dots tradicionais (Instagram-like).
+  /// - Mais que isso: usa um **indicador compacto "X / Y"** com fundo
+  ///   semitransparente — escala bem para qualquer número de fotos.
   Widget _buildHeroDots(int total, int current) {
+    if (total > 8) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.45),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.15),
+          ),
+        ),
+        child: Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(
+                text: '${current + 1}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 12,
+                  letterSpacing: 0.2,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+              TextSpan(
+                text: '  /  $total',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.7),
+                  fontWeight: FontWeight.w700,
+                  fontSize: 11,
+                  letterSpacing: 0.2,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: List.generate(total, (i) {
@@ -1095,6 +1278,16 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   // ────────────────────────────── IDENTIDADE ──────────────────────────────
 
+  /// Bloco de "identidade" reformulado — **sem caixa visual encapsulada**.
+  ///
+  /// Antes era um DecoratedBox com borderRadius 20, sombra e ClipRRect
+  /// envolvendo tudo, criando um "card sobre card". Repetia também o
+  /// título + tipo + endereço que agora estão sobrepostos na hero.
+  ///
+  /// Agora é só conteúdo direto sobre o background da página:
+  /// - Linha de código + matches badge + relacionados (compacto)
+  /// - Pills de meta-status (público/privado, aceita proposta, MCMV…)
+  /// - Footer de identidade (se houver) — separado por linha sutil
   Widget _buildIdentityCard(
     BuildContext context,
     ThemeData theme,
@@ -1102,193 +1295,103 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     Color muted,
     bool isDark,
   ) {
-    final cardBg = isDark
-        ? AppColors.background.cardBackgroundDarkMode
-        : AppColors.background.cardBackground;
-    final borderColor = isDark
-        ? AppColors.border.borderDarkMode
-        : AppColors.border.border;
+    final pills = _buildIdentityMetaPills(property, isDark);
+    final hasFooter = _hasIdentityFooterContent(property);
+    final hasCode = property.code != null && property.code!.isNotEmpty;
 
-    final addressFull = property.address.isNotEmpty
-        ? property.address
-        : '${property.street}, ${property.number} - ${property.neighborhood}, ${property.city} - ${property.state}';
-
-    final accent = isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: borderColor.withValues(alpha: isDark ? 0.48 : 0.62),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.26 : 0.075),
-            blurRadius: 22,
-            offset: const Offset(0, 8),
-            spreadRadius: -6,
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(19),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Linha código + matches — informação meta, em peso secundário
+        Row(
           children: [
-            Container(
-              height: 3,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    accent.withValues(alpha: 0.9),
-                    accent.withValues(alpha: 0.22),
-                  ],
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
-              child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            if (hasCode) ...[
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: property.code!));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Código copiado'),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 5,
+                  ),
                   decoration: BoxDecoration(
-                    color: accent.withValues(alpha: isDark ? 0.14 : 0.1),
+                    color: muted.withValues(alpha: 0.10),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: accent.withValues(alpha: 0.22)),
+                    border: Border.all(
+                      color: muted.withValues(alpha: 0.22),
+                    ),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
-                        _typeIcon(property.type),
-                        size: 12,
-                        color: accent,
-                      ),
+                      Icon(Icons.tag, size: 12, color: muted),
                       const SizedBox(width: 4),
                       Text(
-                        property.type.label.toUpperCase(),
+                        property.code!,
                         style: TextStyle(
-                          fontSize: 10,
+                          fontSize: 11,
                           fontWeight: FontWeight.w800,
-                          letterSpacing: 0.6,
-                          color: accent,
+                          color: muted,
+                          letterSpacing: 0.3,
+                          fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                       ),
                     ],
                   ),
                 ),
-                if (property.code != null && property.code!.isNotEmpty) ...[
-                  const SizedBox(width: 8),
-                  InkWell(
-                    borderRadius: BorderRadius.circular(8),
-                    onTap: () {
-                      Clipboard.setData(ClipboardData(text: property.code!));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Código copiado'),
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: muted.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.tag, size: 11, color: muted),
-                          const SizedBox(width: 3),
-                          Text(
-                            property.code!,
-                            style: TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w800,
-                              color: muted,
-                              letterSpacing: 0.2,
-                              fontFeatures: const [FontFeature.tabularFigures()],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-            const SizedBox(height: 10),
-            MatchesBadge(
-              propertyId: widget.propertyId,
-              onClick: () => Navigator.pushNamed(
-                context,
-                AppRoutes.matchesByProperty(widget.propertyId),
               ),
-              child: Text(
-                property.title,
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.4,
-                  height: 1.15,
-                  color: ThemeHelpers.textColor(context),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(Icons.place_outlined, size: 16, color: accent.withValues(alpha: 0.75)),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    addressFull,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: muted,
-                      height: 1.3,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            if (_buildIdentityMetaPills(property, isDark).isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: _buildIdentityMetaPills(property, isDark),
-              ),
+              const SizedBox(width: 10),
             ],
-            if (_hasIdentityFooterContent(property)) ...[
-              const SizedBox(height: 14),
-              Container(
-                height: 1,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      borderColor.withValues(alpha: 0),
-                      borderColor.withValues(alpha: isDark ? 0.6 : 0.85),
-                      borderColor.withValues(alpha: 0),
-                    ],
+            // Matches badge — vai pra direita pra ficar visualmente equilibrado
+            Expanded(
+              child: Align(
+                alignment: hasCode
+                    ? Alignment.centerLeft
+                    : Alignment.centerLeft,
+                child: MatchesBadge(
+                  propertyId: widget.propertyId,
+                  onClick: () => Navigator.pushNamed(
+                    context,
+                    AppRoutes.matchesByProperty(widget.propertyId),
                   ),
+                  child: const SizedBox.shrink(),
                 ),
               ),
-              const SizedBox(height: 12),
-              _buildIdentityFooter(theme, property, muted),
-            ],
-              ],
             ),
-          ),
           ],
         ),
-      ),
+
+        // Pills de meta-status (público, MCMV, aceita proposta, etc)
+        if (pills.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: pills,
+          ),
+        ],
+
+        // Footer extra (responsável, captador, etc) — quando existe,
+        // separado por linha fina pra dividir hierarquia
+        if (hasFooter) ...[
+          const SizedBox(height: 14),
+          Container(
+            height: 1,
+            color: ThemeHelpers.borderLightColor(context)
+                .withValues(alpha: 0.55),
+          ),
+          const SizedBox(height: 12),
+          _buildIdentityFooter(theme, property, muted),
+        ],
+      ],
     );
   }
 
@@ -1629,53 +1732,18 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ? AppColors.primary.primaryDarkMode
         : AppColors.primary.primary;
 
-    final surface = isDark
-        ? AppColors.background.backgroundSecondaryDarkMode
-        : AppColors.background.backgroundSecondary;
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: accent.withValues(alpha: isDark ? 0.36 : 0.24),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.24 : 0.07),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-            spreadRadius: -5,
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(19),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(
-              height: 3,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    accent.withValues(alpha: 0.95),
-                    accent.withValues(alpha: 0.2),
-                  ],
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
-              child: hasSale && hasRent
-                  ? _buildPriceDualLayout(theme, property, accent, isDark)
-                  : _buildPriceSingleLayout(theme, property, hasSale, accent, isDark),
-            ),
-          ],
-        ),
-      ),
-    );
+    // Bloco de preço editorial — **sem caixa**.
+    //
+    // O preço é a informação mais importante depois da foto: ele é a
+    // razão de o imóvel existir na vitrine. Antes ficava encapsulado
+    // numa caixa secundária, sem destaque tipográfico real.
+    //
+    // Agora é só um padding inline sobre o background da página, com a
+    // hierarquia tipográfica fazendo o trabalho: eyebrow accent fino +
+    // valor grande em peso 900 + chips de meta abaixo.
+    return hasSale && hasRent
+        ? _buildPriceDualLayout(theme, property, accent, isDark)
+        : _buildPriceSingleLayout(theme, property, hasSale, accent, isDark);
   }
 
   Widget _buildPriceUnavailableCard(BuildContext context, ThemeData theme, bool isDark) {
@@ -2299,66 +2367,23 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
+  /// Descrição editorial — sem caixa, sem limite duro, com expand/collapse.
+  ///
+  /// Antes era um Container com border + sombra + stripe accent + texto
+  /// sem limite, virando paredão infinito em imóveis com descrição
+  /// longa.
+  ///
+  /// Agora delega ao `_ExpandableDescription`:
+  /// - Texto vai DIRETO sobre o background (sem caixa cinza)
+  /// - Régua accent fina à esquerda como ânfase editorial
+  /// - Mostra ~5 linhas com **gradient fade** no rodapé indicando truncamento
+  /// - Botão "Ver mais" / "Ver menos" — não corta o conteúdo, só recolhe
   Widget _buildDescriptionCard(
     BuildContext context,
     ThemeData theme,
     Property property,
   ) {
-    final isDark = theme.brightness == Brightness.dark;
-    final cardBg = isDark
-        ? AppColors.background.cardBackgroundDarkMode
-        : AppColors.background.cardBackground;
-    final borderColor = isDark
-        ? AppColors.border.borderDarkMode
-        : AppColors.border.border;
-    final text = property.description.trim().isEmpty
-        ? 'Sem descrição cadastrada para este imóvel.'
-        : property.description;
-    final isEmpty = property.description.trim().isEmpty;
-
-    final accent = isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: borderColor.withValues(alpha: isDark ? 0.55 : 0.75)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.14 : 0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-            spreadRadius: -2,
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(15),
-        child: IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Container(width: 4, color: accent),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 16, 16, 16),
-                  child: Text(
-                    text,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: isEmpty
-                          ? ThemeHelpers.textSecondaryColor(context)
-                          : ThemeHelpers.textColor(context),
-                      height: 1.55,
-                      fontStyle: isEmpty ? FontStyle.italic : null,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+    return _ExpandableDescription(text: property.description);
   }
 
   Widget _buildCharacteristicsCard(
@@ -6366,6 +6391,215 @@ class _GalleryRoundIconButton extends StatelessWidget {
                   ),
                 )
               : Icon(icon, color: fg, size: 22),
+        ),
+      ),
+    );
+  }
+}
+
+/// Descrição editorial expansível.
+///
+/// Comportamento:
+/// - **Recolhida**: mostra ~5 linhas; quando o texto extrapola, aplica
+///   um `ShaderMask` com gradient fade no rodapé indicando que tem mais
+///   conteúdo, e exibe o botão "Ver mais".
+/// - **Expandida**: texto completo + botão "Ver menos".
+/// - **Vazia**: mensagem discreta em itálico, sem qualquer caixa.
+///
+/// A detecção de "extrapolou as 5 linhas" é feita via `TextPainter.didExceedMaxLines`
+/// no `LayoutBuilder` — assim o botão só aparece se realmente o texto
+/// for longo o suficiente para ser truncado.
+class _ExpandableDescription extends StatefulWidget {
+  const _ExpandableDescription({required this.text});
+
+  final String text;
+
+  static const int _kCollapsedMaxLines = 5;
+
+  @override
+  State<_ExpandableDescription> createState() => _ExpandableDescriptionState();
+}
+
+class _ExpandableDescriptionState extends State<_ExpandableDescription>
+    with SingleTickerProviderStateMixin {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final accent =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+
+    final cleaned = widget.text.trim();
+    final empty = cleaned.isEmpty;
+
+    if (empty) {
+      return Padding(
+        padding: const EdgeInsets.only(left: 14, top: 4),
+        child: Row(
+          children: [
+            Icon(Icons.short_text_rounded, size: 16, color: secondary),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                'Sem descrição cadastrada. Edite o imóvel para adicionar contexto.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: secondary,
+                  fontWeight: FontWeight.w600,
+                  height: 1.4,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final textStyle = theme.textTheme.bodyLarge?.copyWith(
+      height: 1.6,
+      fontSize: 14.5,
+      letterSpacing: -0.05,
+      color: ThemeHelpers.textColor(context),
+      fontWeight: FontWeight.w500,
+    );
+
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Régua accent fina à esquerda — referência editorial discreta
+          Container(
+            width: 3,
+            margin: const EdgeInsets.only(right: 14),
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.55),
+              borderRadius: BorderRadius.circular(99),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    // Mede se o texto extrapola N linhas pra decidir se
+                    // mostra o botão "Ver mais"/"Ver menos".
+                    final tp = TextPainter(
+                      text: TextSpan(text: cleaned, style: textStyle),
+                      maxLines: _ExpandableDescription._kCollapsedMaxLines,
+                      textDirection: Directionality.of(context),
+                    )..layout(maxWidth: constraints.maxWidth);
+
+                    final overflow = tp.didExceedMaxLines;
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        AnimatedSize(
+                          duration: const Duration(milliseconds: 220),
+                          alignment: Alignment.topLeft,
+                          curve: Curves.easeOut,
+                          child: _expanded || !overflow
+                              ? SelectableText(
+                                  cleaned,
+                                  style: textStyle,
+                                )
+                              : ShaderMask(
+                                  shaderCallback: (rect) {
+                                    return LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: const [
+                                        Colors.white,
+                                        Colors.white,
+                                        Colors.transparent,
+                                      ],
+                                      stops: const [0.0, 0.7, 1.0],
+                                    ).createShader(rect);
+                                  },
+                                  blendMode: BlendMode.dstIn,
+                                  child: Text(
+                                    cleaned,
+                                    maxLines: _ExpandableDescription
+                                        ._kCollapsedMaxLines,
+                                    overflow: TextOverflow.clip,
+                                    style: textStyle,
+                                  ),
+                                ),
+                        ),
+                        if (overflow) ...[
+                          const SizedBox(height: 6),
+                          _ExpandToggle(
+                            expanded: _expanded,
+                            accent: accent,
+                            onTap: () {
+                              setState(() => _expanded = !_expanded);
+                            },
+                          ),
+                        ],
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Botão minimalista de toggle "Ver mais ↓ / Ver menos ↑".
+class _ExpandToggle extends StatelessWidget {
+  const _ExpandToggle({
+    required this.expanded,
+    required this.accent,
+    required this.onTap,
+  });
+
+  final bool expanded;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                expanded ? 'Ver menos' : 'Ver mais',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: accent,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.1,
+                ),
+              ),
+              const SizedBox(width: 4),
+              AnimatedRotation(
+                turns: expanded ? 0.5 : 0,
+                duration: const Duration(milliseconds: 220),
+                child: Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  size: 18,
+                  color: accent,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

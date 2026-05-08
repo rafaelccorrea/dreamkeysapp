@@ -45,6 +45,19 @@ class KanbanController extends ChangeNotifier {
   String? _bulkBoardContextKey;
   bool _bulkDeleting = false;
 
+  // ── Paginação por coluna ────────────────────────────────────────────
+  /// Estado de paginação por coluna. Inicializado quando `loadBoard`
+  /// retorna e usado por `loadMoreTasksForColumn`.
+  ///
+  /// O board (`getBoard`) traz só `perColumnLimit` cards (default 12)
+  /// por coluna. Pra carregar os próximos, chamamos
+  /// `GET /kanban/columns/:id/tasks?page=N&limit=12` e fazemos append no
+  /// `_board.tasks`. O `_columnPagination[columnId]` mantém qual a
+  /// próxima página, total de páginas (descoberto após 1ª chamada
+  /// paginada), e flags de loading/hasMore.
+  static const int _kColumnPageSize = 12;
+  final Map<String, ColumnPagination> _columnPagination = {};
+
   // Getters
   KanbanBoard? get board => _board;
   bool get loading => _loading;
@@ -1315,7 +1328,14 @@ class KanbanController extends ChangeNotifier {
     String? projectId,
     bool clearError = false,
   }) {
-    if (board != null) _board = board;
+    if (board != null) {
+      _board = board;
+      // Reseta a paginação por coluna toda vez que o board é recarregado
+      // (ex.: troca de funil, refresh manual, recovery de 404). Sem isso,
+      // os contadores de página ficavam fora de sincronia com o novo
+      // conjunto de cards e o "Carregar mais" duplicava ou parava cedo.
+      _resetColumnPagination(board);
+    }
     if (loading != null) _loading = loading;
     if (clearError) _error = null;
     if (error != null) _error = error;
@@ -1339,6 +1359,114 @@ class KanbanController extends ChangeNotifier {
     _bulkDeleteEligibilityLoading = false;
     _bulkBoardContextKey = null;
     _bulkDeleting = false;
+    _columnPagination.clear();
     notifyListeners();
   }
+
+  // ───────────────────────────────────────────────────────────────────
+  // PAGINAÇÃO POR COLUNA
+  // ───────────────────────────────────────────────────────────────────
+
+  /// Inicializa o estado de paginação após `loadBoard` ou refresh.
+  ///
+  /// Heurística: se uma coluna chegou com **exatamente** `_kColumnPageSize`
+  /// cards no board inicial, assumimos que pode haver mais e marcamos
+  /// `hasMore = true`. Se chegou com menos, certamente não há mais.
+  /// O `totalPages` real só é descoberto após a primeira chamada
+  /// paginada — antes disso, deixamos `hasMore` como otimista (true).
+  void _resetColumnPagination(KanbanBoard board) {
+    _columnPagination.clear();
+    final byColumn = <String, int>{};
+    for (final t in board.tasks) {
+      byColumn.update(t.columnId, (v) => v + 1, ifAbsent: () => 1);
+    }
+    for (final col in board.columns) {
+      final loaded = byColumn[col.id] ?? 0;
+      _columnPagination[col.id] = ColumnPagination(
+        currentPage: 1,
+        loadedCount: loaded,
+        // Se chegou exatamente o page size, há chance de ter mais.
+        // Se chegou menos, não há mais.
+        hasMore: loaded >= _kColumnPageSize,
+      );
+    }
+  }
+
+  /// Status de paginação de uma coluna (UI usa `hasMore` + `loadingMore`
+  /// pra renderizar o botão "Carregar mais" e o spinner).
+  ColumnPagination columnPaginationFor(String columnId) {
+    return _columnPagination[columnId] ??
+        ColumnPagination(
+          currentPage: 1,
+          loadedCount: 0,
+          hasMore: false,
+        );
+  }
+
+  /// Carrega a próxima página de tasks da coluna e adiciona ao board.
+  ///
+  /// Chama `GET /kanban/columns/:id/tasks?page=N&limit=12` e faz append
+  /// dos cards novos em `_board.tasks` (deduplicando por id).
+  Future<void> loadMoreTasksForColumn(String columnId) async {
+    final state = _columnPagination[columnId];
+    if (state == null || !state.hasMore || state.loadingMore) return;
+    if (_board == null) return;
+    final teamId = _teamId;
+    if (teamId == null || teamId.isEmpty) return;
+
+    state.loadingMore = true;
+    notifyListeners();
+
+    try {
+      final nextPage = state.currentPage + 1;
+      final res = await _kanbanService.getColumnTasks(
+        columnId: columnId,
+        teamId: teamId,
+        projectId: _projectId,
+        page: nextPage,
+        limit: _kColumnPageSize,
+      );
+
+      if (res.success && res.data != null) {
+        final pageData = res.data!;
+        final existingIds =
+            _board!.tasks.map((t) => t.id).toSet();
+        final newOnes = pageData.tasks
+            .where((t) => !existingIds.contains(t.id))
+            .toList();
+        _board!.tasks.addAll(newOnes);
+
+        state.currentPage = pageData.page;
+        state.loadedCount += newOnes.length;
+        // `totalPages` confiável vem aqui — atualizamos o `hasMore`.
+        state.hasMore = pageData.page < pageData.totalPages;
+      } else {
+        // Falha na página → marca como sem-mais pra não loopar.
+        state.hasMore = false;
+      }
+    } catch (e) {
+      debugPrint('❌ [KANBAN_CTRL] loadMoreTasksForColumn($columnId): $e');
+      state.hasMore = false;
+    } finally {
+      state.loadingMore = false;
+      notifyListeners();
+    }
+  }
+}
+
+/// Estado de paginação por coluna do board Kanban.
+///
+/// Exposto publicamente porque a UI precisa ler `hasMore` e `loadingMore`
+/// pra renderizar o botão "Carregar mais" e o spinner inline.
+class ColumnPagination {
+  int currentPage;
+  int loadedCount;
+  bool hasMore;
+  bool loadingMore = false;
+
+  ColumnPagination({
+    required this.currentPage,
+    required this.loadedCount,
+    required this.hasMore,
+  });
 }

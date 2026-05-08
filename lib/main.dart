@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
 import 'core/constants/api_constants.dart';
@@ -81,6 +82,20 @@ class _MyAppState extends State<MyApp> {
         navigatorKey: appNavigatorKey,
         initialRoute: AppRoutes.splash,
         onGenerateRoute: AppRoutes.generateRoute,
+        // Localização pt-BR — sem isso, `showDatePicker(locale: pt_BR)`
+        // não consegue carregar traduções e o popup do calendário
+        // simplesmente não abre. Era exatamente o que estava acontecendo
+        // no filtro do dashboard.
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: const [
+          Locale('pt', 'BR'),
+          Locale('en', 'US'),
+        ],
+        locale: const Locale('pt', 'BR'),
       ),
     );
   }

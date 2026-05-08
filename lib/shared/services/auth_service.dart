@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../../core/constants/api_constants.dart';
 import '../../core/push/app_push_service.dart';
+import '../utils/avatar_url_resolver.dart';
 import 'api_service.dart';
 import 'secure_storage_service.dart';
 
@@ -95,7 +96,7 @@ class User {
       email: json['email']?.toString() ?? '',
       role: json['role']?.toString() ?? '',
       owner: json['owner'] as bool? ?? false,
-      avatar: json['avatar']?.toString(),
+      avatar: AvatarUrlResolver.resolve(json['avatar']?.toString()),
       companyId: json['companyId']?.toString() ?? json['company_id']?.toString(),
       createdAt: json['createdAt']?.toString() ?? json['created_at']?.toString() ?? '',
       updatedAt: json['updatedAt']?.toString() ?? json['updated_at']?.toString(),

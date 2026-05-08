@@ -287,6 +287,73 @@ class KanbanService {
     }
   }
 
+  /// Lista tasks de uma coluna específica com paginação.
+  ///
+  /// Endpoint: `GET /kanban/columns/:columnId/tasks?teamId&projectId&page&limit&search`
+  ///
+  /// Usado pelo botão "Carregar mais" nos cards do board — quando o
+  /// `getBoard` traz só os primeiros N (perColumnLimit, padrão 12) por
+  /// coluna e o usuário precisa ver os próximos.
+  ///
+  /// O backend retorna `{ data, total, page, limit, totalPages }`. Espelha
+  /// `KanbanColumnTasksPage`.
+  Future<ApiResponse<KanbanColumnTasksPage>> getColumnTasks({
+    required String columnId,
+    required String teamId,
+    String? projectId,
+    int page = 1,
+    int limit = 12,
+    String? search,
+  }) async {
+    try {
+      final params = <String, String>{
+        'teamId': teamId,
+        'page': '$page',
+        'limit': '$limit',
+      };
+      if (projectId != null && projectId.isNotEmpty) {
+        params['projectId'] = projectId;
+      }
+      if (search != null && search.trim().isNotEmpty) {
+        params['search'] = search.trim();
+      }
+
+      final response = await _apiService.get<Map<String, dynamic>>(
+        ApiConstants.kanbanColumnTasks(columnId),
+        queryParameters: params,
+      );
+
+      if (response.success && response.data != null) {
+        try {
+          final pageData = KanbanColumnTasksPage.fromJson(response.data!);
+          return ApiResponse.success(
+            data: pageData,
+            statusCode: response.statusCode,
+          );
+        } catch (e) {
+          debugPrint('❌ [KANBAN_SERVICE] Erro ao fazer parse: $e');
+          return ApiResponse.error(
+            message: 'Erro ao processar resposta',
+            statusCode: response.statusCode,
+            data: response.error,
+          );
+        }
+      }
+
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao buscar tarefas da coluna',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [KANBAN_SERVICE] Exceção ao buscar tasks da coluna: $e');
+      return ApiResponse.error(
+        message: 'Erro ao buscar tarefas da coluna: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
   /// Lista colunas
   Future<ApiResponse<List<KanbanColumn>>> listColumns() async {
     try {

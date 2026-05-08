@@ -5,6 +5,7 @@ import 'dart:convert';
 import '../../core/constants/api_constants.dart';
 import 'api_service.dart';
 import 'secure_storage_service.dart';
+import '../utils/avatar_url_resolver.dart';
 
 /// Modelos de dados de Perfil
 class Profile {
@@ -47,7 +48,7 @@ class Profile {
       email: json['email']?.toString() ?? '',
       phone: json['phone']?.toString(),
       cellphone: json['cellphone']?.toString(),
-      avatar: json['avatar']?.toString(),
+      avatar: AvatarUrlResolver.resolve(json['avatar']?.toString()),
       role: json['role']?.toString() ?? '',
       companyId: json['companyId']?.toString() ?? json['company_id']?.toString() ?? '',
       companyName: json['companyName']?.toString() ?? json['company_name']?.toString(),

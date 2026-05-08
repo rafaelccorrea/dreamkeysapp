@@ -1675,24 +1675,69 @@ class _KanbanPageState extends State<KanbanPage> {
                                 )
                               : ScrollConfiguration(
                                   behavior: NoScrollbarScrollBehavior(),
-                                  child: ListView.builder(
-                                    shrinkWrap: false,
-                                    physics:
-                                        const AlwaysScrollableScrollPhysics(),
-                                    padding: const EdgeInsets.fromLTRB(
-                                      6,
-                                      8,
-                                      6,
-                                      8,
-                                    ),
-                                    itemCount: tasks.length,
-                                    itemBuilder: (context, index) {
-                                      final task = tasks[index];
-                                      return _buildDraggableTaskForReorder(
-                                        context,
-                                        controller,
-                                        task,
-                                        column.id,
+                                  child: Builder(
+                                    builder: (context) {
+                                      // Paginação por coluna — auto load ao
+                                      // chegar no fim da lista; mantém item
+                                      // extra apenas para mostrar spinner.
+                                      final pagination = controller
+                                          .columnPaginationFor(column.id);
+                                      final showFooter = pagination.loadingMore;
+                                      final itemCount = tasks.length +
+                                          (showFooter ? 1 : 0);
+                                      return NotificationListener<
+                                        ScrollNotification
+                                      >(
+                                        onNotification: (notification) {
+                                          if (notification.metrics.axis !=
+                                              Axis.vertical) {
+                                            return false;
+                                          }
+                                          final nearBottom =
+                                              notification
+                                                  .metrics
+                                                  .pixels >=
+                                              notification
+                                                      .metrics
+                                                      .maxScrollExtent -
+                                                  120;
+                                          if (nearBottom &&
+                                              pagination.hasMore &&
+                                              !pagination.loadingMore) {
+                                            controller.loadMoreTasksForColumn(
+                                              column.id,
+                                            );
+                                          }
+                                          return false;
+                                        },
+                                        child: ListView.builder(
+                                          shrinkWrap: false,
+                                          physics:
+                                              const AlwaysScrollableScrollPhysics(),
+                                          padding: const EdgeInsets.fromLTRB(
+                                            6,
+                                            8,
+                                            6,
+                                            8,
+                                          ),
+                                          itemCount: itemCount,
+                                          itemBuilder: (context, index) {
+                                            if (index >= tasks.length) {
+                                              return _buildLoadMoreFooter(
+                                                context,
+                                                columnColor,
+                                                pagination,
+                                              );
+                                            }
+                                            final task = tasks[index];
+                                            return _buildDraggableTaskForReorder(
+                                              context,
+                                              controller,
+                                              task,
+                                              column.id,
+                                            );
+                                          },
+                                        ),
                                       );
                                     },
                                   ),
@@ -1742,6 +1787,70 @@ class _KanbanPageState extends State<KanbanPage> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Footer da lista de cards — somente spinner do carregamento automático.
+  Widget _buildLoadMoreFooter(
+    BuildContext context,
+    Color columnColor,
+    ColumnPagination pagination,
+  ) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final loading = pagination.loadingMore;
+    final loaded = pagination.loadedCount;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 4),
+      child: Material(
+        color: Colors.transparent,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            color: columnColor.withValues(alpha: isDark ? 0.10 : 0.06),
+            border: Border.all(
+              color: columnColor.withValues(alpha: isDark ? 0.35 : 0.25),
+              width: 1,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (loading) ...[
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: columnColor,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  'Carregando mais tarefas...',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: columnColor,
+                    letterSpacing: -0.1,
+                  ),
+                ),
+              ] else
+                Text(
+                  '$loaded carregados',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: columnColor,
+                    fontSize: 10,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

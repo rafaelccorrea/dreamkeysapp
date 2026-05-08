@@ -587,6 +587,41 @@ class KanbanBoard {
   }
 }
 
+/// Página de tasks de uma coluna específica.
+///
+/// Resposta de `GET /kanban/columns/:columnId/tasks?page=N&limit=M`.
+/// Usado para o "Carregar mais" cards dentro de uma coluna do board.
+class KanbanColumnTasksPage {
+  final List<KanbanTask> tasks;
+  final int total;
+  final int page;
+  final int limit;
+  final int totalPages;
+
+  KanbanColumnTasksPage({
+    required this.tasks,
+    required this.total,
+    required this.page,
+    required this.limit,
+    required this.totalPages,
+  });
+
+  factory KanbanColumnTasksPage.fromJson(Map<String, dynamic> json) {
+    final rawTasks = (json['data'] as List<dynamic>?) ?? const [];
+    return KanbanColumnTasksPage(
+      tasks: rawTasks
+          .map((e) => KanbanTask.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      total: (json['total'] as num?)?.toInt() ?? rawTasks.length,
+      page: (json['page'] as num?)?.toInt() ?? 1,
+      limit: (json['limit'] as num?)?.toInt() ?? rawTasks.length,
+      totalPages: (json['totalPages'] as num?)?.toInt() ?? 1,
+    );
+  }
+
+  bool get hasMore => page < totalPages;
+}
+
 /// Equipe do Kanban
 class KanbanTeam {
   final String id;

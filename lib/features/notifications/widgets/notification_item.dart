@@ -29,12 +29,18 @@ class NotificationItem extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     final style = NotificationTypeStyle.fromType(notification.type);
 
+    // Diferença visual de lida vs não lida deve ser **óbvia**, não sutil:
+    // - Não lida: fundo tingido na cor do tipo (mais saturado), borda
+    //   esquerda 4px sólida, dot pulsante, texto cheio.
+    // - Lida: fundo transparente, borda esquerda 2px com 35% de opacity
+    //   (presente mas atenuada), texto secundário cinza.
     final unreadBg = isDark
-        ? Colors.white.withValues(alpha: 0.03)
-        : style.color.withValues(alpha: 0.05);
+        ? style.color.withValues(alpha: 0.10)
+        : style.color.withValues(alpha: 0.06);
 
     final backgroundColor =
         notification.read ? Colors.transparent : unreadBg;
+    final isUnread = !notification.read;
 
     return Dismissible(
       key: Key(notification.id),
@@ -60,13 +66,16 @@ class NotificationItem extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          child: Container(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
             decoration: BoxDecoration(
               color: backgroundColor,
               border: Border(
                 left: BorderSide(
-                  color: style.color,
-                  width: 3,
+                  color: isUnread
+                      ? style.color
+                      : style.color.withValues(alpha: 0.32),
+                  width: isUnread ? 4 : 2,
                 ),
                 bottom: BorderSide(
                   color: isDark
@@ -80,7 +89,7 @@ class NotificationItem extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _TypeIconChip(style: style),
+                _TypeIconChip(style: style, dimmed: !isUnread),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -89,13 +98,19 @@ class NotificationItem extends StatelessWidget {
                       Text(
                         notification.title,
                         style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: notification.read
-                              ? FontWeight.w600
-                              : FontWeight.w700,
+                          fontWeight: isUnread
+                              ? FontWeight.w800
+                              : FontWeight.w600,
                           letterSpacing: -0.1,
-                          color: isDark
-                              ? AppColors.text.textDarkMode
-                              : AppColors.text.text,
+                          // Lidas ficam com texto secundário pra deixar
+                          // claro que já foram vistas.
+                          color: isUnread
+                              ? (isDark
+                                  ? AppColors.text.textDarkMode
+                                  : AppColors.text.text)
+                              : (isDark
+                                  ? AppColors.text.textSecondaryDarkMode
+                                  : AppColors.text.textSecondary),
                         ),
                       ),
                       const SizedBox(height: 4),
@@ -105,7 +120,9 @@ class NotificationItem extends StatelessWidget {
                           height: 1.4,
                           color: isDark
                               ? AppColors.text.textSecondaryDarkMode
-                              : AppColors.text.textSecondary,
+                                  .withValues(alpha: isUnread ? 1 : 0.7)
+                              : AppColors.text.textSecondary
+                                  .withValues(alpha: isUnread ? 1 : 0.7),
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
@@ -113,7 +130,7 @@ class NotificationItem extends StatelessWidget {
                       const SizedBox(height: 8),
                       Row(
                         children: [
-                          _CategoryChip(style: style),
+                          _CategoryChip(style: style, dimmed: !isUnread),
                           const SizedBox(width: 8),
                           Flexible(
                             child: Text(
@@ -133,18 +150,18 @@ class NotificationItem extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (!notification.read)
+                if (isUnread)
                   Container(
-                    width: 8,
-                    height: 8,
-                    margin: const EdgeInsets.only(left: 8, top: 6),
+                    width: 10,
+                    height: 10,
+                    margin: const EdgeInsets.only(left: 10, top: 6),
                     decoration: BoxDecoration(
                       color: style.color,
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: style.color.withValues(alpha: 0.55),
-                          blurRadius: 6,
+                          color: style.color.withValues(alpha: 0.6),
+                          blurRadius: 8,
                         ),
                       ],
                     ),
@@ -180,28 +197,38 @@ class NotificationItem extends StatelessWidget {
 }
 
 /// Chip do ícone à esquerda com fundo `tinted` na cor do tipo.
+///
+/// `dimmed` (notificação já lida): cores e ícone com 55% de opacity.
+/// Mantém a categoria identificável (mesma cor base) mas claramente
+/// "passada".
 class _TypeIconChip extends StatelessWidget {
   final NotificationTypeStyle style;
+  final bool dimmed;
 
-  const _TypeIconChip({required this.style});
+  const _TypeIconChip({required this.style, this.dimmed = false});
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final dimFactor = dimmed ? 0.55 : 1.0;
     return Container(
       width: 40,
       height: 40,
       decoration: BoxDecoration(
-        color: style.color.withValues(alpha: isDark ? 0.18 : 0.12),
+        color: style.color.withValues(
+          alpha: (isDark ? 0.18 : 0.12) * dimFactor,
+        ),
         borderRadius: BorderRadius.circular(11),
         border: Border.all(
-          color: style.color.withValues(alpha: isDark ? 0.32 : 0.22),
+          color: style.color.withValues(
+            alpha: (isDark ? 0.32 : 0.22) * dimFactor,
+          ),
           width: 1,
         ),
       ),
       child: Icon(
         style.icon,
-        color: style.color,
+        color: style.color.withValues(alpha: dimmed ? 0.6 : 1.0),
         size: 20,
       ),
     );
@@ -211,21 +238,27 @@ class _TypeIconChip extends StatelessWidget {
 /// Chip da categoria (label + ponto de cor) ao lado da data.
 class _CategoryChip extends StatelessWidget {
   final NotificationTypeStyle style;
+  final bool dimmed;
 
-  const _CategoryChip({required this.style});
+  const _CategoryChip({required this.style, this.dimmed = false});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final dimFactor = dimmed ? 0.55 : 1.0;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: style.color.withValues(alpha: isDark ? 0.16 : 0.10),
+        color: style.color.withValues(
+          alpha: (isDark ? 0.16 : 0.10) * dimFactor,
+        ),
         borderRadius: BorderRadius.circular(999),
         border: Border.all(
-          color: style.color.withValues(alpha: isDark ? 0.32 : 0.22),
+          color: style.color.withValues(
+            alpha: (isDark ? 0.32 : 0.22) * dimFactor,
+          ),
           width: 1,
         ),
       ),
@@ -236,7 +269,7 @@ class _CategoryChip extends StatelessWidget {
             width: 6,
             height: 6,
             decoration: BoxDecoration(
-              color: style.color,
+              color: style.color.withValues(alpha: dimmed ? 0.6 : 1.0),
               shape: BoxShape.circle,
             ),
           ),
@@ -247,7 +280,7 @@ class _CategoryChip extends StatelessWidget {
               fontSize: 10.5,
               fontWeight: FontWeight.w700,
               letterSpacing: 0.1,
-              color: style.color,
+              color: style.color.withValues(alpha: dimmed ? 0.7 : 1.0),
             ),
           ),
         ],

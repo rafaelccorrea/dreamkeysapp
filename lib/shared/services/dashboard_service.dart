@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'api_service.dart';
 import '../../core/constants/api_constants.dart';
+import '../utils/avatar_url_resolver.dart';
 
 /// Modelos de dados do Dashboard
 class DashboardResponse {
@@ -89,7 +90,7 @@ class DashboardUser {
       name: json['name']?.toString() ?? '',
       email: json['email']?.toString() ?? '',
       role: json['role']?.toString() ?? '',
-      avatar: json['avatar']?.toString(),
+      avatar: AvatarUrlResolver.resolve(json['avatar']?.toString()),
     );
   }
 }

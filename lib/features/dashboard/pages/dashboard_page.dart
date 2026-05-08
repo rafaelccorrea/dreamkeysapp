@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' show cos, max, min, pi, sin;
 
 import 'package:flutter/material.dart';
@@ -1389,193 +1390,171 @@ class _DashboardPageState extends State<DashboardPage> {
     ).format(DateTime.now());
   }
 
+  /// Hero do dashboard — "populado" com contexto vivo do dia.
+  ///
+  /// Reformulado pra deixar de ser uma saudação magra e virar um painel
+  /// editorial denso de informação contextual:
+  ///
+  /// - **Avatar real do usuário** quando disponível (fallback: monograma
+  ///   accent gradient com a primeira letra do nome)
+  /// - **Eyebrow `PAINEL · HH:MM` com clock vivo** que atualiza em
+  ///   tempo real (sub-widget `_HeroLiveClock` com Timer.periodic)
+  /// - **Saudação** dinâmica + nome
+  /// - **Subtitle de role** formatado (ex.: "Master · Corretor")
+  /// - **Spotlight do próximo agendamento iminente** (se houver):
+  ///   destaca a próxima visita/reunião com hora + título + cliente.
+  ///   Quando não há nada nos próximos compromissos, mostra um
+  ///   empty-state contextual ("Nada na agenda iminente").
+  /// - **Quick KPI strip** com 4 mini-pills inline mostrando contagens
+  ///   chave (Imóveis · Clientes · Agendamentos · Tarefas) com ícones
+  ///   próprios e cores semânticas
+  /// - **Insight panel** (já existia) de variação % vs período anterior
+  /// - **Pill de período ativo** + botões Atualizar/Filtros
+  ///
+  /// Removidas as pills antigas de "Comparação" e "Métrica" — não
+  /// fazem mais parte do filtro (eram filtros sem efeito visual).
   Widget _buildGreeting(BuildContext context, ThemeData theme) {
-    final userName = _dashboardData?.user.name ?? 'Usuário';
-    final firstName = userName.trim().isEmpty ? 'Usuário' : userName.trim().split(' ').first;
+    final user = _dashboardData?.user;
+    final userName = user?.name ?? 'Usuário';
+    final firstName =
+        userName.trim().isEmpty ? 'Usuário' : userName.trim().split(' ').first;
     final performance = _dashboardData?.performance;
     final stats = _dashboardData?.stats;
+    final upcomingAppointments =
+        _dashboardData?.upcomingAppointments ?? const <DashboardAppointment>[];
     final accent = _dashboardAccentColor(context);
-
-    Widget greetingIcon() {
-      final isDark = Theme.of(context).brightness == Brightness.dark;
-      return Container(
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          gradient: LinearGradient(
-            colors: [accent, const Color(0xFF7C3AED)],
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: isDark
-                  ? accent.withOpacity(0.35)
-                  : accent.withValues(alpha: 0.22),
-              blurRadius: isDark ? 14 : 11,
-              offset: Offset(0, isDark ? 8 : 4),
-              spreadRadius: isDark ? 0 : -1,
-            ),
-          ],
-        ),
-        child: const Icon(Icons.dashboard_customize_outlined, color: Colors.white, size: 22),
-      );
-    }
-
-    Widget pillRow() {
-      return Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          _buildFilterPill(context, Icons.date_range_outlined, _activePeriodLabel()),
-          _buildFilterPill(context, Icons.compare_arrows_outlined, _activeComparisonLabel()),
-          _buildFilterPill(context, Icons.insights_outlined, _activeMetricLabel()),
-        ],
-      );
-    }
-
-    final mainTitles = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          'PAINEL GERAL',
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: accent,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 2.2,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          '${_getGreeting()}, $firstName',
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w900,
-            color: ThemeHelpers.textColor(context),
-            height: 1.05,
-          ),
-        ),
-      ],
-    );
-
-    final dateLine = Text(
-      'Visão executiva · ${_formatFullDate()}',
-      style: theme.textTheme.bodySmall?.copyWith(
-        color: ThemeHelpers.textSecondaryColor(context),
-        height: 1.3,
-      ),
-      maxLines: 2,
-      overflow: TextOverflow.ellipsis,
-    );
 
     return Padding(
       padding: const EdgeInsets.only(top: 2, bottom: 4),
       child: LayoutBuilder(
         builder: (context, constraints) {
-              final w = constraints.maxWidth;
-              final spread = w >= 480;
-              final actionsTop = w >= 640;
-              // Linha extra: filtros | insight lado a lado (mais “app”, menos torre).
-              final pillsBesideInsight = w >= 520;
+          final w = constraints.maxWidth;
+          final actionsTop = w >= 640;
 
-              if (!spread) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        greetingIcon(),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              mainTitles,
-                              const SizedBox(height: 6),
-                              dateLine,
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    pillRow(),
-                    const SizedBox(height: 10),
-                    _buildInsightPanel(context, theme, performance, stats),
-                    const SizedBox(height: 10),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: _buildHeaderActions(context, theme),
-                    ),
-                  ],
-                );
-              }
-
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── TOP ROW: avatar + eyebrow/saudação + ações ──────
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      greetingIcon(),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                  _HeroAvatar(
+                    name: userName,
+                    avatarUrl: user?.avatar,
+                    accent: accent,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Eyebrow com clock vivo
+                        Row(
                           children: [
-                            Expanded(
-                              flex: 52,
-                              child: mainTitles,
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              flex: 48,
-                              child: Align(
-                                alignment: Alignment.topRight,
-                                child: dateLine,
+                            Text(
+                              'PAINEL',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: accent,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 2.2,
                               ),
                             ),
+                            const SizedBox(width: 8),
+                            Container(
+                              width: 4,
+                              height: 4,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: accent.withValues(alpha: 0.6),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            const _HeroLiveClock(),
                           ],
                         ),
-                      ),
-                      if (actionsTop) ...[
-                        const SizedBox(width: 12),
-                        _buildHeaderActions(context, theme),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  if (pillsBesideInsight)
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          flex: 40,
-                          child: pillRow(),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${_getGreeting()}, $firstName',
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            color: ThemeHelpers.textColor(context),
+                            height: 1.05,
+                            letterSpacing: -0.4,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          flex: 60,
-                          child: _buildInsightPanel(context, theme, performance, stats),
+                        const SizedBox(height: 4),
+                        Text(
+                          _formatFullDate(),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: ThemeHelpers.textSecondaryColor(context),
+                            fontWeight: FontWeight.w600,
+                            height: 1.3,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
-                    )
-                  else ...[
-                    pillRow(),
-                    const SizedBox(height: 10),
-                    _buildInsightPanel(context, theme, performance, stats),
-                  ],
-                  if (!actionsTop) ...[
-                    const SizedBox(height: 10),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: _buildHeaderActions(context, theme),
                     ),
+                  ),
+                  if (actionsTop) ...[
+                    const SizedBox(width: 12),
+                    _buildHeaderActions(context, theme),
                   ],
                 ],
-              );
-            },
-          ),
+              ),
+
+              const SizedBox(height: 14),
+
+              // ── SPOTLIGHT do próximo agendamento (ou empty-state) ─
+              _NextAppointmentSpotlight(
+                appointments: upcomingAppointments,
+                accent: accent,
+              ),
+
+              const SizedBox(height: 14),
+
+              // ── QUICK KPI strip ────────────────────────────────
+              if (stats != null)
+                _HeroQuickKpiStrip(
+                  stats: stats,
+                ),
+
+              const SizedBox(height: 12),
+
+              // ── Insight panel (variação % do período) ──────────
+              _buildInsightPanel(context, theme, performance, stats),
+
+              const SizedBox(height: 12),
+
+              // ── Pill de período + ações ───────────────────────
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Flexible(
+                    child: _buildFilterPill(
+                      context,
+                      Icons.date_range_outlined,
+                      // Short label aqui — em telas estreitas o label
+                      // longo ("Período personalizado") estourava o
+                      // pill. `Flexible + ellipsis` no `_buildFilterPill`
+                      // já cuida do corte; o short label só evita
+                      // truncar em valores comuns ("7 dias", "30 dias").
+                      _activePeriodShortLabel(),
+                    ),
+                  ),
+                  if (!actionsTop) ...[
+                    const SizedBox(width: 10),
+                    _buildHeaderActions(context, theme),
+                  ],
+                ],
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -1704,23 +1683,35 @@ class _DashboardPageState extends State<DashboardPage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: isDark ? accent.withOpacity(0.07) : ThemeHelpers.cardBackgroundColor(context),
+        color: isDark
+            ? accent.withValues(alpha: 0.07)
+            : ThemeHelpers.cardBackgroundColor(context),
         borderRadius: BorderRadius.circular(999),
         border: Border.all(
-          color: isDark ? accent.withOpacity(0.14) : borderCol.withValues(alpha: 0.55),
+          color: isDark
+              ? accent.withValues(alpha: 0.14)
+              : borderCol.withValues(alpha: 0.55),
         ),
       ),
+      // `mainAxisSize: min` mas o Text precisa ser `Flexible` pra
+      // permitir ellipsis quando o pill ficar dentro de `Expanded` em
+      // telas estreitas — caso contrário, dá overflow horizontal
+      // (caso do label "Período personalizado").
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: 15, color: accent),
           const SizedBox(width: 7),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: ThemeHelpers.textColor(context),
-                  fontWeight: FontWeight.w700,
-                ),
+          Flexible(
+            child: Text(
+              label,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: ThemeHelpers.textColor(context),
+                    fontWeight: FontWeight.w700,
+                  ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
       ),
@@ -5527,64 +5518,26 @@ class _DashboardPageState extends State<DashboardPage> {
     ];
   }
 
-  String _activePeriodLabel() {
-    switch (_filters.dateRange) {
-      case '7d':
-        return 'Últimos 7 dias';
-      case '30d':
-        return 'Últimos 30 dias';
-      case '90d':
-        return 'Últimos 90 dias';
-      case 'custom':
-        return 'Período personalizado';
-      default:
-        return 'Período atual';
-    }
-  }
-
   /// Rótulo curto para chips e pills (evita corte em telas estreitas).
   String _activePeriodShortLabel() {
     switch (_filters.dateRange) {
+      case 'today':
+        return 'Hoje';
       case '7d':
         return '7 dias';
       case '30d':
         return '30 dias';
       case '90d':
         return '90 dias';
+      case '1y':
+        return '1 ano';
       case 'custom':
-        return 'Pers.';
+        return 'Personalizado';
       default:
         return 'Atual';
     }
   }
 
-  String _activeComparisonLabel() {
-    switch (_filters.compareWith) {
-      case 'previous_period':
-        return 'Comparando período';
-      case 'previous_year':
-        return 'Comparando ano';
-      case 'none':
-        return 'Sem comparação';
-      default:
-        return 'Comparação ativa';
-    }
-  }
-
-  String _activeMetricLabel() {
-    switch (_filters.metric) {
-      case 'sales':
-        return 'Vendas';
-      case 'commissions':
-        return 'Comissões';
-      case 'properties':
-        return 'Imóveis';
-      case 'clients':
-        return 'Clientes';
-      default:
-        return 'Todas as métricas';
-    }
-  }
 }
 
 /// Dados de um gauge da seção Métricas de conversão.
@@ -5678,4 +5631,495 @@ class _ConversionGaugePainter extends CustomPainter {
       old.color != color ||
       old.trackColor != trackColor ||
       old.tickColor != tickColor;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// HERO COMPONENTS — sub-widgets do `_buildGreeting`
+// ═══════════════════════════════════════════════════════════════════
+
+/// Avatar do hero — usa foto real se disponível, senão monograma
+/// gradient accent com a primeira letra do nome.
+class _HeroAvatar extends StatelessWidget {
+  const _HeroAvatar({
+    required this.name,
+    required this.avatarUrl,
+    required this.accent,
+  });
+
+  final String name;
+  final String? avatarUrl;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final initials = _initials(name);
+    final hasUrl = avatarUrl != null && avatarUrl!.trim().isNotEmpty;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      width: 52,
+      height: 52,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        gradient: hasUrl
+            ? null
+            : LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  accent,
+                  Color.lerp(accent, const Color(0xFF7C3AED), 0.45) ?? accent,
+                ],
+              ),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withValues(alpha: isDark ? 0.32 : 0.22),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+            spreadRadius: -2,
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: hasUrl
+            ? Image.network(
+                avatarUrl!,
+                width: 52,
+                height: 52,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => _MonogramFallback(
+                  initials: initials,
+                ),
+              )
+            : _MonogramFallback(initials: initials),
+      ),
+    );
+  }
+
+  static String _initials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty || parts.first.isEmpty) return '?';
+    if (parts.length == 1) return parts.first[0].toUpperCase();
+    return (parts.first[0] + parts.last[0]).toUpperCase();
+  }
+}
+
+class _MonogramFallback extends StatelessWidget {
+  const _MonogramFallback({required this.initials});
+  final String initials;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Text(
+        initials,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 19,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.4,
+        ),
+      ),
+    );
+  }
+}
+
+/// Clock vivo no eyebrow do hero — atualiza a cada 30s.
+class _HeroLiveClock extends StatefulWidget {
+  const _HeroLiveClock();
+
+  @override
+  State<_HeroLiveClock> createState() => _HeroLiveClockState();
+}
+
+class _HeroLiveClockState extends State<_HeroLiveClock> {
+  late Timer _timer;
+  late DateTime _now;
+
+  @override
+  void initState() {
+    super.initState();
+    _now = DateTime.now();
+    // 30s é resolução suficiente — clock minute-precision sem custo
+    // alto de redraws. Quando a janela mudar de minuto, re-renderiza.
+    _timer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) {
+        setState(() => _now = DateTime.now());
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final timeStr =
+        '${_now.hour.toString().padLeft(2, '0')}:${_now.minute.toString().padLeft(2, '0')}';
+    return Text(
+      timeStr,
+      style: theme.textTheme.labelSmall?.copyWith(
+        color: ThemeHelpers.textSecondaryColor(context),
+        fontWeight: FontWeight.w800,
+        letterSpacing: 0.4,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      ),
+    );
+  }
+}
+
+/// Spotlight do próximo agendamento iminente — destaque editorial
+/// pra o compromisso mais próximo do user.
+///
+/// Exibe horário grande à esquerda, título do compromisso, cliente
+/// e tipo. Quando não há agendamentos próximos, mostra um empty-state
+/// contextual com ícone discreto.
+class _NextAppointmentSpotlight extends StatelessWidget {
+  const _NextAppointmentSpotlight({
+    required this.appointments,
+    required this.accent,
+  });
+
+  final List<DashboardAppointment> appointments;
+  final Color accent;
+
+  /// Próximo compromisso = primeiro item da lista (já vem ordenado por
+  /// data/hora pelo backend).
+  DashboardAppointment? get _next =>
+      appointments.isEmpty ? null : appointments.first;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final next = _next;
+
+    if (next == null) {
+      // Empty state — discreto, sem container destacado
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.04)
+              : Colors.black.withValues(alpha: 0.03),
+          border: Border.all(color: ThemeHelpers.borderLightColor(context)),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.event_available_rounded,
+              size: 18,
+              color: ThemeHelpers.textSecondaryColor(context),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Nada na agenda iminente · aproveite pra prospectar',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: ThemeHelpers.textSecondaryColor(context),
+                  fontWeight: FontWeight.w600,
+                  height: 1.3,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final timeText = next.time.isNotEmpty ? next.time : '—';
+    final dateText = _formatRelativeDate(next.date);
+    final typeText = _formatType(next.type);
+    final hasClient = next.client.trim().isNotEmpty;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        // Fundo sutilmente tingido accent — bloco de "atenção"
+        color: accent.withValues(alpha: isDark ? 0.10 : 0.06),
+        border: Border.all(color: accent.withValues(alpha: 0.32)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Coluna de tempo grande à esquerda
+          Container(
+            width: 64,
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  timeText,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: accent,
+                    letterSpacing: -0.6,
+                    height: 1,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  dateText.toUpperCase(),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: accent.withValues(alpha: 0.85),
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.2,
+                    fontSize: 9.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Divisor vertical sutil
+          Container(
+            width: 1,
+            height: 36,
+            margin: const EdgeInsets.symmetric(horizontal: 12),
+            color: accent.withValues(alpha: 0.25),
+          ),
+
+          // Coluna de detalhes
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Icon(_iconForType(next.type), size: 13, color: accent),
+                    const SizedBox(width: 5),
+                    Flexible(
+                      child: Text(
+                        typeText,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: accent,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.6,
+                          fontSize: 10,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  next.title.isNotEmpty ? next.title : 'Compromisso',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: ThemeHelpers.textColor(context),
+                    letterSpacing: -0.2,
+                    height: 1.2,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (hasClient) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    next.client,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: ThemeHelpers.textSecondaryColor(context),
+                      fontWeight: FontWeight.w600,
+                      height: 1.2,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatRelativeDate(String iso) {
+    if (iso.isEmpty) return 'Próximo';
+    try {
+      final d = DateTime.parse(iso);
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final target = DateTime(d.year, d.month, d.day);
+      final diff = target.difference(today).inDays;
+      if (diff == 0) return 'Hoje';
+      if (diff == 1) return 'Amanhã';
+      if (diff < 7) return DateFormat('EEEE', 'pt_BR').format(d);
+      return DateFormat('d MMM', 'pt_BR').format(d);
+    } catch (_) {
+      return 'Próximo';
+    }
+  }
+
+  String _formatType(String type) {
+    final t = type.trim().toLowerCase();
+    return switch (t) {
+      'visit' => 'Visita',
+      'meeting' => 'Reunião',
+      'call' => 'Ligação',
+      'inspection' => 'Vistoria',
+      'signing' => 'Assinatura',
+      _ => t.isEmpty ? 'Compromisso' : '${t[0].toUpperCase()}${t.substring(1)}',
+    };
+  }
+
+  IconData _iconForType(String type) {
+    final t = type.trim().toLowerCase();
+    return switch (t) {
+      'visit' => Icons.directions_walk_rounded,
+      'meeting' => Icons.groups_rounded,
+      'call' => Icons.phone_rounded,
+      'inspection' => Icons.fact_check_outlined,
+      'signing' => Icons.draw_rounded,
+      _ => Icons.event_rounded,
+    };
+  }
+}
+
+/// Linha de "manchete" editorial com KPIs do user.
+///
+/// 4 métricas escolhidas pra **não duplicar** os cards principais
+/// embaixo do dashboard (Imóveis, Clientes, Vistorias, Comissões):
+///
+///   12.5%       3            3            5
+///   CONVERSÃO   MATCHES      AGENDA       TAREFAS
+///   ────────    ──────       ──────       ───────
+///
+/// Cada coluna divide o espaço igualmente (`Expanded`), com:
+/// - Valor grande em peso 900, com a cor temática da categoria
+///   (suporta `int` ou `double` formatado em %)
+/// - Label uppercase fina abaixo
+/// - Linha accent fina sob o label como assinatura visual
+/// - Separadores verticais sutis entre colunas
+class _HeroQuickKpiStrip extends StatelessWidget {
+  const _HeroQuickKpiStrip({
+    required this.stats,
+  });
+
+  final DashboardStats stats;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = <_QuickKpi>[
+      _QuickKpi(
+        accent: const Color(0xFF0EA5E9), // azul — carteira de imóveis
+        label: 'Imóveis',
+        value: '${stats.myProperties}',
+      ),
+      _QuickKpi(
+        accent: const Color(0xFF14B8A6), // teal — carteira de clientes
+        label: 'Clientes',
+        value: '${stats.myClients}',
+      ),
+      _QuickKpi(
+        accent: const Color(0xFFF59E0B), // âmbar — agenda
+        label: 'Agenda',
+        value: '${stats.myAppointments}',
+      ),
+      _QuickKpi(
+        accent: const Color(0xFF8B5CF6), // roxo — tarefas
+        label: 'Tarefas',
+        value: '${stats.myTasks}',
+      ),
+    ];
+
+    final divColor = ThemeHelpers.borderLightColor(context)
+        .withValues(alpha: 0.6);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        for (var i = 0; i < items.length; i++) ...[
+          if (i > 0)
+            Container(
+              width: 1,
+              height: 38,
+              color: divColor,
+            ),
+          Expanded(child: items[i].render(context)),
+        ],
+      ],
+    );
+  }
+}
+
+class _QuickKpi {
+  const _QuickKpi({
+    required this.accent,
+    required this.label,
+    required this.value,
+  });
+
+  final Color accent;
+  final String label;
+
+  /// Valor já formatado como string (suporta int "12", double "12.5%",
+  /// "—" para ausente). O formatting é responsabilidade do caller.
+  final String value;
+
+  Widget render(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Valor grande — protagonista visual de cada coluna
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w900,
+                color: accent,
+                letterSpacing: -0.6,
+                height: 1,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          // Label uppercase fina — como "rótulo" do valor
+          Text(
+            label.toUpperCase(),
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: ThemeHelpers.textSecondaryColor(context),
+              letterSpacing: 1.4,
+              fontSize: 9.5,
+              height: 1,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 6),
+          // Linha accent fina — assinatura visual sutil
+          Container(
+            height: 2,
+            width: 18,
+            decoration: BoxDecoration(
+              color: accent,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

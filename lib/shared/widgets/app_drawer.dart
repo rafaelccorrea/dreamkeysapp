@@ -1658,19 +1658,30 @@ class _CompanyPickerSheet extends StatefulWidget {
   State<_CompanyPickerSheet> createState() => _CompanyPickerSheetState();
 }
 
-class _CompanyPickerSheetState extends State<_CompanyPickerSheet> {
+class _CompanyPickerSheetState extends State<_CompanyPickerSheet>
+    with SingleTickerProviderStateMixin {
   late TextEditingController _searchController;
+  late AnimationController _pulseCtrl;
+  late Animation<double> _pulse;
   String _query = '';
 
   @override
   void initState() {
     super.initState();
     _searchController = TextEditingController();
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1300),
+    )..repeat(reverse: true);
+    _pulse = Tween<double>(begin: 0.5, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
+    );
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _pulseCtrl.dispose();
     super.dispose();
   }
 
@@ -1699,213 +1710,169 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet> {
     return (parts.first[0] + parts.last[0]).toUpperCase();
   }
 
+  Company? _findCurrent() {
+    if (widget.currentId == null) return null;
+    for (final c in widget.companies) {
+      if (c.id == widget.currentId) return c;
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final viewport = MediaQuery.sizeOf(context).height;
-    final filtered = _query.isEmpty
-        ? widget.companies
-        : widget.companies
+    final cardBg = ThemeHelpers.cardBackgroundColor(context);
+    final accent = widget.accent;
+
+    final current = _findCurrent();
+    final others = widget.companies
+        .where((c) => c.id != widget.currentId)
+        .toList();
+    final filteredOthers = _query.isEmpty
+        ? others
+        : others
             .where((c) =>
                 c.name.toLowerCase().contains(_query.toLowerCase().trim()))
             .toList();
-    final showSearch = widget.companies.length >= 6;
+
+    final showSearch = others.length >= 6;
+    final matrixCount = widget.companies.where((c) => c.isMatrix).length;
+    final totalModules = widget.companies
+        .map((c) => c.availableModules.length)
+        .fold<int>(0, (a, b) => a + b);
 
     return Padding(
       padding: EdgeInsets.only(top: MediaQuery.paddingOf(context).top + 24),
       child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
         child: Container(
-          constraints: BoxConstraints(maxHeight: viewport * 0.82),
+          constraints: BoxConstraints(maxHeight: viewport * 0.86),
           decoration: BoxDecoration(
-            color: ThemeHelpers.cardBackgroundColor(context),
+            color: cardBg,
             border: Border(
               top: BorderSide(
-                color: ThemeHelpers.borderLightColor(context),
-                width: 1,
+                color: accent.withValues(alpha: isDark ? 0.4 : 0.25),
+                width: 1.4,
               ),
             ),
+            boxShadow: [
+              BoxShadow(
+                color: accent.withValues(alpha: isDark ? 0.18 : 0.10),
+                blurRadius: 32,
+                offset: const Offset(0, -8),
+                spreadRadius: -8,
+              ),
+            ],
           ),
           child: SafeArea(
             top: false,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+            child: Stack(
               children: [
-                // Drag handle
-                Padding(
-                  padding: const EdgeInsets.only(top: 10, bottom: 6),
-                  child: Container(
-                    width: 44,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: ThemeHelpers.borderLightColor(context),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-                ),
-
-                // Header editorial
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(22, 14, 22, 8),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'CONTEXTO',
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: widget.accent,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: 2.4,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'Trocar de empresa',
-                              style: theme.textTheme.headlineSmall?.copyWith(
-                                fontWeight: FontWeight.w900,
-                                color: ThemeHelpers.textColor(context),
-                                height: 1.05,
-                                letterSpacing: -0.4,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              '${widget.companies.length} empresas disponíveis · painel e dados seguem o contexto.',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color:
-                                    ThemeHelpers.textSecondaryColor(context),
-                                height: 1.35,
-                              ),
-                            ),
+                // Decoração de gradient sutil no topo do sheet — dá
+                // sensação de "luz vinda da empresa ativa" sem ser
+                // chamativo. Pintada por baixo do conteúdo.
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: 200,
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            accent.withValues(alpha: isDark ? 0.12 : 0.06),
+                            accent.withValues(alpha: 0),
                           ],
                         ),
                       ),
-                      // Botão fechar discreto
-                      InkWell(
-                        onTap: () => Navigator.pop(context),
-                        borderRadius: BorderRadius.circular(999),
-                        child: Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: ThemeHelpers.borderLightColor(context)
-                                .withValues(alpha: isDark ? 0.16 : 0.08),
-                          ),
-                          child: Icon(
-                            Icons.close_rounded,
-                            size: 18,
-                            color: ThemeHelpers.textSecondaryColor(context),
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
 
-                // Search (só com muitas empresas)
-                if (showSearch)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(22, 12, 22, 4),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: ThemeHelpers.borderLightColor(context)
-                            .withValues(alpha: isDark ? 0.12 : 0.05),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: ThemeHelpers.borderLightColor(context),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Drag handle premium accent
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10, bottom: 4),
+                      child: Container(
+                        width: 48,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              accent.withValues(alpha: 0.5),
+                              accent,
+                              accent.withValues(alpha: 0.5),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(999),
                         ),
                       ),
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
-                      child: Row(
+                    ),
+
+                    // Header
+                    _buildHeader(
+                      theme,
+                      isDark,
+                      accent,
+                      matrixCount,
+                      totalModules,
+                    ),
+
+                    // Search (só com 6+ empresas)
+                    if (showSearch) _buildSearch(theme, isDark, accent),
+
+                    // Conteúdo scrollável: empresa ativa + lista de outras
+                    Flexible(
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
                         children: [
-                          Icon(
-                            Icons.search_rounded,
-                            size: 18,
-                            color: ThemeHelpers.textSecondaryColor(context),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: TextField(
-                              controller: _searchController,
-                              onChanged: (v) => setState(() => _query = v),
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: ThemeHelpers.textColor(context),
-                              ),
-                              decoration: InputDecoration(
-                                hintText: 'Buscar empresa…',
-                                hintStyle: theme.textTheme.bodyMedium?.copyWith(
-                                  color:
-                                      ThemeHelpers.textSecondaryColor(context),
-                                ),
-                                border: InputBorder.none,
-                                isDense: true,
-                                contentPadding:
-                                    const EdgeInsets.symmetric(vertical: 12),
-                              ),
+                          // EMPRESA ATIVA (em destaque)
+                          if (current != null) ...[
+                            _buildSectionLabel('EMPRESA ATIVA', accent),
+                            const SizedBox(height: 10),
+                            _CompanyActiveCard(
+                              company: current,
+                              accent: accent,
+                              monogramColor: _monogramColor(current.name),
+                              initials: _initials(current.name),
+                              pulse: _pulse,
                             ),
-                          ),
-                          if (_query.isNotEmpty)
-                            InkWell(
-                              onTap: () {
-                                _searchController.clear();
-                                setState(() => _query = '');
-                              },
-                              borderRadius: BorderRadius.circular(999),
-                              child: Padding(
-                                padding: const EdgeInsets.all(4),
-                                child: Icon(
-                                  Icons.close_rounded,
-                                  size: 16,
-                                  color:
-                                      ThemeHelpers.textSecondaryColor(context),
+                            const SizedBox(height: 22),
+                          ],
+
+                          // OUTRAS EMPRESAS DISPONÍVEIS
+                          if (filteredOthers.isNotEmpty) ...[
+                            _buildSectionLabel(
+                              _query.isEmpty
+                                  ? 'OUTRAS EMPRESAS'
+                                  : 'RESULTADOS · ${filteredOthers.length}',
+                              accent,
+                            ),
+                            const SizedBox(height: 8),
+                            for (final c in filteredOthers)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: _CompanyOptionTile(
+                                  company: c,
+                                  accent: accent,
+                                  monogramColor: _monogramColor(c.name),
+                                  initials: _initials(c.name),
+                                  onTap: () => widget.onPick(c),
                                 ),
                               ),
-                            ),
+                          ] else if (_query.isNotEmpty)
+                            _buildEmpty(theme, isDark),
                         ],
                       ),
                     ),
-                  ),
-
-                // Lista
-                Flexible(
-                  child: filtered.isEmpty
-                      ? Padding(
-                          padding: const EdgeInsets.fromLTRB(22, 32, 22, 40),
-                          child: Center(
-                            child: Text(
-                              'Nenhuma empresa encontrada',
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color:
-                                    ThemeHelpers.textSecondaryColor(context),
-                              ),
-                            ),
-                          ),
-                        )
-                      : ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(14, 12, 14, 22),
-                          itemCount: filtered.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 8),
-                          itemBuilder: (_, i) {
-                            final c = filtered[i];
-                            final isActive = c.id == widget.currentId;
-                            return _CompanyPickerTile(
-                              company: c,
-                              isActive: isActive,
-                              accent: widget.accent,
-                              monogramColor: _monogramColor(c.name),
-                              initials: _initials(c.name),
-                              onTap: () => widget.onPick(c),
-                            );
-                          },
-                        ),
+                  ],
                 ),
               ],
             ),
@@ -1914,12 +1881,466 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet> {
       ),
     );
   }
+
+  // ──────────────────────────────────────────────────────────────────
+  Widget _buildHeader(
+    ThemeData theme,
+    bool isDark,
+    Color accent,
+    int matrixCount,
+    int totalModules,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(22, 14, 14, 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Eyebrow com bolinha pulsante (live indicator)
+                Row(
+                  children: [
+                    AnimatedBuilder(
+                      animation: _pulse,
+                      builder: (_, __) => Container(
+                        width: 7,
+                        height: 7,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: accent.withValues(alpha: _pulse.value),
+                          boxShadow: [
+                            BoxShadow(
+                              color: accent.withValues(
+                                alpha: _pulse.value * 0.6,
+                              ),
+                              blurRadius: 6,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'WORKSPACE',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: accent,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 2.6,
+                        fontSize: 10.5,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                // Título grande
+                Text(
+                  'Trocar de empresa',
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: ThemeHelpers.textColor(context),
+                    height: 1.02,
+                    letterSpacing: -0.6,
+                    fontSize: 26,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Stats line — texto rico
+                _buildStatsLine(
+                  theme,
+                  matrixCount,
+                  totalModules,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          // Botão fechar premium (não chip pequeno)
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () => Navigator.pop(context),
+              borderRadius: BorderRadius.circular(999),
+              child: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.06)
+                      : Colors.black.withValues(alpha: 0.04),
+                  border: Border.all(
+                    color: ThemeHelpers.borderLightColor(context),
+                  ),
+                ),
+                child: Icon(
+                  Icons.close_rounded,
+                  size: 18,
+                  color: ThemeHelpers.textSecondaryColor(context),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatsLine(ThemeData theme, int matrixCount, int totalModules) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final total = widget.companies.length;
+    final parts = <String>[
+      '$total ${total == 1 ? "empresa" : "empresas"}',
+      if (matrixCount > 0)
+        '$matrixCount ${matrixCount == 1 ? "matriz" : "matrizes"}',
+      if (totalModules > 0)
+        '$totalModules ${totalModules == 1 ? "módulo" : "módulos"}',
+    ];
+    return Wrap(
+      spacing: 6,
+      runSpacing: 4,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        for (var i = 0; i < parts.length; i++) ...[
+          if (i > 0)
+            Text(
+              '·',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: secondary.withValues(alpha: 0.6),
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          Text(
+            parts[i],
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: secondary,
+              fontWeight: FontWeight.w600,
+              height: 1.3,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildSearch(ThemeData theme, bool isDark, Color accent) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(22, 4, 22, 8),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.05)
+              : Colors.black.withValues(alpha: 0.03),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: _query.isNotEmpty
+                ? accent.withValues(alpha: 0.4)
+                : ThemeHelpers.borderLightColor(context),
+            width: _query.isNotEmpty ? 1.4 : 1,
+          ),
+        ),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+        child: Row(
+          children: [
+            Icon(
+              Icons.search_rounded,
+              size: 18,
+              color: _query.isNotEmpty
+                  ? accent
+                  : ThemeHelpers.textSecondaryColor(context),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: TextField(
+                controller: _searchController,
+                onChanged: (v) => setState(() => _query = v),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: ThemeHelpers.textColor(context),
+                  fontWeight: FontWeight.w600,
+                ),
+                decoration: InputDecoration(
+                  hintText: 'Buscar empresa…',
+                  hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                    color:
+                        ThemeHelpers.textSecondaryColor(context),
+                  ),
+                  border: InputBorder.none,
+                  isDense: true,
+                  contentPadding:
+                      const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            ),
+            if (_query.isNotEmpty)
+              InkWell(
+                onTap: () {
+                  _searchController.clear();
+                  setState(() => _query = '');
+                },
+                borderRadius: BorderRadius.circular(999),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(
+                    Icons.close_rounded,
+                    size: 16,
+                    color: accent,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSectionLabel(String label, Color accent) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Container(width: 4, height: 12, color: accent),
+        const SizedBox(width: 8),
+        Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: accent,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 2.0,
+            fontSize: 10,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEmpty(ThemeData theme, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 32),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.search_off_rounded,
+              size: 36,
+              color: ThemeHelpers.textSecondaryColor(context)
+                  .withValues(alpha: 0.5),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Nenhuma empresa encontrada',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: ThemeHelpers.textSecondaryColor(context),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Tente outro termo de busca',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: ThemeHelpers.textSecondaryColor(context)
+                    .withValues(alpha: 0.7),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-class _CompanyPickerTile extends StatelessWidget {
-  const _CompanyPickerTile({
+/// Card destacado da empresa ATUAL — aparece em bloco separado no topo,
+/// fora da lista das outras opções, pra deixar claro qual está ativa.
+class _CompanyActiveCard extends StatelessWidget {
+  const _CompanyActiveCard({
     required this.company,
-    required this.isActive,
+    required this.accent,
+    required this.monogramColor,
+    required this.initials,
+    required this.pulse,
+  });
+
+  final Company company;
+  final Color accent;
+  final Color monogramColor;
+  final String initials;
+  final Animation<double> pulse;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final modulesCount = company.availableModules.length;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            accent.withValues(alpha: isDark ? 0.16 : 0.10),
+            accent.withValues(alpha: isDark ? 0.06 : 0.04),
+          ],
+        ),
+        border: Border.all(
+          color: accent.withValues(alpha: isDark ? 0.5 : 0.36),
+          width: 1.4,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withValues(alpha: isDark ? 0.22 : 0.12),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+            spreadRadius: -4,
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          // Monograma maior (52px) com sombra premium accent
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  monogramColor,
+                  Color.lerp(monogramColor, Colors.black, 0.22) ??
+                      monogramColor,
+                ],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: monogramColor.withValues(alpha: 0.42),
+                  blurRadius: 14,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              initials,
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.5,
+                fontSize: 17,
+              ),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    AnimatedBuilder(
+                      animation: pulse,
+                      builder: (_, __) => Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: const Color(0xFF22C55E)
+                              .withValues(alpha: pulse.value),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF22C55E)
+                                  .withValues(alpha: pulse.value * 0.6),
+                              blurRadius: 5,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'CONECTADO',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: const Color(0xFF22C55E),
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.4,
+                        fontSize: 9.5,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  company.name,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: ThemeHelpers.textColor(context),
+                    fontWeight: FontWeight.w900,
+                    height: 1.1,
+                    letterSpacing: -0.3,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Wrap(
+                  spacing: 5,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    if (company.isMatrix)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(999),
+                          color: accent.withValues(alpha: 0.18),
+                          border: Border.all(
+                            color: accent.withValues(alpha: 0.36),
+                          ),
+                        ),
+                        child: Text(
+                          'MATRIZ',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            color: accent,
+                            letterSpacing: 0.8,
+                            fontSize: 9,
+                          ),
+                        ),
+                      ),
+                    Text(
+                      modulesCount > 0
+                          ? '$modulesCount ${modulesCount == 1 ? "módulo" : "módulos"}'
+                          : 'Sem módulos',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: ThemeHelpers.textSecondaryColor(context),
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.2,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Tile clicável de empresa não-ativa — clean, com microinteração ao tap.
+class _CompanyOptionTile extends StatelessWidget {
+  const _CompanyOptionTile({
+    required this.company,
     required this.accent,
     required this.monogramColor,
     required this.initials,
@@ -1927,7 +2348,6 @@ class _CompanyPickerTile extends StatelessWidget {
   });
 
   final Company company;
-  final bool isActive;
   final Color accent;
   final Color monogramColor;
   final String initials;
@@ -1937,64 +2357,61 @@ class _CompanyPickerTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final modulesCount = company.availableModules.length;
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(18),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        splashColor: monogramColor.withValues(alpha: 0.10),
+        highlightColor: monogramColor.withValues(alpha: 0.05),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
-            // Fundo sutil quando ativa, transparente nas demais — evita o
-            // efeito "lista de cards iguais" quando há muitas empresas.
-            color: isActive
-                ? accent.withValues(alpha: isDark ? 0.10 : 0.06)
-                : Colors.transparent,
+            color: Colors.transparent,
             border: Border.all(
-              color: isActive
-                  ? accent.withValues(alpha: isDark ? 0.45 : 0.32)
-                  : ThemeHelpers.borderLightColor(context)
-                      .withValues(alpha: isDark ? 0.6 : 0.5),
-              width: isActive ? 1.4 : 1,
+              color: ThemeHelpers.borderLightColor(context)
+                  .withValues(alpha: isDark ? 0.5 : 0.6),
             ),
           ),
           child: Row(
             children: [
-              // Monograma com cor própria por empresa
+              // Monograma 44×44 — menor que o ativo (52) pra estabelecer
+              // hierarquia visual clara entre "ativa" e "outras"
               Container(
-                width: 46,
-                height: 46,
+                width: 44,
+                height: 44,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(13),
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                     colors: [
                       monogramColor.withValues(alpha: 0.95),
-                      monogramColor.withValues(alpha: 0.75),
+                      monogramColor.withValues(alpha: 0.78),
                     ],
                   ),
                   boxShadow: [
                     BoxShadow(
                       color: monogramColor.withValues(alpha: 0.28),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
                     ),
                   ],
                 ),
                 alignment: Alignment.center,
                 child: Text(
                   initials,
-                  style: theme.textTheme.titleMedium?.copyWith(
+                  style: theme.textTheme.titleSmall?.copyWith(
                     color: Colors.white,
                     fontWeight: FontWeight.w900,
                     letterSpacing: 0.4,
                   ),
                 ),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2005,62 +2422,86 @@ class _CompanyPickerTile extends StatelessWidget {
                       style: theme.textTheme.titleSmall?.copyWith(
                         color: ThemeHelpers.textColor(context),
                         fontWeight: FontWeight.w800,
+                        letterSpacing: -0.2,
                         height: 1.15,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    if (company.isMatrix) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        'Matriz',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.4,
+                    const SizedBox(height: 3),
+                    Row(
+                      children: [
+                        if (company.isMatrix) ...[
+                          Container(
+                            width: 5,
+                            height: 5,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: monogramColor,
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            'Matriz',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: monogramColor,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.4,
+                              fontSize: 10,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            '·',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: ThemeHelpers.textSecondaryColor(context)
+                                  .withValues(alpha: 0.5),
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                        ],
+                        Flexible(
+                          child: Text(
+                            modulesCount > 0
+                                ? '$modulesCount ${modulesCount == 1 ? "módulo" : "módulos"}'
+                                : 'Sem módulos',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color:
+                                  ThemeHelpers.textSecondaryColor(context),
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.2,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures()
+                              ],
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ],
                 ),
               ),
-              const SizedBox(width: 10),
-              if (isActive)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 9,
-                    vertical: 5,
+              const SizedBox(width: 8),
+              // Indicador de ação clicável — círculo accent sutil com seta
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: accent.withValues(alpha: isDark ? 0.10 : 0.06),
+                  border: Border.all(
+                    color: accent.withValues(alpha: isDark ? 0.32 : 0.22),
                   ),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(999),
-                    color: accent,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.check_rounded,
-                        size: 12,
-                        color: Colors.white,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        'ATIVA',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 0.8,
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              else
-                Icon(
-                  Icons.arrow_forward_ios_rounded,
-                  size: 14,
-                  color: ThemeHelpers.textSecondaryColor(context),
                 ),
+                child: Icon(
+                  Icons.arrow_forward_rounded,
+                  size: 16,
+                  color: accent,
+                ),
+              ),
             ],
           ),
         ),

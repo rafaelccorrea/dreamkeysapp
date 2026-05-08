@@ -1,19 +1,30 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../controllers/notification_controller.dart';
 import 'notification_list.dart';
 
-/// Componente principal do centro de notificações
-/// Exibe badge com contador e painel dropdown com lista
-/// Pode ser usado como widget para adicionar em actions do AppBar
+/// Botão sino com badge + abertura do **modal bottom sheet** premium de
+/// notificações.
+///
+/// **Mudança de design** (em relação à versão anterior baseada em overlay
+/// ancorado):
+/// - Antes: dropdown de 360×480 ancorado no botão, com gradients, glows,
+///   ShaderMask, textura de pontos, 3 sombras coloridas competindo entre
+///   si. Ficava "sujo" visualmente e travava em telas pequenas.
+/// - Agora: `showModalBottomSheet` clean — drag handle, header editorial,
+///   ação primária "Marcar todas" como botão sólido, lista ocupando o
+///   resto. Padrão moderno mobile (Apple/iOS, Linear, Notion).
+///
+/// O badge no botão (contador vermelho) e o ícone do sino com glow quando
+/// há não lidas continuam — é o que o usuário vê no AppBar e precisa
+/// chamar atenção.
 class NotificationCenter extends StatefulWidget {
   final bool embedded;
 
-  /// Tamanho reduzido para a cápsula do [MinimalBodyChrome].
+  /// Tamanho reduzido para a cápsula do toolbar minimalista.
   final bool compactToolbar;
 
   const NotificationCenter({
@@ -27,56 +38,26 @@ class NotificationCenter extends StatefulWidget {
 }
 
 class _NotificationCenterState extends State<NotificationCenter> {
-  final GlobalKey _buttonKey = GlobalKey();
-  OverlayEntry? _overlayEntry;
-  bool _isOpen = false;
+  Future<void> _openSheet() async {
+    final controller =
+        Provider.of<NotificationController>(context, listen: false);
 
-  @override
-  void dispose() {
-    _closeOverlay();
-    super.dispose();
-  }
+    // Força um refresh ao abrir — garante que o usuário veja o estado
+    // mais recente do servidor (e qualquer marcação remota feita por
+    // outro device aparece corretamente).
+    // ignore: unawaited_futures
+    controller.loadNotifications(reset: true);
+    // ignore: unawaited_futures
+    controller.refreshUnreadCount();
 
-  void _closeOverlay() {
-    if (_overlayEntry != null) {
-      _overlayEntry!.remove();
-      _overlayEntry = null;
-      _isOpen = false;
-    }
-  }
-
-  void _toggleOverlay() {
-    if (_isOpen) {
-      _closeOverlay();
-    } else {
-      _showOverlay();
-    }
-  }
-
-  void _showOverlay() {
-    final RenderBox? renderBox =
-        _buttonKey.currentContext?.findRenderObject() as RenderBox?;
-    if (renderBox == null) return;
-
-    final size = renderBox.size;
-    final offset = renderBox.localToGlobal(Offset.zero);
-    final screenWidth = MediaQuery.sizeOf(context).width;
-
-    // Distância da extremidade direita do botão até a borda direita da tela.
-    final anchorRight = (screenWidth - (offset.dx + size.width))
-        .clamp(8.0, double.infinity)
-        .toDouble();
-
-    _overlayEntry = OverlayEntry(
-      builder: (context) => _NotificationOverlayPanel(
-        anchorTop: offset.dy + size.height + 8,
-        anchorRight: anchorRight,
-        onClose: _closeOverlay,
-      ),
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.42),
+      builder: (_) => const _NotificationSheet(),
     );
-
-    Overlay.of(context).insert(_overlayEntry!);
-    _isOpen = true;
   }
 
   @override
@@ -87,12 +68,10 @@ class _NotificationCenterState extends State<NotificationCenter> {
     return Consumer<NotificationController>(
       builder: (context, controller, child) {
         final unreadCount = controller.unreadCount;
-
+        final hasUnread = unreadCount > 0;
         final compact = widget.compactToolbar;
         final dim = compact ? 40.0 : 46.0;
         final iconSize = compact ? 20.0 : 22.0;
-
-        final hasUnread = unreadCount > 0;
         const accentRed = Color(0xFFEF4444);
 
         return Stack(
@@ -104,8 +83,7 @@ class _NotificationCenterState extends State<NotificationCenter> {
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(
-                  key: _buttonKey,
-                  onTap: _toggleOverlay,
+                  onTap: _openSheet,
                   borderRadius: BorderRadius.circular(12),
                   child: Container(
                     width: dim,
@@ -114,9 +92,8 @@ class _NotificationCenterState extends State<NotificationCenter> {
                     decoration: BoxDecoration(
                       color: isDark
                           ? Colors.white.withValues(alpha: 0.07)
-                          : theme.colorScheme.surfaceContainerHighest.withValues(
-                              alpha: 0.65,
-                            ),
+                          : theme.colorScheme.surfaceContainerHighest
+                              .withValues(alpha: 0.65),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                         width: 1.5,
@@ -127,14 +104,13 @@ class _NotificationCenterState extends State<NotificationCenter> {
                                 : AppColors.border.border),
                       ),
                       boxShadow: [
-                        if (hasUnread) ...[
+                        if (hasUnread)
                           BoxShadow(
                             color: accentRed.withValues(alpha: 0.12),
                             blurRadius: 8,
-                            spreadRadius: 0,
                             offset: const Offset(0, 2),
-                          ),
-                        ] else
+                          )
+                        else
                           BoxShadow(
                             color: Colors.black.withValues(
                               alpha: isDark ? 0.2 : 0.04,
@@ -207,317 +183,79 @@ class _NotificationCenterState extends State<NotificationCenter> {
   }
 }
 
-/// Altura reservada do cabeçalho + listagem (lista usa o restante).
-const double _kNotificationPanelHeaderBlock = 108;
-
-/// Largura ideal do painel (em telas estreitas reduz para caber).
-const double _kNotificationPanelWidth = 360;
-
-/// Margem mínima entre o painel e as bordas laterais da tela.
-const double _kNotificationPanelSideMargin = 12;
-
-/// Altura máxima do painel (limita para não ocupar a tela toda).
-const double _kNotificationPanelMaxHeight = 480;
-
-/// Painel dropdown de notificações — overlay animado com blur, profundidade e detalhes de marca.
-class _NotificationOverlayPanel extends StatefulWidget {
-  final double anchorTop;
-  final double anchorRight;
-  final VoidCallback onClose;
-
-  const _NotificationOverlayPanel({
-    required this.anchorTop,
-    required this.anchorRight,
-    required this.onClose,
-  });
-
-  @override
-  State<_NotificationOverlayPanel> createState() =>
-      _NotificationOverlayPanelState();
-}
-
-class _NotificationOverlayPanelState extends State<_NotificationOverlayPanel>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _open;
-  late Animation<double> _fade;
-  late Animation<double> _scale;
-  late Animation<Offset> _slide;
-
-  @override
-  void initState() {
-    super.initState();
-    _open = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 340),
-    );
-    _fade = CurvedAnimation(parent: _open, curve: Curves.easeOutCubic);
-    _scale = Tween<double>(begin: 0.94, end: 1.0).animate(
-      CurvedAnimation(parent: _open, curve: Curves.easeOutBack),
-    );
-    _slide = Tween<Offset>(
-      begin: const Offset(0, -0.035),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _open, curve: Curves.easeOutCubic));
-    _open.forward();
-  }
-
-  @override
-  void dispose() {
-    _open.dispose();
-    super.dispose();
-  }
+/// Sheet propriamente dito.
+///
+/// Estrutura:
+/// 1. Drag handle no topo (toque + arrasto para fechar)
+/// 2. Header editorial: eyebrow `INBOX`, título "Notificações", linha
+///    contextual (X não lidas / Tudo em dia)
+/// 3. Botão "Marcar todas" só aparece quando há não lidas
+/// 4. Botão fechar circular discreto à direita
+/// 5. Lista preenche o resto, scrollável
+///
+/// Altura inicial: 70% da tela. Pode ser arrastado pra subir até 92%
+/// (`DraggableScrollableSheet`-like comportamento via `initialChildSize`).
+class _NotificationSheet extends StatelessWidget {
+  const _NotificationSheet();
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final mediaSize = MediaQuery.sizeOf(context);
-    final screenWidth = mediaSize.width;
-    final screenHeight = mediaSize.height;
-    final padding = MediaQuery.paddingOf(context);
-    final bottomNavHeight = 56.0 + padding.bottom;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final cardBg = ThemeHelpers.cardBackgroundColor(context);
+    final viewportHeight = MediaQuery.sizeOf(context).height;
 
-    // Largura: limitada a ~360px, com margens laterais em telas estreitas.
-    final maxAvailableWidth = screenWidth - (_kNotificationPanelSideMargin * 2);
-    final panelWidth =
-        _kNotificationPanelWidth.clamp(0.0, maxAvailableWidth).toDouble();
-
-    // Garante que o anchorRight respeite a margem mínima.
-    final effectiveRight = widget.anchorRight.clamp(
-      _kNotificationPanelSideMargin,
-      (screenWidth - panelWidth - _kNotificationPanelSideMargin)
-          .clamp(_kNotificationPanelSideMargin, double.infinity)
-          .toDouble(),
-    );
-
-    // Altura: limita a um valor confortável (não toma a tela inteira).
-    final availableHeight =
-        screenHeight - widget.anchorTop - bottomNavHeight - 8;
-    final maxHeight = availableHeight
-        .clamp(220.0, _kNotificationPanelMaxHeight)
-        .toDouble();
-
-    final primary = isDark
-        ? AppColors.primary.primaryDarkMode
-        : AppColors.primary.primary;
-    final secondary = isDark
-        ? AppColors.secondary.secondaryDarkMode
-        : AppColors.secondary.secondary;
-
-    return GestureDetector(
-      onTap: widget.onClose,
-      behavior: HitTestBehavior.opaque,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // Camada escurecida + blur leve (toque fora fecha)
-          Positioned.fill(
-            child: ClipRect(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(
-                      alpha: isDark ? 0.32 : 0.18,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            right: effectiveRight,
-            top: widget.anchorTop,
-            width: panelWidth,
-            child: GestureDetector(
-              onTap: () {},
-              child: AnimatedBuilder(
-                animation: _open,
-                builder: (context, child) {
-                  return FadeTransition(
-                    opacity: _fade,
-                    child: SlideTransition(
-                      position: _slide,
-                      child: ScaleTransition(
-                        scale: _scale,
-                        alignment: Alignment.topRight,
-                        child: child,
-                      ),
-                    ),
-                  );
-                },
-                child: _NotificationPanelChrome(
-                  maxHeight: maxHeight,
-                  primary: primary,
-                  secondary: secondary,
-                  onClose: widget.onClose,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Corpo visual do painel (bordas, sombras, brilho interno).
-class _NotificationPanelChrome extends StatelessWidget {
-  final double maxHeight;
-  final Color primary;
-  final Color secondary;
-  final VoidCallback onClose;
-
-  const _NotificationPanelChrome({
-    required this.maxHeight,
-    required this.primary,
-    required this.secondary,
-    required this.onClose,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final innerBg = isDark
-        ? AppColors.background.cardBackgroundDarkMode
-        : AppColors.background.cardBackground;
-
-    const panelShape = BorderRadius.all(Radius.circular(22));
-    const innerRadii = BorderRadius.all(Radius.circular(20.65));
-
-    return Container(
-      width: double.infinity,
-      constraints: BoxConstraints(maxHeight: maxHeight),
-      decoration: BoxDecoration(
-        borderRadius: panelShape,
-        boxShadow: [
-          BoxShadow(
-            color: primary.withValues(alpha: isDark ? 0.22 : 0.18),
-            blurRadius: 32,
-            spreadRadius: -4,
-            offset: const Offset(0, 18),
-          ),
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.55 : 0.12),
-            blurRadius: 40,
-            offset: const Offset(0, 24),
-          ),
-          BoxShadow(
-            color: secondary.withValues(alpha: 0.08),
-            blurRadius: 60,
-            spreadRadius: -8,
-            offset: const Offset(0, 36),
-          ),
-        ],
+    return Padding(
+      padding: EdgeInsets.only(
+        top: MediaQuery.paddingOf(context).top + 24,
       ),
       child: ClipRRect(
-        borderRadius: panelShape,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
         child: Container(
+          constraints: BoxConstraints(maxHeight: viewportHeight * 0.92),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                Color.lerp(innerBg, primary, isDark ? 0.09 : 0.04)!,
-                innerBg,
-                Color.lerp(innerBg, secondary, isDark ? 0.06 : 0.03)!,
-              ],
-              stops: const [0.0, 0.38, 1.0],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
+            color: cardBg,
+            border: Border(
+              top: BorderSide(
+                color: ThemeHelpers.borderLightColor(context),
+                width: 1,
+              ),
             ),
           ),
-          child: Padding(
-            padding: const EdgeInsets.all(1.35),
-            child: ClipRRect(
-              borderRadius: innerRadii,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: innerBg,
-                  borderRadius: innerRadii,
-                  border: Border.all(
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.08)
-                        : primary.withValues(alpha: 0.12),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Drag handle
+                Padding(
+                  padding: const EdgeInsets.only(top: 10, bottom: 4),
+                  child: Container(
+                    width: 44,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: ThemeHelpers.borderLightColor(context),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
                   ),
                 ),
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    // Brilho difuso superior (vidro / profundidade)
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      height: 132,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              primary.withValues(alpha: isDark ? 0.14 : 0.10),
-                              primary.withValues(alpha: 0.02),
-                              Colors.transparent,
-                            ],
-                            stops: const [0.0, 0.45, 1.0],
-                          ),
-                        ),
-                      ),
-                    ),
-                    // Traço decorativo no topo
-                    Positioned(
-                      top: 10,
-                      left: 0,
-                      right: 0,
-                      child: Center(
-                        child: Container(
-                          width: 42,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(99),
-                            gradient: LinearGradient(
-                              colors: [
-                                primary.withValues(alpha: 0.35),
-                                secondary.withValues(alpha: 0.55),
-                              ],
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: primary.withValues(alpha: 0.35),
-                                blurRadius: 8,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    // Raster sutil no fundo
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: CustomPaint(
-                          painter: _DotTexturePainter(
-                            color: ThemeHelpers.textColor(context).withValues(
-                              alpha: isDark ? 0.035 : 0.04,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _NotificationPanelHeader(onClose: onClose),
-                        Flexible(
-                          child: ClipRect(
-                            child: NotificationList(
-                              embedded: true,
-                              maxHeight: maxHeight - _kNotificationPanelHeaderBlock,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+
+                // Header
+                const _SheetHeader(),
+
+                // Divisor sutil
+                Container(
+                  height: 1,
+                  margin: const EdgeInsets.only(top: 4, bottom: 0),
+                  color: ThemeHelpers.borderLightColor(context)
+                      .withValues(alpha: isDark ? 0.4 : 0.6),
                 ),
-              ),
+
+                // Lista
+                const Expanded(
+                  child: NotificationList(embedded: true),
+                ),
+              ],
             ),
           ),
         ),
@@ -526,259 +264,185 @@ class _NotificationPanelChrome extends StatelessWidget {
   }
 }
 
-/// Textura de pontos muito suave atrás da lista.
-class _DotTexturePainter extends CustomPainter {
-  final Color color;
-
-  _DotTexturePainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final p = Paint()..color = color;
-    const step = 18.0;
-    var row = 0;
-    for (var y = 0.0; y < size.height; y += step, row++) {
-      final stagger = row.isOdd ? step * 0.5 : 0.0;
-      for (var x = stagger; x < size.width; x += step) {
-        canvas.drawCircle(Offset(x, y), 1.1, p);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _DotTexturePainter oldDelegate) =>
-      oldDelegate.color != color;
-}
-
-class _NotificationPanelHeader extends StatelessWidget {
-  final VoidCallback onClose;
-
-  const _NotificationPanelHeader({required this.onClose});
+class _SheetHeader extends StatelessWidget {
+  const _SheetHeader();
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final primary = isDark
+    final accent = isDark
         ? AppColors.primary.primaryDarkMode
         : AppColors.primary.primary;
-    final secondary = isDark
-        ? AppColors.secondary.secondaryDarkMode
-        : AppColors.secondary.secondary;
 
     return Consumer<NotificationController>(
       builder: (context, controller, _) {
         final unread = controller.unreadCount;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 22, 12, 12),
-              child: Row(
+        final contextLine = unread > 0
+            ? '$unread ${unread == 1 ? 'não lida' : 'não lidas'}'
+            : 'Tudo em dia';
+
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 12, 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _HeaderIconOrb(primary: primary, hasUnread: unread > 0),
-                  const SizedBox(width: 14),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        ShaderMask(
-                          blendMode: BlendMode.srcIn,
-                          shaderCallback: (bounds) {
-                            return LinearGradient(
-                              colors: [
-                                primary,
-                                AppColors.primary.primaryLight,
-                                isDark
-                                    ? AppColors.secondary.secondaryDarkMode
-                                    : AppColors.secondary.secondary,
-                              ],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ).createShader(
-                              Rect.fromLTWH(0, 0, bounds.width, bounds.height),
-                            );
-                          },
-                          child: Text(
-                            'Notificações',
-                            style: theme.textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.6,
-                              height: 1.05,
-                              color: Colors.white,
-                            ),
+                        Text(
+                          'INBOX',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: accent,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 2.4,
                           ),
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          unread > 0
-                              ? '$unread não lida${unread == 1 ? '' : 's'} · Toque num item para abrir'
-                              : 'Tudo em dia · alertas e atualizações em tempo real',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: ThemeHelpers.textSecondaryColor(context),
-                            fontWeight: FontWeight.w600,
-                            height: 1.35,
+                          'Notificações',
+                          style: theme.textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            color: ThemeHelpers.textColor(context),
+                            height: 1.05,
+                            letterSpacing: -0.4,
                           ),
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            // Bolinha contextual: vermelha pulsante quando
+                            // tem não-lidas, verde fixa quando "tudo em dia".
+                            _ContextDot(
+                              color: unread > 0
+                                  ? const Color(0xFFEF4444)
+                                  : const Color(0xFF22C55E),
+                              pulse: unread > 0,
+                            ),
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: Text(
+                                contextLine,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: ThemeHelpers.textSecondaryColor(
+                                      context),
+                                  fontWeight: FontWeight.w600,
+                                  height: 1.35,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
                   ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      _ChromeCloseButton(onPressed: onClose),
-                      if (unread > 0) ...[
-                        const SizedBox(height: 10),
-                        _MarkAllChip(
-                          onPressed: () async {
-                            await controller.markAllAsRead();
-                          },
-                        ),
-                      ],
-                    ],
-                  ),
+                  const SizedBox(width: 12),
+                  // Botão fechar circular discreto
+                  _CloseChip(),
                 ],
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 18),
-              child: Container(
-                height: 1,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      Colors.transparent,
-                      primary.withValues(alpha: 0.45),
-                      secondary.withValues(alpha: 0.35),
-                      Colors.transparent,
-                    ],
-                  ),
+
+              // Botão "Marcar todas" — full width, só quando há não-lidas
+              if (unread > 0) ...[
+                const SizedBox(height: 14),
+                _MarkAllAction(
+                  onPressed: () async {
+                    await controller.markAllAsRead();
+                  },
                 ),
-              ),
-            ),
-            const SizedBox(height: 6),
-          ],
+              ],
+            ],
+          ),
         );
       },
     );
   }
 }
 
-class _HeaderIconOrb extends StatelessWidget {
-  final Color primary;
-  final bool hasUnread;
+class _ContextDot extends StatefulWidget {
+  const _ContextDot({required this.color, required this.pulse});
 
-  const _HeaderIconOrb({
-    required this.primary,
-    required this.hasUnread,
-  });
+  final Color color;
+  final bool pulse;
+
+  @override
+  State<_ContextDot> createState() => _ContextDotState();
+}
+
+class _ContextDotState extends State<_ContextDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    )..repeat(reverse: true);
+    _scale = Tween<double>(begin: 0.85, end: 1.15).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      width: 48,
-      height: 48,
+    final dot = Container(
+      width: 8,
+      height: 8,
       decoration: BoxDecoration(
+        color: widget.color,
         shape: BoxShape.circle,
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            primary.withValues(alpha: 0.28),
-            primary.withValues(alpha: 0.08),
-          ],
-        ),
-        border: Border.all(
-          color: primary.withValues(alpha: hasUnread ? 0.55 : 0.28),
-          width: 1.5,
-        ),
         boxShadow: [
           BoxShadow(
-            color: primary.withValues(alpha: hasUnread ? 0.35 : 0.15),
-            blurRadius: hasUnread ? 16 : 10,
-            spreadRadius: hasUnread ? 1 : 0,
+            color: widget.color.withValues(alpha: 0.5),
+            blurRadius: 6,
           ),
-        ],
-      ),
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Icon(
-            hasUnread
-                ? Icons.notifications_active_rounded
-                : Icons.notifications_none_rounded,
-            color: primary,
-            size: 26,
-          ),
-          if (hasUnread)
-            Positioned(
-              right: 6,
-              top: 6,
-              child: Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xFF22C55E),
-                  border: Border.all(
-                    color: isDark
-                        ? AppColors.background.cardBackgroundDarkMode
-                        : Colors.white,
-                    width: 1.5,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF22C55E).withValues(alpha: 0.6),
-                      blurRadius: 6,
-                    ),
-                  ],
-                ),
-              ),
-            ),
         ],
       ),
     );
+    if (!widget.pulse) return dot;
+    return ScaleTransition(scale: _scale, child: dot);
   }
 }
 
-class _ChromeCloseButton extends StatelessWidget {
-  final VoidCallback onPressed;
-
-  const _ChromeCloseButton({required this.onPressed});
-
+class _CloseChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(14),
-        child: Ink(
-          width: 40,
-          height: 40,
+        onTap: () => Navigator.of(context).pop(),
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          width: 36,
+          height: 36,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
+            shape: BoxShape.circle,
             color: isDark
                 ? Colors.white.withValues(alpha: 0.06)
-                : AppColors.background.backgroundTertiary.withValues(alpha: 0.9),
+                : Colors.black.withValues(alpha: 0.04),
             border: Border.all(
-              color: ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
+              color: ThemeHelpers.borderLightColor(context),
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.06),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
           ),
           child: Icon(
             Icons.close_rounded,
-            size: 22,
+            size: 18,
             color: ThemeHelpers.textSecondaryColor(context),
           ),
         ),
@@ -787,16 +451,16 @@ class _ChromeCloseButton extends StatelessWidget {
   }
 }
 
-class _MarkAllChip extends StatelessWidget {
-  final VoidCallback onPressed;
+class _MarkAllAction extends StatelessWidget {
+  const _MarkAllAction({required this.onPressed});
 
-  const _MarkAllChip({required this.onPressed});
+  final Future<void> Function() onPressed;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final primary = isDark
+    final accent = isDark
         ? AppColors.primary.primaryDarkMode
         : AppColors.primary.primary;
 
@@ -804,35 +468,38 @@ class _MarkAllChip extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onPressed,
-        borderRadius: BorderRadius.circular(20),
-        child: Ink(
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(12),
             gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
               colors: [
-                primary.withValues(alpha: 0.14),
-                primary.withValues(alpha: 0.06),
+                accent.withValues(alpha: isDark ? 0.18 : 0.10),
+                accent.withValues(alpha: isDark ? 0.08 : 0.04),
               ],
             ),
-            border: Border.all(color: primary.withValues(alpha: 0.38)),
+            border: Border.all(
+              color: accent.withValues(alpha: isDark ? 0.4 : 0.28),
+            ),
           ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.done_all_rounded, size: 16, color: primary),
-                const SizedBox(width: 6),
-                Text(
-                  'Marcar lidas',
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: primary,
-                    letterSpacing: -0.2,
-                  ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.done_all_rounded, size: 18, color: accent),
+              const SizedBox(width: 10),
+              Text(
+                'Marcar todas como lidas',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: accent,
+                  letterSpacing: -0.1,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

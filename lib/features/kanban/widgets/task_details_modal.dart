@@ -430,6 +430,25 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
   // TAB: DETAILS
   // ---------------------------------------------------------------------------
 
+  /// Aba **Detalhes** redesenhada — layout editorial assimétrico.
+  ///
+  /// Antes era uma sequência de 5 caixas cinzas idênticas empilhadas,
+  /// cada uma com SectionHeader iguais e conteúdo listado verticalmente.
+  /// Resultado: parecia um formulário, não uma ficha de informação rica.
+  ///
+  /// Agora a hierarquia visual é distinta por bloco:
+  /// 1. **Descrição editorial** — sem caixa, borda accent fina à esquerda,
+  ///    fonte maior com leading generoso. É o conteúdo principal e ganha
+  ///    destaque tipográfico próprio.
+  /// 2. **Bento grid 2×2** — 4 tiles temáticos com cores próprias por
+  ///    categoria (prazo cinza/âmbar/vermelho conforme saúde, prioridade
+  ///    na cor da própria prioridade, funil roxo, status verde/cinza).
+  ///    Substitui o `_InfoStack` linear vertical.
+  /// 3. **Equipe** — cards lado a lado quando largura permite.
+  /// 4. **Tags** — chips coloridos como antes (já estavam OK).
+  /// 5. **Timeline horizontal** — 3 marcadores numa linha temporal
+  ///    horizontal (Criada → Atualizada → Prazo) com conector gradient.
+  ///    Substitui a lista vertical de datas.
   Widget _buildDetailsTab(BuildContext context, ThemeData theme, _TaskState state) {
     final task = widget.task;
     final hasDescription =
@@ -443,33 +462,27 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SectionHeader(
-            overline: 'Sobre o card',
-            title: 'Descrição',
-            trailing: hasDescription
-                ? '${task.description!.trim().length} caracteres'
-                : null,
-          ),
-          const SizedBox(height: 10),
-          _DescriptionBlock(
+          // 1. DESCRIÇÃO em destaque editorial
+          _EditorialDescription(
             text: hasDescription ? task.description!.trim() : null,
           ),
-          const SizedBox(height: 24),
-          _SectionHeader(
-            overline: 'Status & contexto',
-            title: 'Informações',
-          ),
-          const SizedBox(height: 10),
-          _InfoStack(task: task, state: state),
-          const SizedBox(height: 24),
+          const SizedBox(height: 26),
+
+          // 2. BENTO GRID — info chave em 2×2 com cores próprias
+          _BentoInfoGrid(task: task, state: state),
+          const SizedBox(height: 26),
+
+          // 3. EQUIPE
           _SectionHeader(
             overline: 'Equipe',
             title: 'Pessoas envolvidas',
           ),
           const SizedBox(height: 10),
           _PeopleStrip(task: task),
+
+          // 4. TAGS (se houver)
           if (hasTags) ...[
-            const SizedBox(height: 24),
+            const SizedBox(height: 26),
             _SectionHeader(
               overline: 'Categorias',
               title: 'Tags',
@@ -482,13 +495,15 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
               children: [for (final t in tags) _PillTag(label: t)],
             ),
           ],
-          const SizedBox(height: 24),
+          const SizedBox(height: 26),
+
+          // 5. TIMELINE HORIZONTAL
           _SectionHeader(
             overline: 'Auditoria',
             title: 'Linha do tempo',
           ),
-          const SizedBox(height: 10),
-          _TimelineFooter(task: task, state: state),
+          const SizedBox(height: 14),
+          _HorizontalTimeline(task: task, state: state),
         ],
       ),
     );
@@ -1261,155 +1276,145 @@ class _SectionHeader extends StatelessWidget {
 }
 
 // =============================================================================
-// DESCRIPTION
+// DESCRIPTION — editorial, sem caixa
 // =============================================================================
 
-class _DescriptionBlock extends StatelessWidget {
+/// Descrição "tipo pull-quote": eyebrow `BRIEFING` em cima, texto grande
+/// com leading 1.55, e uma borda accent fina (3px) à esquerda fazendo o
+/// papel de "régua editorial". Sem container cinza padrão.
+///
+/// Quando vazia: mensagem explicitamente discreta com ícone, sem
+/// container — fica claro que está vazio sem ocupar muito espaço.
+class _EditorialDescription extends StatelessWidget {
   final String? text;
 
-  const _DescriptionBlock({required this.text});
+  const _EditorialDescription({required this.text});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
+    final accent = _kanbanAccent(context);
     final empty = text == null || text!.isEmpty;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: ThemeHelpers.cardBackgroundColor(context)
-            .withValues(alpha: isDark ? 0.42 : 0.55),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.4),
+    final hasText = !empty;
+    final length = hasText ? text!.length : 0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Eyebrow + título "Briefing" — alinhado, mas mais leve que o
+        // _SectionHeader padrão (sem o stripe vertical de 4px à esquerda).
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Text(
+              'BRIEFING',
+              style: theme.textTheme.labelSmall?.copyWith(
+                letterSpacing: 2.6,
+                fontWeight: FontWeight.w900,
+                color: accent,
+                fontSize: 10,
+                height: 1,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Container(
+                height: 1,
+                color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
+              ),
+            ),
+            if (hasText) ...[
+              const SizedBox(width: 10),
+              Text(
+                '$length caracteres',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: secondary,
+                  letterSpacing: 0.4,
+                ),
+              ),
+            ],
+          ],
         ),
-      ),
-      child: empty
-          ? Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        const SizedBox(height: 12),
+
+        if (empty)
+          Padding(
+            padding: const EdgeInsets.only(left: 14, top: 4),
+            child: Row(
               children: [
-                Icon(Icons.short_text_rounded, size: 18, color: secondary),
-                const SizedBox(width: 10),
-                Expanded(
+                Icon(Icons.short_text_rounded, size: 16, color: secondary),
+                const SizedBox(width: 8),
+                Flexible(
                   child: Text(
                     'Sem descrição. Edite o card para adicionar contexto.',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: secondary,
                       fontWeight: FontWeight.w600,
                       height: 1.4,
+                      fontStyle: FontStyle.italic,
                     ),
                   ),
                 ),
               ],
-            )
-          : SelectableText(
-              text!,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                height: 1.55,
-                fontSize: 14,
-                color: ThemeHelpers.textColor(context),
-              ),
             ),
+          )
+        else
+          // Régua accent à esquerda + texto editorial generoso
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  width: 3,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: SelectableText(
+                    text!,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      height: 1.55,
+                      fontSize: 15,
+                      letterSpacing: -0.1,
+                      color: ThemeHelpers.textColor(context),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }
 
 // =============================================================================
-// INFO STACK (lista vertical de info-rows mais legível que grid 2x2)
+// BENTO INFO GRID (2×2 — substitui a lista vertical _InfoStack)
 // =============================================================================
 
-class _InfoStack extends StatelessWidget {
+/// Grid 2×2 de tiles temáticos com info-chave do card.
+///
+/// Cada tile tem **cor própria** (não uma caixa cinza idêntica), com a
+/// cor refletindo a categoria ou o estado:
+/// - **Prazo**: cinza neutro / âmbar (vence hoje) / vermelho (atrasada)
+/// - **Prioridade**: cor da própria prioridade (vinda do backend)
+/// - **Funil**: roxo (`#8B5CF6`) — categoria de "contexto/organização"
+/// - **Status**: verde (`#10B981`) se concluída, cinza se em aberto
+///
+/// O destaque é o **valor central grande** (não a label). Cada tile
+/// também tem uma "helper line" no rodapé (ex.: "Em 3 dias", "Workspace
+/// pessoal"). É bem mais escaneável que linhas verticais alinhadas.
+class _BentoInfoGrid extends StatelessWidget {
   final KanbanTask task;
   final _TaskState state;
 
-  const _InfoStack({required this.task, required this.state});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final priorityColor = task.priority != null
-        ? Color(int.parse(task.priority!.color.replaceFirst('#', '0xFF')))
-        : null;
-
-    final items = <_InfoRow>[
-      _InfoRow(
-        icon: Icons.flag_rounded,
-        iconColor: priorityColor ?? ThemeHelpers.textSecondaryColor(context),
-        label: 'Prioridade',
-        valueText: task.priority?.label ?? 'Não definida',
-        accentValue: task.priority != null,
-      ),
-      _InfoRow(
-        icon: state.health == _TaskHealth.overdue
-            ? Icons.error_rounded
-            : state.health == _TaskHealth.dueToday
-                ? Icons.warning_amber_rounded
-                : Icons.event_outlined,
-        iconColor: state.dueDate == null
-            ? ThemeHelpers.textSecondaryColor(context)
-            : state.accent,
-        label: 'Prazo',
-        valueText: state.dueDate == null
-            ? 'Sem prazo'
-            : DateFormat("d 'de' MMMM, y", 'pt_BR')
-                .format(state.dueDate!.toLocal()),
-        helper: state.dueDate == null
-            ? null
-            : _deadlineHelper(state),
-        accentValue: state.dueDate != null && state.health != _TaskHealth.ok,
-      ),
-      if (task.project != null)
-        _InfoRow(
-          icon: Icons.account_tree_outlined,
-          iconColor: const Color(0xFF8B5CF6),
-          label: 'Funil',
-          valueText: task.project!.name,
-          helper: task.project!.isPersonal == true
-              ? 'Workspace pessoal'
-              : task.project!.status.label,
-        ),
-      _InfoRow(
-        icon: task.isCompleted
-            ? Icons.check_circle_rounded
-            : Icons.circle_outlined,
-        iconColor: task.isCompleted
-            ? const Color(0xFF10B981)
-            : ThemeHelpers.textSecondaryColor(context),
-        label: 'Status',
-        valueText: task.isCompleted ? 'Concluída' : 'Em aberto',
-      ),
-    ];
-
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: ThemeHelpers.cardBackgroundColor(context)
-            .withValues(alpha: isDark ? 0.42 : 0.55),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.4),
-        ),
-      ),
-      child: Column(
-        children: [
-          for (var i = 0; i < items.length; i++) ...[
-            items[i].render(context, theme),
-            if (i < items.length - 1)
-              Divider(
-                height: 1,
-                thickness: 1,
-                color:
-                    ThemeHelpers.borderColor(context).withValues(alpha: 0.32),
-                indent: 16,
-                endIndent: 16,
-              ),
-          ],
-        ],
-      ),
-    );
-  }
+  const _BentoInfoGrid({required this.task, required this.state});
 
   static String? _deadlineHelper(_TaskState state) {
     final d = state.daysFromToday;
@@ -1421,50 +1426,157 @@ class _InfoStack extends StatelessWidget {
     if (d == 0) return 'Vence hoje';
     return 'Em $d dia${d == 1 ? '' : 's'}';
   }
+
+  @override
+  Widget build(BuildContext context) {
+    final priorityColor = task.priority != null
+        ? Color(int.parse(task.priority!.color.replaceFirst('#', '0xFF')))
+        : null;
+
+    final tiles = <_BentoTile>[
+      // PRAZO — destaque para data + helper "Em N dias"
+      _BentoTile(
+        icon: state.health == _TaskHealth.overdue
+            ? Icons.error_rounded
+            : state.health == _TaskHealth.dueToday
+                ? Icons.warning_amber_rounded
+                : Icons.event_outlined,
+        accent: state.dueDate == null
+            ? const Color(0xFF64748B) // slate
+            : state.accent,
+        label: 'Prazo',
+        value: state.dueDate == null
+            ? 'Sem prazo'
+            : DateFormat("d 'de' MMM", 'pt_BR')
+                .format(state.dueDate!.toLocal()),
+        helper: state.dueDate == null ? null : _deadlineHelper(state),
+        valueAccent: state.dueDate != null && state.health != _TaskHealth.ok,
+      ),
+
+      // PRIORIDADE — usa cor real vinda do backend
+      _BentoTile(
+        icon: Icons.flag_rounded,
+        accent: priorityColor ?? const Color(0xFF94A3B8),
+        label: 'Prioridade',
+        value: task.priority?.label ?? 'Não definida',
+        valueAccent: task.priority != null,
+        helper: task.priority == null ? 'Defina ao editar' : null,
+      ),
+
+      // FUNIL — sempre roxo (cor de "contexto")
+      if (task.project != null)
+        _BentoTile(
+          icon: Icons.account_tree_outlined,
+          accent: const Color(0xFF8B5CF6),
+          label: 'Funil',
+          value: task.project!.name,
+          helper: task.project!.isPersonal == true
+              ? 'Workspace pessoal'
+              : task.project!.status.label,
+        )
+      else
+        _BentoTile(
+          icon: Icons.account_tree_outlined,
+          accent: const Color(0xFF94A3B8),
+          label: 'Funil',
+          value: 'Sem funil',
+          helper: 'Sem projeto associado',
+        ),
+
+      // STATUS
+      _BentoTile(
+        icon: task.isCompleted
+            ? Icons.check_circle_rounded
+            : Icons.circle_outlined,
+        accent: task.isCompleted
+            ? const Color(0xFF10B981)
+            : const Color(0xFF94A3B8),
+        label: 'Status',
+        value: task.isCompleted ? 'Concluída' : 'Em aberto',
+        valueAccent: task.isCompleted,
+        helper: task.isCompleted ? 'Marcada como done' : 'Aguardando',
+      ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 2 colunas em larguras > 320 (sempre verdade pra mobile portrait
+        // moderno). Em telas muito largas (tablet), dá pra usar 4 colunas.
+        final cols = constraints.maxWidth >= 720 ? 4 : 2;
+        const aspectRatio = 1.55; // largura/altura — tile ligeiramente
+        // mais largo que alto, dá mais espaço pra label longa.
+
+        return GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: tiles.length,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: cols,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+            childAspectRatio: aspectRatio,
+          ),
+          itemBuilder: (_, i) => tiles[i].render(context),
+        );
+      },
+    );
+  }
 }
 
-class _InfoRow {
+class _BentoTile {
   final IconData icon;
-  final Color iconColor;
+  final Color accent;
   final String label;
-  final String valueText;
+  final String value;
   final String? helper;
-  final bool accentValue;
 
-  const _InfoRow({
+  /// Quando `true`, o valor central usa a cor accent (chama atenção
+  /// pra valores "ativos" — prazo crítico, prioridade definida, etc).
+  final bool valueAccent;
+
+  const _BentoTile({
     required this.icon,
-    required this.iconColor,
+    required this.accent,
     required this.label,
-    required this.valueText,
+    required this.value,
     this.helper,
-    this.accentValue = false,
+    this.valueAccent = false,
   });
 
-  Widget render(BuildContext context, ThemeData theme) {
-    final secondary = ThemeHelpers.textSecondaryColor(context);
+  Widget render(BuildContext context) {
+    final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        // Fundo sutilmente tingido na cor do accent — não cinza idêntico.
+        color: accent.withValues(alpha: isDark ? 0.10 : 0.06),
+        border: Border.all(
+          color: accent.withValues(alpha: isDark ? 0.32 : 0.22),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
-              color: iconColor.withValues(alpha: isDark ? 0.18 : 0.1),
-              border: Border.all(color: iconColor.withValues(alpha: 0.32)),
-            ),
-            child: Icon(icon, size: 16, color: iconColor),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
+          // Topo: ícone + eyebrow label
+          Row(
+            children: [
+              Container(
+                width: 26,
+                height: 26,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  color: accent.withValues(alpha: isDark ? 0.22 : 0.16),
+                ),
+                child: Icon(icon, size: 14, color: accent),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
                   label.toUpperCase(),
                   style: theme.textTheme.labelSmall?.copyWith(
                     letterSpacing: 1.2,
@@ -1473,34 +1585,45 @@ class _InfoRow {
                     fontSize: 10,
                     height: 1,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  valueText,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.2,
-                    height: 1.2,
-                    color: accentValue
-                        ? iconColor
-                        : ThemeHelpers.textColor(context),
-                  ),
-                ),
-                if (helper != null && helper!.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    helper!,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: secondary,
-                      height: 1.2,
-                    ),
-                  ),
-                ],
-              ],
+              ),
+            ],
+          ),
+
+          // Valor central em destaque
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Text(
+              value,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.3,
+                height: 1.1,
+                fontSize: 15.5,
+                color: valueAccent
+                    ? accent
+                    : ThemeHelpers.textColor(context),
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
+
+          // Helper line discreta no rodapé
+          if (helper != null && helper!.isNotEmpty)
+            Text(
+              helper!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: secondary,
+                height: 1.1,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
         ],
       ),
     );
@@ -1726,129 +1849,218 @@ Color _tagColor(String tag) {
 }
 
 // =============================================================================
-// TIMELINE FOOTER (created/updated/due)
+// HORIZONTAL TIMELINE (created → updated → due)
 // =============================================================================
 
-class _TimelineFooter extends StatelessWidget {
+/// Linha do tempo **horizontal** ligando 3 marcos do card:
+/// Criada → Atualizada → Prazo. Cada marco tem ícone circular accent,
+/// label, data e helper (tempo relativo).
+///
+/// Substitui o `_TimelineFooter` antigo que era uma lista vertical de 3
+/// rows iguais — visualmente entediante e idêntico aos outros blocos.
+class _HorizontalTimeline extends StatelessWidget {
   final KanbanTask task;
   final _TaskState state;
 
-  const _TimelineFooter({required this.task, required this.state});
+  const _HorizontalTimeline({required this.task, required this.state});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final fmt = DateFormat("d MMM y · HH:mm", 'pt_BR');
-    final items = <_FooterDate>[
-      _FooterDate(
+    final fmt = DateFormat("d MMM", 'pt_BR');
+    final timeFmt = DateFormat("HH:mm");
+
+    final entries = <_TimelineEntry>[
+      _TimelineEntry(
         icon: Icons.add_circle_outline_rounded,
+        accent: const Color(0xFF22C55E),
         label: 'Criada',
         value: fmt.format(task.createdAt.toLocal()),
+        time: timeFmt.format(task.createdAt.toLocal()),
         helper: _relativeTime(task.createdAt),
       ),
-      _FooterDate(
+      _TimelineEntry(
         icon: Icons.update_rounded,
+        accent: const Color(0xFF3B82F6),
         label: 'Atualizada',
         value: fmt.format(task.updatedAt.toLocal()),
+        time: timeFmt.format(task.updatedAt.toLocal()),
         helper: _relativeTime(task.updatedAt),
       ),
       if (state.dueDate != null)
-        _FooterDate(
-          icon: Icons.event_outlined,
+        _TimelineEntry(
+          icon: state.health == _TaskHealth.overdue
+              ? Icons.error_rounded
+              : state.health == _TaskHealth.dueToday
+                  ? Icons.warning_amber_rounded
+                  : Icons.event_outlined,
+          accent: state.health == _TaskHealth.ok
+              ? const Color(0xFF8B5CF6)
+              : state.accent,
           label: 'Prazo',
           value: fmt.format(state.dueDate!.toLocal()),
-          helper: _InfoStack._deadlineHelper(state),
-          accent: state.health != _TaskHealth.ok ? state.accent : null,
+          time: timeFmt.format(state.dueDate!.toLocal()),
+          helper: _BentoInfoGrid._deadlineHelper(state),
+          emphasized: state.health != _TaskHealth.ok,
         ),
     ];
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: ThemeHelpers.cardBackgroundColor(context)
-            .withValues(alpha: isDark ? 0.42 : 0.55),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.4),
-        ),
-      ),
-      child: Column(
-        children: [
-          for (var i = 0; i < items.length; i++) ...[
-            items[i].render(context, theme),
-            if (i < items.length - 1)
-              Divider(
-                height: 14,
-                thickness: 1,
-                color: ThemeHelpers.borderColor(context)
-                    .withValues(alpha: 0.32),
+
+    final lineColor = ThemeHelpers.borderColor(context)
+        .withValues(alpha: isDark ? 0.6 : 0.45);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Posicionamento equidistante dos pontos. O segmento entre
+          // pontos é a "linha conectora" pintada por baixo.
+          return Stack(
+            children: [
+              // Linha conectora — sutil e contínua atrás dos pontos.
+              Positioned(
+                left: 22,
+                right: 22,
+                top: 17, // alinha com centro vertical do círculo (34/2)
+                child: Container(
+                  height: 2,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        lineColor.withValues(alpha: 0.0),
+                        lineColor.withValues(alpha: 1.0),
+                        lineColor.withValues(alpha: 1.0),
+                        lineColor.withValues(alpha: 0.0),
+                      ],
+                      stops: const [0.0, 0.05, 0.95, 1.0],
+                    ),
+                  ),
+                ),
               ),
-          ],
-        ],
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (var i = 0; i < entries.length; i++)
+                    Expanded(child: entries[i].render(context, theme)),
+                ],
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 }
 
-class _FooterDate {
+class _TimelineEntry {
   final IconData icon;
+  final Color accent;
   final String label;
   final String value;
+  final String time;
   final String? helper;
-  final Color? accent;
+  final bool emphasized;
 
-  const _FooterDate({
+  const _TimelineEntry({
     required this.icon,
+    required this.accent,
     required this.label,
     required this.value,
+    required this.time,
     this.helper,
-    this.accent,
+    this.emphasized = false,
   });
 
   Widget render(BuildContext context, ThemeData theme) {
+    final isDark = theme.brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final color = accent ?? secondary;
-    return Row(
+    final scaffoldBg = isDark
+        ? Theme.of(context).scaffoldBackgroundColor
+        : Theme.of(context).cardColor;
+
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 14, color: color),
-        const SizedBox(width: 8),
-        SizedBox(
-          width: 86,
-          child: Text(
-            label.toUpperCase(),
-            style: theme.textTheme.labelSmall?.copyWith(
-              letterSpacing: 1.2,
-              fontWeight: FontWeight.w800,
-              color: color,
-              fontSize: 10,
-              height: 1,
+        // Bullet circular accent — fica POR CIMA da linha conectora,
+        // por isso tem fundo do scaffold pra "esconder" a linha que passa
+        // por trás (ilusão de quebra do conector).
+        Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: scaffoldBg,
+            border: Border.all(
+              color: accent.withValues(alpha: emphasized ? 0.85 : 0.55),
+              width: emphasized ? 2 : 1.5,
             ),
+            boxShadow: emphasized
+                ? [
+                    BoxShadow(
+                      color: accent.withValues(alpha: 0.3),
+                      blurRadius: 10,
+                      spreadRadius: 0,
+                    ),
+                  ]
+                : null,
+          ),
+          child: Icon(
+            icon,
+            size: 16,
+            color: accent,
           ),
         ),
-        Expanded(
-          child: Text(
-            value,
-            style: theme.textTheme.bodySmall?.copyWith(
-              fontWeight: FontWeight.w800,
-              fontSize: 12,
-              letterSpacing: -0.1,
-              height: 1.2,
-              color: ThemeHelpers.textColor(context),
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+        const SizedBox(height: 8),
+        Text(
+          label.toUpperCase(),
+          style: theme.textTheme.labelSmall?.copyWith(
+            letterSpacing: 1.2,
+            fontWeight: FontWeight.w800,
+            color: secondary,
+            fontSize: 9.5,
+            height: 1,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.2,
+            color: emphasized ? accent : ThemeHelpers.textColor(context),
+            height: 1.15,
+            fontSize: 13.5,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        Text(
+          time,
+          style: theme.textTheme.labelSmall?.copyWith(
+            fontWeight: FontWeight.w600,
+            color: secondary,
+            fontSize: 10.5,
+            fontFeatures: const [FontFeature.tabularFigures()],
           ),
         ),
-        if (helper != null && helper!.isNotEmpty)
+        if (helper != null && helper!.isNotEmpty) ...[
+          const SizedBox(height: 4),
           Text(
             helper!,
             style: theme.textTheme.labelSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: color,
-              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              color: emphasized ? accent : secondary,
+              fontSize: 10,
+              height: 1.1,
             ),
+            maxLines: 2,
+            textAlign: TextAlign.center,
+            overflow: TextOverflow.ellipsis,
           ),
+        ],
       ],
     );
   }

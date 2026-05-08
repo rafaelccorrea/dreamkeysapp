@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,28 +7,22 @@ import 'package:flutter/services.dart';
 import '../navigation/app_navigator.dart';
 import '../theme/app_colors.dart';
 
-/// Toasts limpos no padrão moderno (estilo Linear/Vercel/Notion):
-/// pill compacta no rodapé, sem ruído visual.
+/// Toasts premium do Intellisys — pill no rodapé com identidade visual
+/// forte (accent vertical, glass sutil, ícone gradient).
 ///
-/// O design anterior tinha **muito** elemento competindo por atenção em
-/// cada toast: faixa accent vertical, ícone-plate quadrado de 46px, label
-/// uppercase tipo "CONFIRMADO/INTELLISYS", barra de countdown progressiva
-/// e ainda um ícone de swipe-down. Para um aviso passageiro de 3 segundos
-/// isso é overkill — o toast é justamente algo que não deve dominar a
-/// tela. Esta reescrita reduz ao essencial:
-///
-/// - **Posição**: rodapé (mais discreto que topo, padrão moderno).
-/// - **Forma**: pill compacta com fundo escuro/claro adaptativo, borda
-///   sutil e sombra leve com tint do accent.
-/// - **Conteúdo**: ícone circular compacto (28px) + mensagem em uma linha
-///   peso 600 + subtítulo opcional menor.
-/// - **Sem ruído**: sem labels uppercase, sem barra de countdown visível,
-///   sem hint de swipe — o usuário descobre por instinto que pode tocar
-///   ou arrastar pra fechar.
-/// - **Animação**: slide-up + fade (entrada) e slide-down + fade (saída).
-///
-/// API pública mantida igual: `AppToast.success/error/warning/info` e
-/// extension `context.showToast(...)`. Quem chamava antes não muda nada.
+/// **Histórico do design**:
+/// 1ª versão: muito carregado — faixa accent + label uppercase pomposa
+/// + barra de countdown + ícone gigante quadrado. Ficou "carregado".
+/// 2ª versão: minimalista demais — pill sólida lisa, ícone circular,
+/// texto pequeno. Ficou "HTML sem CSS" (sem identidade).
+/// **Esta versão (3ª)**: meio-termo refinado:
+///   - Faixa accent vertical de 4px à esquerda (assinatura visual)
+///   - Backdrop blur sutil (glass premium, não pesado)
+///   - Ícone circular accent com gradient diagonal
+///   - Tipografia robusta (peso 700, fontSize 14.5)
+///   - Sombra dupla (preta dropshadow + glow accent)
+///   - Borda accent semitransparente para definir o card
+///   - Posição rodapé (padrão moderno mobile)
 enum AppToastKind {
   success,
   error,
@@ -51,7 +46,7 @@ class AppToast {
     required String message,
     AppToastKind kind = AppToastKind.info,
     String? subtitle,
-    Duration duration = const Duration(milliseconds: 3200),
+    Duration duration = const Duration(milliseconds: 3400),
     VoidCallback? onTap,
   }) {
     final theme = Theme.of(context);
@@ -98,7 +93,7 @@ extension AppToastBuildContext on BuildContext {
     String message, {
     AppToastKind kind = AppToastKind.info,
     String? subtitle,
-    Duration duration = const Duration(milliseconds: 3200),
+    Duration duration = const Duration(milliseconds: 3400),
   }) {
     AppToast.show(
       this,
@@ -110,10 +105,9 @@ extension AppToastBuildContext on BuildContext {
   }
 }
 
-// ───────────────────────────────────────────────────────────────────────
-// Estilos por tipo. Cada tipo tem **um** accent — a paleta do toast em
-// si é neutra (escuro no dark / claro no light) pra não competir com o
-// app por atenção. Só o ícone circular reflete a "natureza" do toast.
+// ─────────────────────────────────────────────────────────────────────
+// Estilo por tipo
+// ─────────────────────────────────────────────────────────────────────
 
 class _ToastStyle {
   const _ToastStyle({required this.accent, required this.icon});
@@ -149,6 +143,10 @@ _ToastStyle _styleFor(AppToastKind kind, Brightness brightness) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Layer
+// ─────────────────────────────────────────────────────────────────────
+
 class _ToastLayer extends StatefulWidget {
   const _ToastLayer({
     required this.theme,
@@ -176,13 +174,15 @@ class _ToastLayerState extends State<_ToastLayer>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 360),
-    reverseDuration: const Duration(milliseconds: 240),
+    duration: const Duration(milliseconds: 420),
+    reverseDuration: const Duration(milliseconds: 280),
   );
 
   late final Animation<double> _slide = CurvedAnimation(
     parent: _controller,
-    curve: const Cubic(0.22, 1, 0.36, 1),
+    // Curve com leve overshoot — dá sensação de "snap" premium em vez
+    // de slide chato.
+    curve: const Cubic(0.34, 1.32, 0.64, 1),
     reverseCurve: Curves.easeInCubic,
   );
 
@@ -225,32 +225,37 @@ class _ToastLayerState extends State<_ToastLayer>
     final isDark = brightness == Brightness.dark;
     final style = _styleFor(widget.kind, brightness);
 
-    // Fundo da pill: escuro no dark mode, off-white no light. Sólido,
-    // sem glass — glass tinha sombra "borrada" demais e ficava lendo
-    // como caixa de erro do sistema.
-    final bg = isDark
-        ? const Color(0xFF1A1A1F)
-        : const Color(0xFFFFFFFF);
+    // Glass tonal — semi-transparente com blur por trás. Dá profundidade
+    // sem ficar pesado como o glass da v1.
+    final bgBase = isDark
+        ? const Color(0xFF14141A)
+        : Colors.white;
+    final bg = bgBase.withValues(alpha: isDark ? 0.86 : 0.94);
+
     final fg = isDark ? Colors.white : const Color(0xFF0F1216);
     final fgSec = isDark
-        ? Colors.white.withValues(alpha: 0.62)
-        : const Color(0xFF0F1216).withValues(alpha: 0.6);
-    final borderCol = isDark
-        ? Colors.white.withValues(alpha: 0.08)
-        : Colors.black.withValues(alpha: 0.08);
+        ? Colors.white.withValues(alpha: 0.7)
+        : const Color(0xFF0F1216).withValues(alpha: 0.66);
 
     final bottom = media.padding.bottom + 18 - _dragY;
 
+    // OverlayEntry não tem `Material` ancestor por padrão — sem isso
+    // o Flutter renderiza um sublinhado duplo amarelo de aviso embaixo
+    // de qualquer `Text`. Envolvendo num Material transparente resolve
+    // (e ainda permite InkWell funcionar dentro do toast, se um dia
+    // precisarmos).
     return Positioned(
       left: 0,
       right: 0,
       bottom: bottom,
-      child: SafeArea(
+      child: Material(
+        type: MaterialType.transparency,
+        child: SafeArea(
         top: false,
         child: Center(
           child: SlideTransition(
             position: Tween<Offset>(
-              begin: const Offset(0, 0.4),
+              begin: const Offset(0, 0.5),
               end: Offset.zero,
             ).animate(_slide),
             child: FadeTransition(
@@ -266,7 +271,7 @@ class _ToastLayerState extends State<_ToastLayer>
                   },
                   onVerticalDragUpdate: (d) {
                     setState(() {
-                      _dragY = (_dragY - d.delta.dy).clamp(-120.0, 24.0);
+                      _dragY = (_dragY - d.delta.dy).clamp(-160.0, 24.0);
                     });
                   },
                   onVerticalDragEnd: (d) {
@@ -278,77 +283,127 @@ class _ToastLayerState extends State<_ToastLayer>
                   },
                   child: Container(
                     margin: const EdgeInsets.symmetric(horizontal: 16),
-                    constraints: const BoxConstraints(maxWidth: 540),
+                    constraints: const BoxConstraints(maxWidth: 560),
                     decoration: BoxDecoration(
-                      color: bg,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: borderCol, width: 1),
+                      borderRadius: BorderRadius.circular(16),
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withValues(
-                            alpha: isDark ? 0.42 : 0.10,
+                            alpha: isDark ? 0.55 : 0.14,
                           ),
-                          blurRadius: 24,
-                          offset: const Offset(0, 12),
-                          spreadRadius: -8,
+                          blurRadius: 28,
+                          offset: const Offset(0, 14),
+                          spreadRadius: -10,
                         ),
                         BoxShadow(
                           color: style.accent
-                              .withValues(alpha: isDark ? 0.18 : 0.08),
-                          blurRadius: 20,
+                              .withValues(alpha: isDark ? 0.32 : 0.18),
+                          blurRadius: 30,
                           offset: const Offset(0, 8),
-                          spreadRadius: -10,
+                          spreadRadius: -12,
                         ),
                       ],
                     ),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 12, 16, 12),
-                      child: Row(
-                        crossAxisAlignment: widget.subtitle != null
-                            ? CrossAxisAlignment.start
-                            : CrossAxisAlignment.center,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _RoundIcon(
-                            accent: style.accent,
-                            icon: style.icon,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: BackdropFilter(
+                        // Glass leve (sigma 14) — dá premium sem virar
+                        // "borrão" como sigma 18+ da v1.
+                        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: bg,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: style.accent
+                                  .withValues(alpha: isDark ? 0.28 : 0.22),
+                              width: 1,
+                            ),
                           ),
-                          const SizedBox(width: 12),
-                          Flexible(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
+                          child: IntrinsicHeight(
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                Text(
-                                  widget.message,
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    color: fg,
-                                    height: 1.3,
-                                    letterSpacing: -0.1,
-                                  ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                if (widget.subtitle != null) ...[
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    widget.subtitle!,
-                                    style: TextStyle(
-                                      fontSize: 12.5,
-                                      fontWeight: FontWeight.w500,
-                                      color: fgSec,
-                                      height: 1.35,
+                                // Faixa accent vertical — assinatura visual
+                                // que diferencia do "card cinza genérico"
+                                Container(
+                                  width: 4,
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [
+                                        style.accent,
+                                        style.accent
+                                            .withValues(alpha: 0.65),
+                                      ],
                                     ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                ],
+                                ),
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      12,
+                                      12,
+                                      14,
+                                      12,
+                                    ),
+                                    child: Row(
+                                      crossAxisAlignment: widget.subtitle != null
+                                          ? CrossAxisAlignment.start
+                                          : CrossAxisAlignment.center,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        _RoundIcon(
+                                          accent: style.accent,
+                                          icon: style.icon,
+                                          isDark: isDark,
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Flexible(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Text(
+                                                widget.message,
+                                                style: TextStyle(
+                                                  fontSize: 14.5,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: fg,
+                                                  height: 1.25,
+                                                  letterSpacing: -0.1,
+                                                ),
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                              if (widget.subtitle != null) ...[
+                                                const SizedBox(height: 3),
+                                                Text(
+                                                  widget.subtitle!,
+                                                  style: TextStyle(
+                                                    fontSize: 12.5,
+                                                    fontWeight: FontWeight.w500,
+                                                    color: fgSec,
+                                                    height: 1.35,
+                                                  ),
+                                                  maxLines: 2,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
                               ],
                             ),
                           ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
@@ -358,23 +413,31 @@ class _ToastLayerState extends State<_ToastLayer>
           ),
         ),
       ),
+      ),
     );
   }
 }
 
-/// Ícone circular compacto à esquerda — único elemento "colorido" do
-/// toast, é o que diferencia visualmente success/error/warning/info.
+/// Ícone circular accent com gradient diagonal e glow sutil.
+///
+/// É o elemento mais "colorido" do toast — marca claramente o tipo
+/// (success/error/warning/info) sem precisar de label uppercase.
 class _RoundIcon extends StatelessWidget {
-  const _RoundIcon({required this.accent, required this.icon});
+  const _RoundIcon({
+    required this.accent,
+    required this.icon,
+    required this.isDark,
+  });
 
   final Color accent;
   final IconData icon;
+  final bool isDark;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 28,
-      height: 28,
+      width: 32,
+      height: 32,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         gradient: LinearGradient(
@@ -382,12 +445,12 @@ class _RoundIcon extends StatelessWidget {
           end: Alignment.bottomRight,
           colors: [
             accent,
-            Color.lerp(accent, Colors.black, 0.18) ?? accent,
+            Color.lerp(accent, Colors.black, 0.22) ?? accent,
           ],
         ),
         boxShadow: [
           BoxShadow(
-            color: accent.withValues(alpha: 0.42),
+            color: accent.withValues(alpha: isDark ? 0.55 : 0.42),
             blurRadius: 10,
             offset: const Offset(0, 3),
           ),
@@ -395,7 +458,7 @@ class _RoundIcon extends StatelessWidget {
       ),
       child: Icon(
         icon,
-        size: 16,
+        size: 18,
         color: Colors.white,
       ),
     );

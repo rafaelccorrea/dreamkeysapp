@@ -312,6 +312,11 @@ class ApiConstants {
   static String kanbanBoard(String teamId) => '/kanban/board/$teamId';
   static const String kanbanColumns = '/kanban/columns';
   static String kanbanColumnById(String id) => '/kanban/columns/$id';
+
+  /// `GET /kanban/columns/:columnId/tasks?teamId&projectId&page&limit&search`
+  /// Usado pelo "Carregar mais" cards dentro de uma coluna do board.
+  static String kanbanColumnTasks(String columnId) =>
+      '/kanban/columns/$columnId/tasks';
   static String kanbanColumnsReorder(String teamId) =>
       '/kanban/columns/reorder/$teamId';
   static const String kanbanTasks = '/kanban/tasks';
