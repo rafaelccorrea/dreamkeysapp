@@ -67,22 +67,16 @@ workflows:
           echo "Navegando para o diretório iOS..."
           cd ios
 
-          echo "Ajustando o Podfile para garantir a versão mínima do iOS (13.0) para o Firebase usando Ruby..."
-          # Script Ruby para modificar o Podfile de forma robusta
-          ruby -i.bak -e "
-            found_platform = false
-            File.foreach(\'Podfile\').with_index do |line, line_num|
-              if line =~ /^\s*platform\s+:ios/ 
-                puts \"platform :ios, \'13.0\'\"
-                found_platform = true
-              else
-                puts line
-              end
-            end
-            unless found_platform
-              puts \"platform :ios, \'13.0\'\"
-            end
-          " Podfile
+          echo "Ajustando o Podfile para garantir a versão mínima do iOS (13.0) para o Firebase..."
+          # Verifica se a linha 'platform :ios' existe no Podfile
+          if grep -q "platform :ios" Podfile; then
+            # Se existir, substitui a linha inteira, garantindo 'platform :ios, '13.0''
+            # Usa sed -i '' para compatibilidade com BSD sed (macOS)
+            sed -i '' "s/^platform :ios.*$/platform :ios, '13.0'/" Podfile
+          else
+            # Se não existir, adiciona a linha 'platform :ios, '13.0'' no início do Podfile
+            printf "platform :ios, '13.0'\n%s" "$(cat Podfile)" > Podfile
+          fi
 
           echo "Instalando os pods com --repo-update..."
           pod install --repo-update
