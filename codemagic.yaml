@@ -37,8 +37,9 @@ workflows:
 
       - name: Install CocoaPods and dependencies
         script: |
-          # Atualiza RubyGems e instala uma versão compatível do CocoaPods
+          # Atualiza RubyGems e instala uma versão compatível do activesupport e CocoaPods
           gem update --system
+          gem install activesupport -v 6.1.7.8 # Força uma versão compatível do activesupport
           gem install cocoapods -v 1.12.1 # Força a instalação da versão 1.12.1
           cd ios
           pod install
