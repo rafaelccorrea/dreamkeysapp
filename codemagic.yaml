@@ -5,7 +5,7 @@ workflows:
     environment:
       flutter: stable
       xcode: latest
-      cocoapods: 1.12.1 # Manter a versão para referência, mas vamos atualizar no script
+      # Removemos a versão fixa do cocoapods aqui, pois será instalada via Homebrew
       vars:
         # Substitua pelos seus valores reais ou configure no Codemagic UI
         APP_STORE_CONNECT_PRIVATE_KEY: |
@@ -35,12 +35,15 @@ workflows:
           flutter clean
           flutter pub get
 
-      - name: Install CocoaPods and dependencies
+      - name: Install CocoaPods via Homebrew and clean cache
         script: |
-          # Atualiza RubyGems e instala uma versão compatível do activesupport e CocoaPods
-          gem update --system
-          gem install activesupport -v 6.1.7.8 # Força uma versão compatível do activesupport
-          gem install cocoapods -v 1.12.1 # Força a instalação da versão 1.12.1
+          # Garante que o Homebrew esteja atualizado
+          brew update
+          # Instala o CocoaPods via Homebrew, que gerencia suas próprias dependências Ruby
+          brew install cocoapods
+          # Limpa o cache do CocoaPods para evitar problemas residuais
+          pod cache clean --all
+          # Navega para o diretório iOS e instala os pods
           cd ios
           pod install
 
