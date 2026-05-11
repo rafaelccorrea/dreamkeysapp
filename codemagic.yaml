@@ -7,7 +7,7 @@ workflows:
       xcode: latest
       # Removemos a versão fixa do cocoapods aqui, pois será instalada via Homebrew
       vars:
-        # Substitua pelos seus valores reais ou configure no Codemagic UI
+        # Substitua pelos seus seus valores reais ou configure no Codemagic UI
         APP_STORE_CONNECT_PRIVATE_KEY: |
           -----BEGIN PRIVATE KEY-----
           # Seu App Store Connect API Key aqui
@@ -29,6 +29,11 @@ workflows:
         - pattern: main
           include: true
 
+    cache:
+      cache_paths:
+        - ~/.pub-cache
+        - $HOME/Library/Caches/CocoaPods # Adicionado cache para CocoaPods
+
     scripts:
       - name: Set up Flutter
         script: |
@@ -37,15 +42,34 @@ workflows:
 
       - name: Install CocoaPods via Homebrew and clean cache
         script: |
-          # Garante que o Homebrew esteja atualizado
-          brew update
-          # Instala o CocoaPods via Homebrew, que gerencia suas próprias dependências Ruby
-          brew install cocoapods
-          # Limpa o cache do CocoaPods para evitar problemas residuais
+          echo "Verificando e atualizando Homebrew..."
+          # Tenta atualizar o Homebrew. Se falhar, o script continua, mas imprime um aviso.
+          brew update || echo "Aviso: Homebrew update falhou, mas o script continuará."
+          
+          echo "Verificando instalação do CocoaPods via Homebrew..."
+          # Verifica se o CocoaPods já está instalado via Homebrew
+          if ! brew list cocoapods &>/dev/null; then
+            echo "CocoaPods não encontrado via Homebrew. Instalando..."
+            brew install cocoapods
+          else
+            echo "CocoaPods já instalado via Homebrew. Atualizando..."
+            brew upgrade cocoapods
+          fi
+
+          echo "Garantindo que o PATH do Homebrew esteja configurado corretamente..."
+          # Adiciona os caminhos padrão do Homebrew ao PATH para garantir que o `pod` correto seja usado.
+          # /opt/homebrew/bin é para Apple Silicon (M1/M2), /usr/local/bin é para Intel Macs.
+          export PATH="/opt/homebrew/bin:$PATH"
+          export PATH="/usr/local/bin:$PATH"
+
+          echo "Limpando o cache do CocoaPods para evitar problemas residuais..."
           pod cache clean --all
-          # Navega para o diretório iOS e instala os pods
+
+          echo "Navegando para o diretório iOS e instalando os pods..."
           cd ios
-          pod install
+          # `pod install --repo-update` garante que os repositórios de specs do CocoaPods estejam atualizados
+          # antes de instalar os pods, o que pode resolver problemas de versões.
+          pod install --repo-update
 
       - name: Build iOS App
         script: |
