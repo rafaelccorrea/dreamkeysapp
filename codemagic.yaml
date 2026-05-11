@@ -67,16 +67,27 @@ workflows:
           echo "Navegando para o diretório iOS..."
           cd ios
 
-          echo "Ajustando o Podfile para garantir a versão mínima do iOS (13.0) para o Firebase..."
-          # Verifica se a linha 'platform :ios' existe no Podfile
+          echo "Ajustando o Podfile para garantir a versão mínima do iOS (13.0) e forçar o deployment target..."
+          # 1. Garante que a linha 'platform :ios, '13.0'' esteja presente no Podfile
           if grep -q "platform :ios" Podfile; then
-            # Se existir, substitui a linha inteira, garantindo 'platform :ios, '13.0''
-            # Usa sed -i '' para compatibilidade com BSD sed (macOS)
             sed -i '' "s/^platform :ios.*$/platform :ios, '13.0'/" Podfile
           else
-            # Se não existir, adiciona a linha 'platform :ios, '13.0'' no início do Podfile
             printf "platform :ios, '13.0'\n%s" "$(cat Podfile)" > Podfile
           fi
+
+          # 2. Adiciona um bloco post_install para forçar o IPHONEOS_DEPLOYMENT_TARGET para 13.0 em todos os pods
+          # Isso é crucial para resolver conflitos de dependência do Firebase.
+          cat << EOF >> Podfile
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    flutter_additional_ios_build_settings(target)
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
+    end
+  end
+end
+EOF
 
           echo "Instalando os pods com --repo-update..."
           pod install --repo-update
