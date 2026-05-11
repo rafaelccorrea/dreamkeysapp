@@ -4,8 +4,8 @@ workflows:
     instance_type: mac_mini_m1
     environment:
       flutter: stable
-      xcode: latest # Alterado de 15.0 para latest
-      cocoapods: 1.12.1
+      xcode: latest
+      cocoapods: 1.12.1 # Manter a versão para referência, mas vamos atualizar no script
       vars:
         # Substitua pelos seus valores reais ou configure no Codemagic UI
         APP_STORE_CONNECT_PRIVATE_KEY: |
@@ -35,8 +35,11 @@ workflows:
           flutter clean
           flutter pub get
 
-      - name: Install CocoaPods
+      - name: Install CocoaPods and dependencies
         script: |
+          # Atualiza RubyGems e instala uma versão compatível do CocoaPods
+          gem update --system
+          gem install cocoapods -v 1.12.1 # Força a instalação da versão 1.12.1
           cd ios
           pod install
 
