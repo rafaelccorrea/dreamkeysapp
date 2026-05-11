@@ -4,7 +4,7 @@ workflows:
     instance_type: mac_mini_m1
     environment:
       flutter: stable
-      xcode: 15.0
+      xcode: latest # Alterado de 15.0 para latest
       cocoapods: 1.12.1
       vars:
         # Substitua pelos seus valores reais ou configure no Codemagic UI
