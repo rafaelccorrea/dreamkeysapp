@@ -1,0 +1,71 @@
+workflows:
+  ios-build:
+    name: Flutter iOS Build
+    instance_type: mac_mini_m1
+    environment:
+      flutter: stable
+      xcode: 15.0
+      cocoapods: 1.12.1
+      vars:
+        # Substitua pelos seus valores reais ou configure no Codemagic UI
+        APP_STORE_CONNECT_PRIVATE_KEY: |
+          -----BEGIN PRIVATE KEY-----
+          # Seu App Store Connect API Key aqui
+          -----END PRIVATE KEY-----
+        CERTIFICATE_PRIVATE_KEY: |
+          -----BEGIN PRIVATE KEY-----
+          # Sua chave privada do certificado de distribuição aqui
+          -----END PRIVATE KEY-----
+        BUNDLE_ID: "com.yourcompany.yourapp"
+        APP_ID: "SEU_APP_ID_AQUI" # Ex: 1234567890
+        PROVISIONING_PROFILE_UUID: "SEU_PROFILE_UUID_AQUI"
+
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: master
+          include: true
+        - pattern: main
+          include: true
+
+    scripts:
+      - name: Set up Flutter
+        script: |
+          flutter clean
+          flutter pub get
+
+      - name: Install CocoaPods
+        script: |
+          cd ios
+          pod install
+
+      - name: Build iOS App
+        script: |
+          flutter build ios --release --no-codesign
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - $HOME/Library/Developer/Xcode/Archives/**/*.xcarchive
+
+    publishing:
+      email:
+        recipients:
+          - seu.email@exemplo.com
+        success: true
+        failure: false
+
+      # Opcional: Publicar no App Store Connect
+      # app_store_connect:
+      #   api_key:
+      #     key_id: $APP_STORE_CONNECT_KEY_ID
+      #     issuer_id: $APP_STORE_CONNECT_ISSUER_ID
+      #     private_key: $APP_STORE_CONNECT_PRIVATE_KEY
+      #   # build_number: # Opcional, se não for usar o do Codemagic
+      #   # version: # Opcional, se não for usar o do Codemagic
+      #   submit_to_testflight: true
+      #   submit_to_app_store: false
+      #   # beta_groups: # Opcional, grupos de TestFlight
+      #   #   - "Testers"
+
