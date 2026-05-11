@@ -68,7 +68,7 @@ workflows:
           cd ios
 
           echo "Ajustando o Podfile para garantir a versão mínima do iOS (13.0) e forçar o deployment target..."
-          # 1. Garante que a linha 'platform :ios, '13.0'' esteja presente no Podfile
+          # 1. Garante que a linha platform :ios, '13.0' esteja presente no Podfile
           if grep -q "platform :ios" Podfile; then
             sed -i '' "s/^platform :ios.*$/platform :ios, '13.0'/" Podfile
           else
