@@ -135,9 +135,10 @@ class KanbanSubtaskService {
       if (response.success) {
         if (response.data is List) {
           final rawList = response.data as List;
+          final filteredRawList = _applyLegacyListFilters(rawList, filters);
           final cached = _LegacySubTasksCache(
-            raw: List<dynamic>.from(rawList),
-            stats: _computeStatsFromRawList(rawList),
+            raw: filteredRawList,
+            stats: _computeStatsFromRawList(filteredRawList),
           );
           _legacyListCache[cacheKey] = cached;
           // Evita crescer indefinidamente.
@@ -170,9 +171,10 @@ class KanbanSubtaskService {
         if (retryResponse.success) {
           if (retryResponse.data is List) {
             final rawList = retryResponse.data as List;
+            final filteredRawList = _applyLegacyListFilters(rawList, filters);
             final cached = _LegacySubTasksCache(
-              raw: List<dynamic>.from(rawList),
-              stats: _computeStatsFromRawList(rawList),
+              raw: filteredRawList,
+              stats: _computeStatsFromRawList(filteredRawList),
             );
             _legacyListCache[cacheKey] = cached;
             if (_legacyListCache.length > 8) {
@@ -337,6 +339,103 @@ class KanbanSubtaskService {
       );
     }
     return SubTasksListResponse.empty;
+  }
+
+  List<dynamic> _applyLegacyListFilters(List rawList, SubTasksListFilters filters) {
+    if (rawList.isEmpty) return const <dynamic>[];
+
+    DateTime? parseDate(dynamic raw) {
+      if (raw == null) return null;
+      try {
+        return DateTime.parse(raw.toString());
+      } catch (_) {
+        return null;
+      }
+    }
+
+    DateTime toDay(DateTime d) => DateTime(d.year, d.month, d.day);
+    bool withinRange(
+      DateTime? value, {
+      DateTime? from,
+      DateTime? to,
+    }) {
+      if (value == null) return false;
+      final day = toDay(value);
+      if (from != null && day.isBefore(toDay(from))) return false;
+      if (to != null && day.isAfter(toDay(to))) return false;
+      return true;
+    }
+
+    final taskId = filters.taskId?.trim();
+    final cardSearch = filters.cardSearch?.trim().toLowerCase();
+    final teamId = filters.cardTeamId?.trim();
+    final projectId = filters.cardProjectId?.trim();
+
+    final filtered = rawList.where((item) {
+      if (item is! Map) return false;
+      final map = Map<String, dynamic>.from(item);
+
+      if (taskId != null && taskId.isNotEmpty) {
+        final taskIdValue = map['taskId']?.toString() ?? '';
+        if (taskIdValue != taskId) return false;
+      }
+
+      if (filters.isCompleted != null) {
+        final completed = map['isCompleted'] == true;
+        if (completed != filters.isCompleted) return false;
+      }
+
+      if (filters.dueDateFrom != null || filters.dueDateTo != null) {
+        final due = parseDate(map['dueDate']);
+        if (!withinRange(
+          due,
+          from: filters.dueDateFrom,
+          to: filters.dueDateTo,
+        )) {
+          return false;
+        }
+      }
+
+      if (cardSearch != null && cardSearch.isNotEmpty) {
+        final title = (map['parentTaskTitle'] ?? map['taskTitle'] ?? map['title'])
+            ?.toString()
+            .toLowerCase();
+        if (title == null || !title.contains(cardSearch)) return false;
+      }
+
+      if (teamId != null && teamId.isNotEmpty) {
+        final value = (map['teamId'] ??
+                (map['parentTask'] is Map ? (map['parentTask'] as Map)['teamId'] : null))
+            ?.toString();
+        if (value != teamId) return false;
+      }
+
+      if (projectId != null && projectId.isNotEmpty) {
+        final value = (map['projectId'] ??
+                (map['parentTask'] is Map ? (map['parentTask'] as Map)['projectId'] : null))
+            ?.toString();
+        if (value != projectId) return false;
+      }
+
+      if (filters.subtaskKind != null) {
+        final taskType = map['taskType']?.toString().toLowerCase().trim() ?? '';
+        switch (filters.subtaskKind!) {
+          case SubtaskKindFilter.ligar:
+            if (taskType != 'ligar') return false;
+            break;
+          case SubtaskKindFilter.tarefa:
+            if (taskType != 'tarefa') return false;
+            break;
+          case SubtaskKindFilter.ligarOrTarefa:
+            if (taskType != 'ligar' && taskType != 'tarefa') return false;
+            break;
+        }
+      }
+
+      return true;
+    }).toList(growable: false);
+
+    return List<dynamic>.from(filtered);
   }
 
   /// `GET /kanban/subtasks/:subTaskId`.

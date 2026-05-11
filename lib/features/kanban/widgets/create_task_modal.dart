@@ -194,18 +194,11 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
     final n = DateTime.now();
     _dueDate = DateTime(n.year, n.month, n.day);
     _contactRows.add(_ContactRowEditors());
-    _titleController.addListener(_rebuild);
-    _descriptionController.addListener(_rebuild);
-    _internalNotesController.addListener(_rebuild);
     _loadCurrentUserId().then((_) {
       if (!mounted) return;
       setState(() => _assigneeId = _currentUserId);
       _loadProjectMembers();
     });
-  }
-
-  void _rebuild() {
-    if (mounted) setState(() {});
   }
 
   @override
@@ -699,6 +692,7 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
         maxLines: 4,
         maxLength: 300,
         maxLengthEnforcement: MaxLengthEnforcement.enforced,
+        onChanged: (_) => setState(() {}),
         decoration: _flatDecoration(
           hint: 'Descreva o contexto desta negociação',
         ).copyWith(counterText: ''),
@@ -721,6 +715,7 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
         maxLines: 4,
         maxLength: 2000,
         maxLengthEnforcement: MaxLengthEnforcement.enforced,
+        onChanged: (_) => setState(() {}),
         decoration: _flatDecoration(
           hint: 'Ex.: aceita permuta, forma de pagamento, financiamento',
         ).copyWith(counterText: ''),
@@ -821,6 +816,7 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
         controller: _titleController,
         maxLength: 200,
         maxLengthEnforcement: MaxLengthEnforcement.enforced,
+        onChanged: (_) => setState(() {}),
         textCapitalization: TextCapitalization.sentences,
         decoration: _flatDecoration(
           hint: 'Ex.: Apto 3 dorms — Centro / Família Silva',
@@ -900,9 +896,10 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
 
   Widget _ownerProjectBody(bool wide) {
     final controller = context.read<KanbanController>();
+    final accent = _accent(context);
     final ownerCard = _FieldCard(
       icon: Icons.person_pin_rounded,
-      iconColor: _accent(context),
+      iconColor: accent,
       label: 'Responsável',
       sublabel: 'Quem vai cuidar deste card',
       child: _loadingMembers
@@ -910,46 +907,81 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
               padding: EdgeInsets.symmetric(vertical: 12),
               child: LinearProgressIndicator(minHeight: 2),
             )
-          : DropdownButtonFormField<String>(
-              initialValue: _assigneeId,
-              decoration: _flatDecoration(),
-              items: _memberUsers
-                  .map(
-                    (u) => DropdownMenuItem(
-                      value: u.id,
-                      child: Row(
-                        children: [
-                          CircleAvatar(
-                            radius: 12,
-                            backgroundColor:
-                                _accent(context).withValues(alpha: 0.18),
-                            child: Text(
-                              _initials(u.name.isEmpty ? u.email : u.name),
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
-                                color: _accent(context),
+          : Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                color: ThemeHelpers.cardBackgroundColor(context),
+                border: Border.all(
+                  color: accent.withValues(alpha: 0.26),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  DropdownButtonFormField<String>(
+                    initialValue: _assigneeId,
+                    isExpanded: true,
+                    menuMaxHeight: 340,
+                    borderRadius: BorderRadius.circular(16),
+                    dropdownColor: ThemeHelpers.cardBackgroundColor(context),
+                    icon: Icon(
+                      Icons.unfold_more_rounded,
+                      color: ThemeHelpers.textSecondaryColor(context),
+                    ),
+                    decoration: _flatDecoration(
+                      hint: 'Selecione o responsável',
+                      prefix: Icons.badge_outlined,
+                    ),
+                    selectedItemBuilder: (context) {
+                      return _memberUsers
+                          .map(
+                            (u) => Align(
+                              alignment: Alignment.centerLeft,
+                              child: _memberDropdownRow(
+                                user: u,
+                                accent: accent,
+                                selected: true,
+                              ),
+                            ),
+                          )
+                          .toList();
+                    },
+                    items: _memberUsers
+                        .map(
+                          (u) => DropdownMenuItem<String>(
+                            value: u.id,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 3),
+                              child: _memberDropdownRow(
+                                user: u,
+                                accent: accent,
                               ),
                             ),
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              u.name.isNotEmpty ? u.name : u.email,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
+                        )
+                        .toList(),
+                    onChanged: (v) {
+                      setState(() {
+                        _assigneeId = v;
+                        if (v != null) _involvedUserIds.remove(v);
+                      });
+                    },
+                  ),
+                  if (_assigneeId != null)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(2, 8, 2, 0),
+                      child: Text(
+                        'Responsável definido para esta negociação.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: ThemeHelpers.textSecondaryColor(context),
+                        ),
                       ),
                     ),
-                  )
-                  .toList(),
-              onChanged: (v) {
-                setState(() {
-                  _assigneeId = v;
-                  if (v != null) _involvedUserIds.remove(v);
-                });
-              },
+                ],
+              ),
             ),
     );
 
@@ -1474,6 +1506,7 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
           .map((u) {
         final on = _involvedUserIds.contains(u.id);
         return FilterChip(
+          showCheckmark: false,
           avatar: CircleAvatar(
             radius: 12,
             backgroundColor: _accent(context).withValues(alpha: 0.18),
@@ -1487,6 +1520,19 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
             ),
           ),
           label: Text(u.name.isNotEmpty ? u.name : u.email),
+          labelStyle: TextStyle(
+            fontWeight: FontWeight.w700,
+            color: on ? _accent(context) : ThemeHelpers.textColor(context),
+          ),
+          side: BorderSide(
+            color: on
+                ? _accent(context).withValues(alpha: 0.65)
+                : ThemeHelpers.borderColor(context),
+          ),
+          backgroundColor: ThemeHelpers.cardBackgroundColor(context),
+          selectedColor: _accent(context).withValues(alpha: 0.14),
+          pressElevation: 0,
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
           selected: on,
           onSelected: (sel) {
             setState(() {
@@ -1499,6 +1545,52 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
           },
         );
       }).toList(),
+    );
+  }
+
+  String _memberDisplayName(KanbanUser user) {
+    final name = user.name.trim();
+    if (name.isNotEmpty) return name;
+    final email = user.email.trim();
+    if (email.isNotEmpty) return email;
+    return 'Usuário';
+  }
+
+  Widget _memberDropdownRow({
+    required KanbanUser user,
+    required Color accent,
+    bool selected = false,
+  }) {
+    final label = _memberDisplayName(user);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        CircleAvatar(
+          radius: 12,
+          backgroundColor: accent.withValues(alpha: 0.18),
+          child: Text(
+            _initials(label),
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w900,
+              color: accent,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Flexible(
+          fit: FlexFit.loose,
+          child: Text(
+            label,
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+            style: TextStyle(
+              fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
+              color: ThemeHelpers.textColor(context),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -1948,16 +2040,18 @@ class _CollapsibleSection extends StatelessWidget {
               ),
             ),
           ),
-          AnimatedCrossFade(
-            firstChild: const SizedBox.shrink(),
-            secondChild: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: child,
+          ClipRect(
+            child: AnimatedSize(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topCenter,
+              child: expanded
+                  ? Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      child: child,
+                    )
+                  : const SizedBox.shrink(),
             ),
-            crossFadeState: expanded
-                ? CrossFadeState.showSecond
-                : CrossFadeState.showFirst,
-            duration: const Duration(milliseconds: 220),
           ),
         ],
       ),

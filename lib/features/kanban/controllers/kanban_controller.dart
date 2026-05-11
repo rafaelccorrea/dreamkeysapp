@@ -44,6 +44,7 @@ class KanbanController extends ChangeNotifier {
   bool _bulkDeleteEligibilityLoading = false;
   String? _bulkBoardContextKey;
   bool _bulkDeleting = false;
+  bool _lastProjectHydrated = false;
 
   // ── Paginação por coluna ────────────────────────────────────────────
   /// Estado de paginação por coluna. Inicializado quando `loadBoard`
@@ -343,6 +344,23 @@ class KanbanController extends ChangeNotifier {
     await loadAccessibleProjects();
   }
 
+  /// Restaura o último funil selecionado salvo localmente (escopo por empresa).
+  Future<void> _hydrateLastSelectedProjectIfNeeded() async {
+    if (_lastProjectHydrated) return;
+    _lastProjectHydrated = true;
+    try {
+      final companyId = await SecureStorageService.instance.getCompanyId();
+      final persisted = await SecureStorageService.instance.getLastKanbanProjectId(
+        companyId: companyId,
+      );
+      if (persisted != null && persisted.isNotEmpty) {
+        _projectId = persisted;
+      }
+    } catch (e) {
+      debugPrint('⚠️ [KANBAN_CTRL] Falha ao restaurar último funil: $e');
+    }
+  }
+
   /// Ao abrir a página: primeiro frame já mostra skeleton se ainda não há quadro nem erro.
   void markKanbanEnteringIfNeeded() {
     if (_board != null || _error != null) return;
@@ -370,6 +388,7 @@ class KanbanController extends ChangeNotifier {
     _updateState(loading: true, clearError: true);
 
     try {
+      await _hydrateLastSelectedProjectIfNeeded();
       String? resolvedTeamId = teamId ?? _teamId;
 
       // Descobrir equipe (paridade web: `GET /kanban/teams?onlyWithProjects=true`).
@@ -989,6 +1008,11 @@ class KanbanController extends ChangeNotifier {
 
     if (projectId.trim().isEmpty) return;
     _projectId = projectId;
+    final companyId = await SecureStorageService.instance.getCompanyId();
+    await SecureStorageService.instance.saveLastKanbanProjectId(
+      projectId: projectId,
+      companyId: companyId,
+    );
 
     // Encontrar o projeto selecionado para obter o teamId correto
     String? projectTeamId;
@@ -1359,6 +1383,7 @@ class KanbanController extends ChangeNotifier {
     _bulkDeleteEligibilityLoading = false;
     _bulkBoardContextKey = null;
     _bulkDeleting = false;
+    _lastProjectHydrated = false;
     _columnPagination.clear();
     notifyListeners();
   }

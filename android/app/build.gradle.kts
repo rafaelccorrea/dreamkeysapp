@@ -67,20 +67,29 @@ android {
     }
 
     buildTypes {
+        val hasKeyProps = rootProject.file("key.properties").exists()
+        val hasEnvSigning = !System.getenv("DK_STORE_FILE").isNullOrBlank() &&
+            !System.getenv("DK_STORE_PASSWORD").isNullOrBlank() &&
+            !System.getenv("DK_KEY_ALIAS").isNullOrBlank() &&
+            !System.getenv("DK_KEY_PASSWORD").isNullOrBlank()
+        val hasReleaseSigning = hasKeyProps || hasEnvSigning
+        val isReleaseBuildRequested = gradle.startParameter.taskNames.any {
+            it.contains("release", ignoreCase = true)
+        }
+
         release {
-            val hasKeyProps = rootProject.file("key.properties").exists()
-            val hasEnvSigning = !System.getenv("DK_STORE_FILE").isNullOrBlank() &&
-                !System.getenv("DK_STORE_PASSWORD").isNullOrBlank() &&
-                !System.getenv("DK_KEY_ALIAS").isNullOrBlank() &&
-                !System.getenv("DK_KEY_PASSWORD").isNullOrBlank()
-            if (!hasKeyProps && !hasEnvSigning) {
+            if (!hasReleaseSigning && isReleaseBuildRequested) {
                 throw GradleException(
                     "Release sem chave de assinatura. " +
                         "Crie android/key.properties ou defina DK_STORE_FILE, DK_STORE_PASSWORD, " +
                         "DK_KEY_ALIAS e DK_KEY_PASSWORD."
                 )
             }
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             
             // Habilitar minificação e otimização
             isMinifyEnabled = true

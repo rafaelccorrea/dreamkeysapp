@@ -515,9 +515,9 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
                           _buildBucketsRail(context),
                           Padding(
                             padding: const EdgeInsets.fromLTRB(
-                              14,
+                              8,
                               _kSectionGap + 1,
-                              14,
+                              8,
                               _kPagePadBottom,
                             ),
                             child: _buildBody(context),
@@ -551,6 +551,12 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
     final updatedAtLabel = _formatHeroTimestamp(DateTime.now());
     final activeBucketLabel = _bucketLabel(_activeBucket);
     final hasSearch = _appliedSearch.trim().isNotEmpty;
+    final progressTone = completionPct >= 70
+        ? (isDark ? AppColors.status.greenDarkMode : AppColors.status.green)
+        : accent;
+    final pendingTone = pending > 0
+        ? (isDark ? AppColors.status.warningDarkMode : AppColors.status.warning)
+        : (isDark ? AppColors.status.greenDarkMode : AppColors.status.green);
 
     final headline = pending == 0
         ? 'Tudo em dia por aqui'
@@ -567,12 +573,15 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 42,
-                height: 42,
+                width: 46,
+                height: 46,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(14),
                   gradient: LinearGradient(
                     colors: [accent, const Color(0xFF7C3AED)],
+                  ),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: isDark ? 0.16 : 0.34),
                   ),
                   boxShadow: [
                     BoxShadow(
@@ -604,69 +613,216 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
                         letterSpacing: 2.2,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 5),
                     Text(
                       headline,
                       style: theme.textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.w900,
                         color: ThemeHelpers.textColor(context),
-                        height: 1.05,
+                        height: 1.08,
                         letterSpacing: -0.4,
                       ),
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'Atualizado às $updatedAtLabel • Visão: $activeBucketLabel • Progresso: $completionPct%',
+                      'Atualizado $updatedAtLabel · Visão ${activeBucketLabel[0].toUpperCase()}${activeBucketLabel.substring(1)} · Progresso $completionPct%',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: subtitleColor,
+                        fontWeight: FontWeight.w700,
                         height: 1.3,
-                        fontWeight: FontWeight.w600,
                       ),
                     ),
                     if (hasSearch) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        'Filtro ativo: "${_appliedSearch.trim()}"',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: accent,
-                          fontWeight: FontWeight.w700,
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? accent.withValues(alpha: 0.11)
+                              : accent.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: isDark
+                                ? accent.withValues(alpha: 0.24)
+                                : accent.withValues(alpha: 0.22),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(LucideIcons.search, size: 13, color: accent),
+                            const SizedBox(width: 6),
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 230),
+                              child: Text(
+                                'Filtro "${_appliedSearch.trim()}"',
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: ThemeHelpers.textColor(context),
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.15,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 7,
+                      runSpacing: 7,
+                      children: [
+                        _buildHeroMiniStatChip(
+                          context,
+                          icon: LucideIcons.inbox,
+                          label: 'Pendentes',
+                          value: pending,
+                          tone: pendingTone,
+                        ),
+                        _buildHeroMiniStatChip(
+                          context,
+                          icon: LucideIcons.alertTriangle,
+                          label: 'Atrasadas',
+                          value: overdue,
+                          tone: danger,
+                        ),
+                        _buildHeroMiniStatChip(
+                          context,
+                          icon: LucideIcons.checkCircle2,
+                          label: 'Concluídas',
+                          value: completed,
+                          tone: progressTone,
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
             ],
           ),
-          if (overdue > 0) ...[
-            const SizedBox(height: 10),
-            Row(
+          const SizedBox(height: 11),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.03)
+                  : Colors.white.withValues(alpha: 0.55),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
+              ),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _PulseDot(color: danger),
-                const SizedBox(width: 7),
+                Container(
+                  width: 3,
+                  height: 30,
+                  margin: const EdgeInsets.only(top: 1),
+                  decoration: BoxDecoration(
+                    color: overdue > 0 ? danger : pendingTone,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  width: 26,
+                  height: 26,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: overdue > 0
+                        ? danger.withValues(alpha: 0.16)
+                        : pendingTone.withValues(alpha: 0.16),
+                  ),
+                  child: Icon(
+                    overdue > 0 ? LucideIcons.alertTriangle : LucideIcons.sparkles,
+                    size: 14,
+                    color: overdue > 0 ? danger : pendingTone,
+                  ),
+                ),
+                const SizedBox(width: 9),
                 Expanded(
                   child: Text(
-                    '$overdue ${overdue == 1 ? 'tarefa atrasada' : 'tarefas atrasadas'}',
+                    overdue > 0
+                        ? '$overdue ${overdue == 1 ? 'tarefa atrasada precisa de atenção agora.' : 'tarefas atrasadas pedem ação imediata.'}'
+                        : (pending > 0
+                            ? '$pending ${pending == 1 ? 'pendência ativa no seu fluxo.' : 'pendências ativas no seu fluxo.'}'
+                            : 'Nenhuma pendência ativa. Continue mantendo esse ritmo.'),
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: danger,
-                      fontWeight: FontWeight.w800,
+                      color: ThemeHelpers.textColor(context),
+                      fontWeight: FontWeight.w700,
+                      height: 1.32,
                     ),
                   ),
                 ),
+                if (overdue > 0) ...[
+                  const SizedBox(width: 8),
+                  _PulseDot(color: danger),
+                ],
               ],
             ),
-          ] else ...[
-            const SizedBox(height: 10),
-            Text(
-              'Lembretes do que fazer com cada lead.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: subtitleColor,
-                height: 1.3,
-              ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Lembretes do que fazer com cada lead.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: subtitleColor,
+              height: 1.3,
             ),
-          ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeroMiniStatChip(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required int value,
+    required Color tone,
+  }) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      decoration: BoxDecoration(
+        color: isDark ? tone.withValues(alpha: 0.11) : tone.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isDark ? tone.withValues(alpha: 0.28) : tone.withValues(alpha: 0.22),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: tone),
+          const SizedBox(width: 6),
+          Text(
+            '$value',
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: tone,
+              fontWeight: FontWeight.w900,
+              height: 1,
+            ),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: ThemeHelpers.textColor(context),
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.15,
+            ),
+          ),
         ],
       ),
     );

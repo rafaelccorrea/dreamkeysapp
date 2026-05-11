@@ -22,6 +22,7 @@ class SecureStorageService {
   static const String _keyRefreshToken = 'refresh_token';
   static const String _keyCompanyId = 'intellisys_selected_company_id';
   static const String _keyFcmRegisteredToken = 'fcm_registered_token';
+  static const String _keyKanbanLastProjectIdPrefix = 'kanban_last_project_id';
 
   /// Salva as credenciais do usuário
   Future<void> saveCredentials({
@@ -248,6 +249,48 @@ class SecureStorageService {
       await _storage.delete(key: _keyFcmRegisteredToken);
     } catch (e) {
       debugPrint('⚠️ [SECURE_STORAGE] Erro ao limpar token FCM: $e');
+    }
+  }
+
+  String _kanbanLastProjectKey(String? companyId) {
+    final suffix = (companyId ?? 'global').trim();
+    if (suffix.isEmpty) return '${_keyKanbanLastProjectIdPrefix}_global';
+    return '${_keyKanbanLastProjectIdPrefix}_$suffix';
+  }
+
+  Future<void> saveLastKanbanProjectId({
+    required String projectId,
+    String? companyId,
+  }) async {
+    final value = projectId.trim();
+    if (value.isEmpty) return;
+    try {
+      await _storage.write(
+        key: _kanbanLastProjectKey(companyId),
+        value: value,
+      );
+    } catch (e) {
+      debugPrint('⚠️ [SECURE_STORAGE] Erro ao salvar último funil Kanban: $e');
+    }
+  }
+
+  Future<String?> getLastKanbanProjectId({String? companyId}) async {
+    try {
+      final value = await _storage.read(key: _kanbanLastProjectKey(companyId));
+      final trimmed = value?.trim();
+      if (trimmed == null || trimmed.isEmpty) return null;
+      return trimmed;
+    } catch (e) {
+      debugPrint('⚠️ [SECURE_STORAGE] Erro ao ler último funil Kanban: $e');
+      return null;
+    }
+  }
+
+  Future<void> clearLastKanbanProjectId({String? companyId}) async {
+    try {
+      await _storage.delete(key: _kanbanLastProjectKey(companyId));
+    } catch (e) {
+      debugPrint('⚠️ [SECURE_STORAGE] Erro ao limpar último funil Kanban: $e');
     }
   }
 

@@ -57,9 +57,9 @@ class SubTaskCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _Timeline(color: bucketColor),
-                const SizedBox(width: 14),
+                const SizedBox(width: 10),
                 _TypeIcon(style: typeStyle),
-                const SizedBox(width: 14),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -100,7 +100,7 @@ class SubTaskCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
                 _RightActions(
                   isCompleted: subtask.isCompleted,
                   color: bucketColor,
@@ -146,7 +146,7 @@ class SubTaskDivider extends StatelessWidget {
     return Padding(
       // Recuo na esquerda para alinhar com o ícone do próximo item — dá
       // a sensação de "linha de tempo contínua" entre as tarefas.
-      padding: const EdgeInsets.only(left: 16),
+      padding: const EdgeInsets.only(left: 12),
       child: Container(
         height: 1,
         color:

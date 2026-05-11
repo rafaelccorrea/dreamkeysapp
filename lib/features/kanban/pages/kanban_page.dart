@@ -2374,13 +2374,14 @@ class _KanbanPageState extends State<KanbanPage> {
   }
 
   Widget _deadlineChip(_KanbanTaskDeadline deadline) {
-    final c = deadline.accentColor(context)!;
+    final c =
+        deadline.accentColor(context) ?? ThemeHelpers.textSecondaryColor(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
       decoration: BoxDecoration(
-        color: c.withValues(alpha: 0.13),
+        color: c.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: c.withValues(alpha: 0.32), width: 0.7),
+        border: Border.all(color: c.withValues(alpha: 0.28), width: 0.7),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
