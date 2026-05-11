@@ -59,14 +59,29 @@ workflows:
           echo "Garantindo que o PATH do Homebrew esteja configurado corretamente..."
           # Adiciona os caminhos padrão do Homebrew ao PATH para garantir que o `pod` correto seja usado.
           # /opt/homebrew/bin é para Apple Silicon (M1/M2), /usr/local/bin é para Intel Macs.
+          # Também adicionamos HOMEBREW_NO_PATH_SHADOW_CHECK=1 para evitar o aviso de shadowing.
+          export HOMEBREW_NO_PATH_SHADOW_CHECK=1
           export PATH="/opt/homebrew/bin:$PATH"
           export PATH="/usr/local/bin:$PATH"
 
           echo "Limpando o cache do CocoaPods para evitar problemas residuais..."
           pod cache clean --all
 
-          echo "Navegando para o diretório iOS e instalando os pods..."
+          echo "Navegando para o diretório iOS..."
           cd ios
+
+          echo "Ajustando o Podfile para garantir a versão mínima do iOS (13.0) para o Firebase..."
+          # Este script sed irá procurar pela linha 'platform :ios' e garantir que seja 'platform :ios, '13.0''
+          # Se a linha não existir, ele adicionará no início do arquivo.
+          # Se já existir com uma versão menor, ele atualizará.
+          # Se já existir com uma versão maior ou igual, ele não fará nada.
+          if ! grep -q "platform :ios" Podfile; then
+            echo "platform :ios, '13.0'" | cat - Podfile > temp && mv temp Podfile
+          else
+            sed -i '' "/platform :ios/c\platform :ios, '13.0'" Podfile
+          fi
+
+          echo "Instalando os pods com --repo-update..."
           # `pod install --repo-update` garante que os repositórios de specs do CocoaPods estejam atualizados
           # antes de instalar os pods, o que pode resolver problemas de versões.
           pod install --repo-update
