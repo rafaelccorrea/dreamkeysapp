@@ -53,8 +53,6 @@ workflows:
       email:
         recipients:
           - seu.email@exemplo.com
-        success: true
-        failure: false
 
       # Opcional: Publicar no App Store Connect
       # app_store_connect:
@@ -68,4 +66,3 @@ workflows:
       #   submit_to_app_store: false
       #   # beta_groups: # Opcional, grupos de TestFlight
       #   #   - "Testers"
-
