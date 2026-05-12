@@ -8,17 +8,20 @@ workflows:
       # Removemos a versão fixa do cocoapods aqui, pois será instalada via Homebrew
       vars:
         # Substitua pelos seus seus valores reais ou configure no Codemagic UI
-        APP_STORE_CONNECT_PRIVATE_KEY: |
-          -----BEGIN PRIVATE KEY-----
-          # Seu App Store Connect API Key aqui
-          -----END PRIVATE KEY-----
-        CERTIFICATE_PRIVATE_KEY: |
-          -----BEGIN PRIVATE KEY-----
-          # Sua chave privada do certificado de distribuição aqui
-          -----END PRIVATE KEY-----
+        # As variáveis abaixo são para code signing e publicação. 
+        # Para builds sem assinatura (--no-codesign), elas não são estritamente necessárias.
+        # Mantenha BUNDLE_ID com um valor válido para o projeto Xcode.
         BUNDLE_ID: "com.yourcompany.yourapp"
-        APP_ID: "SEU_APP_ID_AQUI" # Ex: 1234567890
-        PROVISIONING_PROFILE_UUID: "SEU_PROFILE_UUID_AQUI"
+        # APP_STORE_CONNECT_PRIVATE_KEY: |
+        #   -----BEGIN PRIVATE KEY-----
+        #   # Seu App Store Connect API Key aqui
+        #   -----END PRIVATE KEY-----
+        # CERTIFICATE_PRIVATE_KEY: |
+        #   -----BEGIN PRIVATE KEY-----
+        #   # Sua chave privada do certificado de distribuição aqui
+        #   -----END PRIVATE KEY-----
+        # APP_ID: "SEU_APP_ID_AQUI" # Ex: 1234567890
+        # PROVISIONING_PROFILE_UUID: "SEU_PROFILE_UUID_AQUI"
 
     triggering:
       events:
@@ -42,30 +45,27 @@ workflows:
 
       - name: Install CocoaPods via Homebrew and clean cache
         script: |
-          echo "Verificando e atualizando Homebrew..."
-          # Tenta atualizar o Homebrew. Se falhar, o script continua, mas imprime um aviso.
-          brew update || echo "Aviso: Homebrew update falhou, mas o script continuará."
-          
-          echo "Verificando instalação do CocoaPods via Homebrew..."
-          # Verifica se o CocoaPods já está instalado via Homebrew
-          if ! brew list cocoapods &>/dev/null; then
-            echo "CocoaPods não encontrado via Homebrew. Instalando..."
-            brew install cocoapods
-          else
-            echo "CocoaPods já instalado via Homebrew. Atualizando..."
-            brew upgrade cocoapods
+          echo "Instalando/Atualizando CocoaPods via RubyGems..."
+          # Instala CocoaPods via gem, que é mais robusto em ambientes CI como o Codemagic
+          # e evita problemas de PATH/shadowing com Homebrew ou rbenv.
+          sudo gem install cocoapods
+          if [ $? -ne 0 ]; then
+            echo "Erro: Falha ao instalar CocoaPods via RubyGems. Abortando." && exit 1
           fi
+          echo "CocoaPods instalado/atualizado com sucesso via RubyGems."
 
-          echo "Garantindo que o PATH do Homebrew esteja configurado corretamente e desativando o aviso de shadowing..."
-          export HOMEBREW_NO_PATH_SHADOW_CHECK=1 # Isso silencia o aviso de shadowing
-          # Prioriza o Homebrew para Apple Silicon e Intel
-          export PATH="/opt/homebrew/bin:$PATH"
-          export PATH="/usr/local/bin:$PATH"
+          echo "Garantindo que o PATH do sistema esteja configurado para o binário do CocoaPods..."
+          # Adiciona o diretório de gems ao PATH para garantir que o 'pod' seja encontrado
+          export PATH="$(ruby -r rubygems -e 'puts Gem.user_dir')/bin:$PATH"
+          export PATH="/usr/local/bin:$PATH" # Para compatibilidade
+          export PATH="/opt/homebrew/bin:$PATH" # Para Apple Silicon
           echo "PATH atual: $PATH"
           echo "Versão do pod sendo usada: $(which pod)"
 
-          echo "Limpando o cache do CocoaPods para evitar problemas residuais..."
+          echo "Limpando o cache do CocoaPods e removendo instalações anteriores para evitar problemas residuais..."
           pod cache clean --all
+          # Remove Pods e Podfile.lock para garantir uma instalação limpa
+          rm -rf Pods Podfile.lock
 
           echo "Navegando para o diretório iOS..."
           if [ -d "ios" ]; then
