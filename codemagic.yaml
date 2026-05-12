@@ -119,3 +119,13 @@ workflows:
       email:
         recipients:
           - es553807@gmail.com
+      app_store_connect:
+        # Usa as mesmas credenciais já cadastradas como env vars
+        # (Issuer ID, Key ID e Private Key no grupo app_store_credentials).
+        api_key: $APP_STORE_CONNECT_PRIVATE_KEY
+        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
+        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
+        # Sobe direto para o TestFlight (testes internos).
+        submit_to_testflight: true
+        # Para submeter direto à App Store (revisão pública),
+        # troque para `submit_to_app_store: true` quando estiver pronto.
