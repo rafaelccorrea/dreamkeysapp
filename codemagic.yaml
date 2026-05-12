@@ -85,22 +85,45 @@ workflows:
 
       - name: Set up code signing
         script: |
-          set -e
+          set -ex
+
+          echo "===== API CREDENTIALS ====="
+          echo "ISSUER_ID set: ${APP_STORE_CONNECT_ISSUER_ID:+yes}"
+          echo "KEY_ID set: ${APP_STORE_CONNECT_KEY_IDENTIFIER:+yes}"
+          echo "PRIVATE_KEY set: ${APP_STORE_CONNECT_PRIVATE_KEY:+yes}"
+          echo "BUNDLE_ID: $BUNDLE_ID"
+
           keychain initialize
 
-          # Garante que existe um IOS_DISTRIBUTION certificate na conta
-          # (se já existir, o comando falha silenciosamente e seguimos)
+          echo "===== LIST EXISTING CERTS ====="
+          app-store-connect certificates list --type IOS_DISTRIBUTION || true
+
+          echo "===== LIST EXISTING BUNDLE IDS ====="
+          app-store-connect bundle-ids list --bundle-id-identifier "$BUNDLE_ID" || true
+
+          echo "===== LIST EXISTING PROFILES ====="
+          app-store-connect profiles list --profile-type IOS_APP_STORE || true
+
+          echo "===== CREATE IOS_DISTRIBUTION CERTIFICATE ====="
           app-store-connect certificates create \
             --type IOS_DISTRIBUTION \
-            --save || echo "Certificate já existe, continuando..."
+            --save \
+            || echo "[warn] cert create falhou (talvez já exista)"
 
-          # Cria/baixa o provisioning profile para o bundle id
+          echo "===== FETCH SIGNING FILES (cria profile se necessário) ====="
           app-store-connect fetch-signing-files \
             "$BUNDLE_ID" \
+            --platform IOS \
             --type IOS_APP_STORE \
             --create
 
+          echo "===== ADD CERTS TO KEYCHAIN ====="
           keychain add-certificates
+
+          echo "===== DOWNLOADED PROFILES ====="
+          ls -la "$HOME/Library/MobileDevice/Provisioning Profiles/" || true
+
+          echo "===== APPLY PROFILES IN XCODE PROJECT ====="
           xcode-project use-profiles
 
       - name: Build signed IPA
