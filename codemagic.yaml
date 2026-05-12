@@ -75,19 +75,12 @@ workflows:
             printf "platform :ios, '13.0'\n%s" "$(cat Podfile)" > Podfile
           fi
 
-          # 2. Adiciona um bloco post_install para forçar o IPHONEOS_DEPLOYMENT_TARGET para 13.0 em todos os pods
-          # Isso é crucial para resolver conflitos de dependência do Firebase.
-          cat << EOF >> Podfile
-          
-          post_install do |installer|
-            installer.pods_project.targets.each do |target|
-              flutter_additional_ios_build_settings(target)
-              target.build_configurations.each do |config|
-                config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
-              end
-            end
-          end
-          EOF
+          # 2. Injeta a configuração do IPHONEOS_DEPLOYMENT_TARGET no bloco post_install existente.
+          # Isso é crucial para resolver conflitos de dependência do Firebase e evitar múltiplos hooks.
+          sed -i '' "/flutter_additional_ios_build_settings(target)/a\\
+            target.build_configurations.each do |config|\\
+              config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'\\
+            end" Podfile
 
           echo "Instalando os pods com --repo-update..."
           pod install --repo-update
