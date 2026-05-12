@@ -83,10 +83,23 @@ workflows:
           pod install --repo-update
           cd ..
 
-      - name: Fetch signing files
+      - name: Set up code signing
         script: |
+          set -e
           keychain initialize
-          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+
+          # Garante que existe um IOS_DISTRIBUTION certificate na conta
+          # (se já existir, o comando falha silenciosamente e seguimos)
+          app-store-connect certificates create \
+            --type IOS_DISTRIBUTION \
+            --save || echo "Certificate já existe, continuando..."
+
+          # Cria/baixa o provisioning profile para o bundle id
+          app-store-connect fetch-signing-files \
+            "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+
           keychain add-certificates
           xcode-project use-profiles
 
