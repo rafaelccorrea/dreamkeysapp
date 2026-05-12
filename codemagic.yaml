@@ -58,32 +58,55 @@ workflows:
 
           echo "Garantindo que o PATH do Homebrew esteja configurado corretamente e desativando o aviso de shadowing..."
           export HOMEBREW_NO_PATH_SHADOW_CHECK=1 # Isso silencia o aviso de shadowing
-          export PATH="/opt/homebrew/bin:$PATH" # Prioriza o Homebrew para Apple Silicon
-          export PATH="/usr/local/bin:$PATH" # Prioriza o Homebrew para Intel (compatibilidade)
+          # Prioriza o Homebrew para Apple Silicon e Intel
+          export PATH="/opt/homebrew/bin:$PATH"
+          export PATH="/usr/local/bin:$PATH"
+          echo "PATH atual: $PATH"
+          echo "Versão do pod sendo usada: $(which pod)"
 
           echo "Limpando o cache do CocoaPods para evitar problemas residuais..."
           pod cache clean --all
 
           echo "Navegando para o diretório iOS..."
-          cd ios
+          if [ -d "ios" ]; then
+            cd ios
+          else
+            echo "Erro: Diretório 'ios' não encontrado. Abortando." && exit 1
+          fi
 
-          echo "Ajustando o Podfile para garantir a versão mínima do iOS (13.0) e forçar o deployment target..."
+          echo "Verificando e ajustando o Podfile..."
+          if [ ! -f "Podfile" ]; then
+            echo "Erro: Podfile não encontrado no diretório iOS. Abortando." && exit 1
+          fi
+
           # 1. Garante que a linha platform :ios, '13.0' esteja presente no Podfile
           if grep -q "platform :ios" Podfile; then
             sed -i '' "s/^platform :ios.*$/platform :ios, '13.0'/" Podfile
+            echo "Versão da plataforma iOS no Podfile ajustada para 13.0."
           else
             printf "platform :ios, '13.0'\n%s" "$(cat Podfile)" > Podfile
+            echo "Linha 'platform :ios, 13.0' adicionada ao Podfile."
           fi
 
           # 2. Injeta a configuração do IPHONEOS_DEPLOYMENT_TARGET no bloco post_install existente.
           # Isso é crucial para resolver conflitos de dependência do Firebase e evitar múltiplos hooks.
-          sed -i '' "/flutter_additional_ios_build_settings(target)/a\\
-            target.build_configurations.each do |config|\\
-              config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'\\
-            end" Podfile
+          # Verifica se a configuração já existe para evitar duplicação.
+          if ! grep -q "IPHONEOS_DEPLOYMENT_TARGET = '13.0'" Podfile; then
+            sed -i '' "/flutter_additional_ios_build_settings(target)/a\\
+              target.build_configurations.each do |config|\\
+                config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'\\
+              end" Podfile
+            echo "IPHONEOS_DEPLOYMENT_TARGET = '13.0' injetado no bloco post_install."
+          else
+            echo "IPHONEOS_DEPLOYMENT_TARGET já configurado no Podfile. Pulando injeção."
+          fi
 
           echo "Instalando os pods com --repo-update..."
           pod install --repo-update
+          if [ $? -ne 0 ]; then
+            echo "Erro: pod install falhou. Verifique os logs acima." && exit 1
+          fi
+          echo "Pods instalados com sucesso."}]
 
       - name: Build iOS App
         script: |
@@ -97,4 +120,4 @@ workflows:
     publishing:
       email:
         recipients:
-          - seu.email@exemplo.com
+          - es553807@gmail.com
