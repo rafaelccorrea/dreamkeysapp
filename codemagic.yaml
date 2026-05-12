@@ -95,18 +95,34 @@ workflows:
 
       - name: Set up code signing
         script: |
-          set -ex
+          set -e
 
           echo "BUNDLE_ID: $BUNDLE_ID"
           keychain initialize
 
-          # Gera private key RSA usada pelo certificado de distribuição.
-          # NOTE: cada build cria um novo IOS_DISTRIBUTION cert na Apple.
-          # Apple aceita até 3 ativos por team — se atingir limite,
-          # revogue antigos em developer.apple.com → Certificates.
-          openssl genrsa -out /tmp/distribution_key.pem 2048
+          # ---------------------------------------------------------------
+          # Persistência da chave privada do certificado de distribuição.
+          #
+          # 1ª build (sem IOS_DISTRIBUTION_PRIVATE_KEY no env):
+          #   - revogue todos os iOS/Apple Distribution certs em
+          #     developer.apple.com → Certificates antes de rodar
+          #   - geramos uma chave nova e printamos no log ao final
+          #   - copie o bloco PRIVATE KEY do log e salve como SECRET no
+          #     Codemagic UI: IOS_DISTRIBUTION_PRIVATE_KEY
+          #
+          # Builds seguintes (com IOS_DISTRIBUTION_PRIVATE_KEY definido):
+          #   - reutilizam o mesmo cert/perfil, sem estourar a cota
+          # ---------------------------------------------------------------
+          if [ -n "$IOS_DISTRIBUTION_PRIVATE_KEY" ]; then
+            echo "Reusing existing IOS_DISTRIBUTION_PRIVATE_KEY from secrets."
+            printf '%s' "$IOS_DISTRIBUTION_PRIVATE_KEY" > /tmp/distribution_key.pem
+          else
+            echo "No IOS_DISTRIBUTION_PRIVATE_KEY secret found; generating a fresh RSA key."
+            openssl genrsa -out /tmp/distribution_key.pem 2048
+            GENERATED_NEW_KEY=1
+          fi
 
-          # Cria cert + provisioning profile via API com a private key acima.
+          # Cria/usa cert + provisioning profile via API com a private key.
           app-store-connect fetch-signing-files \
             "$BUNDLE_ID" \
             --platform IOS \
@@ -114,11 +130,23 @@ workflows:
             --certificate-key=@file:/tmp/distribution_key.pem \
             --create
 
-          # Instala o cert no keychain (password padrão vazio).
           keychain add-certificates
-
-          # Aplica o profile no projeto Xcode.
           xcode-project use-profiles
+
+          if [ "$GENERATED_NEW_KEY" = "1" ]; then
+            echo ""
+            echo "=================================================================="
+            echo "  COPY THE PRIVATE KEY BELOW AND SAVE AS A CODEMAGIC SECRET:"
+            echo "  Name: IOS_DISTRIBUTION_PRIVATE_KEY"
+            echo "  Group: app_store_credentials"
+            echo "  Value: (include the BEGIN/END lines and everything between)"
+            echo "=================================================================="
+            cat /tmp/distribution_key.pem
+            echo "=================================================================="
+            echo "  After saving, future builds will reuse the same certificate"
+            echo "  and never hit Apple's 3-cert quota again."
+            echo "=================================================================="
+          fi
 
       - name: Build signed IPA
         script: |
