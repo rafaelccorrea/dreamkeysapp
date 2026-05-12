@@ -78,16 +78,16 @@ workflows:
           # 2. Adiciona um bloco post_install para forçar o IPHONEOS_DEPLOYMENT_TARGET para 13.0 em todos os pods
           # Isso é crucial para resolver conflitos de dependência do Firebase.
           cat << EOF >> Podfile
-
-post_install do |installer|
-  installer.pods_project.targets.each do |target|
-    flutter_additional_ios_build_settings(target)
-    target.build_configurations.each do |config|
-      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
-    end
-  end
-end
-EOF
+          
+          post_install do |installer|
+            installer.pods_project.targets.each do |target|
+              flutter_additional_ios_build_settings(target)
+              target.build_configurations.each do |config|
+                config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
+              end
+            end
+          end
+          EOF
 
           echo "Instalando os pods com --repo-update..."
           pod install --repo-update
@@ -105,16 +105,3 @@ EOF
       email:
         recipients:
           - seu.email@exemplo.com
-
-      # Opcional: Publicar no App Store Connect
-      # app_store_connect:
-      #   api_key:
-      #     key_id: $APP_STORE_CONNECT_KEY_ID
-      #     issuer_id: $APP_STORE_CONNECT_ISSUER_ID
-      #     private_key: $APP_STORE_CONNECT_PRIVATE_KEY
-      #   # build_number: # Opcional, se não for usar o do Codemagic
-      #   # version: # Opcional, se não for usar o do Codemagic
-      #   submit_to_testflight: true
-      #   submit_to_app_store: false
-      #   # beta_groups: # Opcional, grupos de TestFlight
-      #   #   - "Testers"
