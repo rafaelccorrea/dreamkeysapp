@@ -1,96 +1,99 @@
 workflows:
-  ios-build:
-    name: Flutter iOS Build
+  ios-unsigned-ipa:
+    name: iOS IPA (no codesign)
     instance_type: mac_mini_m1
     environment:
       flutter: stable
       xcode: latest
-      # Removemos a versão fixa do cocoapods aqui, pois será instalada via Homebrew
       vars:
-        # Substitua pelos seus seus valores reais ou configure no Codemagic UI
-        # As variáveis abaixo são para code signing e publicação. 
-        # Para builds sem assinatura (--no-codesign), elas não são estritamente necessárias.
-        # Mantenha BUNDLE_ID com um valor válido para o projeto Xcode.
-        BUNDLE_ID: "com.yourcompany.yourapp"
-        # APP_STORE_CONNECT_PRIVATE_KEY: |
-        #   -----BEGIN PRIVATE KEY-----
-        #   # Seu App Store Connect API Key aqui
-        #   -----END PRIVATE KEY-----
-        # CERTIFICATE_PRIVATE_KEY: |
-        #   -----BEGIN PRIVATE KEY-----
-        #   # Sua chave privada do certificado de distribuição aqui
-        #   -----END PRIVATE KEY-----
-        # APP_ID: "SEU_APP_ID_AQUI" # Ex: 1234567890
-        # PROVISIONING_PROFILE_UUID: "SEU_PROFILE_UUID_AQUI"
+        BUNDLE_ID: "com.dreamkeys.corretor"
 
     triggering:
       events:
         - push
       branch_patterns:
-        - pattern: master
-          include: true
         - pattern: main
+          include: true
+        - pattern: master
           include: true
 
     cache:
       cache_paths:
         - ~/.pub-cache
-        - $HOME/Library/Caches/CocoaPods # Adicionado cache para CocoaPods
+        - $HOME/Library/Caches/CocoaPods
 
     scripts:
-      - name: Set up Flutter
+      - name: Flutter deps
         script: |
           flutter clean
           flutter pub get
 
-      - name: Install CocoaPods via Homebrew and clean cache
+      - name: iOS pods
         script: |
-          echo "Instalando/Atualizando CocoaPods via RubyGems..."
           sudo gem install cocoapods
-          if [ $? -ne 0 ]; then
-            echo "Erro: Falha ao instalar CocoaPods via RubyGems. Abortando." && exit 1
-          fi
-          echo "CocoaPods instalado/atualizado com sucesso via RubyGems."
-
-          echo "Garantindo que o PATH do sistema esteja configurado para o binário do CocoaPods..."
-          # Prioriza o diretório de gems do usuário e do sistema no PATH
-          export PATH="$(ruby -r rubygems -e 'puts Gem.user_dir')/bin:$PATH"
-          export PATH="$(ruby -r rubygems -e 'puts Gem.dir')/bin:$PATH"
-          export PATH="/usr/local/bin:$PATH" # Para compatibilidade
-          export PATH="/opt/homebrew/bin:$PATH" # Para Apple Silicon
-          echo "PATH atual: $PATH"
-          echo "Versão do pod sendo usada: $(which pod)"
-
-          echo "Limpando o cache do CocoaPods e removendo instalações anteriores para evitar problemas residuais..."
-          pod cache clean --all
-          # Remove Pods e Podfile.lock para garantir uma instalação limpa
-          rm -rf ios/Pods ios/Podfile.lock
-
-          echo "Executando script Ruby para corrigir o Podfile..."
-          # O script Ruby precisa ser executado no diretório raiz do projeto, não no diretório iOS
           ruby fix_podfile.rb
-          if [ $? -ne 0 ]; then
-            echo "Erro: Script Ruby de correção do Podfile falhou. Abortando." && exit 1
-          fi
-          echo "Podfile ajustado com sucesso pelo script Ruby."
-
-          echo "Navegando para o diretório iOS..."
-          if [ -d "ios" ]; then
-            cd ios
-          else
-            echo "Erro: Diretório 'ios' não encontrado. Abortando." && exit 1
-          fi
-
-          echo "Instalando os pods com --repo-update..."
+          cd ios
           pod install --repo-update
-          if [ $? -ne 0 ]; then
-            echo "Erro: pod install falhou. Verifique os logs acima." && exit 1
-          fi
-          echo "Pods instalados com sucesso."}]
+          cd ..
 
-      - name: Build iOS App
+      - name: Build unsigned IPA
         script: |
-          flutter build ios --release --no-codesign
+          flutter build ipa --release --no-codesign
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - $HOME/Library/Developer/Xcode/Archives/**/*.xcarchive
+
+    publishing:
+      email:
+        recipients:
+          - es553807@gmail.com
+
+  ios-appstore-ipa:
+    name: iOS IPA (App Store signed)
+    instance_type: mac_mini_m1
+    environment:
+      flutter: stable
+      xcode: latest
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.dreamkeys.corretor
+      vars:
+        BUNDLE_ID: "com.dreamkeys.corretor"
+        # Configure no Codemagic UI (Secrets):
+        # APP_STORE_CONNECT_ISSUER_ID
+        # APP_STORE_CONNECT_KEY_IDENTIFIER
+        # APP_STORE_CONNECT_PRIVATE_KEY
+        # CERTIFICATE_PRIVATE_KEY
+
+    integrations:
+      app_store_connect: codemagic
+
+    scripts:
+      - name: Flutter deps
+        script: |
+          flutter clean
+          flutter pub get
+
+      - name: iOS pods
+        script: |
+          sudo gem install cocoapods
+          ruby fix_podfile.rb
+          cd ios
+          pod install --repo-update
+          cd ..
+
+      - name: Fetch signing files
+        script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+          keychain add-certificates
+          xcode-project use-profiles
+
+      - name: Build signed IPA
+        script: |
+          flutter build ipa --release
 
     artifacts:
       - build/ios/ipa/*.ipa
