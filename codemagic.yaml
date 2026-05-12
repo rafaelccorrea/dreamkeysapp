@@ -56,9 +56,6 @@ workflows:
     environment:
       flutter: stable
       xcode: latest
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.dreamkeys.corretor
       groups:
         - app_store_credentials # Codemagic UI → Environment variables → group
       vars:
@@ -67,7 +64,6 @@ workflows:
         APP_STORE_CONNECT_KEY_IDENTIFIER: "95D6586993"
         # APP_STORE_CONNECT_PRIVATE_KEY -> definir no Codemagic UI como SECRET
         # (conteúdo do arquivo .p8 baixado, incluindo "-----BEGIN PRIVATE KEY-----")
-        # CERTIFICATE_PRIVATE_KEY -> opcional; com fetch-signing-files --create, é gerado pelo Codemagic
 
     scripts:
       - name: Flutter deps
