@@ -46,8 +46,6 @@ workflows:
       - name: Install CocoaPods via Homebrew and clean cache
         script: |
           echo "Instalando/Atualizando CocoaPods via RubyGems..."
-          # Instala CocoaPods via gem, que é mais robusto em ambientes CI como o Codemagic
-          # e evita problemas de PATH/shadowing com Homebrew ou rbenv.
           sudo gem install cocoapods
           if [ $? -ne 0 ]; then
             echo "Erro: Falha ao instalar CocoaPods via RubyGems. Abortando." && exit 1
@@ -55,8 +53,9 @@ workflows:
           echo "CocoaPods instalado/atualizado com sucesso via RubyGems."
 
           echo "Garantindo que o PATH do sistema esteja configurado para o binário do CocoaPods..."
-          # Adiciona o diretório de gems ao PATH para garantir que o 'pod' seja encontrado
+          # Prioriza o diretório de gems do usuário e do sistema no PATH
           export PATH="$(ruby -r rubygems -e 'puts Gem.user_dir')/bin:$PATH"
+          export PATH="$(ruby -r rubygems -e 'puts Gem.dir')/bin:$PATH"
           export PATH="/usr/local/bin:$PATH" # Para compatibilidade
           export PATH="/opt/homebrew/bin:$PATH" # Para Apple Silicon
           echo "PATH atual: $PATH"
@@ -65,40 +64,21 @@ workflows:
           echo "Limpando o cache do CocoaPods e removendo instalações anteriores para evitar problemas residuais..."
           pod cache clean --all
           # Remove Pods e Podfile.lock para garantir uma instalação limpa
-          rm -rf Pods Podfile.lock
+          rm -rf ios/Pods ios/Podfile.lock
+
+          echo "Executando script Ruby para corrigir o Podfile..."
+          # O script Ruby precisa ser executado no diretório raiz do projeto, não no diretório iOS
+          ruby fix_podfile.rb
+          if [ $? -ne 0 ]; then
+            echo "Erro: Script Ruby de correção do Podfile falhou. Abortando." && exit 1
+          fi
+          echo "Podfile ajustado com sucesso pelo script Ruby."
 
           echo "Navegando para o diretório iOS..."
           if [ -d "ios" ]; then
             cd ios
           else
             echo "Erro: Diretório 'ios' não encontrado. Abortando." && exit 1
-          fi
-
-          echo "Verificando e ajustando o Podfile..."
-          if [ ! -f "Podfile" ]; then
-            echo "Erro: Podfile não encontrado no diretório iOS. Abortando." && exit 1
-          fi
-
-          # 1. Garante que a linha platform :ios, '15.0' esteja presente no Podfile
-          if grep -q "platform :ios" Podfile; then
-            sed -i '' "s/^platform :ios.*$/platform :ios, '15.0'/" Podfile
-            echo "Versão da plataforma iOS no Podfile ajustada para 15.0."
-          else
-            printf "platform :ios, '15.0'\n%s" "$(cat Podfile)" > Podfile
-            echo "Linha 'platform :ios, 15.0' adicionada ao Podfile."
-          fi
-
-          # 2. Injeta a configuração do IPHONEOS_DEPLOYMENT_TARGET no bloco post_install existente.
-          # Isso é crucial para resolver conflitos de dependência do Firebase e evitar múltiplos hooks.
-          # Verifica se a configuração já existe para evitar duplicação.
-          if ! grep -q "IPHONEOS_DEPLOYMENT_TARGET = '15.0'" Podfile; then
-            sed -i '' "/flutter_additional_ios_build_settings(target)/a\\
-              target.build_configurations.each do |config|\\
-                config.build_settings["IPHONEOS_DEPLOYMENT_TARGET"] = '15.0'\\
-              end" Podfile
-            echo "IPHONEOS_DEPLOYMENT_TARGET = '15.0' injetado no bloco post_install."
-          else
-            echo "IPHONEOS_DEPLOYMENT_TARGET já configurado no Podfile. Pulando injeção."
           fi
 
           echo "Instalando os pods com --repo-update..."
