@@ -22,6 +22,8 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
@@ -45,5 +47,30 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.business</string>
+	<key>NSCameraUsageDescription</key>
+	<string>O Intellisys precisa acessar a câmera para que você tire fotos dos imóveis e atualize seu avatar.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>O Intellisys precisa acessar suas fotos para anexar imagens aos imóveis e ao seu perfil.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>O Intellisys precisa salvar imagens dos imóveis na sua biblioteca de fotos quando solicitado.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>O Intellisys pode utilizar o microfone ao capturar vídeos curtos dos imóveis.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Use o Face ID para entrar no Intellisys de forma rápida e segura.</string>
+	<key>NSUserNotificationsUsageDescription</key>
+	<string>O Intellisys envia notificações sobre leads, agendamentos e atualizações da sua carteira de imóveis.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>O Intellisys utiliza sua localização para mostrar imóveis próximos quando autorizado.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+		<string>fetch</string>
+	</array>
+	<key>FirebaseAppDelegateProxyEnabled</key>
+	<false/>
 </dict>
 </plist>

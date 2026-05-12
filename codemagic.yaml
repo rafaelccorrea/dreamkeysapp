@@ -71,6 +71,20 @@ workflows:
           flutter clean
           flutter pub get
 
+      - name: Regenerate icons & strip alpha (Apple rejects PNGs com alpha no AppIcon)
+        script: |
+          set -ex
+          # Regenera ícones a partir de assets/images/launcher_icon_from_favicon.png
+          # com remove_alpha_ios: true conforme pubspec.yaml.
+          dart run flutter_launcher_icons || flutter pub run flutter_launcher_icons:main
+
+          # Belt-and-suspenders: força remoção de alpha em TODOS os PNGs do AppIcon
+          # achatando com fundo branco. sips vem nativo no macOS.
+          ICON_DIR="ios/Runner/Assets.xcassets/AppIcon.appiconset"
+          for f in "$ICON_DIR"/*.png; do
+            sips -s format png --setProperty hasAlpha NO "$f" --out "$f" || true
+          done
+
       - name: iOS pods
         script: |
           sudo gem install cocoapods
