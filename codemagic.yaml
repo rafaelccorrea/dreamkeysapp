@@ -83,43 +83,27 @@ workflows:
         script: |
           set -ex
 
-          echo "===== API CREDENTIALS ====="
-          echo "ISSUER_ID set: ${APP_STORE_CONNECT_ISSUER_ID:+yes}"
-          echo "KEY_ID set: ${APP_STORE_CONNECT_KEY_IDENTIFIER:+yes}"
-          echo "PRIVATE_KEY set: ${APP_STORE_CONNECT_PRIVATE_KEY:+yes}"
           echo "BUNDLE_ID: $BUNDLE_ID"
-
           keychain initialize
 
-          echo "===== LIST EXISTING CERTS ====="
-          app-store-connect certificates list --type IOS_DISTRIBUTION || true
+          # Gera private key RSA usada pelo certificado de distribuição.
+          # NOTE: cada build cria um novo IOS_DISTRIBUTION cert na Apple.
+          # Apple aceita até 3 ativos por team — se atingir limite,
+          # revogue antigos em developer.apple.com → Certificates.
+          openssl genrsa -out /tmp/distribution_key.pem 2048
 
-          echo "===== LIST EXISTING BUNDLE IDS ====="
-          app-store-connect bundle-ids list --bundle-id-identifier "$BUNDLE_ID" || true
-
-          echo "===== LIST EXISTING PROFILES ====="
-          app-store-connect profiles list --profile-type IOS_APP_STORE || true
-
-          echo "===== CREATE IOS_DISTRIBUTION CERTIFICATE ====="
-          app-store-connect certificates create \
-            --type IOS_DISTRIBUTION \
-            --save \
-            || echo "[warn] cert create falhou (talvez já exista)"
-
-          echo "===== FETCH SIGNING FILES (cria profile se necessário) ====="
+          # Cria cert + provisioning profile via API com a private key acima.
           app-store-connect fetch-signing-files \
             "$BUNDLE_ID" \
             --platform IOS \
             --type IOS_APP_STORE \
+            --certificate-key=@file:/tmp/distribution_key.pem \
             --create
 
-          echo "===== ADD CERTS TO KEYCHAIN ====="
+          # Instala o cert no keychain (password padrão vazio).
           keychain add-certificates
 
-          echo "===== DOWNLOADED PROFILES ====="
-          ls -la "$HOME/Library/MobileDevice/Provisioning Profiles/" || true
-
-          echo "===== APPLY PROFILES IN XCODE PROJECT ====="
+          # Aplica o profile no projeto Xcode.
           xcode-project use-profiles
 
       - name: Build signed IPA
