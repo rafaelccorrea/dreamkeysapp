@@ -873,6 +873,84 @@ class KanbanService {
     }
   }
 
+  /// `POST /kanban/tasks/:id/mark-result` — vendido / perdido / reabrir (`open`).
+  Future<ApiResponse<KanbanTask>> markTaskResult(
+    String taskId, {
+    required String result,
+    String? lossReason,
+    String? notes,
+  }) async {
+    try {
+      final body = <String, dynamic>{
+        'result': result,
+        if (lossReason != null && lossReason.trim().isNotEmpty)
+          'lossReason': lossReason.trim(),
+        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+      };
+      final response = await _apiService.post<Map<String, dynamic>>(
+        ApiConstants.kanbanTaskMarkResult(taskId),
+        body: body,
+      );
+
+      if (response.success && response.data != null) {
+        try {
+          final task = KanbanTask.fromJson(response.data!);
+          return ApiResponse.success(
+            data: task,
+            statusCode: response.statusCode,
+          );
+        } catch (e) {
+          return ApiResponse.error(
+            message: 'Erro ao processar resposta',
+            statusCode: response.statusCode,
+          );
+        }
+      }
+
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao marcar resultado',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [KANBAN_SERVICE] markTaskResult: $e');
+      return ApiResponse.error(
+        message: 'Erro ao marcar resultado: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// `POST /kanban/tasks/:id/transfer` — move o card para outro funil (mesma empresa).
+  Future<ApiResponse<void>> transferTask(
+    String taskId,
+    KanbanTransferTaskPayload payload,
+  ) async {
+    try {
+      final response = await _apiService.post(
+        ApiConstants.kanbanTaskTransfer(taskId),
+        body: payload.toJson(),
+      );
+
+      if (response.success) {
+        return ApiResponse.success(
+          data: null,
+          statusCode: response.statusCode,
+        );
+      }
+
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao transferir tarefa',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [KANBAN_SERVICE] transferTask: $e');
+      return ApiResponse.error(
+        message: 'Erro ao transferir tarefa: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
   /// Deleta tarefa
   Future<ApiResponse<void>> deleteTask(String id) async {
     try {
@@ -1686,62 +1764,41 @@ class KanbanService {
     }
   }
 
-  /// Lista membros de um projeto
+  /// Lista membros de um projeto (`GET /kanban/projects/:id/members`).
+  ///
+  /// A API devolve [PaginatedProjectMembersResponseDto] (`data`, `total`, `page`…),
+  /// não um array na raiz.
   Future<ApiResponse<List<ProjectMember>>> getProjectMembers(String projectId) async {
     try {
-      debugPrint('👥 [KANBAN_SERVICE] ════════════════════════════════════');
-      debugPrint('👥 [KANBAN_SERVICE] getProjectMembers - Iniciando');
-      debugPrint('👥 [KANBAN_SERVICE] ════════════════════════════════════');
-      debugPrint('👥 [KANBAN_SERVICE] Parâmetros:');
-      debugPrint('   - projectId: $projectId');
-      debugPrint('   - projectId length: ${projectId.length}');
-      debugPrint('   - projectId isEmpty: ${projectId.isEmpty}');
-      
       final endpoint = ApiConstants.kanbanProjectMembers(projectId);
-      debugPrint('👥 [KANBAN_SERVICE] Endpoint: $endpoint');
-      debugPrint('👥 [KANBAN_SERVICE] URL completa: ${ApiConstants.baseApiUrl}$endpoint');
-      debugPrint('👥 [KANBAN_SERVICE] Fazendo requisição GET...');
-
-      final response = await _apiService.get<List<dynamic>>(
+      final response = await _apiService.get<Map<String, dynamic>>(
         endpoint,
+        queryParameters: const {
+          'page': '1',
+          'limit': '100',
+        },
       );
-
-      debugPrint('👥 [KANBAN_SERVICE] ════════════════════════════════════');
-      debugPrint('👥 [KANBAN_SERVICE] Resposta recebida:');
-      debugPrint('   - success: ${response.success}');
-      debugPrint('   - statusCode: ${response.statusCode}');
-      debugPrint('   - message: ${response.message}');
-      debugPrint('   - data: ${response.data != null ? "existe (${response.data!.length} itens)" : "null"}');
-      debugPrint('👥 [KANBAN_SERVICE] ════════════════════════════════════');
 
       if (response.success && response.data != null) {
         try {
-          debugPrint('👥 [KANBAN_SERVICE] Parseando membros...');
-          final members = response.data!
-              .map((e) {
-                try {
-                  return ProjectMember.fromJson(e as Map<String, dynamic>);
-                } catch (parseError) {
-                  debugPrint('❌ [KANBAN_SERVICE] Erro ao parsear membro: $parseError');
-                  debugPrint('   - Dados: $e');
-                  rethrow;
-                }
-              })
+          final map = response.data!;
+          final raw = map['data'];
+          if (raw is! List) {
+            return ApiResponse.error(
+              message: 'Resposta de membros em formato inesperado.',
+              statusCode: response.statusCode,
+            );
+          }
+          final members = raw
+              .map((e) => ProjectMember.fromJson(e as Map<String, dynamic>))
               .toList();
 
-          debugPrint('✅ [KANBAN_SERVICE] ${members.length} membros parseados com sucesso');
-          for (var i = 0; i < members.length; i++) {
-            final member = members[i];
-            debugPrint('   [$i] ${member.user.name} (${member.user.id}) - Role: ${member.role}');
-          }
-          
           return ApiResponse.success(
             data: members,
             statusCode: response.statusCode,
           );
-        } catch (e, stackTrace) {
+        } catch (e) {
           debugPrint('❌ [KANBAN_SERVICE] Erro ao parsear membros: $e');
-          debugPrint('❌ [KANBAN_SERVICE] StackTrace: $stackTrace');
           return ApiResponse.error(
             message: 'Erro ao processar resposta do servidor: ${e.toString()}',
             statusCode: response.statusCode,
@@ -1749,16 +1806,12 @@ class KanbanService {
         }
       }
 
-      debugPrint('❌ [KANBAN_SERVICE] Resposta não foi bem-sucedida');
       return ApiResponse.error(
         message: response.message ?? 'Erro ao buscar membros do projeto',
         statusCode: response.statusCode,
       );
-    } catch (e, stackTrace) {
-      debugPrint('❌ [KANBAN_SERVICE] ════════════════════════════════════');
+    } catch (e) {
       debugPrint('❌ [KANBAN_SERVICE] Exceção ao buscar membros: $e');
-      debugPrint('❌ [KANBAN_SERVICE] StackTrace: $stackTrace');
-      debugPrint('❌ [KANBAN_SERVICE] ════════════════════════════════════');
       return ApiResponse.error(
         message: 'Erro ao buscar membros do projeto: ${e.toString()}',
         statusCode: 0,

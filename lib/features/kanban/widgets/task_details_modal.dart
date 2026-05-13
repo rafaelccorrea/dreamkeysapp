@@ -10,7 +10,10 @@ import '../../../shared/services/secure_storage_service.dart';
 import '../../../shared/utils/jwt_utils.dart';
 import '../models/kanban_models.dart';
 import '../services/kanban_service.dart';
+import '../controllers/kanban_controller.dart';
 import 'subtask_manager.dart';
+import 'mark_task_result_sheet.dart';
+import 'transfer_task_sheet.dart';
 
 /// Modal completo de detalhes do card.
 ///
@@ -317,6 +320,43 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
   bool _canDeleteComment(KanbanTaskComment comment) =>
       _currentUserId != null && comment.userId == _currentUserId;
 
+  /// Card atualizado após marcar resultado / mover no board (paridade com detalhe web).
+  KanbanTask _mergedTask(KanbanController c) {
+    final id = widget.task.id;
+    final board = c.board;
+    if (board != null) {
+      for (final t in board.tasks) {
+        if (t.id == id) return t;
+      }
+    }
+    return widget.task;
+  }
+
+  void _openMarkResultSheet(
+    BuildContext context,
+    KanbanTask task, {
+    String? quickEntry,
+  }) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54,
+      builder: (ctx) =>
+          MarkTaskResultSheet(task: task, quickEntry: quickEntry),
+    );
+  }
+
+  void _openTransferSheet(BuildContext context, KanbanTask task) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54,
+      builder: (ctx) => TransferTaskSheet(task: task),
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // BUILD
   // ---------------------------------------------------------------------------
@@ -324,88 +364,103 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
   @override
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final task = widget.task;
-    final state = _TaskState.from(task);
+    return ListenableBuilder(
+      listenable: KanbanController.instance,
+      builder: (context, _) {
+        final theme = Theme.of(context);
+        final isDark = theme.brightness == Brightness.dark;
+        final task = _mergedTask(KanbanController.instance);
+        final state = _TaskState.from(task);
+        final perms = KanbanController.instance.permissions;
+        final canMark =
+            perms?.canMarkResult ?? perms?.canEditTasks ?? false;
+        final canXfer =
+            perms?.canTransfer ?? perms?.canEditTasks ?? false;
 
-    return Material(
-      color: Colors.transparent,
-      child: Container(
-        height: mq.size.height * 0.94,
-        decoration: BoxDecoration(
-          color: ThemeHelpers.cardBackgroundColor(context),
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
-          border: Border.all(
-            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
-          ),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          children: [
-            _buildDragHandle(context, isDark),
-            _StateRibbon(state: state),
-            _TaskHeroHeader(
-              task: task,
-              state: state,
-              onClose: () => Navigator.of(context).pop(),
-              onCopyId: () {
-                Clipboard.setData(ClipboardData(text: task.id));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('ID da tarefa copiado'),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
-              },
+        return Material(
+          color: Colors.transparent,
+          child: Container(
+            height: mq.size.height * 0.94,
+            decoration: BoxDecoration(
+              color: ThemeHelpers.cardBackgroundColor(context),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
+              border: Border.all(
+                color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+              ),
             ),
-            _MinimalTabBar(
-              controller: _tabController,
-              tabs: [
-                _TabItem(icon: Icons.article_outlined, label: 'Detalhes'),
-                _TabItem(
-                  icon: Icons.checklist_rounded,
-                  label: 'Tarefas',
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                _buildDragHandle(context, isDark),
+                _StateRibbon(state: state),
+                _TaskHeroHeader(
+                  task: task,
+                  state: state,
+                  canMarkResult: canMark,
+                  canTransfer: canXfer,
+                  onMarkWon: () =>
+                      _openMarkResultSheet(context, task, quickEntry: 'won'),
+                  onMarkLost: () =>
+                      _openMarkResultSheet(context, task, quickEntry: 'lost'),
+                  onTransfer: () => _openTransferSheet(context, task),
+                  onOpenResult: () =>
+                      _openMarkResultSheet(context, task),
+                  onClose: () => Navigator.of(context).pop(),
+                  onCopyId: () {
+                    Clipboard.setData(ClipboardData(text: task.id));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('ID da tarefa copiado'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  },
                 ),
-                _TabItem(
-                  icon: Icons.forum_outlined,
-                  label: 'Conversas',
-                  badge: _comments.length,
+                _MinimalTabBar(
+                  controller: _tabController,
+                  tabs: [
+                    _TabItem(icon: Icons.article_outlined, label: 'Detalhes'),
+                    _TabItem(
+                      icon: Icons.checklist_rounded,
+                      label: 'Tarefas',
+                    ),
+                    _TabItem(
+                      icon: Icons.forum_outlined,
+                      label: 'Conversas',
+                      badge: _comments.length,
+                    ),
+                    _TabItem(
+                      icon: Icons.history_rounded,
+                      label: 'Histórico',
+                      badge: (_history.isNotEmpty || _loadingHistory)
+                          ? _history.length
+                          : null,
+                    ),
+                  ],
                 ),
-                _TabItem(
-                  icon: Icons.history_rounded,
-                  label: 'Histórico',
-                  badge: (_history.isNotEmpty || _loadingHistory)
-                      ? _history.length
-                      : null,
+                Expanded(
+                  child: TabBarView(
+                    controller: _tabController,
+                    physics: const ClampingScrollPhysics(),
+                    children: [
+                      _buildDetailsTab(context, theme, state, task),
+                      SingleChildScrollView(
+                        physics: const ClampingScrollPhysics(),
+                        child: SubTaskManager(
+                          taskId: task.id,
+                          parentCardTitle: task.title,
+                        ),
+                      ),
+                      _buildCommentsTab(context, theme),
+                      _buildHistoryTab(context, theme),
+                    ],
+                  ),
                 ),
               ],
             ),
-            Expanded(
-              child: TabBarView(
-                controller: _tabController,
-                physics: const ClampingScrollPhysics(),
-                children: [
-                  _buildDetailsTab(context, theme, state),
-                  // Aba Tarefas — checklist do card (subtarefas).
-                  // Visualmente convivendo com o resto do modal: scrollável,
-                  // mesmo padding lateral, e gerenciador completo
-                  // (carregamento, criar, toggle, excluir).
-                  SingleChildScrollView(
-                    physics: const ClampingScrollPhysics(),
-                    child: SubTaskManager(
-                      taskId: task.id,
-                      parentCardTitle: task.title,
-                    ),
-                  ),
-                  _buildCommentsTab(context, theme),
-                  _buildHistoryTab(context, theme),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -449,8 +504,12 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
   /// 5. **Timeline horizontal** — 3 marcadores numa linha temporal
   ///    horizontal (Criada → Atualizada → Prazo) com conector gradient.
   ///    Substitui a lista vertical de datas.
-  Widget _buildDetailsTab(BuildContext context, ThemeData theme, _TaskState state) {
-    final task = widget.task;
+  Widget _buildDetailsTab(
+    BuildContext context,
+    ThemeData theme,
+    _TaskState state,
+    KanbanTask task,
+  ) {
     final hasDescription =
         task.description != null && task.description!.trim().isNotEmpty;
     final tags = task.displayTags;
@@ -704,14 +763,26 @@ class _StateRibbon extends StatelessWidget {
 class _TaskHeroHeader extends StatelessWidget {
   final KanbanTask task;
   final _TaskState state;
+  final bool canMarkResult;
+  final bool canTransfer;
   final VoidCallback onClose;
   final VoidCallback onCopyId;
+  final VoidCallback onMarkWon;
+  final VoidCallback onMarkLost;
+  final VoidCallback onTransfer;
+  final VoidCallback onOpenResult;
 
   const _TaskHeroHeader({
     required this.task,
     required this.state,
+    required this.canMarkResult,
+    required this.canTransfer,
     required this.onClose,
     required this.onCopyId,
+    required this.onMarkWon,
+    required this.onMarkLost,
+    required this.onTransfer,
+    required this.onOpenResult,
   });
 
   @override
@@ -722,6 +793,13 @@ class _TaskHeroHeader extends StatelessWidget {
     final priorityColor = task.priority != null
         ? Color(int.parse(task.priority!.color.replaceFirst('#', '0xFF')))
         : null;
+
+    const win = Color(0xFF15803D);
+    const loss = Color(0xFFB91C1C);
+    final xfer = theme.colorScheme.primary;
+
+    final closed = task.hasClosedResult;
+    final showCrm = canMarkResult || canTransfer;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 14, 8, 16),
@@ -773,7 +851,6 @@ class _TaskHeroHeader extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          // Linha de "monograma" lateral + título grande, multilinhas.
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: Row(
@@ -821,43 +898,69 @@ class _TaskHeroHeader extends StatelessWidget {
           const SizedBox(height: 14),
           Padding(
             padding: const EdgeInsets.only(right: 16),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                _MetaPill(
-                  icon: state.stateIcon,
-                  label: state.stateLabel,
-                  color: state.accent,
-                  emphasized: state.health != _TaskHealth.ok,
+                Expanded(
+                  child: Row(
+                    children: [
+                      if (task.assignedTo != null)
+                        _MetaAvatarPill(user: task.assignedTo!)
+                      else
+                        Text(
+                          'Sem responsável',
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            color: secondary,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.1,
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
-                if (task.priority != null)
-                  _MetaPill(
-                    icon: Icons.flag_rounded,
-                    label: task.priority!.label,
-                    color: priorityColor ?? state.accent,
+                if (showCrm) ...[
+                  Container(
+                    width: 1,
+                    height: 26,
+                    margin: const EdgeInsets.only(right: 6),
+                    color: ThemeHelpers.borderColor(context)
+                        .withValues(alpha: isDark ? 0.4 : 0.35),
                   ),
-                if (state.dueDate != null)
-                  _MetaPill(
-                    icon: Icons.event_outlined,
-                    label: DateFormat("d 'de' MMM", 'pt_BR')
-                        .format(state.dueDate!.toLocal()),
-                    color: state.accent,
-                    subtle: true,
-                  ),
-                if (task.assignedTo != null)
-                  _MetaAvatarPill(user: task.assignedTo!),
-                if (task.commentsCount != null && task.commentsCount! > 0)
-                  _MetaPill(
-                    icon: Icons.mode_comment_outlined,
-                    label: '${task.commentsCount} comentários',
-                    color: secondary,
-                    subtle: true,
-                  ),
+                  if (canMarkResult && closed)
+                    _HeroCrmIconButton(
+                      icon: Icons.tune_rounded,
+                      tooltip: 'Resultado · reabrir ou revisar',
+                      color: secondary,
+                      onPressed: onOpenResult,
+                    ),
+                  if (canMarkResult && !closed) ...[
+                    _HeroCrmIconButton(
+                      icon: Icons.emoji_events_outlined,
+                      tooltip: 'Marcar como vendido',
+                      color: win,
+                      onPressed: onMarkWon,
+                    ),
+                    const SizedBox(width: 4),
+                    _HeroCrmIconButton(
+                      icon: Icons.south_west_rounded,
+                      tooltip: 'Marcar como perdido',
+                      color: loss,
+                      onPressed: onMarkLost,
+                    ),
+                  ],
+                  if (canTransfer) ...[
+                    if (canMarkResult) const SizedBox(width: 4),
+                    _HeroCrmIconButton(
+                      icon: Icons.swap_horiz_rounded,
+                      tooltip: 'Transferir para outro funil',
+                      color: xfer,
+                      onPressed: onTransfer,
+                    ),
+                  ],
+                ],
               ],
             ),
           ),
-          // Linha sutil de separação no final do header.
           Padding(
             padding: const EdgeInsets.only(top: 16, right: 16),
             child: Container(
@@ -881,6 +984,46 @@ class _TaskHeroHeader extends StatelessWidget {
       parts.add(_relativeTime(task.updatedAt, prefix: '• atualizada'));
     }
     return parts.join('  ');
+  }
+}
+
+/// Ícone compacto no hero (paridade com ações discretas no CRM web).
+class _HeroCrmIconButton extends StatelessWidget {
+  const _HeroCrmIconButton({
+    required this.icon,
+    required this.tooltip,
+    required this.color,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final Color color;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      waitDuration: const Duration(milliseconds: 420),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(11),
+          child: Ink(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(11),
+              color: color.withValues(alpha: 0.1),
+              border: Border.all(color: color.withValues(alpha: 0.32)),
+            ),
+            child: Icon(icon, size: 21, color: color),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -954,64 +1097,6 @@ class _PriorityMark extends StatelessWidget {
         hasPriority ? Icons.flag_rounded : Icons.task_alt_rounded,
         color: color,
         size: 20,
-      ),
-    );
-  }
-}
-
-class _MetaPill extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-  final bool emphasized;
-  final bool subtle;
-
-  const _MetaPill({
-    required this.icon,
-    required this.label,
-    required this.color,
-    this.emphasized = false,
-    this.subtle = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final fillAlpha = emphasized
-        ? (isDark ? 0.22 : 0.14)
-        : subtle
-            ? (isDark ? 0.10 : 0.06)
-            : (isDark ? 0.16 : 0.10);
-    final borderAlpha = emphasized ? 0.5 : (subtle ? 0.22 : 0.34);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        color: color.withValues(alpha: fillAlpha),
-        border: Border.all(color: color.withValues(alpha: borderAlpha)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 13, color: color),
-          const SizedBox(width: 6),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 220),
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: color,
-                fontWeight: FontWeight.w800,
-                fontSize: 11.5,
-                letterSpacing: 0.1,
-                height: 1,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }

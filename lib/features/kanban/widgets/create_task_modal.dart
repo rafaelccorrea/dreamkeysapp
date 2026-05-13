@@ -553,9 +553,9 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
                       keyboardDismissBehavior:
                           ScrollViewKeyboardDismissBehavior.onDrag,
                       padding: EdgeInsets.fromLTRB(
-                        wide ? 32 : 16,
-                        20,
-                        wide ? 32 : 16,
+                        wide ? 22 : 12,
+                        16,
+                        wide ? 22 : 12,
                         140,
                       ),
                       children: [
@@ -639,7 +639,7 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
               top: BorderSide(color: ThemeHelpers.borderColor(context)),
             ),
           ),
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
           child: Row(
             children: [
               TextButton(
@@ -907,81 +907,71 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
               padding: EdgeInsets.symmetric(vertical: 12),
               child: LinearProgressIndicator(minHeight: 2),
             )
-          : Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                color: ThemeHelpers.cardBackgroundColor(context),
-                border: Border.all(
-                  color: accent.withValues(alpha: 0.26),
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  DropdownButtonFormField<String>(
-                    initialValue: _assigneeId,
-                    isExpanded: true,
-                    menuMaxHeight: 340,
-                    borderRadius: BorderRadius.circular(16),
-                    dropdownColor: ThemeHelpers.cardBackgroundColor(context),
-                    icon: Icon(
-                      Icons.unfold_more_rounded,
-                      color: ThemeHelpers.textSecondaryColor(context),
-                    ),
-                    decoration: _flatDecoration(
-                      hint: 'Selecione o responsável',
-                      prefix: Icons.badge_outlined,
-                    ),
-                    selectedItemBuilder: (context) {
-                      return _memberUsers
-                          .map(
-                            (u) => Align(
-                              alignment: Alignment.centerLeft,
-                              child: _memberDropdownRow(
-                                user: u,
-                                accent: accent,
-                                selected: true,
-                              ),
-                            ),
-                          )
-                          .toList();
-                    },
-                    items: _memberUsers
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: _assigneeId,
+                  isExpanded: true,
+                  menuMaxHeight: 340,
+                  borderRadius: BorderRadius.circular(16),
+                  dropdownColor: ThemeHelpers.cardBackgroundColor(context),
+                  icon: Icon(
+                    Icons.unfold_more_rounded,
+                    color: ThemeHelpers.textSecondaryColor(context),
+                  ),
+                  decoration: _flatDecoration(
+                    hint: 'Selecione o responsável',
+                    prefix: Icons.badge_outlined,
+                  ),
+                  selectedItemBuilder: (context) {
+                    return _memberUsers
                         .map(
-                          (u) => DropdownMenuItem<String>(
-                            value: u.id,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 3),
-                              child: _memberDropdownRow(
-                                user: u,
-                                accent: accent,
-                              ),
+                          (u) => Align(
+                            alignment: Alignment.centerLeft,
+                            child: _memberDropdownRow(
+                              user: u,
+                              accent: accent,
+                              selected: true,
                             ),
                           ),
                         )
-                        .toList(),
-                    onChanged: (v) {
-                      setState(() {
-                        _assigneeId = v;
-                        if (v != null) _involvedUserIds.remove(v);
-                      });
-                    },
-                  ),
-                  if (_assigneeId != null)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(2, 8, 2, 0),
-                      child: Text(
-                        'Responsável definido para esta negociação.',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: ThemeHelpers.textSecondaryColor(context),
+                        .toList();
+                  },
+                  items: _memberUsers
+                      .map(
+                        (u) => DropdownMenuItem<String>(
+                          value: u.id,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 3),
+                            child: _memberDropdownRow(
+                              user: u,
+                              accent: accent,
+                            ),
+                          ),
                         ),
+                      )
+                      .toList(),
+                  onChanged: (v) {
+                    setState(() {
+                      _assigneeId = v;
+                      if (v != null) _involvedUserIds.remove(v);
+                    });
+                  },
+                ),
+                if (_assigneeId != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      'Responsável definido para esta negociação.',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: ThemeHelpers.textSecondaryColor(context),
                       ),
                     ),
-                ],
-              ),
+                  ),
+              ],
             ),
     );
 
@@ -998,30 +988,32 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
       iconColor: const Color(0xFF6366F1),
       label: 'Funil',
       sublabel: 'Definido pelo seletor de funil',
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          color: ThemeHelpers.cardBackgroundColor(context),
-          border: Border.all(color: ThemeHelpers.borderColor(context)),
-        ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(
           children: [
-            Icon(Icons.lock_outline_rounded,
-                size: 18, color: ThemeHelpers.textSecondaryColor(context)),
+            Icon(
+              Icons.lock_outline_rounded,
+              size: 18,
+              color: ThemeHelpers.textSecondaryColor(context),
+            ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 projectName,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w700),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 15,
+                  letterSpacing: -0.2,
+                ),
               ),
             ),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(999),
-                color: _accent(context).withValues(alpha: 0.14),
+                color: _accent(context).withValues(alpha: 0.12),
               ),
               child: Text(
                 'FIXO',
@@ -1214,7 +1206,7 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
                 borderRadius: BorderRadius.circular(999),
                 color: selected
                     ? fg.withValues(alpha: 0.16)
-                    : ThemeHelpers.cardBackgroundColor(context),
+                    : ThemeHelpers.backgroundColor(context).withValues(alpha: 0.5),
                 border: Border.all(
                   color: selected
                       ? fg.withValues(alpha: 0.7)
@@ -1318,155 +1310,169 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
       children: [
         ...List.generate(_contactRows.length, (i) {
           final row = _contactRows[i];
-          return Container(
-            margin: const EdgeInsets.only(bottom: 12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              color: ThemeHelpers.cardBackgroundColor(context),
-              border: Border.all(color: ThemeHelpers.borderColor(context)),
-            ),
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 14,
-                      backgroundColor:
-                          _accent(context).withValues(alpha: 0.16),
-                      child: Text(
-                        '${i + 1}',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w900,
-                          color: _accent(context),
+          final accent = _accent(context);
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 18),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(
+                    width: 3,
+                    margin: const EdgeInsets.only(top: 2, bottom: 2),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(2),
+                      color: accent.withValues(alpha: 0.55),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 14,
+                              backgroundColor:
+                                  accent.withValues(alpha: 0.16),
+                              child: Text(
+                                '${i + 1}',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  color: accent,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              'Contato ${i + 1}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 14,
+                                letterSpacing: -0.2,
+                              ),
+                            ),
+                            const Spacer(),
+                            if (_contactRows.length > 1)
+                              IconButton(
+                                tooltip: 'Remover',
+                                icon: Icon(
+                                  Icons.delete_outline_rounded,
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
+                                onPressed: () => setState(() {
+                                  row.dispose();
+                                  _contactRows.removeAt(i);
+                                }),
+                              ),
+                          ],
                         ),
-                      ),
+                        const SizedBox(height: 12),
+                        wide
+                            ? Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    flex: 3,
+                                    child: TextField(
+                                      controller: row.name,
+                                      decoration: _flatDecoration(
+                                        label: 'Nome',
+                                        hint: 'Ex.: Paulo C.',
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    flex: 2,
+                                    child: TextField(
+                                      controller: row.phone,
+                                      keyboardType: TextInputType.phone,
+                                      decoration: _flatDecoration(
+                                        label: 'Telefone',
+                                        hint: '(00) 00000-0000',
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    flex: 3,
+                                    child: TextField(
+                                      controller: row.email,
+                                      keyboardType: TextInputType.emailAddress,
+                                      decoration: _flatDecoration(
+                                        label: 'E-mail',
+                                        hint: 'email@exemplo.com',
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  TextField(
+                                    controller: row.name,
+                                    decoration: _flatDecoration(label: 'Nome'),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  TextField(
+                                    controller: row.phone,
+                                    keyboardType: TextInputType.phone,
+                                    decoration: _flatDecoration(label: 'Telefone'),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  TextField(
+                                    controller: row.email,
+                                    keyboardType: TextInputType.emailAddress,
+                                    decoration: _flatDecoration(label: 'E-mail'),
+                                  ),
+                                ],
+                              ),
+                        const SizedBox(height: 8),
+                        wide
+                            ? Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: TextField(
+                                      controller: row.jobTitle,
+                                      decoration: _flatDecoration(label: 'Cargo'),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: TextField(
+                                      controller: row.birthDate,
+                                      decoration: _flatDecoration(
+                                        label: 'Nascimento (AAAA-MM-DD)',
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  TextField(
+                                    controller: row.jobTitle,
+                                    decoration: _flatDecoration(label: 'Cargo'),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  TextField(
+                                    controller: row.birthDate,
+                                    decoration: _flatDecoration(
+                                      label: 'Nascimento (AAAA-MM-DD)',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                      ],
                     ),
-                    const SizedBox(width: 10),
-                    Text(
-                      'Contato ${i + 1}',
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                    const Spacer(),
-                    if (_contactRows.length > 1)
-                      IconButton(
-                        tooltip: 'Remover',
-                        icon: Icon(Icons.delete_outline_rounded,
-                            color: Theme.of(context).colorScheme.error),
-                        onPressed: () => setState(() {
-                          row.dispose();
-                          _contactRows.removeAt(i);
-                        }),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                wide
-                    ? Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            flex: 3,
-                            child: TextField(
-                              controller: row.name,
-                              decoration: _flatDecoration(
-                                label: 'Nome',
-                                hint: 'Ex.: Paulo C.',
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            flex: 2,
-                            child: TextField(
-                              controller: row.phone,
-                              keyboardType: TextInputType.phone,
-                              decoration: _flatDecoration(
-                                label: 'Telefone',
-                                hint: '(00) 00000-0000',
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            flex: 3,
-                            child: TextField(
-                              controller: row.email,
-                              keyboardType: TextInputType.emailAddress,
-                              decoration: _flatDecoration(
-                                label: 'E-mail',
-                                hint: 'email@exemplo.com',
-                              ),
-                            ),
-                          ),
-                        ],
-                      )
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          TextField(
-                            controller: row.name,
-                            decoration:
-                                _flatDecoration(label: 'Nome'),
-                          ),
-                          const SizedBox(height: 8),
-                          TextField(
-                            controller: row.phone,
-                            keyboardType: TextInputType.phone,
-                            decoration:
-                                _flatDecoration(label: 'Telefone'),
-                          ),
-                          const SizedBox(height: 8),
-                          TextField(
-                            controller: row.email,
-                            keyboardType: TextInputType.emailAddress,
-                            decoration:
-                                _flatDecoration(label: 'E-mail'),
-                          ),
-                        ],
-                      ),
-                const SizedBox(height: 8),
-                wide
-                    ? Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: row.jobTitle,
-                              decoration:
-                                  _flatDecoration(label: 'Cargo'),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: TextField(
-                              controller: row.birthDate,
-                              decoration: _flatDecoration(
-                                label: 'Nascimento (AAAA-MM-DD)',
-                              ),
-                            ),
-                          ),
-                        ],
-                      )
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          TextField(
-                            controller: row.jobTitle,
-                            decoration:
-                                _flatDecoration(label: 'Cargo'),
-                          ),
-                          const SizedBox(height: 8),
-                          TextField(
-                            controller: row.birthDate,
-                            decoration: _flatDecoration(
-                              label: 'Nascimento (AAAA-MM-DD)',
-                            ),
-                          ),
-                        ],
-                      ),
-              ],
+                  ),
+                ],
+              ),
             ),
           );
         }),
@@ -1609,18 +1615,24 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
     required String subtitle,
     required VoidCallback onClear,
   }) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: accent.withValues(alpha: 0.08),
-        border: Border.all(color: accent.withValues(alpha: 0.32)),
-      ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Container(
+            width: 3,
+            height: 40,
+            margin: const EdgeInsets.only(top: 2),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(2),
+              color: accent.withValues(alpha: 0.65),
+            ),
+          ),
+          const SizedBox(width: 12),
           CircleAvatar(
             radius: 18,
-            backgroundColor: accent.withValues(alpha: 0.22),
+            backgroundColor: accent.withValues(alpha: 0.14),
             child: Icon(icon, color: accent, size: 18),
           ),
           const SizedBox(width: 12),
@@ -1631,18 +1643,20 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
                 Text(
                   title,
                   style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 15,
+                    letterSpacing: -0.25,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
                 if (subtitle.isNotEmpty) ...[
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 3),
                   Text(
                     subtitle,
                     style: TextStyle(
                       color: ThemeHelpers.textSecondaryColor(context),
                       fontSize: 12,
+                      fontWeight: FontWeight.w600,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1652,7 +1666,7 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
           ),
           IconButton(
             tooltip: 'Remover',
-            icon: const Icon(Icons.close_rounded),
+            icon: Icon(Icons.close_rounded, color: accent),
             onPressed: onClear,
           ),
         ],
@@ -1661,20 +1675,16 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
   }
 
   Widget _entityEmpty({required IconData icon, required String text}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: ThemeHelpers.cardBackgroundColor(context),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.7),
-          style: BorderStyle.solid,
-        ),
-      ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon,
-              size: 18, color: ThemeHelpers.textSecondaryColor(context)),
+          Icon(
+            icon,
+            size: 17,
+            color: ThemeHelpers.textSecondaryColor(context),
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -1683,6 +1693,8 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
                 color: ThemeHelpers.textSecondaryColor(context),
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
+                height: 1.35,
+                fontStyle: FontStyle.italic,
               ),
             ),
           ),
@@ -1692,33 +1704,37 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
   }
 
   Widget _suggestionList({required List<_SuggestItem> items}) {
-    return Container(
-      margin: const EdgeInsets.only(top: 8),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: ThemeHelpers.cardBackgroundColor(context),
-        border: Border.all(color: ThemeHelpers.borderColor(context)),
-      ),
-      child: ListView.separated(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        itemCount: items.length,
-        separatorBuilder: (_, _) => Divider(
-          height: 1,
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+    final line = ThemeHelpers.borderColor(context).withValues(alpha: 0.4);
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(left: BorderSide(color: line, width: 2)),
         ),
-        itemBuilder: (ctx, i) {
-          final s = items[i];
-          return ListTile(
-            dense: true,
-            title: Text(s.title,
-                style: const TextStyle(fontWeight: FontWeight.w700)),
-            subtitle: s.subtitle.isEmpty ? null : Text(s.subtitle),
-            trailing:
-                const Icon(Icons.arrow_forward_rounded, size: 18),
-            onTap: s.onTap,
-          );
-        },
+        child: ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.only(left: 10),
+          itemCount: items.length,
+          separatorBuilder: (_, _) => Divider(
+            height: 1,
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
+          ),
+          itemBuilder: (ctx, i) {
+            final s = items[i];
+            return ListTile(
+              dense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+              title: Text(
+                s.title,
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              subtitle: s.subtitle.isEmpty ? null : Text(s.subtitle),
+              trailing: const Icon(Icons.arrow_forward_rounded, size: 18),
+              onTap: s.onTap,
+            );
+          },
+        ),
       ),
     );
   }
@@ -1733,19 +1749,19 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
       hintText: hint,
       prefixIcon: prefix != null ? Icon(prefix, size: 20) : null,
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         borderSide: BorderSide(color: ThemeHelpers.borderColor(context)),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         borderSide: BorderSide(color: ThemeHelpers.borderColor(context)),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: _accent(context), width: 1.4),
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: _accent(context), width: 1.35),
       ),
       filled: true,
-      fillColor: Theme.of(context).scaffoldBackgroundColor,
+      fillColor: ThemeHelpers.backgroundColor(context).withValues(alpha: 0.42),
       isDense: true,
       contentPadding:
           const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -1887,29 +1903,26 @@ class _PageSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accent = Theme.of(context).colorScheme.primary;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 18),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        color: ThemeHelpers.cardBackgroundColor(context),
-        border: Border.all(color: ThemeHelpers.borderColor(context)),
-      ),
+    final border = ThemeHelpers.borderColor(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 22),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
-                width: 32,
-                height: 32,
+                width: 4,
+                height: 18,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
-                  color: accent.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(2),
+                  color: accent,
                 ),
-                child: Icon(icon, size: 18, color: accent),
               ),
               const SizedBox(width: 10),
+              Icon(icon, size: 19, color: accent),
+              const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1918,7 +1931,8 @@ class _PageSection extends StatelessWidget {
                       text: TextSpan(
                         style: TextStyle(
                           fontWeight: FontWeight.w900,
-                          fontSize: 15,
+                          fontSize: 16,
+                          letterSpacing: -0.3,
                           color: ThemeHelpers.textColor(context),
                         ),
                         children: [
@@ -1931,23 +1945,27 @@ class _PageSection extends StatelessWidget {
                         ],
                       ),
                     ),
-                    if (subtitle != null)
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 3),
                       Text(
                         subtitle!,
                         style: TextStyle(
                           fontSize: 12,
-                          color:
-                              ThemeHelpers.textSecondaryColor(context),
+                          color: ThemeHelpers.textSecondaryColor(context),
                           fontWeight: FontWeight.w600,
+                          height: 1.25,
                         ),
                       ),
+                    ],
                   ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           child,
+          const SizedBox(height: 4),
+          Divider(height: 1, thickness: 1, color: border.withValues(alpha: 0.35)),
         ],
       ),
     );
@@ -1974,47 +1992,37 @@ class _CollapsibleSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accent = Theme.of(context).colorScheme.primary;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 18),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        color: ThemeHelpers.cardBackgroundColor(context),
-        border: Border.all(color: ThemeHelpers.borderColor(context)),
-      ),
+    final border = ThemeHelpers.borderColor(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           InkWell(
-            borderRadius: BorderRadius.circular(20),
             onTap: onToggle,
+            borderRadius: BorderRadius.circular(8),
             child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              padding: const EdgeInsets.symmetric(vertical: 10),
               child: Row(
                 children: [
-                  Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(10),
-                      color: accent.withValues(alpha: 0.14),
-                    ),
-                    child: Icon(icon, size: 18, color: accent),
-                  ),
+                  Icon(icon, size: 20, color: accent),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       title,
                       style: const TextStyle(
                         fontWeight: FontWeight.w900,
-                        fontSize: 15,
+                        fontSize: 16,
+                        letterSpacing: -0.25,
                       ),
                     ),
                   ),
                   if (badge != null) ...[
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(999),
                         color: accent.withValues(alpha: 0.12),
@@ -2040,6 +2048,7 @@ class _CollapsibleSection extends StatelessWidget {
               ),
             ),
           ),
+          Divider(height: 1, thickness: 1, color: border.withValues(alpha: 0.35)),
           ClipRect(
             child: AnimatedSize(
               duration: const Duration(milliseconds: 220),
@@ -2047,7 +2056,7 @@ class _CollapsibleSection extends StatelessWidget {
               alignment: Alignment.topCenter,
               child: expanded
                   ? Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      padding: const EdgeInsets.only(top: 12, bottom: 2),
                       child: child,
                     )
                   : const SizedBox.shrink(),
@@ -2080,19 +2089,9 @@ class _FieldCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        color: Color.alphaBlend(
-          iconColor.withValues(alpha: isDark ? 0.05 : 0.04),
-          ThemeHelpers.cardBackgroundColor(context),
-        ),
-        border: Border.all(
-          color: iconColor.withValues(alpha: isDark ? 0.30 : 0.22),
-        ),
-      ),
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -2100,58 +2099,73 @@ class _FieldCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 28,
-                height: 28,
+                width: 3,
+                height: 36,
+                margin: const EdgeInsets.only(top: 1),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  color: iconColor.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(2),
+                  color: iconColor.withValues(alpha: 0.75),
                 ),
-                child: Icon(icon, size: 16, color: iconColor),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    RichText(
-                      text: TextSpan(
-                        style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 13,
-                          color: ThemeHelpers.textColor(context),
-                        ),
-                        children: [
-                          TextSpan(text: label),
-                          if (required)
-                            const TextSpan(
-                              text: ' *',
-                              style: TextStyle(color: Color(0xFFEF4444)),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(icon, size: 16, color: iconColor),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: RichText(
+                            text: TextSpan(
+                              style: TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 13,
+                                letterSpacing: -0.1,
+                                color: ThemeHelpers.textColor(context),
+                              ),
+                              children: [
+                                TextSpan(text: label),
+                                if (required)
+                                  const TextSpan(
+                                    text: ' *',
+                                    style: TextStyle(color: Color(0xFFEF4444)),
+                                  ),
+                              ],
                             ),
-                        ],
-                      ),
+                          ),
+                        ),
+                        if (meta != null)
+                          Text(
+                            meta!,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: secondary,
+                            ),
+                          ),
+                      ],
                     ),
-                    if (sublabel != null)
-                      Text(
-                        sublabel!,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color:
-                              ThemeHelpers.textSecondaryColor(context),
+                    if (sublabel != null) ...[
+                      const SizedBox(height: 4),
+                      Padding(
+                        padding: const EdgeInsets.only(left: 22),
+                        child: Text(
+                          sublabel!,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: secondary,
+                            height: 1.3,
+                          ),
                         ),
                       ),
+                    ],
                   ],
                 ),
               ),
-              if (meta != null)
-                Text(
-                  meta!,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    color: ThemeHelpers.textSecondaryColor(context),
-                  ),
-                ),
             ],
           ),
           const SizedBox(height: 10),
@@ -2266,45 +2280,60 @@ class _StagePicker extends StatelessWidget {
           ),
         ),
         if (selected != null) ...[
-          const SizedBox(height: 12),
-          Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              color: stageColor(selected).withValues(alpha: 0.10),
-              border: Border.all(
-                color: stageColor(selected).withValues(alpha: 0.42),
-              ),
-            ),
+          const SizedBox(height: 10),
+          IntrinsicHeight(
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Icon(Icons.check_circle_rounded,
-                    color: stageColor(selected), size: 18),
-                const SizedBox(width: 10),
+                Container(
+                  width: 3,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(2),
+                    color: stageColor(selected).withValues(alpha: 0.85),
+                  ),
+                ),
+                const SizedBox(width: 12),
                 Expanded(
-                  child: RichText(
-                    text: TextSpan(
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: ThemeHelpers.textColor(context),
-                      ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
                       children: [
-                        TextSpan(
-                          text: selected.title,
-                          style:
-                              const TextStyle(fontWeight: FontWeight.w800),
+                        Icon(
+                          Icons.check_circle_rounded,
+                          color: stageColor(selected),
+                          size: 18,
                         ),
-                        const TextSpan(text: '  ·  '),
-                        TextSpan(
-                          text: selectedIdx == 0
-                              ? 'Início do funil'
-                              : selectedIdx == total - 1
-                                  ? 'Final do funil'
-                                  : 'Etapa ${selectedIdx + 1} de $total',
-                          style: TextStyle(
-                            color: ThemeHelpers.textSecondaryColor(context),
-                            fontWeight: FontWeight.w600,
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: RichText(
+                            text: TextSpan(
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: ThemeHelpers.textColor(context),
+                              ),
+                              children: [
+                                TextSpan(
+                                  text: selected.title,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                const TextSpan(text: '  ·  '),
+                                TextSpan(
+                                  text: selectedIdx == 0
+                                      ? 'Início do funil'
+                                      : selectedIdx == total - 1
+                                          ? 'Final do funil'
+                                          : 'Etapa ${selectedIdx + 1} de $total',
+                                  style: TextStyle(
+                                    color: ThemeHelpers.textSecondaryColor(
+                                      context,
+                                    ),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ],
@@ -2354,23 +2383,14 @@ class _StageItem extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(14),
           color: selected
-              ? color.withValues(alpha: 0.16)
-              : ThemeHelpers.cardBackgroundColor(context),
+              ? color.withValues(alpha: 0.14)
+              : ThemeHelpers.backgroundColor(context).withValues(alpha: 0.55),
           border: Border.all(
             color: selected
-                ? color
-                : ThemeHelpers.borderColor(context),
-            width: selected ? 1.6 : 1,
+                ? color.withValues(alpha: 0.85)
+                : ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
+            width: selected ? 1.35 : 1,
           ),
-          boxShadow: selected
-              ? [
-                  BoxShadow(
-                    color: color.withValues(alpha: 0.18),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ]
-              : null,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2450,9 +2470,11 @@ class _DateButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          color: Theme.of(context).scaffoldBackgroundColor,
-          border: Border.all(color: ThemeHelpers.borderColor(context)),
+          borderRadius: BorderRadius.circular(10),
+          color: ThemeHelpers.backgroundColor(context).withValues(alpha: 0.42),
+          border: Border.all(
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.65),
+          ),
         ),
         child: Row(
           children: [

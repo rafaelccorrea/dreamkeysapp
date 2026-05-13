@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+
+import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
-import '../models/kanban_models.dart';
 import '../controllers/kanban_controller.dart';
+import '../models/kanban_models.dart';
 import '../services/kanban_service.dart';
 
-/// Modal para editar tarefa
+/// Bottom sheet para editar o card — layout **editorial**: hierarquia forte,
+/// blocos por tema (identidade, fluxo, tags), sem “formulário cinza” genérico.
 class EditTaskModal extends StatefulWidget {
   final KanbanTask task;
 
@@ -48,201 +52,99 @@ class _EditTaskModalState extends State<EditTaskModal> {
     final controller = context.read<KanbanController>();
     if (controller.teamId == null) return;
 
-    setState(() {
-      _loadingTags = true;
-    });
+    setState(() => _loadingTags = true);
 
     try {
       final response = await _kanbanService.listTags(controller.teamId!);
       if (response.success && response.data != null) {
+        if (!mounted) return;
         setState(() {
           _availableTags = KanbanUiTagFilter.visible(response.data!);
           _loadingTags = false;
         });
       } else {
-        setState(() {
-          _loadingTags = false;
-        });
+        if (!mounted) return;
+        setState(() => _loadingTags = false);
       }
-    } catch (e) {
-      setState(() {
-        _loadingTags = false;
-      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingTags = false);
     }
   }
 
   Future<void> _loadProjectMembers() async {
-    debugPrint('👥 [EDIT_TASK_MODAL] _loadProjectMembers - Iniciando');
-    
     final controller = context.read<KanbanController>();
     final board = controller.board;
-    
-    // Tentar obter projeto do objeto task primeiro
+
     KanbanProject? project = widget.task.project;
     String? projectId = widget.task.projectId;
-    
-    debugPrint('👥 [EDIT_TASK_MODAL] Estado inicial:');
-    debugPrint('   - task.project: ${project != null ? "existe" : "null"}');
-    debugPrint('   - task.projectId: ${projectId ?? "null"}');
-    debugPrint('   - controller.projectId: ${controller.projectId ?? "null"}');
-    
-    // Se o projeto não está populado na tarefa, usar o projectId do controller (projeto selecionado)
+
     if (project == null && projectId == null) {
       projectId = controller.projectId;
-      debugPrint('👥 [EDIT_TASK_MODAL] Usando projectId do controller: $projectId');
     }
-    
-    // Se ainda não temos projeto, tentar buscar da lista de projetos do board
+
     if (project == null && projectId != null && projectId.isNotEmpty) {
-      debugPrint('👥 [EDIT_TASK_MODAL] Projeto não está populado, buscando do board...');
-      
-      if (board != null && board.projects != null) {
-        debugPrint('👥 [EDIT_TASK_MODAL] Board tem ${board.projects!.length} projetos');
+      if (board?.projects != null) {
         try {
-          project = board.projects!.firstWhere(
-            (p) => p.id == projectId,
-          );
-          debugPrint('👥 [EDIT_TASK_MODAL] ✅ Projeto encontrado no board: ${project.name}');
-        } catch (e) {
-          debugPrint('👥 [EDIT_TASK_MODAL] ❌ Projeto não encontrado no board: $e');
-        }
-      } else {
-        debugPrint('👥 [EDIT_TASK_MODAL] ⚠️ Board ou lista de projetos é null');
-      }
-    }
-    
-    debugPrint('👥 [EDIT_TASK_MODAL] Projeto final:');
-    debugPrint('   - project: ${project != null ? "existe" : "null"}');
-    debugPrint('   - projectId: ${projectId ?? "null"}');
-    if (project != null) {
-      debugPrint('   - project.id: ${project.id}');
-      debugPrint('   - project.name: ${project.name}');
-      debugPrint('   - project.isPersonal: ${project.isPersonal}');
-    }
-    
-    // Se não há projeto, não carregar membros
-    if (project == null) {
-      if (projectId != null && projectId.isNotEmpty) {
-        debugPrint('👥 [EDIT_TASK_MODAL] ⚠️ Temos projectId mas projeto não foi encontrado');
-        debugPrint('👥 [EDIT_TASK_MODAL] Tentando carregar membros diretamente com projectId: $projectId');
-        // Mesmo sem o objeto projeto, podemos tentar carregar membros se temos o ID
-        // Mas precisamos verificar se é pessoal primeiro - vamos assumir que não é pessoal se não encontramos o objeto
-      } else {
-        debugPrint('👥 [EDIT_TASK_MODAL] ⚠️ Projeto é null e projectId também, não carregando membros');
-        return;
-      }
-    } else {
-      // Se temos o objeto projeto, verificar se é pessoal
-      if (project.isPersonal == true) {
-        debugPrint('👥 [EDIT_TASK_MODAL] ⚠️ Projeto é pessoal, não carregando membros');
-        return;
+          project = board!.projects!.firstWhere((p) => p.id == projectId);
+        } catch (_) {}
       }
     }
 
-    // Se chegamos aqui, temos um projectId válido (mesmo sem o objeto projeto)
-    final finalProjectId = project?.id ?? projectId;
-    if (finalProjectId == null || finalProjectId.isEmpty) {
-      debugPrint('👥 [EDIT_TASK_MODAL] ❌ Não temos projectId válido para carregar membros');
+    if (project != null && project.isPersonal == true) {
       return;
     }
 
-    debugPrint('👥 [EDIT_TASK_MODAL] ✅ Carregando membros do projeto...');
-    debugPrint('   - projectId: $finalProjectId');
+    final finalProjectId = project?.id ?? projectId;
+    if (finalProjectId == null || finalProjectId.isEmpty) {
+      return;
+    }
 
     try {
-      debugPrint('👥 [EDIT_TASK_MODAL] Chamando _kanbanService.getProjectMembers($finalProjectId)');
       final response = await _kanbanService.getProjectMembers(finalProjectId);
-      
-      debugPrint('👥 [EDIT_TASK_MODAL] Resposta recebida:');
-      debugPrint('   - success: ${response.success}');
-      debugPrint('   - statusCode: ${response.statusCode}');
-      debugPrint('   - message: ${response.message}');
-      debugPrint('   - data: ${response.data != null ? "${response.data!.length} membros" : "null"}');
-      
-      if (response.success && response.data != null) {
-        debugPrint('👥 [EDIT_TASK_MODAL] ✅ ${response.data!.length} membros carregados');
-        if (!mounted) return;
+      if (response.success && response.data != null && mounted) {
         setState(() {
-          _projectMembers = response.data!
-              .map((member) {
-                debugPrint('   - Membro: ${member.user.name} (${member.user.id}) - Role: ${member.role}');
-                return member.user;
-              })
-              .toList();
+          _projectMembers =
+              response.data!.map((m) => m.user).toList();
         });
-        debugPrint('👥 [EDIT_TASK_MODAL] ✅ _projectMembers atualizado com ${_projectMembers.length} usuários');
-      } else {
-        debugPrint('👥 [EDIT_TASK_MODAL] ❌ Erro ao carregar membros: ${response.message}');
       }
-    } catch (e, stackTrace) {
-      debugPrint('👥 [EDIT_TASK_MODAL] ❌ Exceção ao carregar membros: $e');
-      debugPrint('👥 [EDIT_TASK_MODAL] StackTrace: $stackTrace');
-    }
+    } catch (_) {}
   }
 
   List<KanbanUser> _getAvailableUsers() {
-    debugPrint('👥 [EDIT_TASK_MODAL] _getAvailableUsers - Iniciando');
-    
     final controller = context.read<KanbanController>();
     final board = controller.board;
-    
-    // Tentar obter projeto do objeto task primeiro
+
     KanbanProject? project = widget.task.project;
     String? projectId = widget.task.projectId;
-    
-    // Se o projeto não está populado na tarefa, usar o projectId do controller
+
     if (project == null && projectId == null) {
       projectId = controller.projectId;
-      debugPrint('👥 [EDIT_TASK_MODAL] Usando projectId do controller: $projectId');
     }
-    
-    // Se o projeto não está populado, tentar buscar da lista de projetos do board
+
     if (project == null && projectId != null && projectId.isNotEmpty) {
-      if (board != null && board.projects != null) {
+      if (board?.projects != null) {
         try {
-          project = board.projects!.firstWhere(
-            (p) => p.id == projectId,
-          );
-          debugPrint('👥 [EDIT_TASK_MODAL] ✅ Projeto encontrado no board: ${project.name}');
-        } catch (e) {
-          debugPrint('👥 [EDIT_TASK_MODAL] ⚠️ Projeto não encontrado no board: $e');
-        }
+          project = board!.projects!.firstWhere((p) => p.id == projectId);
+        } catch (_) {}
       }
     }
-    
-    debugPrint('👥 [EDIT_TASK_MODAL] Estado atual:');
-    debugPrint('   - project: ${project != null ? "existe" : "null"}');
-    debugPrint('   - project.isPersonal: ${project?.isPersonal}');
-    debugPrint('   - projectId: ${projectId ?? "null"}');
-    debugPrint('   - _projectMembers.length: ${_projectMembers.length}');
-    
-    // Se é projeto de equipe (ou temos membros carregados), usar membros do projeto
-    // Verificamos se não é pessoal OU se temos membros carregados (mesmo sem objeto projeto)
+
     final isTeamProject = project == null || project.isPersonal != true;
     if (isTeamProject && _projectMembers.isNotEmpty) {
-      debugPrint('👥 [EDIT_TASK_MODAL] ✅ Usando membros do projeto (${_projectMembers.length} membros)');
-      // Garantir que o responsável atual está na lista
       final usersMap = <String, KanbanUser>{};
       for (final user in _projectMembers) {
         usersMap[user.id] = user;
       }
       if (widget.task.assignedTo != null) {
-        debugPrint('👥 [EDIT_TASK_MODAL] Adicionando responsável atual: ${widget.task.assignedTo!.name}');
         usersMap[widget.task.assignedTo!.id] = widget.task.assignedTo!;
       }
-      final users = usersMap.values.toList();
-      debugPrint('👥 [EDIT_TASK_MODAL] Retornando ${users.length} usuários');
-      return users;
+      return usersMap.values.toList();
     }
-    
-    debugPrint('👥 [EDIT_TASK_MODAL] ⚠️ Usando lógica antiga (extrair das tarefas)');
 
-    // Para projetos pessoais ou quando não há membros, usar lógica antiga
     if (board == null) return [];
 
-    // Extrair usuários únicos das tarefas (assignedTo e createdBy)
     final usersMap = <String, KanbanUser>{};
-
     for (final task in board.tasks) {
       if (task.assignedTo != null) {
         usersMap[task.assignedTo!.id] = task.assignedTo!;
@@ -251,12 +153,9 @@ class _EditTaskModalState extends State<EditTaskModal> {
         usersMap[task.createdBy!.id] = task.createdBy!;
       }
     }
-
-    // Se a tarefa atual tem assignedTo, garantir que está na lista
     if (widget.task.assignedTo != null) {
       usersMap[widget.task.assignedTo!.id] = widget.task.assignedTo!;
     }
-
     return usersMap.values.toList();
   }
 
@@ -275,18 +174,65 @@ class _EditTaskModalState extends State<EditTaskModal> {
       lastDate: DateTime.now().add(const Duration(days: 365)),
     );
     if (picked != null) {
-      setState(() {
-        _selectedDueDate = picked;
-      });
+      setState(() => _selectedDueDate = picked);
+    }
+  }
+
+  InputDecoration _fieldDecoration(
+    BuildContext context, {
+    required String label,
+    String? hint,
+    IconData? prefix,
+  }) {
+    final accent = _editAccent(context);
+    final border = ThemeHelpers.borderColor(context);
+    return InputDecoration(
+      labelText: label,
+      hintText: hint,
+      prefixIcon: prefix != null
+          ? Icon(prefix, size: 20, color: ThemeHelpers.textSecondaryColor(context))
+          : null,
+      labelStyle: TextStyle(
+        fontWeight: FontWeight.w700,
+        fontSize: 12,
+        color: ThemeHelpers.textSecondaryColor(context),
+        letterSpacing: 0.2,
+      ),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: border.withValues(alpha: 0.65)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: border.withValues(alpha: 0.55)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: accent, width: 1.35),
+      ),
+      filled: true,
+      fillColor: ThemeHelpers.backgroundColor(context).withValues(alpha: 0.55),
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+    );
+  }
+
+  String _columnLabel(BuildContext context) {
+    try {
+      final col = context
+          .read<KanbanController>()
+          .columns
+          .firstWhere((c) => c.id == widget.task.columnId);
+      return col.title;
+    } catch (_) {
+      return 'Etapa';
     }
   }
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
 
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
     final controller = context.read<KanbanController>();
 
@@ -299,17 +245,13 @@ class _EditTaskModalState extends State<EditTaskModal> {
             : _descriptionController.text.trim(),
         priority: _selectedPriority?.name,
         dueDate: _selectedDueDate,
-        assignedToId:
-            _selectedAssignedToId ??
-            widget.task.assignedToId, // Sempre deve ter um responsável
+        assignedToId: _selectedAssignedToId ?? widget.task.assignedToId,
         tags: _selectedTags.isNotEmpty ? _selectedTags : null,
       ),
     );
 
     if (mounted) {
-      setState(() {
-        _isLoading = false;
-      });
+      setState(() => _isLoading = false);
 
       if (success) {
         Navigator.of(context).pop();
@@ -333,336 +275,683 @@ class _EditTaskModalState extends State<EditTaskModal> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final accent = _editAccent(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final sheetH = MediaQuery.sizeOf(context).height * 0.92;
+    final columnName = _columnLabel(context);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(20),
-          topRight: Radius.circular(20),
-        ),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Handle
-          Container(
-            margin: const EdgeInsets.only(top: 12),
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: ThemeHelpers.textSecondaryColor(context),
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          // Header
-          Container(
-            padding: const EdgeInsets.all(20),
-            child: Row(
-              children: [
-                Icon(Icons.edit, color: theme.colorScheme.primary),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Editar Tarefa',
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+    return Material(
+      color: Colors.transparent,
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: SizedBox(
+          height: sheetH,
+          child: ClipRRect(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+            child: Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: ThemeHelpers.cardBackgroundColor(context),
+                border: Border(
+                  top: BorderSide(
+                    color: ThemeHelpers.borderColor(context).withValues(alpha: 0.4),
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-              ],
-            ),
-          ),
-          // Form
-          Flexible(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Título
-                    TextFormField(
-                      controller: _titleController,
-                      decoration: const InputDecoration(
-                        labelText: 'Título *',
-                        hintText: 'Digite o título da tarefa',
-                        border: OutlineInputBorder(),
+              ),
+              child: Column(
+                children: [
+                  Container(height: 3, width: double.infinity, color: accent),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: secondary.withValues(alpha: 0.35),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
                       ),
-                      validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Título é obrigatório';
-                        }
-                        return null;
-                      },
-                      textCapitalization: TextCapitalization.sentences,
                     ),
-                    const SizedBox(height: 16),
-                    // Descrição
-                    TextFormField(
-                      controller: _descriptionController,
-                      decoration: const InputDecoration(
-                        labelText: 'Descrição',
-                        hintText: 'Digite a descrição da tarefa',
-                        border: OutlineInputBorder(),
-                      ),
-                      maxLines: 4,
-                      textCapitalization: TextCapitalization.sentences,
-                    ),
-                    const SizedBox(height: 16),
-                    // Responsável
-                    Builder(
-                      builder: (context) {
-                        final isPersonalProject =
-                            widget.task.project?.isPersonal == true;
-                        return IgnorePointer(
-                          ignoring: isPersonalProject,
-                          child: Opacity(
-                            opacity: isPersonalProject ? 0.6 : 1.0,
-                            child: DropdownButtonFormField<String>(
-                              initialValue: _selectedAssignedToId,
-                              decoration: InputDecoration(
-                                labelText: 'Responsável *',
-                                border: const OutlineInputBorder(),
-                                helperText: isPersonalProject
-                                    ? 'Não é possível alterar o responsável em projetos pessoais'
-                                    : null,
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 14, 8, 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'EDIÇÃO',
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  letterSpacing: 2.4,
+                                  fontWeight: FontWeight.w900,
+                                  color: accent,
+                                  fontSize: 10,
+                                  height: 1,
+                                ),
                               ),
-                              items: _getAvailableUsers().map((user) {
-                                return DropdownMenuItem<String>(
-                                  value: user.id,
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      if (user.avatar != null)
-                                        CircleAvatar(
-                                          radius: 12,
-                                          backgroundImage: NetworkImage(
-                                            user.avatar!,
-                                          ),
-                                        )
-                                      else
-                                        CircleAvatar(
-                                          radius: 12,
-                                          child: Text(
-                                            user.name[0].toUpperCase(),
-                                            style: const TextStyle(
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                        ),
-                                      const SizedBox(width: 8),
-                                      Flexible(
-                                        child: Text(
-                                          user.name,
-                                          overflow: TextOverflow.ellipsis,
-                                          maxLines: 1,
-                                        ),
-                                      ),
-                                    ],
+                              const SizedBox(height: 6),
+                              Text(
+                                'Editar negociação',
+                                style: theme.textTheme.titleLarge?.copyWith(
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: -0.35,
+                                  height: 1.05,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.view_column_outlined,
+                                    size: 14,
+                                    color: secondary,
                                   ),
-                                );
-                              }).toList(),
+                                  const SizedBox(width: 6),
+                                  Flexible(
+                                    child: Text(
+                                      columnName,
+                                      style: theme.textTheme.labelMedium?.copyWith(
+                                        color: secondary,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.close_rounded, color: secondary),
+                          onPressed: () => Navigator.of(context).pop(),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _EditSectionHeader(
+                              overline: 'IDENTIDADE',
+                              title: 'Título e briefing',
+                              accent: accent,
+                            ),
+                            const SizedBox(height: 14),
+                            TextFormField(
+                              controller: _titleController,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.2,
+                              ),
+                              decoration: _fieldDecoration(
+                                context,
+                                label: 'Título',
+                                hint: 'Nome visível no funil',
+                                prefix: Icons.title_rounded,
+                              ).copyWith(
+                                floatingLabelBehavior: FloatingLabelBehavior.always,
+                              ),
                               validator: (value) {
-                                if (value == null || value.isEmpty) {
-                                  return 'Responsável é obrigatório';
+                                if (value == null || value.trim().isEmpty) {
+                                  return 'Título é obrigatório';
                                 }
                                 return null;
                               },
-                              onChanged: isPersonalProject
-                                  ? null
-                                  : (value) {
-                                      setState(() {
-                                        _selectedAssignedToId = value;
-                                      });
-                                    },
+                              textCapitalization: TextCapitalization.sentences,
                             ),
-                          ),
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    // Prioridade
-                    DropdownButtonFormField<KanbanPriority>(
-                      initialValue: _selectedPriority,
-                      decoration: const InputDecoration(
-                        labelText: 'Prioridade',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: [
-                        const DropdownMenuItem<KanbanPriority>(
-                          value: null,
-                          child: Text('Sem prioridade'),
-                        ),
-                        ...KanbanPriority.values.map((priority) {
-                          return DropdownMenuItem(
-                            value: priority,
-                            child: Row(
+                            const SizedBox(height: 18),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
-                                Container(
-                                  width: 12,
-                                  height: 12,
-                                  decoration: BoxDecoration(
-                                    color: Color(
-                                      int.parse(
-                                        priority.color.replaceFirst(
-                                          '#',
-                                          '0xFF',
-                                        ),
-                                      ),
-                                    ),
-                                    shape: BoxShape.circle,
+                                Text(
+                                  'BRIEFING',
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    letterSpacing: 2.2,
+                                    fontWeight: FontWeight.w900,
+                                    color: accent,
+                                    fontSize: 10,
+                                    height: 1,
                                   ),
                                 ),
-                                const SizedBox(width: 8),
-                                Text(priority.label),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Container(
+                                    height: 1,
+                                    color: ThemeHelpers.borderColor(context)
+                                        .withValues(alpha: 0.35),
+                                  ),
+                                ),
                               ],
                             ),
-                          );
-                        }),
-                      ],
-                      onChanged: (value) {
-                        setState(() {
-                          _selectedPriority = value;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    // Data de vencimento
-                    InkWell(
-                      onTap: _selectDueDate,
-                      child: InputDecorator(
-                        decoration: const InputDecoration(
-                          labelText: 'Data de Vencimento',
-                          border: OutlineInputBorder(),
-                          suffixIcon: Icon(Icons.calendar_today),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                _selectedDueDate != null
-                                    ? '${_selectedDueDate!.day}/${_selectedDueDate!.month}/${_selectedDueDate!.year}'
-                                    : 'Selecione uma data',
-                                style: TextStyle(
-                                  color: _selectedDueDate != null
-                                      ? ThemeHelpers.textColor(context)
-                                      : ThemeHelpers.textSecondaryColor(
-                                          context,
+                            const SizedBox(height: 12),
+                            IntrinsicHeight(
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Container(
+                                    width: 3,
+                                    decoration: BoxDecoration(
+                                      color: accent.withValues(alpha: 0.5),
+                                      borderRadius: BorderRadius.circular(99),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: TextFormField(
+                                      controller: _descriptionController,
+                                      minLines: 4,
+                                      maxLines: 8,
+                                      style: theme.textTheme.bodyLarge?.copyWith(
+                                        height: 1.5,
+                                        fontWeight: FontWeight.w500,
+                                        letterSpacing: -0.05,
+                                      ),
+                                      decoration: InputDecoration(
+                                        hintText:
+                                            'Contexto, próximos passos, observações…',
+                                        hintStyle: TextStyle(
+                                          color: secondary,
+                                          fontWeight: FontWeight.w500,
                                         ),
+                                        border: InputBorder.none,
+                                        isDense: true,
+                                        contentPadding: EdgeInsets.zero,
+                                      ),
+                                      textCapitalization:
+                                          TextCapitalization.sentences,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 28),
+                            _EditSectionHeader(
+                              overline: 'FLUXO',
+                              title: 'Responsável, prioridade e prazo',
+                              accent: accent,
+                            ),
+                            const SizedBox(height: 14),
+                            Builder(
+                              builder: (context) {
+                                final isPersonal =
+                                    widget.task.project?.isPersonal == true;
+                                return IgnorePointer(
+                                  ignoring: isPersonal,
+                                  child: Opacity(
+                                    opacity: isPersonal ? 0.55 : 1,
+                                    child: DropdownButtonFormField<String>(
+                                      initialValue: _selectedAssignedToId,
+                                      isExpanded: true,
+                                      menuMaxHeight: 360,
+                                      borderRadius: BorderRadius.circular(16),
+                                      dropdownColor:
+                                          ThemeHelpers.cardBackgroundColor(context),
+                                      icon: Icon(
+                                        Icons.unfold_more_rounded,
+                                        color: secondary,
+                                      ),
+                                      decoration: _fieldDecoration(
+                                        context,
+                                        label: 'Responsável',
+                                        hint: 'Quem conduz o card',
+                                        prefix: Icons.person_outline_rounded,
+                                      ).copyWith(
+                                        helperText: isPersonal
+                                            ? 'Projetos pessoais: responsável fixo.'
+                                            : null,
+                                        helperMaxLines: 2,
+                                      ),
+                                      items: _getAvailableUsers().map((user) {
+                                        return DropdownMenuItem<String>(
+                                          value: user.id,
+                                          child: Row(
+                                            children: [
+                                              CircleAvatar(
+                                                radius: 14,
+                                                backgroundColor: accent
+                                                    .withValues(alpha: 0.12),
+                                                backgroundImage: user.avatar != null
+                                                    ? NetworkImage(user.avatar!)
+                                                    : null,
+                                                child: user.avatar == null
+                                                    ? Text(
+                                                        user.name.isNotEmpty
+                                                            ? user.name[0]
+                                                                .toUpperCase()
+                                                            : '?',
+                                                        style: const TextStyle(
+                                                          fontSize: 13,
+                                                          fontWeight: FontWeight.w800,
+                                                        ),
+                                                      )
+                                                    : null,
+                                              ),
+                                              const SizedBox(width: 10),
+                                              Expanded(
+                                                child: Text(
+                                                  user.name,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: theme.textTheme.bodyMedium
+                                                      ?.copyWith(
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      }).toList(),
+                                      validator: (value) {
+                                        if (value == null || value.isEmpty) {
+                                          return 'Responsável é obrigatório';
+                                        }
+                                        return null;
+                                      },
+                                      onChanged: isPersonal
+                                          ? null
+                                          : (value) {
+                                              setState(() {
+                                                _selectedAssignedToId = value;
+                                              });
+                                            },
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 18),
+                            Text(
+                              'PRIORIDADE',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                letterSpacing: 1.6,
+                                fontWeight: FontWeight.w800,
+                                color: secondary,
+                                fontSize: 10,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                _PriorityChip(
+                                  label: 'Sem prioridade',
+                                  selected: _selectedPriority == null,
+                                  dotColor: const Color(0xFF94A3B8),
+                                  onTap: () =>
+                                      setState(() => _selectedPriority = null),
+                                ),
+                                ...KanbanPriority.values.map((p) {
+                                  final c = Color(
+                                    int.parse(p.color.replaceFirst('#', '0xFF')),
+                                  );
+                                  return _PriorityChip(
+                                    label: p.label,
+                                    selected: _selectedPriority == p,
+                                    dotColor: c,
+                                    onTap: () =>
+                                        setState(() => _selectedPriority = p),
+                                  );
+                                }),
+                              ],
+                            ),
+                            const SizedBox(height: 18),
+                            Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onTap: _selectDueDate,
+                                borderRadius: BorderRadius.circular(14),
+                                child: Ink(
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: ThemeHelpers.borderColor(context)
+                                          .withValues(alpha: 0.55),
+                                    ),
+                                    color: ThemeHelpers.backgroundColor(context)
+                                        .withValues(alpha: 0.55),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 16,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.event_outlined,
+                                        color: accent,
+                                        size: 22,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Prazo',
+                                              style: theme.textTheme.labelSmall
+                                                  ?.copyWith(
+                                                fontWeight: FontWeight.w800,
+                                                color: secondary,
+                                                letterSpacing: 0.6,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              _selectedDueDate != null
+                                                  ? DateFormat(
+                                                      "EEEE, d 'de' MMMM",
+                                                      'pt_BR',
+                                                    ).format(_selectedDueDate!)
+                                                  : 'Sem data definida',
+                                              style: theme.textTheme.bodyLarge
+                                                  ?.copyWith(
+                                                fontWeight: FontWeight.w800,
+                                                letterSpacing: -0.2,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      if (_selectedDueDate != null)
+                                        IconButton(
+                                          icon: Icon(
+                                            Icons.close_rounded,
+                                            size: 20,
+                                            color: secondary,
+                                          ),
+                                          onPressed: () => setState(
+                                            () => _selectedDueDate = null,
+                                          ),
+                                          visualDensity: VisualDensity.compact,
+                                        ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
-                            if (_selectedDueDate != null)
-                              IconButton(
-                                icon: const Icon(Icons.clear, size: 18),
-                                onPressed: () {
-                                  setState(() {
-                                    _selectedDueDate = null;
-                                  });
-                                },
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
+                            const SizedBox(height: 28),
+                            _EditSectionHeader(
+                              overline: 'ETIQUETAS',
+                              title: 'Tags do card',
+                              accent: accent,
+                            ),
+                            const SizedBox(height: 12),
+                            if (_loadingTags)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 20),
+                                child: Center(
+                                  child: SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  ),
+                                ),
+                              )
+                            else if (_availableTags.isEmpty)
+                              Text(
+                                'Nenhuma tag disponível para este time.',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: secondary,
+                                  fontStyle: FontStyle.italic,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              )
+                            else
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: _availableTags.map((tag) {
+                                  final sel = _selectedTags.contains(tag);
+                                  return FilterChip(
+                                    showCheckmark: false,
+                                    label: Text(
+                                      tag,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 12.5,
+                                        color: sel
+                                            ? Colors.white
+                                            : ThemeHelpers.textColor(context),
+                                      ),
+                                    ),
+                                    selected: sel,
+                                    onSelected: (v) {
+                                      setState(() {
+                                        if (v) {
+                                          _selectedTags.add(tag);
+                                        } else {
+                                          _selectedTags.remove(tag);
+                                        }
+                                      });
+                                    },
+                                    selectedColor: accent,
+                                    backgroundColor:
+                                        ThemeHelpers.backgroundColor(context)
+                                            .withValues(alpha: 0.5),
+                                    side: BorderSide(
+                                      color: sel
+                                          ? accent
+                                          : ThemeHelpers.borderColor(context)
+                                              .withValues(alpha: 0.55),
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 4,
+                                      vertical: 2,
+                                    ),
+                                  );
+                                }).toList(),
                               ),
+                            const SizedBox(height: 24),
                           ],
                         ),
                       ),
                     ),
-                    const SizedBox(height: 16),
-                    // Tags
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Tags',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w500,
-                          ),
+                  ),
+                  Container(
+                    padding: EdgeInsets.fromLTRB(
+                      20,
+                      12,
+                      20,
+                      12 + MediaQuery.paddingOf(context).bottom,
+                    ),
+                    decoration: BoxDecoration(
+                      color: ThemeHelpers.cardBackgroundColor(context),
+                      border: Border(
+                        top: BorderSide(
+                          color: ThemeHelpers.borderColor(context)
+                              .withValues(alpha: 0.45),
                         ),
-                        const SizedBox(height: 8),
-                        if (_loadingTags)
-                          const Padding(
-                            padding: EdgeInsets.all(16.0),
-                            child: Center(child: CircularProgressIndicator()),
-                          )
-                        else
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: _availableTags.map((tag) {
-                              final isSelected = _selectedTags.contains(tag);
-                              return FilterChip(
-                                label: Text(tag),
-                                selected: isSelected,
-                                onSelected: (selected) {
-                                  setState(() {
-                                    if (selected) {
-                                      _selectedTags.add(tag);
-                                    } else {
-                                      _selectedTags.remove(tag);
-                                    }
-                                  });
-                                },
-                              );
-                            }).toList(),
-                          ),
-                        if (_availableTags.isEmpty && !_loadingTags)
-                          Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: Text(
-                              'Nenhuma tag disponível',
-                              style: TextStyle(
-                                color: ThemeHelpers.textSecondaryColor(context),
-                                fontSize: 12,
-                              ),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        TextButton(
+                          onPressed:
+                              _isLoading ? null : () => Navigator.of(context).pop(),
+                          child: Text(
+                            'Cancelar',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              color: secondary,
                             ),
                           ),
+                        ),
+                        const Spacer(),
+                        FilledButton.icon(
+                          onPressed: _isLoading ? null : _save,
+                          icon: _isLoading
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.check_rounded, size: 20),
+                          label: Text(
+                            _isLoading ? 'Salvando…' : 'Salvar alterações',
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 14,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 20),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
-          // Actions
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: ThemeHelpers.cardBackgroundColor(context),
-              border: Border(
-                top: BorderSide(color: ThemeHelpers.borderColor(context)),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Editorial widgets
+// ---------------------------------------------------------------------------
+
+Color _editAccent(BuildContext context) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  return isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+}
+
+class _EditSectionHeader extends StatelessWidget {
+  final String overline;
+  final String title;
+  final Color accent;
+
+  const _EditSectionHeader({
+    required this.overline,
+    required this.title,
+    required this.accent,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(width: 4, height: 14, color: accent),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                overline.toUpperCase(),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  letterSpacing: 1.4,
+                  fontWeight: FontWeight.w800,
+                  color: accent,
+                  fontSize: 10,
+                  height: 1,
+                ),
               ),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  onPressed: _isLoading
-                      ? null
-                      : () => Navigator.of(context).pop(),
-                  child: const Text('Cancelar'),
+              const SizedBox(height: 3),
+              Text(
+                title,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.2,
+                  height: 1.1,
+                  fontSize: 15,
                 ),
-                const SizedBox(width: 12),
-                ElevatedButton(
-                  onPressed: _isLoading ? null : _save,
-                  child: _isLoading
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Salvar'),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
+        ),
+      ],
+    );
+  }
+}
+
+class _PriorityChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final Color dotColor;
+  final VoidCallback onTap;
+
+  const _PriorityChip({
+    required this.label,
+    required this.selected,
+    required this.dotColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final accent = _editAccent(context);
+    final border = ThemeHelpers.borderColor(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? accent : border.withValues(alpha: 0.55),
+              width: selected ? 1.35 : 1,
+            ),
+            color: selected
+                ? accent.withValues(alpha: 0.12)
+                : ThemeHelpers.backgroundColor(context).withValues(alpha: 0.45),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: dotColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.1,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

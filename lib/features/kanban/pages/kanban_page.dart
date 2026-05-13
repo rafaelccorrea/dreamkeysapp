@@ -2000,6 +2000,43 @@ class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
+  Widget _taskResultChip(KanbanTask task) {
+    final r = task.normalizedResult;
+    if (r == 'open') return const SizedBox.shrink();
+    late final String label;
+    late final Color color;
+    switch (r) {
+      case 'won':
+        label = 'Vendido';
+        color = const Color(0xFF16A34A);
+        break;
+      case 'lost':
+        label = 'Perdido';
+        color = const Color(0xFFDC2626);
+        break;
+      default:
+        label = 'Cancelado';
+        color = ThemeHelpers.textSecondaryColor(context);
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withValues(alpha: 0.32), width: 0.7),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          color: color,
+          height: 1.1,
+        ),
+      ),
+    );
+  }
+
   Widget _buildTaskCard(
     KanbanTask task, {
     bool bulkMode = false,
@@ -2157,7 +2194,8 @@ class _KanbanPageState extends State<KanbanPage> {
                     ],
                     if (task.priority != null ||
                         deadline.isVisible ||
-                        hasTags) ...[
+                        hasTags ||
+                        task.hasClosedResult) ...[
                       const SizedBox(height: 12),
                       Wrap(
                         spacing: 6,
@@ -2166,6 +2204,7 @@ class _KanbanPageState extends State<KanbanPage> {
                           if (task.priority != null)
                             _priorityChip(task.priority!, priorityColor!),
                           if (deadline.isVisible) _deadlineChip(deadline),
+                          if (task.hasClosedResult) _taskResultChip(task),
                           if (hasTags)
                             ..._buildTaskTagChips(tags, theme),
                         ],
@@ -2314,41 +2353,44 @@ class _KanbanPageState extends State<KanbanPage> {
               break;
           }
         },
-        itemBuilder: (context) => [
-          const PopupMenuItem(
-            value: 'details',
-            child: Row(
-              children: [
-                Icon(Icons.info_outline, size: 18),
-                SizedBox(width: 8),
-                Text('Ver detalhes'),
-              ],
-            ),
-          ),
-          if (context.read<KanbanController>().permissions?.canEditTasks ?? true)
+        itemBuilder: (context) {
+          final ctrl = context.read<KanbanController>();
+          final perms = ctrl.permissions;
+          return [
             const PopupMenuItem(
-              value: 'edit',
+              value: 'details',
               child: Row(
                 children: [
-                  Icon(Icons.edit, size: 18),
+                  Icon(Icons.info_outline, size: 18),
                   SizedBox(width: 8),
-                  Text('Editar'),
+                  Text('Ver detalhes'),
                 ],
               ),
             ),
-          if (context.read<KanbanController>().permissions?.canDeleteTasks ??
-              true)
-            const PopupMenuItem(
-              value: 'delete',
-              child: Row(
-                children: [
-                  Icon(Icons.delete_outline, size: 18, color: Colors.red),
-                  SizedBox(width: 8),
-                  Text('Excluir', style: TextStyle(color: Colors.red)),
-                ],
+            if (perms?.canEditTasks ?? true)
+              const PopupMenuItem(
+                value: 'edit',
+                child: Row(
+                  children: [
+                    Icon(Icons.edit, size: 18),
+                    SizedBox(width: 8),
+                    Text('Editar'),
+                  ],
+                ),
               ),
-            ),
-        ],
+            if (perms?.canDeleteTasks ?? true)
+              const PopupMenuItem(
+                value: 'delete',
+                child: Row(
+                  children: [
+                    Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                    SizedBox(width: 8),
+                    Text('Excluir', style: TextStyle(color: Colors.red)),
+                  ],
+                ),
+              ),
+          ];
+        },
       ),
     );
   }
@@ -2466,32 +2508,49 @@ class _KanbanPageState extends State<KanbanPage> {
 
 
   void _showTaskActions(BuildContext context, KanbanTask task) {
+    final pageContext = context;
     final controller = context.read<KanbanController>();
-    showModalBottomSheet(
+    final perms = controller.permissions;
+    showModalBottomSheet<void>(
       context: context,
-      builder: (context) => SafeArea(
+      builder: (sheetContext) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.edit),
-              title: const Text('Editar'),
+              leading: const Icon(Icons.info_outline),
+              title: const Text('Ver detalhes'),
               onTap: () {
-                Navigator.pop(context);
-                showModalBottomSheet(
-                  context: context,
+                Navigator.pop(sheetContext);
+                showModalBottomSheet<void>(
+                  context: pageContext,
                   isScrollControlled: true,
                   backgroundColor: Colors.transparent,
-                  builder: (context) => Padding(
-                    padding: EdgeInsets.only(
-                      bottom: MediaQuery.of(context).viewInsets.bottom,
-                    ),
-                    child: EditTaskModal(task: task),
-                  ),
+                  barrierColor: Colors.black54,
+                  builder: (ctx) => TaskDetailsModal(task: task),
                 );
               },
             ),
-            if (controller.permissions?.canDeleteTasks ?? true)
+            if (perms?.canEditTasks ?? true)
+              ListTile(
+                leading: const Icon(Icons.edit),
+                title: const Text('Editar'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  showModalBottomSheet<void>(
+                    context: pageContext,
+                    isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (ctx) => Padding(
+                      padding: EdgeInsets.only(
+                        bottom: MediaQuery.of(ctx).viewInsets.bottom,
+                      ),
+                      child: EditTaskModal(task: task),
+                    ),
+                  );
+                },
+              ),
+            if (perms?.canDeleteTasks ?? true)
               ListTile(
                 leading: const Icon(Icons.delete, color: Colors.red),
                 title: const Text(
@@ -2499,8 +2558,8 @@ class _KanbanPageState extends State<KanbanPage> {
                   style: TextStyle(color: Colors.red),
                 ),
                 onTap: () {
-                  Navigator.pop(context);
-                  _confirmDeleteTask(context, controller, task);
+                  Navigator.pop(sheetContext);
+                  _confirmDeleteTask(pageContext, controller, task);
                 },
               ),
           ],

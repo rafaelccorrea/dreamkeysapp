@@ -899,6 +899,59 @@ class KanbanController extends ChangeNotifier {
     }
   }
 
+  /// Marca resultado (ganho / perda / reabrir). Recarrega o quadro em caso de sucesso.
+  Future<bool> markTaskResult(
+    String taskId, {
+    required String result,
+    String? lossReason,
+    String? notes,
+  }) async {
+    try {
+      final response = await _kanbanService.markTaskResult(
+        taskId,
+        result: result,
+        lossReason: lossReason,
+        notes: notes,
+      );
+
+      if (response.success) {
+        await loadBoard(teamId: _teamId, projectId: _projectId);
+        return true;
+      }
+      _error = response.message ?? 'Erro ao marcar resultado';
+      notifyListeners();
+      return false;
+    } catch (e) {
+      debugPrint('❌ [KANBAN_CTRL] markTaskResult: $e');
+      _error = 'Erro ao marcar resultado: ${e.toString()}';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Transfere o card para outro funil. Recarrega o quadro em caso de sucesso.
+  Future<bool> transferTask(
+    String taskId,
+    KanbanTransferTaskPayload payload,
+  ) async {
+    try {
+      final response = await _kanbanService.transferTask(taskId, payload);
+
+      if (response.success) {
+        await loadBoard(teamId: _teamId, projectId: _projectId);
+        return true;
+      }
+      _error = response.message ?? 'Erro ao transferir tarefa';
+      notifyListeners();
+      return false;
+    } catch (e) {
+      debugPrint('❌ [KANBAN_CTRL] transferTask: $e');
+      _error = 'Erro ao transferir tarefa: ${e.toString()}';
+      notifyListeners();
+      return false;
+    }
+  }
+
   /// Move uma tarefa.
   ///
   /// `fromColumnId` é obrigatório no backend (validado via `@IsUUID`). Quando

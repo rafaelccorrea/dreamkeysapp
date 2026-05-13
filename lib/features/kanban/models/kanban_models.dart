@@ -58,6 +58,93 @@ enum KanbanProjectStatus {
   }
 }
 
+/// Motivos de perda — mesmos valores de `LossReason` no CRM web (`imobx` / `imobx-front`).
+enum KanbanLossReason {
+  alugouEmOutroLugar('alugou_em_outro_lugar', 'Alugou em outro lugar'),
+  aluguel('aluguel', 'Aluguel'),
+  atendidoPorOutroCorretor('atendido_por_outro_corretor', 'Atendido p/ outro corretor'),
+  clicouErrado('clicou_errado', 'Clicou errado'),
+  cliqueDuplicado('clique_duplicado', 'Clique duplicado'),
+  clienteEmAtendimentoAtivo('cliente_em_atendimento_ativo', 'Cliente em atendimento ativo'),
+  comprouEmOutroLugar('comprou_em_outro_lugar', 'Comprou em outro lugar'),
+  curriculo('curriculo', 'Currículo'),
+  desistiuDaCaptacao('desistiu_da_captacao', 'Desistiu da captação'),
+  desistiuDaCompra('desistiu_da_compra', 'Desistiu da compra'),
+  desistiuDeAlugar('desistiu_de_alugar', 'Desistiu de Alugar'),
+  fechouComOutroCorretorDaEquipe(
+    'fechou_com_outro_corretor_da_equipe',
+    'Fechou com Outro Corretor da Equipe',
+  ),
+  financeiro('financeiro', 'Financeiro'),
+  fornecedor('fornecedor', 'Fornecedor'),
+  imovelJaCadastrado('imovel_ja_cadastrado', 'Imóvel ja cadastrado'),
+  naoConseguiuContatoTelExiste(
+    'nao_conseguiu_contato_tel_existe',
+    'Não conseguiu contato (tel existe)',
+  ),
+  naoELead('nao_e_lead', 'Não é lead'),
+  naoSeEnquadra('nao_se_enquadra', 'Não se enquadra'),
+  parceriaDeNegocios('parceria_de_negocios', 'Parceria de negócios'),
+  parouDeResponder('parou_de_responder', 'Parou de responder'),
+  restricao('restricao', 'Restrição'),
+  semFormaDeContatoTelNaoExiste(
+    'sem_forma_de_contato_tel_nao_existe',
+    'Sem forma de contato (tel não existe)',
+  ),
+  semInteresseImovelEmMarilia(
+    'sem_interesse_imovel_em_marilia',
+    'Sem interesse imóvel em Marília',
+  ),
+  semInteresse('sem_interesse', 'Sem interesse');
+
+  const KanbanLossReason(this.apiValue, this.label);
+
+  final String apiValue;
+  final String label;
+
+  static KanbanLossReason? tryParse(String? raw) {
+    if (raw == null) return null;
+    final s = raw.trim();
+    if (s.isEmpty) return null;
+    for (final e in KanbanLossReason.values) {
+      if (e.apiValue == s) return e;
+    }
+    return null;
+  }
+}
+
+/// Corpo de `POST /kanban/tasks/:id/transfer` — alinhado a `TransferTaskDto` no backend.
+class KanbanTransferTaskPayload {
+  final String toProjectId;
+  final String transferDate;
+  final String preService;
+  final String? toColumnId;
+  final String? assignedToId;
+  final String? notes;
+
+  KanbanTransferTaskPayload({
+    required this.toProjectId,
+    required this.transferDate,
+    required this.preService,
+    this.toColumnId,
+    this.assignedToId,
+    this.notes,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'toProjectId': toProjectId,
+      'transferDate': transferDate,
+      'preService': preService,
+      if (toColumnId != null && toColumnId!.trim().isNotEmpty)
+        'toColumnId': toColumnId,
+      if (assignedToId != null && assignedToId!.trim().isNotEmpty)
+        'assignedToId': assignedToId,
+      if (notes != null && notes!.trim().isNotEmpty) 'notes': notes!.trim(),
+    };
+  }
+}
+
 /// Coluna do Kanban
 class KanbanColumn {
   final String id;
@@ -238,6 +325,13 @@ class KanbanTask {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  /// `open` | `won` | `lost` | `cancelled` — ausente ou vazio equivale a em aberto.
+  final String? result;
+  final String? lossReason;
+  final String? resultNotes;
+  final String? preService;
+  final DateTime? transferDate;
+
   // Relacionamentos populados
   final KanbanUser? assignedTo;
   final KanbanUser? createdBy;
@@ -259,11 +353,28 @@ class KanbanTask {
     this.tags,
     required this.createdAt,
     required this.updatedAt,
+    this.result,
+    this.lossReason,
+    this.resultNotes,
+    this.preService,
+    this.transferDate,
     this.assignedTo,
     this.createdBy,
     this.project,
     this.commentsCount,
   });
+
+  /// Resultado normalizado para regras de UI (igual ao web).
+  String get normalizedResult {
+    final r = result?.trim().toLowerCase();
+    if (r == null || r.isEmpty) return 'open';
+    return r;
+  }
+
+  bool get hasClosedResult {
+    final r = normalizedResult;
+    return r == 'won' || r == 'lost' || r == 'cancelled';
+  }
 
   /// Tags exibíveis nos cards e modais (sem marcadores ocultados por [KanbanUiTagFilter]).
   List<String>? get displayTags {
@@ -294,6 +405,13 @@ class KanbanTask {
           : null,
       createdAt: DateTime.parse(json['createdAt'].toString()),
       updatedAt: DateTime.parse(json['updatedAt'].toString()),
+      result: json['result']?.toString(),
+      lossReason: json['lossReason']?.toString(),
+      resultNotes: json['resultNotes']?.toString(),
+      preService: json['preService']?.toString(),
+      transferDate: json['transferDate'] != null
+          ? DateTime.tryParse(json['transferDate'].toString())
+          : null,
       assignedTo: json['assignedTo'] != null
           ? KanbanUser.fromJson(json['assignedTo'] as Map<String, dynamic>)
           : null,
@@ -323,6 +441,11 @@ class KanbanTask {
       'tags': tags,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
+      if (result != null) 'result': result,
+      if (lossReason != null) 'lossReason': lossReason,
+      if (resultNotes != null) 'resultNotes': resultNotes,
+      if (preService != null) 'preService': preService,
+      if (transferDate != null) 'transferDate': transferDate!.toIso8601String(),
     };
   }
 
@@ -341,6 +464,11 @@ class KanbanTask {
     List<String>? tags,
     DateTime? createdAt,
     DateTime? updatedAt,
+    String? result,
+    String? lossReason,
+    String? resultNotes,
+    String? preService,
+    DateTime? transferDate,
     KanbanUser? assignedTo,
     KanbanUser? createdBy,
     KanbanProject? project,
@@ -361,6 +489,11 @@ class KanbanTask {
       tags: tags ?? this.tags,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      result: result ?? this.result,
+      lossReason: lossReason ?? this.lossReason,
+      resultNotes: resultNotes ?? this.resultNotes,
+      preService: preService ?? this.preService,
+      transferDate: transferDate ?? this.transferDate,
       assignedTo: assignedTo ?? this.assignedTo,
       createdBy: createdBy ?? this.createdBy,
       project: project ?? this.project,
@@ -523,6 +656,8 @@ class KanbanPermissions {
   final bool canCreateColumns;
   final bool canEditColumns;
   final bool canDeleteColumns;
+  final bool canMarkResult;
+  final bool canTransfer;
 
   KanbanPermissions({
     required this.canCreateTasks,
@@ -532,17 +667,22 @@ class KanbanPermissions {
     required this.canCreateColumns,
     required this.canEditColumns,
     required this.canDeleteColumns,
+    required this.canMarkResult,
+    required this.canTransfer,
   });
 
   factory KanbanPermissions.fromJson(Map<String, dynamic> json) {
+    final canEdit = json['canEditTasks'] as bool? ?? false;
     return KanbanPermissions(
       canCreateTasks: json['canCreateTasks'] as bool? ?? false,
-      canEditTasks: json['canEditTasks'] as bool? ?? false,
+      canEditTasks: canEdit,
       canDeleteTasks: json['canDeleteTasks'] as bool? ?? false,
       canMoveTasks: json['canMoveTasks'] as bool? ?? false,
       canCreateColumns: json['canCreateColumns'] as bool? ?? false,
       canEditColumns: json['canEditColumns'] as bool? ?? false,
       canDeleteColumns: json['canDeleteColumns'] as bool? ?? false,
+      canMarkResult: json['canMarkResult'] as bool? ?? canEdit,
+      canTransfer: json['canTransfer'] as bool? ?? canEdit,
     );
   }
 }

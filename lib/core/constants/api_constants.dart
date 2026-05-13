@@ -321,6 +321,10 @@ class ApiConstants {
       '/kanban/columns/reorder/$teamId';
   static const String kanbanTasks = '/kanban/tasks';
   static String kanbanTaskById(String id) => '/kanban/tasks/$id';
+  static String kanbanTaskMarkResult(String taskId) =>
+      '/kanban/tasks/$taskId/mark-result';
+  static String kanbanTaskTransfer(String taskId) =>
+      '/kanban/tasks/$taskId/transfer';
   static const String kanbanTasksMove = '/kanban/tasks/move';
   static String kanbanTaskHistory(String id) => '/kanban/tasks/$id/history';
   static String kanbanTaskComments(String taskId) =>
