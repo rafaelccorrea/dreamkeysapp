@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/theme_helpers.dart';
 
-/// Superfícies e faixas hero no mesmo espírito do Dash SDR (gradiente + borda).
+/// Superfícies e faixas hero (gradiente primário + secundário + borda), alinhado ao dashboard.
 class VividChrome {
   VividChrome._();
 

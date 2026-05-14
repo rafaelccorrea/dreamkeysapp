@@ -307,11 +307,7 @@ class ApiConstants {
   /// Registo do token FCM do app (POST / DELETE com body `{ token }`).
   static const String notificationsMobileDevices = '/notifications/mobile-devices';
 
-  // Endpoints de Kanban — analytics (exige módulo `kanban_management` + `kanban:view_analytics`)
-  static const String kanbanAnalyticsSdrMetrics =
-      '/kanban/analytics/sdr/metrics';
-  static const String kanbanAnalyticsSdrDailyProductivity =
-      '/kanban/analytics/sdr/daily-productivity';
+  // Kanban — analytics por tarefa (ex.: módulo `kanban_management` + `kanban:view_analytics`)
   static String kanbanAnalyticsTaskMetrics(String taskId) =>
       '/kanban/analytics/tasks/$taskId/metrics';
 

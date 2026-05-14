@@ -14,7 +14,6 @@ import '../../../../shared/widgets/minimal_body_chrome.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
 import '../../notifications/widgets/notification_center.dart';
 import '../widgets/dashboard_filters_drawer.dart';
-import '../widgets/sdr_dashboard_tab.dart';
 
 // Formatters globais
 final _currencyFormatter = NumberFormat.currency(
@@ -33,8 +32,7 @@ class DashboardPage extends StatefulWidget {
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
-class _DashboardPageState extends State<DashboardPage>
-    with SingleTickerProviderStateMixin {
+class _DashboardPageState extends State<DashboardPage> {
   /// Ritmo vertical mais curto + mais leitura horizontal (estilo app).
   static const double _kSectionGap = 11;
   static const double _kPagePadH = 20;
@@ -49,39 +47,10 @@ class _DashboardPageState extends State<DashboardPage>
   String? _errorMessage;
   DashboardFilters _filters = DashboardFilters.defaultFilters();
 
-  TabController? _dashTabController;
-  bool _showSdrTab = false;
-
   @override
   void initState() {
     super.initState();
     _loadDashboardData();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _setupSdrTabIfAllowed();
-    });
-  }
-
-  @override
-  void dispose() {
-    _dashTabController?.dispose();
-    super.dispose();
-  }
-
-  Future<void> _setupSdrTabIfAllowed() async {
-    try {
-      await ModuleAccessService.instance.initialize();
-    } catch (_) {}
-    if (!mounted) return;
-    final m = ModuleAccessService.instance;
-    if (!m.hasCompanyModule('kanban_management') ||
-        !m.hasPermission('kanban:view_analytics')) {
-      return;
-    }
-    setState(() {
-      _showSdrTab = true;
-      _dashTabController?.dispose();
-      _dashTabController = TabController(length: 2, vsync: this);
-    });
   }
 
   Future<void> _loadDashboardData() async {
@@ -275,39 +244,6 @@ class _DashboardPageState extends State<DashboardPage>
           ? _buildSkeleton(context, theme)
           : _errorMessage != null
           ? _buildErrorState(context, theme)
-          : _showSdrTab && _dashTabController != null
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 2, 8, 0),
-                      child: TabBar(
-                        controller: _dashTabController!,
-                        labelColor: _dashboardAccentColor(context),
-                        unselectedLabelColor:
-                            ThemeHelpers.textSecondaryColor(context),
-                        indicatorWeight: 3,
-                        tabs: const [
-                          Tab(text: 'Visão geral'),
-                          Tab(text: 'Dash SDR'),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: TabBarView(
-                        controller: _dashTabController!,
-                        children: [
-                          RefreshIndicator(
-                            onRefresh: _loadDashboardData,
-                            color: _dashboardAccentColor(context),
-                            child: _generalDashboardScroll(context, theme),
-                          ),
-                          const SdrDashboardTab(),
-                        ],
-                      ),
-                    ),
-                  ],
-                )
           : RefreshIndicator(
               onRefresh: _loadDashboardData,
               color: _dashboardAccentColor(context),
