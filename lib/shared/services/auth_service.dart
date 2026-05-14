@@ -3,6 +3,7 @@ import '../../core/constants/api_constants.dart';
 import '../../core/push/app_push_service.dart';
 import '../utils/avatar_url_resolver.dart';
 import 'api_service.dart';
+import 'module_access_service.dart';
 import 'secure_storage_service.dart';
 
 Uri _apiUri(String path, [Map<String, String>? query]) {
@@ -433,11 +434,13 @@ class AuthService {
         );
       }
 
-      // Sempre limpar dados localmente, mesmo se a API falhar
-      debugPrint('🧹 [AUTH_SERVICE] Limpando dados locais...');
+      // Sempre limpar sessão localmente, mesmo se a API falhar.
+      // Mantém credenciais + biometria para o utilizador voltar a entrar com Face ID / dedo.
+      debugPrint('🧹 [AUTH_SERVICE] Encerrando sessão (mantendo login biométrico se ativo)...');
       _apiService.clearToken();
-      await SecureStorageService.instance.clearAllAuthData(); // Limpa tokens E credenciais
-      debugPrint('✅ [AUTH_SERVICE] Logout concluído - dados locais limpos');
+      await SecureStorageService.instance.clearAuthSessionKeepCredentials();
+      ModuleAccessService.instance.clear();
+      debugPrint('✅ [AUTH_SERVICE] Logout concluído — sessão limpa, credenciais biométricas preservadas');
 
       return response;
     } catch (e, stackTrace) {
@@ -447,7 +450,8 @@ class AuthService {
       // Garantir que os dados sejam limpos mesmo em caso de erro
       try {
         _apiService.clearToken();
-        await SecureStorageService.instance.clearAllAuthData();
+        await SecureStorageService.instance.clearAuthSessionKeepCredentials();
+        ModuleAccessService.instance.clear();
       } catch (clearError) {
         debugPrint('❌ [AUTH_SERVICE] Erro ao limpar dados: $clearError');
       }

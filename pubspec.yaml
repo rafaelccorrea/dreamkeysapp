@@ -6,7 +6,7 @@ publish_to: 'none'
 # Tem de ser SEMPRE maior que qualquer build já enviado para esta app.
 # Erro típico: "bundle version must be higher than … previousBundleVersion = N"
 # → subir só o +N (ex. +14 → +15 → +16), commit, novo pipeline.
-version: 1.0.6+16
+version: 1.0.6+17
 
 environment:
   sdk: ^3.9.2
@@ -52,13 +52,14 @@ dev_dependencies:
 flutter_launcher_icons:
   android: true
   ios: true
-  # Ícone “I” (favicon) — fundo preto atrás do PNG no launcher.
+  # Qualidade no launcher depende do PNG de origem: use pelo menos 1024×1024 px,
+  # margens generosas e traços nítidos (evitar favicon 16×16 ou 32×32 ampliado).
   image_path: assets/images/launcher_icon_from_favicon.png
   adaptive_icon_background: '#000000'
   adaptive_icon_foreground: assets/images/launcher_icon_from_favicon.png
   # Menos que o default 16% enche demais o círculo; valor maior = ícone um pouco
   # menor no adaptive (menos "exposto" no launcher).
-  adaptive_icon_foreground_inset: 24
+  adaptive_icon_foreground_inset: 18
   remove_alpha_ios: true
   background_color_ios: '#000000'
 

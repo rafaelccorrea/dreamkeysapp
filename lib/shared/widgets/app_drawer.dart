@@ -1461,7 +1461,10 @@ class _AppDrawerState extends State<AppDrawer> {
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Sair'),
-        content: const Text('Tem certeza que deseja sair?'),
+        content: const Text(
+          'Sai da sessão neste aparelho. Se já ativou Face ID ou impressão digital, '
+          'pode voltar a entrar assim na próxima vez (ou com email e senha).',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),

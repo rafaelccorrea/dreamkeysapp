@@ -294,7 +294,25 @@ class SecureStorageService {
     }
   }
 
-  /// Limpa todos os dados de autenticação (tokens, credenciais e Company ID)
+  /// Limpa sessão no servidor local: tokens, empresa e registo FCM.
+  ///
+  /// **Não** remove email/senha nem a flag de biometria — assim, após «Sair»,
+  /// o utilizador continua a poder entrar com Face ID / impressão digital
+  /// (ou preencher a conta manualmente) como no fluxo típico de apps bancários.
+  Future<void> clearAuthSessionKeepCredentials() async {
+    try {
+      await clearTokens();
+      await clearCompanyId();
+      await clearFcmTokenRegistered();
+      debugPrint(
+        '✅ [SECURE_STORAGE] Sessão encerrada (tokens/empresa/FCM); credenciais biométricas mantidas',
+      );
+    } catch (e) {
+      debugPrint('⚠️ [SECURE_STORAGE] Erro ao limpar sessão: $e');
+    }
+  }
+
+  /// Remove tudo: sessão **e** credenciais guardadas para login biométrico.
   Future<void> clearAllAuthData() async {
     try {
       await clearTokens();

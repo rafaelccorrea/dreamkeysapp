@@ -276,6 +276,13 @@ class _LoginPageState extends State<LoginPage> {
           _hasSavedCredentials = hasCredentials;
         });
 
+        if (hasCredentials) {
+          final savedEmail = await SecureStorageService.instance.getSavedEmail();
+          if (savedEmail != null && savedEmail.isNotEmpty && mounted) {
+            _emailController.text = savedEmail;
+          }
+        }
+
         // Se há credenciais salvas E biometria está disponível, tentar login automático
         // Mas apenas se ainda não tentou (evita múltiplas tentativas)
         if (hasCredentials && 
