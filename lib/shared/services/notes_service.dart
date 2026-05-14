@@ -157,7 +157,7 @@ class NotesService {
       final inner = map['data'];
       if (inner is Map &&
           (inner['total'] != null || inner['basic'] != null)) {
-        map = Map<String, dynamic>.from(inner as Map);
+        map = Map<String, dynamic>.from(inner);
       }
       return ApiResponse.success(
         data: NotesStats.fromJson(map),
@@ -213,7 +213,7 @@ class NotesService {
       if (map['id'] == null) {
         final inner = map['data'];
         if (inner is Map) {
-          final im = Map<String, dynamic>.from(inner as Map);
+          final im = Map<String, dynamic>.from(inner);
           if (im['id'] != null) map = im;
         }
       }
