@@ -6,6 +6,30 @@ import 'package:flutter/foundation.dart'
 
 /// Default [FirebaseOptions] for use with your Firebase apps.
 class DefaultFirebaseOptions {
+  /// `true` quando ainda há placeholders de [flutterfire configure] nesta plataforma.
+  /// Nesse caso **não** chame `Firebase.initializeApp` no iOS: o SDK nativo pode encerrar
+  /// o processo (crash ao abrir) em vez de propagar erro para o Dart.
+  static bool looksLikePlaceholder(FirebaseOptions o) {
+    const k = 'REPLACE_WITH';
+    return o.apiKey.contains(k) ||
+        o.appId.contains(k) ||
+        o.projectId.contains(k) ||
+        o.messagingSenderId.contains(k);
+  }
+
+  /// Firebase pronto para uso neste dispositivo (sem placeholders na opção da plataforma).
+  static bool get isFirebaseConfigured {
+    if (kIsWeb) return false;
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return !looksLikePlaceholder(android);
+      case TargetPlatform.iOS:
+        return !looksLikePlaceholder(ios);
+      default:
+        return false;
+    }
+  }
+
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
       throw UnsupportedError('Firebase web não é usado neste app.');

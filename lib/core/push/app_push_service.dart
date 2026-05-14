@@ -38,13 +38,6 @@ bool _isDuplicateDefaultFirebaseAppError(Object error) {
       message.contains('already exists');
 }
 
-bool _firebaseOptionsLookLikePlaceholder() {
-  const k = 'REPLACE_WITH';
-  return DefaultFirebaseOptions.android.apiKey.contains(k) ||
-      DefaultFirebaseOptions.android.appId.contains(k) ||
-      DefaultFirebaseOptions.android.projectId.contains(k);
-}
-
 /// Inicialização mínima do plugin em isolate de background (sem tap handler).
 Future<void> _ensureLocalNotificationsInBackground() async {
   const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -60,6 +53,12 @@ Future<void> _ensureLocalNotificationsInBackground() async {
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  if (!DefaultFirebaseOptions.isFirebaseConfigured) {
+    debugPrint(
+      '📱 [PUSH] Background: Firebase não configurado (ignorando mensagem).',
+    );
+    return;
+  }
   try {
     if (Firebase.apps.isEmpty) {
       await Firebase.initializeApp(
@@ -131,11 +130,14 @@ class AppPushService {
   static Future<void> setupFirebaseBeforeRunApp() async {
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
-    if (_firebaseOptionsLookLikePlaceholder()) {
+    if (!DefaultFirebaseOptions.isFirebaseConfigured) {
+      _firebaseCoreReady = false;
       debugPrint(
-        '📱 [PUSH] firebase_options.dart ainda tem placeholders — '
-        'execute `flutterfire configure` e substitua google-services.json.',
+        '📱 [PUSH] Firebase não configurado para esta plataforma (placeholders em '
+        'lib/firebase_options.dart). Execute `flutterfire configure`, faça rebuild e '
+        'publique de novo. O app abre sem push até lá.',
       );
+      return;
     }
 
     try {
