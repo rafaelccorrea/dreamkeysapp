@@ -55,7 +55,7 @@ class AppScaffold extends StatelessWidget {
 
     return PopScope(
       canPop: !isMainScreen,
-      onPopInvoked: (didPop) {
+      onPopInvokedWithResult: (didPop, result) {
         if (!didPop && isMainScreen) {
           if (currentRoute == AppRoutes.home) {
             return;

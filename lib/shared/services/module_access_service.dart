@@ -207,6 +207,10 @@ class ModuleAccessService extends ChangeNotifier {
     return _selectedCompany?.availableModules.contains(moduleId) ?? false;
   }
 
+  /// Alias de [isModuleAvailableForCompany] — mesmo critério; nome alinhado ao web.
+  bool hasCompanyModule(String moduleId) =>
+      isModuleAvailableForCompany(moduleId);
+
   /// Verifica se usuário tem permissões para o módulo
   bool hasPermissionForModule(String moduleId) {
     if (_hasRoleBypass()) return true;

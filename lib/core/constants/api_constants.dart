@@ -307,6 +307,22 @@ class ApiConstants {
   /// Registo do token FCM do app (POST / DELETE com body `{ token }`).
   static const String notificationsMobileDevices = '/notifications/mobile-devices';
 
+  // Endpoints de Kanban — analytics (exige módulo `kanban_management` + `kanban:view_analytics`)
+  static const String kanbanAnalyticsSdrMetrics =
+      '/kanban/analytics/sdr/metrics';
+  static const String kanbanAnalyticsSdrDailyProductivity =
+      '/kanban/analytics/sdr/daily-productivity';
+  static String kanbanAnalyticsTaskMetrics(String taskId) =>
+      '/kanban/analytics/tasks/$taskId/metrics';
+
+  /// Jornada do lead (`GET` — permissão `kanban:view`).
+  static String kanbanTaskJourney(String taskId) =>
+      '/kanban/tasks/$taskId/journey';
+
+  /// Anexos diretos no card (`GET`/`POST`/`DELETE` — ver guards no Nest).
+  static String kanbanTaskAttachments(String taskId) =>
+      '/kanban/tasks/$taskId/attachments';
+
   // Endpoints de Kanban
   static const String kanbanMyBoards = '/kanban/my-boards';
   static String kanbanBoard(String teamId) => '/kanban/board/$teamId';
@@ -524,6 +540,17 @@ class ApiConstants {
   static String saleChecklistById(String id) => '/sale-checklists/$id';
   static String saleChecklistsByProperty(String propertyId) =>
       '/sale-checklists?propertyId=$propertyId';
+
+  // Endpoints de Anotações (módulo `notes` + permissões `note:*`)
+  static const String notes = '/notes';
+
+  // Endpoints de utilizadores (admin — módulo `user_management`)
+  static const String adminUsers = '/admin/users';
+
+  // Endpoints de Subscriptions (admin/master — ver `RolesGuard` no Nest)
+  static const String subscriptionsMyActive =
+      '/subscriptions/my-active-subscription';
+  static const String subscriptionsMyList = '/subscriptions/my-subscriptions';
 
   // Headers
   static const String contentTypeHeader = 'Content-Type';

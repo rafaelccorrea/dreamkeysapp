@@ -7,6 +7,8 @@ import 'package:intl/intl.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/secure_storage_service.dart';
+import '../../../shared/services/module_access_service.dart';
+import '../../../shared/services/kanban_analytics_service.dart';
 import '../../../shared/utils/jwt_utils.dart';
 import '../models/kanban_models.dart';
 import '../services/kanban_service.dart';
@@ -57,7 +59,7 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 7, vsync: this);
     _tabController.addListener(_onTabChanged);
     _commentController.addListener(() {
       if (mounted) setState(() => _commentLength = _commentController.text.length);
@@ -70,10 +72,17 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
   void _onTabChanged() {
     if (!mounted) return;
     setState(() {});
-    // Aba "Histórico" agora é o índice 3 (depois de Detalhes=0, Tarefas=1,
-    // Conversas=2). Mantemos lazy-load: só busca quando a aba é aberta
-    // pela primeira vez.
-    if (_tabController.index == 3 && _history.isEmpty && !_loadingHistory) {
+    final i = _tabController.index;
+    if (i == 1 && !_didLoadJourney) {
+      _loadJourney();
+    }
+    if (i == 4 && !_didLoadFiles) {
+      _loadTaskFiles();
+    }
+    if (i == 5 && _canViewTaskAnalytics && !_didLoadMetrics) {
+      _loadTaskMetrics();
+    }
+    if (i == 6 && _history.isEmpty && !_loadingHistory) {
       _loadHistory();
     }
   }
@@ -419,8 +428,12 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
                 _MinimalTabBar(
                   controller: _tabController,
                   tabs: [
-                    _TabItem(icon: Icons.article_outlined, label: 'Detalhes'),
-                    _TabItem(
+                    const _TabItem(icon: Icons.article_outlined, label: 'Detalhes'),
+                    const _TabItem(
+                      icon: Icons.signpost_outlined,
+                      label: 'Jornada',
+                    ),
+                    const _TabItem(
                       icon: Icons.checklist_rounded,
                       label: 'Tarefas',
                     ),
@@ -428,6 +441,15 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
                       icon: Icons.forum_outlined,
                       label: 'Conversas',
                       badge: _comments.length,
+                    ),
+                    _TabItem(
+                      icon: Icons.attach_file_rounded,
+                      label: 'Arquivos',
+                      badge: _taskFiles.isNotEmpty ? _taskFiles.length : null,
+                    ),
+                    const _TabItem(
+                      icon: Icons.insights_rounded,
+                      label: 'Métricas',
                     ),
                     _TabItem(
                       icon: Icons.history_rounded,
@@ -444,6 +466,7 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
                     physics: const ClampingScrollPhysics(),
                     children: [
                       _buildDetailsTab(context, theme, state, task),
+                      _buildJourneyTab(context, theme),
                       SingleChildScrollView(
                         physics: const ClampingScrollPhysics(),
                         child: SubTaskManager(
@@ -452,6 +475,8 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
                         ),
                       ),
                       _buildCommentsTab(context, theme),
+                      _buildFilesTab(context, theme),
+                      _buildMetricsTab(context, theme),
                       _buildHistoryTab(context, theme),
                     ],
                   ),
@@ -651,6 +676,343 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
           isLast: i == _history.length - 1,
         );
       },
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // TAB: JORNADA (GET /kanban/tasks/:id/journey)
+  // ---------------------------------------------------------------------------
+
+  List<Map<String, dynamic>> _journey = [];
+  bool _loadingJourney = false;
+  String? _journeyError;
+  bool _didLoadJourney = false;
+
+  Future<void> _loadJourney() async {
+    setState(() {
+      _loadingJourney = true;
+      _journeyError = null;
+    });
+    final r = await _kanbanService.getTaskJourney(widget.task.id);
+    if (!mounted) return;
+    if (r.success && r.data != null) {
+      setState(() {
+        _journey = r.data!;
+        _loadingJourney = false;
+        _didLoadJourney = true;
+      });
+    } else {
+      setState(() {
+        _journeyError = r.message ?? 'Erro ao carregar jornada';
+        _loadingJourney = false;
+        _didLoadJourney = true;
+      });
+    }
+  }
+
+  Widget _buildJourneyTab(BuildContext context, ThemeData theme) {
+    if (_loadingJourney) return const _LoadingView();
+    if (_journeyError != null) {
+      return _ErrorView(message: _journeyError!, onRetry: _loadJourney);
+    }
+    if (_journey.isEmpty) {
+      return const _EmptyState(
+        icon: Icons.signpost_outlined,
+        title: 'Sem eventos de jornada',
+        subtitle:
+            'Eventos de atribuição, colunas, transferências e resultado aparecem aqui.',
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+      physics: const BouncingScrollPhysics(),
+      itemCount: _journey.length,
+      itemBuilder: (context, i) {
+        final e = _journey[i];
+        final title = e['title']?.toString() ?? '';
+        final subtitle = e['subtitle']?.toString();
+        final at = e['at']?.toString() ?? '';
+        final tone = e['tone']?.toString();
+        Color dot = theme.colorScheme.primary;
+        if (tone != null && tone.startsWith('#') && tone.length >= 7) {
+          try {
+            dot = Color(int.parse(tone.replaceFirst('#', '0xFF')));
+          } catch (_) {}
+        }
+        String timeStr = at;
+        try {
+          timeStr = DateFormat('dd/MM/yy HH:mm')
+              .format(DateTime.parse(at).toLocal());
+        } catch (_) {}
+        final isLast = i == _journey.length - 1;
+        return IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Column(
+                children: [
+                  Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: dot,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: dot.withValues(alpha: 0.35),
+                          blurRadius: 6,
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (!isLast)
+                    Container(
+                      width: 2,
+                      height: 48,
+                      margin: const EdgeInsets.only(top: 4),
+                      decoration: BoxDecoration(
+                        color: ThemeHelpers.borderColor(context)
+                            .withValues(alpha: 0.45),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        timeStr,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: ThemeHelpers.textSecondaryColor(context),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        title,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      if (subtitle != null && subtitle.isNotEmpty)
+                        Text(
+                          subtitle,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: ThemeHelpers.textSecondaryColor(context),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // TAB: ARQUIVOS (GET /kanban/tasks/:id/attachments)
+  // ---------------------------------------------------------------------------
+
+  List<Map<String, dynamic>> _taskFiles = [];
+  bool _loadingFiles = false;
+  String? _filesError;
+  bool _didLoadFiles = false;
+
+  Future<void> _loadTaskFiles() async {
+    setState(() {
+      _loadingFiles = true;
+      _filesError = null;
+    });
+    final r = await _kanbanService.getTaskAttachments(widget.task.id);
+    if (!mounted) return;
+    if (r.success && r.data != null) {
+      setState(() {
+        _taskFiles = r.data!;
+        _loadingFiles = false;
+        _didLoadFiles = true;
+      });
+    } else {
+      setState(() {
+        _filesError = r.message ?? 'Erro ao listar arquivos';
+        _loadingFiles = false;
+        _didLoadFiles = true;
+      });
+    }
+  }
+
+  Widget _buildFilesTab(BuildContext context, ThemeData theme) {
+    if (_loadingFiles) return const _LoadingView();
+    if (_filesError != null) {
+      return _ErrorView(message: _filesError!, onRetry: _loadTaskFiles);
+    }
+    if (_taskFiles.isEmpty) {
+      return const _EmptyState(
+        icon: Icons.folder_open_rounded,
+        title: 'Sem anexos no card',
+        subtitle:
+            'Arquivos enviados diretamente na tarefa (fora dos comentários) aparecem aqui.',
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+      physics: const BouncingScrollPhysics(),
+      itemCount: _taskFiles.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (context, i) {
+        final f = _taskFiles[i];
+        final name =
+            f['name']?.toString() ?? f['filename']?.toString() ?? 'Arquivo';
+        final url = f['url']?.toString() ?? '';
+        return ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          tileColor: ThemeHelpers.cardBackgroundColor(context),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(
+              color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
+            ),
+          ),
+          leading: const Icon(Icons.attach_file_rounded),
+          title: Text(name, maxLines: 2, overflow: TextOverflow.ellipsis),
+          subtitle: url.isNotEmpty ? Text(url, maxLines: 1, overflow: TextOverflow.ellipsis) : null,
+          onTap: url.isEmpty
+              ? null
+              : () {
+                  Clipboard.setData(ClipboardData(text: url));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Link copiado')),
+                  );
+                },
+        );
+      },
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // TAB: MÉTRICAS (GET /kanban/analytics/tasks/:id/metrics)
+  // ---------------------------------------------------------------------------
+
+  Map<String, dynamic>? _taskMetrics;
+  bool _loadingMetrics = false;
+  String? _metricsError;
+  bool _didLoadMetrics = false;
+
+  bool get _canViewTaskAnalytics =>
+      ModuleAccessService.instance.hasPermission('kanban:view_analytics');
+
+  Future<void> _loadTaskMetrics() async {
+    setState(() {
+      _loadingMetrics = true;
+      _metricsError = null;
+    });
+    final r =
+        await KanbanAnalyticsService.instance.getTaskMetrics(widget.task.id);
+    if (!mounted) return;
+    if (r.success && r.data != null) {
+      setState(() {
+        _taskMetrics = r.data;
+        _loadingMetrics = false;
+        _didLoadMetrics = true;
+      });
+    } else {
+      setState(() {
+        _metricsError = r.message ?? 'Erro ao carregar métricas';
+        _loadingMetrics = false;
+        _didLoadMetrics = true;
+      });
+    }
+  }
+
+  Widget _buildMetricsTab(BuildContext context, ThemeData theme) {
+    if (!_canViewTaskAnalytics) {
+      return const _EmptyState(
+        icon: Icons.insights_outlined,
+        title: 'Métricas analíticas',
+        subtitle:
+            'É necessária a permissão kanban:view_analytics (e módulo Kanban) para ver esta aba.',
+      );
+    }
+    if (_loadingMetrics) return const _LoadingView();
+    if (_metricsError != null) {
+      return _ErrorView(message: _metricsError!, onRetry: _loadTaskMetrics);
+    }
+    final m = _taskMetrics;
+    if (m == null || m.isEmpty) {
+      return const _EmptyState(
+        icon: Icons.analytics_outlined,
+        title: 'Sem dados',
+        subtitle: 'Não foi possível interpretar a resposta de métricas.',
+      );
+    }
+    String? s(dynamic v) => v?.toString();
+    Widget row(String label, String? value) {
+      if (value == null || value.isEmpty) return const SizedBox.shrink();
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 150,
+              child: Text(
+                label,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: ThemeHelpers.textSecondaryColor(context),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            Expanded(
+              child: Text(
+                value,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final nf = NumberFormat.decimalPattern('pt_BR');
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+      physics: const BouncingScrollPhysics(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Resumo analítico',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 12),
+          row('Subtarefas',
+              '${s(m['completedSubtasks']) ?? '0'} / ${s(m['totalSubtasks']) ?? '0'} concluídas'),
+          row('Taxa subtarefas %', s(m['subtaskCompletionRate'])),
+          row('Tempo na coluna atual (h)', s(m['timeInCurrentColumn'])),
+          row('Tempo total no board (h)', s(m['totalTimeInBoard'])),
+          row('Coluna', s(m['columnName'])),
+          row('Funil', s(m['projectName'])),
+          row('Cliente', s(m['clientName'])),
+          row('Imóvel', s(m['propertyTitle'])),
+          row('Valor', m['totalValue'] != null ? nf.format(m['totalValue']) : null),
+          row('Origem', s(m['source'])),
+          row('Campanha', s(m['campaign'])),
+          row('Qualificação', s(m['qualification'])),
+          row('Resultado', s(m['result'])),
+        ],
+      ),
     );
   }
 }
@@ -1232,6 +1594,8 @@ class _MinimalTabBar extends StatelessWidget {
       ),
       child: TabBar(
         controller: controller,
+        isScrollable: true,
+        tabAlignment: TabAlignment.start,
         labelColor: accent,
         unselectedLabelColor: secondary,
         indicatorColor: accent,

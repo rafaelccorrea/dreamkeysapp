@@ -60,16 +60,16 @@ class MatchService {
               return ApiResponse<MatchListResponse>(
                 success: false,
                 message: 'Formato de resposta inválido',
-                statusCode: response.statusCode ?? 400,
+                statusCode: response.statusCode,
               );
             }
             matchList = MatchListResponse.fromJson(dataMap);
           } else {
-          return ApiResponse<MatchListResponse>(
-            success: false,
-            message: 'Formato de resposta inválido',
-            statusCode: response.statusCode ?? 400,
-          );
+            return ApiResponse<MatchListResponse>(
+              success: false,
+              message: 'Formato de resposta inválido',
+              statusCode: response.statusCode,
+            );
           }
 
           return ApiResponse<MatchListResponse>(
@@ -82,7 +82,7 @@ class MatchService {
           return ApiResponse<MatchListResponse>(
             success: false,
             message: 'Erro ao processar resposta: $e',
-            statusCode: response.statusCode ?? 500,
+            statusCode: response.statusCode,
           );
         }
       }
@@ -90,7 +90,7 @@ class MatchService {
       return ApiResponse<MatchListResponse>(
         success: false,
         message: response.message ?? 'Erro ao buscar matches',
-        statusCode: response.statusCode ?? 500,
+        statusCode: response.statusCode,
       );
     } catch (e) {
       debugPrint('❌ [MATCH_SERVICE] Erro ao buscar matches: $e');
@@ -120,7 +120,7 @@ class MatchService {
       return ApiResponse<Match>(
         success: false,
         message: response.message ?? 'Erro ao buscar match',
-        statusCode: response.statusCode ?? 500,
+        statusCode: response.statusCode,
       );
     } catch (e) {
       debugPrint('❌ [MATCH_SERVICE] Erro ao buscar match: $e');
@@ -151,7 +151,7 @@ class MatchService {
       return ApiResponse<AcceptMatchResponse>(
         success: false,
         message: response.message ?? 'Erro ao aceitar match',
-        statusCode: response.statusCode ?? 500,
+        statusCode: response.statusCode,
       );
     } catch (e) {
       debugPrint('❌ [MATCH_SERVICE] Erro ao aceitar match: $e');
@@ -187,7 +187,7 @@ class MatchService {
       return ApiResponse<IgnoreMatchResponse>(
         success: false,
         message: response.message ?? 'Erro ao ignorar match',
-        statusCode: response.statusCode ?? 500,
+        statusCode: response.statusCode,
       );
     } catch (e) {
       debugPrint('❌ [MATCH_SERVICE] Erro ao ignorar match: $e');
@@ -210,7 +210,7 @@ class MatchService {
       return ApiResponse<void>(
         success: response.success,
         message: response.message,
-        statusCode: response.statusCode ?? 200,
+        statusCode: response.statusCode,
       );
     } catch (e) {
       debugPrint('❌ [MATCH_SERVICE] Erro ao marcar match como visualizado: $e');
@@ -244,7 +244,7 @@ class MatchService {
       return ApiResponse<Match>(
         success: false,
         message: response.message ?? 'Erro ao atualizar status',
-        statusCode: response.statusCode ?? 500,
+        statusCode: response.statusCode,
       );
     } catch (e) {
       debugPrint('❌ [MATCH_SERVICE] Erro ao atualizar status: $e');
@@ -277,14 +277,14 @@ class MatchService {
         return ApiResponse<MatchSummaryWithRecent>(
           success: true,
           data: summary,
-          statusCode: matchesResponse.statusCode ?? 200,
+          statusCode: matchesResponse.statusCode,
         );
       }
 
       return ApiResponse<MatchSummaryWithRecent>(
         success: false,
         message: matchesResponse.message ?? 'Erro ao buscar resumo',
-        statusCode: matchesResponse.statusCode ?? 500,
+        statusCode: matchesResponse.statusCode,
       );
     } catch (e) {
       debugPrint('❌ [MATCH_SERVICE] Erro ao buscar resumo: $e');

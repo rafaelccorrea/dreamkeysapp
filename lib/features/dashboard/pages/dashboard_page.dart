@@ -14,6 +14,7 @@ import '../../../../shared/widgets/minimal_body_chrome.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
 import '../../notifications/widgets/notification_center.dart';
 import '../widgets/dashboard_filters_drawer.dart';
+import '../widgets/sdr_dashboard_tab.dart';
 
 // Formatters globais
 final _currencyFormatter = NumberFormat.currency(
@@ -32,7 +33,8 @@ class DashboardPage extends StatefulWidget {
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
-class _DashboardPageState extends State<DashboardPage> {
+class _DashboardPageState extends State<DashboardPage>
+    with SingleTickerProviderStateMixin {
   /// Ritmo vertical mais curto + mais leitura horizontal (estilo app).
   static const double _kSectionGap = 11;
   static const double _kPagePadH = 20;
@@ -47,10 +49,39 @@ class _DashboardPageState extends State<DashboardPage> {
   String? _errorMessage;
   DashboardFilters _filters = DashboardFilters.defaultFilters();
 
+  TabController? _dashTabController;
+  bool _showSdrTab = false;
+
   @override
   void initState() {
     super.initState();
     _loadDashboardData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _setupSdrTabIfAllowed();
+    });
+  }
+
+  @override
+  void dispose() {
+    _dashTabController?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _setupSdrTabIfAllowed() async {
+    try {
+      await ModuleAccessService.instance.initialize();
+    } catch (_) {}
+    if (!mounted) return;
+    final m = ModuleAccessService.instance;
+    if (!m.hasCompanyModule('kanban_management') ||
+        !m.hasPermission('kanban:view_analytics')) {
+      return;
+    }
+    setState(() {
+      _showSdrTab = true;
+      _dashTabController?.dispose();
+      _dashTabController = TabController(length: 2, vsync: this);
+    });
   }
 
   Future<void> _loadDashboardData() async {
@@ -119,6 +150,109 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  Widget _generalDashboardScroll(BuildContext context, ThemeData theme) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: constraints.maxHeight,
+            ),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                ..._dashboardAmbientHighlights(context),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    _kPagePadH,
+                    _kPagePadTop,
+                    _kPagePadH,
+                    _kPagePadBottom,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildGreeting(context, theme),
+                      SizedBox(height: _kSectionGap + 2),
+                      _buildStatsCards(context, theme),
+                      if (_dashboardData != null) ...[
+                        SizedBox(height: _kSectionGap),
+                        LayoutBuilder(
+                          builder: (context, c) {
+                            if (c.maxWidth < _kPerfActivityRowMinW) {
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  _buildPerformanceCard(context, theme),
+                                  SizedBox(height: _kSectionGap),
+                                  _buildActivitiesSection(context, theme),
+                                ],
+                              );
+                            }
+                            return Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  flex: 12,
+                                  child: _buildPerformanceCard(context, theme),
+                                ),
+                                SizedBox(width: _kSectionGap),
+                                Expanded(
+                                  flex: 10,
+                                  child: _buildActivitiesSection(context, theme),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                        SizedBox(height: _kSectionGap),
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final isWide =
+                                constraints.maxWidth >= _kTwoColMinW;
+                            final goals =
+                                _buildMonthlyGoalsSection(context, theme);
+                            final conversions =
+                                _buildConversionMetrics(context, theme);
+                            if (!isWide) {
+                              return Column(
+                                children: [
+                                  goals,
+                                  SizedBox(height: _kSectionGap),
+                                  conversions,
+                                ],
+                              );
+                            }
+                            return Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(child: goals),
+                                SizedBox(width: _kSectionGap),
+                                Expanded(child: conversions),
+                              ],
+                            );
+                          },
+                        ),
+                        if (_dashboardData!
+                            .gamification.achievements.isNotEmpty) ...[
+                          SizedBox(height: _kSectionGap),
+                          _buildAchievementsSection(context, theme),
+                        ],
+                        SizedBox(height: _kSectionGap),
+                        _buildUpcomingAppointments(context, theme),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -141,105 +275,43 @@ class _DashboardPageState extends State<DashboardPage> {
           ? _buildSkeleton(context, theme)
           : _errorMessage != null
           ? _buildErrorState(context, theme)
+          : _showSdrTab && _dashTabController != null
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 2, 8, 0),
+                      child: TabBar(
+                        controller: _dashTabController!,
+                        labelColor: _dashboardAccentColor(context),
+                        unselectedLabelColor:
+                            ThemeHelpers.textSecondaryColor(context),
+                        indicatorWeight: 3,
+                        tabs: const [
+                          Tab(text: 'Visão geral'),
+                          Tab(text: 'Dash SDR'),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: TabBarView(
+                        controller: _dashTabController!,
+                        children: [
+                          RefreshIndicator(
+                            onRefresh: _loadDashboardData,
+                            color: _dashboardAccentColor(context),
+                            child: _generalDashboardScroll(context, theme),
+                          ),
+                          const SdrDashboardTab(),
+                        ],
+                      ),
+                    ),
+                  ],
+                )
           : RefreshIndicator(
               onRefresh: _loadDashboardData,
               color: _dashboardAccentColor(context),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  return SingleChildScrollView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        minHeight: constraints.maxHeight,
-                      ),
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          ..._dashboardAmbientHighlights(context),
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(
-                              _kPagePadH,
-                              _kPagePadTop,
-                              _kPagePadH,
-                              _kPagePadBottom,
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                            _buildGreeting(context, theme),
-                            SizedBox(height: _kSectionGap + 2),
-                            _buildStatsCards(context, theme),
-                            if (_dashboardData != null) ...[
-                              SizedBox(height: _kSectionGap),
-                              LayoutBuilder(
-                                builder: (context, c) {
-                                  if (c.maxWidth < _kPerfActivityRowMinW) {
-                                    return Column(
-                                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                                      children: [
-                                        _buildPerformanceCard(context, theme),
-                                        SizedBox(height: _kSectionGap),
-                                        _buildActivitiesSection(context, theme),
-                                      ],
-                                    );
-                                  }
-                                  return Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Expanded(
-                                        flex: 12,
-                                        child: _buildPerformanceCard(context, theme),
-                                      ),
-                                      SizedBox(width: _kSectionGap),
-                                      Expanded(
-                                        flex: 10,
-                                        child: _buildActivitiesSection(context, theme),
-                                      ),
-                                    ],
-                                  );
-                                },
-                              ),
-                              SizedBox(height: _kSectionGap),
-                              LayoutBuilder(
-                                builder: (context, constraints) {
-                                  final isWide = constraints.maxWidth >= _kTwoColMinW;
-                                  final goals = _buildMonthlyGoalsSection(context, theme);
-                                  final conversions = _buildConversionMetrics(context, theme);
-                                  if (!isWide) {
-                                    return Column(
-                                      children: [
-                                        goals,
-                                        SizedBox(height: _kSectionGap),
-                                        conversions,
-                                      ],
-                                    );
-                                  }
-                                  return Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Expanded(child: goals),
-                                      SizedBox(width: _kSectionGap),
-                                      Expanded(child: conversions),
-                                    ],
-                                  );
-                                },
-                              ),
-                              if (_dashboardData!.gamification.achievements.isNotEmpty) ...[
-                                SizedBox(height: _kSectionGap),
-                                _buildAchievementsSection(context, theme),
-                              ],
-                              SizedBox(height: _kSectionGap),
-                              _buildUpcomingAppointments(context, theme),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-                },
-              ),
+              child: _generalDashboardScroll(context, theme),
             ),
     );
   }

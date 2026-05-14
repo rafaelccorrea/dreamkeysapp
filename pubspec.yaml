@@ -2,7 +2,11 @@ name: Intellisys
 description: "Intellisys - Sistema Imobiliário"
 publish_to: 'none'
 
-version: 1.0.6+11
+# App Store / TestFlight: o número depois do "+" vira CFBundleVersion no iOS.
+# Tem de ser SEMPRE maior que qualquer build já enviado para esta app.
+# Erro típico: "bundle version must be higher than … previousBundleVersion = N"
+# → subir só o +N (ex. +13 → +14), commit, novo pipeline.
+version: 1.0.6+13
 
 environment:
   sdk: ^3.9.2

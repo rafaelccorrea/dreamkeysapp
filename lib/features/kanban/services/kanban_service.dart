@@ -1818,5 +1818,60 @@ class KanbanService {
       );
     }
   }
+
+  /// Jornada do lead — `GET /kanban/tasks/:id/journey` (`{ success, data }`).
+  Future<ApiResponse<List<Map<String, dynamic>>>> getTaskJourney(
+    String taskId,
+  ) async {
+    try {
+      final response = await _apiService.get<Map<String, dynamic>>(
+        ApiConstants.kanbanTaskJourney(taskId),
+      );
+      if (response.success && response.data != null) {
+        final raw = response.data!['data'];
+        if (raw is List) {
+          final list = raw
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
+          return ApiResponse.success(
+            data: list,
+            statusCode: response.statusCode,
+          );
+        }
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao carregar jornada',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// Anexos diretos no card — `GET /kanban/tasks/:id/attachments` (array na raiz).
+  Future<ApiResponse<List<Map<String, dynamic>>>> getTaskAttachments(
+    String taskId,
+  ) async {
+    try {
+      final response = await _apiService.get<List<dynamic>>(
+        ApiConstants.kanbanTaskAttachments(taskId),
+      );
+      if (response.success && response.data != null) {
+        final list = response.data!
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        return ApiResponse.success(
+          data: list,
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao listar anexos',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
 }
 

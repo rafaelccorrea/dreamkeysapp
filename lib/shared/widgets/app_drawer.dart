@@ -159,6 +159,8 @@ class _AppDrawerState extends State<AppDrawer> {
         activeRoute == AppRoutes.clients ||
         activeRoute == AppRoutes.matches ||
         activeRoute == AppRoutes.calendar ||
+        activeRoute == AppRoutes.notes ||
+        activeRoute == AppRoutes.checklists ||
         activeRoute == AppRoutes.kanban ||
         activeRoute.startsWith('/clients')) {
       setState(() {
@@ -177,6 +179,7 @@ class _AppDrawerState extends State<AppDrawer> {
 
     // Verificar se algum item de Gestão Interna está ativo
     if (activeRoute == AppRoutes.kanban ||
+        activeRoute == AppRoutes.workspace ||
         activeRoute == AppRoutes.inspections ||
         activeRoute == AppRoutes.keys ||
         activeRoute.startsWith('/inspections') ||
@@ -893,6 +896,8 @@ class _AppDrawerState extends State<AppDrawer> {
         activeRoute == AppRoutes.clients ||
         activeRoute == AppRoutes.matches ||
         activeRoute == AppRoutes.calendar ||
+        activeRoute == AppRoutes.notes ||
+        activeRoute == AppRoutes.checklists ||
         activeRoute == AppRoutes.kanban ||
         activeRoute.startsWith('/clients');
 
@@ -909,10 +914,20 @@ class _AppDrawerState extends State<AppDrawer> {
 
     final internaGroupActive =
         activeRoute == AppRoutes.kanban ||
+        activeRoute == AppRoutes.workspace ||
         activeRoute == AppRoutes.inspections ||
         activeRoute == AppRoutes.keys ||
         activeRoute.startsWith('/inspections') ||
         activeRoute.startsWith('/keys');
+
+    final canSeeNotes =
+        ModuleAccessService.instance.hasCompanyModule('notes') &&
+            ModuleAccessService.instance.hasPermission('note:view');
+    final canSeeChecklists = ModuleAccessService.instance
+        .hasCompanyModule('checklist_management');
+    final canSeeWorkspace =
+        ModuleAccessService.instance.hasCompanyModule('user_management') ||
+            ModuleAccessService.instance.hasCompanyModule('team_management');
 
     return Drawer(
       backgroundColor: Colors.transparent,
@@ -1105,6 +1120,46 @@ class _AppDrawerState extends State<AppDrawer> {
                                   },
                                   isSubItem: true,
                                 ),
+                                if (canSeeNotes)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.notes,
+                                    icon: LucideIcons.scrollText,
+                                    activeIcon: LucideIcons.scrollText,
+                                    title: 'Notas',
+                                    accent: accent,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.notes) return;
+                                      Navigator.of(context).pushNamedAndRemoveUntil(
+                                        AppRoutes.notes,
+                                        (route) => false,
+                                      );
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeChecklists)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.checklists,
+                                    icon: LucideIcons.listChecks,
+                                    activeIcon: LucideIcons.listChecks,
+                                    title: 'Checklists',
+                                    accent: accent,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.checklists) {
+                                        return;
+                                      }
+                                      Navigator.of(context).pushNamedAndRemoveUntil(
+                                        AppRoutes.checklists,
+                                        (route) => false,
+                                      );
+                                    },
+                                    isSubItem: true,
+                                  ),
                               ],
                             ),
                             _buildExpansionTile(
@@ -1196,6 +1251,27 @@ class _AppDrawerState extends State<AppDrawer> {
                                   },
                                   isSubItem: true,
                                 ),
+                                if (canSeeWorkspace)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.workspace,
+                                    icon: LucideIcons.users2,
+                                    activeIcon: LucideIcons.users2,
+                                    title: 'Equipe e assinatura',
+                                    accent: accent,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.workspace) {
+                                        return;
+                                      }
+                                      Navigator.of(context).pushNamedAndRemoveUntil(
+                                        AppRoutes.workspace,
+                                        (route) => false,
+                                      );
+                                    },
+                                    isSubItem: true,
+                                  ),
                                 _buildDrawerItem(
                                   context: context,
                                   currentRoute: activeRoute,

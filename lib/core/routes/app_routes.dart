@@ -43,6 +43,9 @@ import '../../features/inspections/pages/create_inspection_page.dart';
 import '../../features/inspections/pages/edit_inspection_page.dart';
 import '../../features/keys/pages/keys_page.dart';
 import '../../features/keys/pages/create_key_page.dart';
+import '../../features/notes/pages/notes_page.dart';
+import '../../features/checklists/pages/checklists_page.dart';
+import '../../features/workspace/pages/workspace_page.dart';
 import '../../shared/services/property_service.dart';
 
 /// Rotas da aplicação com transições customizadas
@@ -120,6 +123,10 @@ class AppRoutes {
   static const String keys = '/keys';
   static const String keyCreate = '/keys/create';
   static String keyEdit(String id) => '/keys/$id/edit';
+
+  static const String notes = '/notes';
+  static const String checklists = '/checklists';
+  static const String workspace = '/workspace';
 
   static String propertyOfferDetails(String offerId) =>
       '/properties/offers/$offerId';
@@ -351,6 +358,12 @@ class AppRoutes {
         final clientId = segments[2];
         return _buildRoute(MatchesPage(clientId: clientId), settings);
       }
+    } else if (routeName == AppRoutes.notes) {
+      return _buildRoute(const NotesPage(), settings);
+    } else if (routeName == AppRoutes.checklists) {
+      return _buildRoute(const ChecklistsPage(), settings);
+    } else if (routeName == AppRoutes.workspace) {
+      return _buildRoute(const WorkspacePage(), settings);
     }
 
     // Rota não encontrada

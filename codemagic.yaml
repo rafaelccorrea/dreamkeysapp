@@ -158,6 +158,13 @@ workflows:
             echo "=================================================================="
           fi
 
+      - name: Show app version (CFBundleVersion)
+        script: |
+          set -e
+          echo "=== pubspec version (marketing+build) — build number is after '+' ==="
+          grep '^version:' pubspec.yaml || true
+          echo "If publish fails with duplicate CFBundleVersion, bump only the +N in pubspec.yaml."
+
       - name: Build signed IPA
         script: |
           flutter build ipa --release
