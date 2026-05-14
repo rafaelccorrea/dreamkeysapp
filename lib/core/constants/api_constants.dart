@@ -324,6 +324,9 @@ class ApiConstants {
   static String kanbanBoard(String teamId) => '/kanban/board/$teamId';
   static const String kanbanColumns = '/kanban/columns';
   static String kanbanColumnById(String id) => '/kanban/columns/$id';
+  /// Colunas resumidas (`projectId` em query) — alinhado a `kanbanValidationsApi.getSimpleColumns`.
+  static String kanbanColumnsSimple(String teamId) =>
+      '/kanban/columns/$teamId/simple';
 
   /// `GET /kanban/columns/:columnId/tasks?teamId&projectId&page&limit&search`
   /// Usado pelo "Carregar mais" cards dentro de uma coluna do board.
@@ -357,6 +360,8 @@ class ApiConstants {
       '/kanban/projects/team/$teamId';
   static const String kanbanProjectsPersonal = '/kanban/projects/team/personal';
   static const String kanbanProjectsFiltered = '/kanban/projects/filtered';
+  /// Todos os funis da empresa — mesmo contrato do modal web de transferência.
+  static const String kanbanProjectsCompany = '/kanban/projects/company';
   static String kanbanProjectFinalize(String id) =>
       '/kanban/projects/$id/finalize';
   static String kanbanProjectsTeamHistory(String teamId) =>

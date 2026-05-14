@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/services/secure_storage_service.dart';
 import '../controllers/kanban_controller.dart';
 import '../models/kanban_models.dart';
 import '../services/kanban_service.dart';
@@ -51,6 +52,67 @@ String _todayYmd() {
   return '${d.year}-${two(d.month)}-${two(d.day)}';
 }
 
+Future<String?> _jwtSubUserId() async {
+  try {
+    final token = await SecureStorageService.instance.getAccessToken();
+    if (token == null || token.isEmpty) return null;
+    final parts = token.split('.');
+    if (parts.length != 3) return null;
+    var output = parts[1].replaceAll('-', '+').replaceAll('_', '/');
+    switch (output.length % 4) {
+      case 2:
+        output += '==';
+        break;
+      case 3:
+        output += '=';
+        break;
+    }
+    final jsonBytes = base64Decode(output);
+    final decoded = utf8.decode(jsonBytes);
+    final map = jsonDecode(decoded);
+    if (map is! Map) return null;
+    final m = Map<String, dynamic>.from(map);
+    final sub = m['sub']?.toString() ??
+        m['userId']?.toString() ??
+        m['id']?.toString();
+    final s = sub?.trim();
+    if (s == null || s.isEmpty) return null;
+    return s;
+  } catch (_) {
+    return null;
+  }
+}
+
+InputDecoration kanbanTransferDropdownDecoration(
+  ThemeData theme,
+  Color border, {
+  String? hintText,
+}) {
+  const accent = Color(0xFF4F46E5);
+  return InputDecoration(
+    hintText: hintText,
+    filled: true,
+    fillColor:
+        theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(14),
+      borderSide: BorderSide(color: border.withValues(alpha: 0.35)),
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(14),
+      borderSide: BorderSide(color: border.withValues(alpha: 0.35)),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(14),
+      borderSide: BorderSide(
+        color: accent.withValues(alpha: 0.65),
+        width: 1.4,
+      ),
+    ),
+  );
+}
+
 /// Bottom sheet editorial: transferência entre funis (mesmo contrato do web).
 class TransferTaskSheet extends StatefulWidget {
   const TransferTaskSheet({super.key, required this.task});
@@ -65,12 +127,22 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
   final KanbanService _kanbanService = KanbanService.instance;
   late String _transferDateYmd;
   String? _toProjectId;
+  String? _toColumnId;
+  String? _assignedToId;
   final Set<String> _selectedTokens = {};
   final TextEditingController _notes = TextEditingController();
   bool _loadingMembers = true;
+  bool _loadingProjects = true;
   bool _submitting = false;
   String? _loadError;
+  String? _projectsLoadError;
   List<KanbanUser> _memberUsers = [];
+  List<KanbanProject> _companyProjects = [];
+  List<KanbanSimpleColumn> _destinationColumns = [];
+  bool _loadingColumns = false;
+  List<ProjectMember> _destinationMembers = [];
+  bool _loadingDestinationMembers = false;
+  String? _lockedPreServiceToken;
 
   KanbanTask get task => widget.task;
 
@@ -81,7 +153,16 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
   void initState() {
     super.initState();
     _transferDateYmd = _todayYmd();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadMembers());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadInitialData();
+    });
+  }
+
+  Future<void> _loadInitialData() async {
+    await Future.wait([
+      _loadCompanyProjects(),
+      _loadMembers(),
+    ]);
   }
 
   @override
@@ -98,6 +179,127 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
     return null;
   }
 
+  KanbanProject? _projectById(String id, KanbanController c) {
+    for (final p in _companyProjects) {
+      if (p.id == id) return p;
+    }
+    for (final p in c.projects) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+
+  /// Funis elegíveis: ativos ou o funil atual (mesmo arquivado) — paridade com o CRM web.
+  List<KanbanProject> _visibleDestinationProjects(String? originId) {
+    bool include(KanbanProject p) {
+      if (originId != null && p.id == originId) return true;
+      return p.status == KanbanProjectStatus.active;
+    }
+
+    return _companyProjects.where(include).toList()
+      ..sort((a, b) {
+        if (originId != null) {
+          if (a.id == originId) return -1;
+          if (b.id == originId) return 1;
+        }
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      });
+  }
+
+  Future<void> _loadCompanyProjects() async {
+    if (!mounted) return;
+    setState(() {
+      _loadingProjects = true;
+      _projectsLoadError = null;
+    });
+    final c = context.read<KanbanController>();
+    final originId = _originProjectId(c);
+    final res = await _kanbanService.getProjectsByCompany();
+    if (!mounted) return;
+    var list = <KanbanProject>[];
+    if (res.success && res.data != null) {
+      list = List<KanbanProject>.from(res.data!);
+    } else {
+      _projectsLoadError = res.message;
+      list = List<KanbanProject>.from(c.projects);
+    }
+    final ids = list.map((p) => p.id).toSet();
+    if (originId != null && originId.isNotEmpty && !ids.contains(originId)) {
+      final cur = await _kanbanService.getProjectById(originId);
+      if (!mounted) return;
+      if (cur.success && cur.data != null) {
+        list.add(cur.data!);
+      }
+    }
+    final seen = <String>{};
+    list = list.where((p) => seen.add(p.id)).toList();
+    list.sort((a, b) {
+      if (originId != null) {
+        if (a.id == originId) return -1;
+        if (b.id == originId) return 1;
+      }
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
+    if (!mounted) return;
+    setState(() {
+      _companyProjects = list;
+      _loadingProjects = false;
+    });
+  }
+
+  Future<void> _onSelectDestinationProject(String? projectId) async {
+    setState(() {
+      _toProjectId = projectId;
+      _toColumnId = null;
+      _assignedToId = null;
+      _destinationColumns = [];
+      _destinationMembers = [];
+    });
+    if (projectId == null || projectId.isEmpty) return;
+    await _loadDestinationContext(projectId);
+  }
+
+  Future<void> _loadDestinationContext(String projectId) async {
+    if (!mounted) return;
+    final c = context.read<KanbanController>();
+    final proj = _projectById(projectId, c);
+    final teamId = proj?.teamId.trim() ?? '';
+    setState(() {
+      _loadingColumns = true;
+      _loadingDestinationMembers = true;
+    });
+    final memRes = await _kanbanService.getProjectMembers(projectId);
+    var cols = <KanbanSimpleColumn>[];
+    if (teamId.isNotEmpty) {
+      final colRes = await _kanbanService.getSimpleColumns(
+        teamId: teamId,
+        projectId: projectId,
+      );
+      if (colRes.success && colRes.data != null) {
+        cols = colRes.data!;
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      if (memRes.success && memRes.data != null) {
+        _destinationMembers = memRes.data!;
+      } else {
+        _destinationMembers = [];
+      }
+      _destinationColumns = cols;
+      _loadingColumns = false;
+      _loadingDestinationMembers = false;
+    });
+    if (_assignedToId != null &&
+        !_destinationMembers.any((m) => m.user.id == _assignedToId)) {
+      setState(() => _assignedToId = null);
+    }
+    if (_toColumnId != null &&
+        !_destinationColumns.any((col) => col.id == _toColumnId)) {
+      setState(() => _toColumnId = null);
+    }
+  }
+
   Future<void> _loadMembers() async {
     final c = context.read<KanbanController>();
     final pid = _originProjectId(c);
@@ -112,10 +314,18 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
       _loadingMembers = true;
       _loadError = null;
     });
+    final jwtId = await _jwtSubUserId();
     final res = await _kanbanService.getProjectMembers(pid);
     if (!mounted) return;
     if (res.success && res.data != null) {
-      final users = res.data!.map((m) => m.user).toList();
+      var memberRows = List<ProjectMember>.from(res.data!);
+      memberRows.sort((a, b) {
+        if (a.isLeader != b.isLeader) return a.isLeader ? -1 : 1;
+        return a.user.name
+            .toLowerCase()
+            .compareTo(b.user.name.toLowerCase());
+      });
+      final users = memberRows.map((m) => m.user).toList();
       final tokensFromCard = _parsePreServiceStored(task.preService);
       final preselected = <String>{};
       for (final u in users) {
@@ -126,9 +336,24 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
           preselected.add(t);
         }
       }
+      String? locked;
+      if (jwtId != null && jwtId.isNotEmpty) {
+        for (final row in memberRows) {
+          if (row.user.id == jwtId) {
+            locked = _preServiceTokenForUser(row.user);
+            break;
+          }
+        }
+      }
+      if (locked != null) {
+        preselected.add(locked);
+      }
       setState(() {
         _memberUsers = users;
-        _selectedTokens.addAll(preselected);
+        _lockedPreServiceToken = locked;
+        _selectedTokens
+          ..clear()
+          ..addAll(preselected);
         _loadingMembers = false;
       });
     } else {
@@ -180,6 +405,11 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
     }
   }
 
+  Set<String> get _effectivePreServiceTokens => {
+        ..._selectedTokens,
+        ...?_lockedPreServiceToken != null ? {_lockedPreServiceToken!} : null,
+      };
+
   Future<void> _submit() async {
     final c = context.read<KanbanController>();
     final origin = _originProjectId(c);
@@ -190,7 +420,7 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
       );
       return;
     }
-    if (_selectedTokens.isEmpty) {
+    if (_effectivePreServiceTokens.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Selecione ao menos uma pessoa em pré-atendimento.'),
@@ -198,8 +428,16 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
       );
       return;
     }
-    final pre = _serializePreService(_selectedTokens);
+    final pre = _serializePreService(_effectivePreServiceTokens);
     if (pre.isEmpty) return;
+    if (pre.length > 8000) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Pré-atendimento excede o limite permitido (8000 caracteres).'),
+        ),
+      );
+      return;
+    }
 
     setState(() => _submitting = true);
     final ok = await c.transferTask(
@@ -208,6 +446,8 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
         toProjectId: _toProjectId!,
         transferDate: _transferDateYmd,
         preService: pre,
+        toColumnId: _toColumnId,
+        assignedToId: _assignedToId,
         notes: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
       ),
     );
@@ -234,10 +474,10 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
     final muted = ThemeHelpers.textSecondaryColor(context);
     final c = context.watch<KanbanController>();
     final originId = _originProjectId(c);
-    final projects = c.projects
-        .where((p) => p.id != originId && p.status == KanbanProjectStatus.active)
-        .toList()
-      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    final projects = _visibleDestinationProjects(originId);
+    final destBlocking =
+        _toProjectId != null &&
+            (_loadingColumns || _loadingDestinationMembers);
 
     final displayDate = _parseYmd(_transferDateYmd);
     final dateLine = displayDate != null
@@ -327,7 +567,7 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
                       true,
                       _toProjectId != null &&
                           projects.any((p) => p.id == _toProjectId),
-                      _selectedTokens.isNotEmpty,
+                      _effectivePreServiceTokens.isNotEmpty,
                     ],
                   ),
                 ),
@@ -337,6 +577,8 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
                     padding: const EdgeInsets.fromLTRB(22, 12, 22, 8),
                     physics: const BouncingScrollPhysics(),
                     children: [
+                      _TransferInfoCallout(borderColor: border),
+                      const SizedBox(height: 18),
                       _SectionNum(
                         n: '01',
                         title: 'Data da transferência',
@@ -357,33 +599,195 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
                         n: '02',
                         title: 'Funil de destino',
                         subtitle:
-                            'Somente funis ativos da mesma empresa. O card é movido, não duplicado.',
+                            'Todos os funis da empresa (GET /kanban/projects/company). Pode ser o mesmo funil — o card vai para a coluna e responsável escolhidos.',
                         accent: _routeInk,
                         borderColor: border,
                       ),
                       const SizedBox(height: 12),
-                      if (projects.isEmpty)
+                      if (_loadingProjects)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 24),
+                          child: Center(
+                            child: SizedBox(
+                              width: 28,
+                              height: 28,
+                              child: CircularProgressIndicator(strokeWidth: 2.4),
+                            ),
+                          ),
+                        )
+                      else if (projects.isEmpty)
                         _EmptyFunnelCallout(
                           borderColor: border,
-                          message:
-                              'Não há outros funis ativos nesta lista. Abra outro funil no seletor do quadro e tente de novo.',
+                          message: _projectsLoadError != null
+                              ? 'Não foi possível carregar os funis da empresa. ${_projectsLoadError!}'
+                              : 'Nenhum funil disponível para transferência.',
                         )
                       else
                         ...projects.map(
                           (p) => Padding(
                             padding: const EdgeInsets.only(bottom: 8),
                             child: _ProjectRail(
-                              name: p.name,
+                              name: p.id == originId
+                                  ? '${p.name} — funil atual'
+                                  : p.name,
                               selected: _toProjectId == p.id,
                               enabled: !_submitting,
-                              onTap: () =>
-                                  setState(() => _toProjectId = p.id),
+                              onTap: () async {
+                                if (_submitting) return;
+                                await _onSelectDestinationProject(p.id);
+                              },
                             ),
                           ),
                         ),
                       const SizedBox(height: 26),
                       _SectionNum(
                         n: '03',
+                        title: 'Coluna destino (opcional)',
+                        subtitle:
+                            'Se não escolher, a API posiciona na primeira coluna ativa do funil.',
+                        accent: _routeInk,
+                        borderColor: border,
+                      ),
+                      const SizedBox(height: 10),
+                      if (_toProjectId == null || _toProjectId!.isEmpty)
+                        Text(
+                          'Selecione primeiro o funil de destino.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: muted,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        )
+                      else if (_loadingColumns)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          child: Center(
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(strokeWidth: 2.2),
+                            ),
+                          ),
+                        )
+                      else
+                        // Controlled field: `value` ainda é o modo correcto quando o
+                        // destino/colunas mudam; `initialValue` só aplica no 1º mount.
+                        // ignore: deprecated_member_use
+                        DropdownButtonFormField<String?>(
+                          value: _toColumnId,
+                          isExpanded: true,
+                          decoration: kanbanTransferDropdownDecoration(
+                            theme,
+                            border,
+                            hintText: 'Primeira coluna (padrão)',
+                          ),
+                          hint: Text(
+                            'Primeira coluna (padrão)',
+                            style: TextStyle(color: muted, fontWeight: FontWeight.w600),
+                          ),
+                          items: [
+                            DropdownMenuItem<String?>(
+                              value: null,
+                              child: Text(
+                                'Primeira coluna (padrão)',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            ..._destinationColumns.map(
+                              (col) => DropdownMenuItem<String?>(
+                                value: col.id,
+                                child: Text(
+                                  col.title,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                          ],
+                          onChanged: _submitting || destBlocking
+                              ? null
+                              : (v) => setState(() => _toColumnId = v),
+                        ),
+                      const SizedBox(height: 26),
+                      _SectionNum(
+                        n: '04',
+                        title: 'Responsável no funil destino (opcional)',
+                        subtitle:
+                            'Apenas membros do funil escolhido. Se vazio, o backend atribui ao gestor do funil.',
+                        accent: _routeInk,
+                        borderColor: border,
+                      ),
+                      const SizedBox(height: 10),
+                      if (_toProjectId == null || _toProjectId!.isEmpty)
+                        Text(
+                          'Selecione primeiro o funil de destino.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: muted,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        )
+                      else if (_loadingDestinationMembers)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          child: Center(
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(strokeWidth: 2.2),
+                            ),
+                          ),
+                        )
+                      else if (_destinationMembers.isEmpty)
+                        Text(
+                          'Nenhum membro listado neste funil.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: muted,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        )
+                      else
+                        // ignore: deprecated_member_use
+                        DropdownButtonFormField<String?>(
+                          value: _assignedToId,
+                          isExpanded: true,
+                          decoration: kanbanTransferDropdownDecoration(
+                            theme,
+                            border,
+                            hintText: 'Gestor do funil (padrão)',
+                          ),
+                          hint: Text(
+                            'Gestor do funil (padrão)',
+                            style: TextStyle(color: muted, fontWeight: FontWeight.w600),
+                          ),
+                          items: [
+                            DropdownMenuItem<String?>(
+                              value: null,
+                              child: Text(
+                                'Gestor do funil (padrão)',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            ..._destinationMembers.map(
+                              (m) => DropdownMenuItem<String?>(
+                                value: m.user.id,
+                                child: Text(
+                                  '${m.user.name.trim()}${m.isLeader ? ' (Líder)' : ''}',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                          ],
+                          onChanged: _submitting || destBlocking
+                              ? null
+                              : (v) => setState(() => _assignedToId = v),
+                        ),
+                      const SizedBox(height: 26),
+                      _SectionNum(
+                        n: '05',
                         title: 'Pré-atendimento',
                         subtitle:
                             'Quem qualificou o lead neste funil — obrigatório; valores gravados como no CRM web.',
@@ -424,8 +828,16 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
                             return _MemberLatticeChip(
                               user: u,
                               selected: on,
+                              locked: _lockedPreServiceToken != null &&
+                                  token == _lockedPreServiceToken,
                               enabled: !_submitting,
                               onTap: () {
+                                if (_submitting) return;
+                                if (on &&
+                                    _lockedPreServiceToken != null &&
+                                    token == _lockedPreServiceToken) {
+                                  return;
+                                }
                                 setState(() {
                                   if (on) {
                                     _selectedTokens.remove(token);
@@ -439,7 +851,7 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
                         ),
                       const SizedBox(height: 26),
                       _SectionNum(
-                        n: '04',
+                        n: '06',
                         title: 'Notas da operação',
                         subtitle: 'Opcional — visível no histórico de transferência.',
                         accent: _routeInk,
@@ -536,7 +948,10 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
                             color: _routeInk,
                             borderRadius: BorderRadius.circular(16),
                             child: InkWell(
-                              onTap: (_loadingMembers || _submitting)
+                              onTap: (_loadingMembers ||
+                                      _submitting ||
+                                      _loadingProjects ||
+                                      destBlocking)
                                   ? null
                                   : _submit,
                               borderRadius: BorderRadius.circular(16),
@@ -594,6 +1009,45 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
 }
 
 // ── Editorial pieces ──────────────────────────────────────────────────────
+
+class _TransferInfoCallout extends StatelessWidget {
+  const _TransferInfoCallout({required this.borderColor});
+
+  final Color borderColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    const accent = Color(0xFF4F46E5);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: accent.withValues(alpha: 0.28)),
+        color: accent.withValues(alpha: 0.08),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline_rounded, color: accent, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'O card é posicionado no funil, coluna e responsável indicados — '
+              'inclusive no mesmo funil (rodízio na mesma equipe). '
+              'Se mudar só coluna ou responsável, escolha o funil atual.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                height: 1.45,
+                fontWeight: FontWeight.w600,
+                color: ThemeHelpers.textSecondaryColor(context),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _TransferGrabber extends StatelessWidget {
   const _TransferGrabber({required this.color});
@@ -985,12 +1439,14 @@ class _MemberLatticeChip extends StatelessWidget {
   const _MemberLatticeChip({
     required this.user,
     required this.selected,
+    this.locked = false,
     required this.enabled,
     required this.onTap,
   });
 
   final KanbanUser user;
   final bool selected;
+  final bool locked;
   final bool enabled;
   final VoidCallback onTap;
 
@@ -1008,10 +1464,12 @@ class _MemberLatticeChip extends StatelessWidget {
     final border = ThemeHelpers.borderColor(context);
     final accent = _TransferTaskSheetState._routeInk;
     final label = user.name.trim().isNotEmpty ? user.name : user.email;
+    final labelText =
+        locked ? '$label (você — sempre vinculado)' : label;
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: enabled ? onTap : null,
+        onTap: enabled && !(locked && selected) ? onTap : null,
         borderRadius: BorderRadius.circular(999),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
@@ -1047,7 +1505,7 @@ class _MemberLatticeChip extends StatelessWidget {
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 200),
                 child: Text(
-                  label,
+                  labelText,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.labelLarge?.copyWith(

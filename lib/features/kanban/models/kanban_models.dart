@@ -231,6 +231,27 @@ class KanbanColumn {
       id.startsWith(KanbanSyntheticColumns.idPrefix);
 }
 
+/// Coluna resumida (`GET /kanban/columns/:teamId/simple?projectId=`) — transferência de card.
+class KanbanSimpleColumn {
+  final String id;
+  final String title;
+  final int position;
+
+  const KanbanSimpleColumn({
+    required this.id,
+    required this.title,
+    required this.position,
+  });
+
+  factory KanbanSimpleColumn.fromJson(Map<String, dynamic> json) {
+    return KanbanSimpleColumn(
+      id: json['id']?.toString() ?? '',
+      title: json['title']?.toString() ?? '',
+      position: json['position'] as int? ?? 0,
+    );
+  }
+}
+
 /// Três etapas padrão (somente UI) quando o backend ainda não devolve colunas —
 /// mesmo desenho usado como funil inicial no CRM web.
 class KanbanSyntheticColumns {

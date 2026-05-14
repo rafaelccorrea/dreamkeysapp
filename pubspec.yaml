@@ -5,8 +5,8 @@ publish_to: 'none'
 # App Store / TestFlight: o número depois do "+" vira CFBundleVersion no iOS.
 # Tem de ser SEMPRE maior que qualquer build já enviado para esta app.
 # Erro típico: "bundle version must be higher than … previousBundleVersion = N"
-# → subir só o +N (ex. +14 → +15), commit, novo pipeline.
-version: 1.0.6+14
+# → subir só o +N (ex. +14 → +15 → +16), commit, novo pipeline.
+version: 1.0.6+16
 
 environment:
   sdk: ^3.9.2

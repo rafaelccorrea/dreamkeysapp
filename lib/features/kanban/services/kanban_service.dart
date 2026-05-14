@@ -1546,6 +1546,75 @@ class KanbanService {
     }
   }
 
+  /// Funis da empresa (`GET /kanban/projects/company`) — lista completa para transferência.
+  Future<ApiResponse<List<KanbanProject>>> getProjectsByCompany() async {
+    try {
+      final response = await _apiService.get<List<dynamic>>(
+        ApiConstants.kanbanProjectsCompany,
+      );
+      if (response.success && response.data != null) {
+        final projects = (response.data!)
+            .map((e) => KanbanProject.fromJson(e as Map<String, dynamic>))
+            .toList();
+        return ApiResponse.success(
+          data: projects,
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao listar funis da empresa',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [KANBAN_SERVICE] getProjectsByCompany: $e');
+      return ApiResponse.error(
+        message: 'Erro ao listar funis da empresa: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Colunas simples do funil (`GET /kanban/columns/:teamId/simple?projectId=`).
+  Future<ApiResponse<List<KanbanSimpleColumn>>> getSimpleColumns({
+    required String teamId,
+    required String projectId,
+  }) async {
+    final tid = teamId.trim();
+    final pid = projectId.trim();
+    if (tid.isEmpty) {
+      return ApiResponse.error(
+        message: 'Equipe do funil não informada.',
+        statusCode: 0,
+      );
+    }
+    try {
+      final response = await _apiService.get<List<dynamic>>(
+        ApiConstants.kanbanColumnsSimple(tid),
+        queryParameters: pid.isNotEmpty ? {'projectId': pid} : null,
+      );
+      if (response.success && response.data != null) {
+        final cols = (response.data!)
+            .map((e) => KanbanSimpleColumn.fromJson(e as Map<String, dynamic>))
+            .toList()
+          ..sort((a, b) => a.position.compareTo(b.position));
+        return ApiResponse.success(
+          data: cols,
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao listar colunas do funil',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [KANBAN_SERVICE] getSimpleColumns: $e');
+      return ApiResponse.error(
+        message: 'Erro ao listar colunas: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
   /// Obtém projeto por ID
   Future<ApiResponse<KanbanProject>> getProjectById(String id) async {
     try {
