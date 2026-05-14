@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/layout/handheld_layout.dart';
 import '../../core/theme/shell_visual_tokens.dart';
 import '../../core/theme/theme_helpers.dart';
 import 'brand_wordmark_logo.dart';
@@ -40,14 +41,19 @@ class MinimalBodyChrome extends StatelessWidget {
         child: SizedBox(
           height: kMinimalChromeBarHeight,
           child: Padding(
-            padding: const EdgeInsets.only(left: 12, right: 16),
+            padding: EdgeInsets.only(
+              left: HandheldLayout.isIosPhone ? 10 : 12,
+              right: HandheldLayout.isIosPhone ? 14 : 16,
+            ),
             child: Row(
               children: [
                 if (showDrawer)
                   Builder(
                     builder: (ctx) => _MinimalMenuButton(
                       onPressed: () => Scaffold.of(ctx).openDrawer(),
-                      tooltip: 'Menu',
+                      tooltip: HandheldLayout.isIosPhone
+                          ? 'Abrir menu'
+                          : 'Menu',
                     ),
                   )
                 else

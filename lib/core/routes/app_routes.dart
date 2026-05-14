@@ -1,3 +1,5 @@
+import 'package:flutter/cupertino.dart' show CupertinoPageRoute;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../../features/auth/login/pages/login_page.dart';
@@ -369,6 +371,14 @@ class AppRoutes {
     Widget page,
     RouteSettings settings,
   ) {
+    // iPhone: transição e gesto de voltar nativos (paridade com apps de sistema).
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      return CupertinoPageRoute<dynamic>(
+        settings: settings,
+        builder: (_) => page,
+      );
+    }
+
     return PageRouteBuilder<dynamic>(
       settings: settings,
       pageBuilder: (context, animation, secondaryAnimation) => page,

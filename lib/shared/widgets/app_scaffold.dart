@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import '../../core/routes/app_routes.dart';
 import '../../core/theme/theme_helpers.dart';
 import '../../features/chat/widgets/chat_floating_button.dart';
@@ -49,6 +50,9 @@ class AppScaffold extends StatelessWidget {
     final navIndex = AppBottomNavigation.getIndexForRoute(currentRoute);
     final isMainScreen = _isMainScreen(currentRoute);
 
+    final isIosPhone =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+
     return PopScope(
       canPop: !isMainScreen,
       onPopInvoked: (didPop) {
@@ -64,6 +68,7 @@ class AppScaffold extends StatelessWidget {
       },
       child: Scaffold(
         backgroundColor: Colors.transparent,
+        drawerEnableOpenDragGesture: !(isIosPhone && showDrawer),
         drawer: showDrawer
             ? AppDrawer(
                 userName: userName,

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../../../core/layout/handheld_layout.dart';
 import '../../../../core/notifications/app_toast.dart';
 import '../../../../core/push/app_push_service.dart';
 import '../../../../shared/services/auth_service.dart';
@@ -495,7 +497,8 @@ class _LoginPageState extends State<LoginPage> {
     final screenWidth = mediaQuery.size.width;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    final headerHeight = screenHeight * 0.32;
+    final headerHeight =
+        screenHeight * HandheldLayout.loginHeroHeightFraction(screenHeight);
     final heroTotalHeight = headerHeight + 24;
     final formSheetTop = heroTotalHeight - 32;
     final pageBg =
@@ -508,12 +511,25 @@ class _LoginPageState extends State<LoginPage> {
     // celulares maiores com botões de navegação.
     final systemBottomInset = mediaQuery.padding.bottom;
 
+    final formHorizontal = HandheldLayout.loginFormHorizontalPadding(screenWidth);
+
     return LoadingOverlay(
       isLoading: _isLoading,
-      child: Scaffold(
-        backgroundColor: pageBg,
-        resizeToAvoidBottomInset: true,
-        body: SafeArea(
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
+        value: SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness:
+              isDark ? Brightness.light : Brightness.dark,
+          statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
+          systemNavigationBarColor: pageBg,
+          systemNavigationBarIconBrightness:
+              isDark ? Brightness.light : Brightness.dark,
+        ),
+        child: Scaffold(
+          backgroundColor: pageBg,
+          resizeToAvoidBottomInset: true,
+          body: SafeArea(
+          top: false,
           bottom: false,
           child: Stack(
             fit: StackFit.expand,
@@ -523,6 +539,7 @@ class _LoginPageState extends State<LoginPage> {
               _buildHeroHeader(
                 isDark: isDark,
                 height: headerHeight,
+                statusBarTop: mediaQuery.padding.top,
               ),
               Positioned(
                 left: 0,
@@ -550,9 +567,9 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                           ),
                           padding: EdgeInsets.fromLTRB(
-                            screenWidth * 0.08,
+                            formHorizontal,
                             18,
-                            screenWidth * 0.08,
+                            formHorizontal,
                             screenHeight * 0.035 + systemBottomInset,
                           ),
                           child: Form(
@@ -665,12 +682,17 @@ class _LoginPageState extends State<LoginPage> {
             ],
           ),
         ),
+        ),
       ),
     );
   }
 
   /// Cabeçalho com imagem, gradiente tonal e brand mark.
-  Widget _buildHeroHeader({required bool isDark, required double height}) {
+  Widget _buildHeroHeader({
+    required bool isDark,
+    required double height,
+    required double statusBarTop,
+  }) {
     final accent = isDark
         ? AppColors.primary.primaryDarkMode
         : AppColors.primary.primary;
@@ -751,9 +773,10 @@ class _LoginPageState extends State<LoginPage> {
             ),
           ),
           Positioned(
-            top: 18,
-            left: 16,
-            right: 20,
+            top: statusBarTop +
+                (HandheldLayout.isIosPhone ? 8 : 18),
+            left: HandheldLayout.isIosPhone ? 12 : 16,
+            right: HandheldLayout.isIosPhone ? 16 : 20,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [

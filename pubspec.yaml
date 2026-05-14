@@ -52,8 +52,9 @@ flutter_launcher_icons:
   image_path: assets/images/launcher_icon_from_favicon.png
   adaptive_icon_background: '#000000'
   adaptive_icon_foreground: assets/images/launcher_icon_from_favicon.png
-  # Menos que o default 16% enche demais o círculo; +4 pp = redução visível mas pequena.
-  adaptive_icon_foreground_inset: 20
+  # Menos que o default 16% enche demais o círculo; valor maior = ícone um pouco
+  # menor no adaptive (menos "exposto" no launcher).
+  adaptive_icon_foreground_inset: 24
   remove_alpha_ios: true
   background_color_ios: '#000000'
 
