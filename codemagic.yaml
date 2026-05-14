@@ -98,6 +98,22 @@ workflows:
           set -e
 
           echo "BUNDLE_ID: $BUNDLE_ID"
+          if [ -z "${IOS_DISTRIBUTION_PRIVATE_KEY:-}" ]; then
+            echo ""
+            echo "=================================================================="
+            echo "  AVISO: IOS_DISTRIBUTION_PRIVATE_KEY não está definido no Codemagic."
+            echo "  Será gerada uma chave NOVA e pedida à Apple um certificado NOVO."
+            echo "  Se a Apple devolver 409 (certificado de distribuição já existe),"
+            echo "  faça UMA das opções:"
+            echo "  A) Revogar um certificado 'Apple Distribution' antigo em"
+            echo "     developer.apple.com → Certificates (máx. 3 ativos), rodar de novo"
+            echo "     UMA vez e guardar o PEM impresso no fim do log como secret"
+            echo "     IOS_DISTRIBUTION_PRIVATE_KEY no grupo app_store_credentials;"
+            echo "  B) Se já tiver o PEM de um build anterior bem-sucedido, colar esse"
+            echo "     mesmo valor em IOS_DISTRIBUTION_PRIVATE_KEY (reutiliza o cert)."
+            echo "=================================================================="
+            echo ""
+          fi
           keychain initialize
 
           # ---------------------------------------------------------------
