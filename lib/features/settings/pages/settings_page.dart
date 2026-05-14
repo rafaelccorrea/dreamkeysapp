@@ -339,7 +339,8 @@ class _SettingsPageState extends State<SettingsPage> {
                         width: 72,
                         height: 72,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _avatarFallback(accent),
+                        errorBuilder: (context, error, stackTrace) =>
+                            _avatarFallback(accent),
                       )
                     : _avatarFallback(accent),
               ),
