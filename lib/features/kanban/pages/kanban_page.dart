@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/navigation/adaptive_page_route.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
@@ -1300,7 +1301,7 @@ class _KanbanPageState extends State<KanbanPage> {
     final createInColumn = target;
 
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
+      adaptivePageRoute<void>(
         fullscreenDialog: true,
         builder: (_) => ChangeNotifierProvider<KanbanController>.value(
           value: controller,
@@ -1755,7 +1756,7 @@ class _KanbanPageState extends State<KanbanPage> {
                         child: OutlinedButton.icon(
                           onPressed: () {
                             Navigator.of(context).push(
-                              MaterialPageRoute<void>(
+                              adaptivePageRoute<void>(
                                 fullscreenDialog: true,
                                 builder: (_) =>
                                     ChangeNotifierProvider<KanbanController>

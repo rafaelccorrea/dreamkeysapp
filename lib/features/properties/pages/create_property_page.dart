@@ -20,6 +20,7 @@ import '../../../../core/theme/theme_helpers.dart';
 import '../../../../shared/utils/input_formatters.dart';
 import '../../../../shared/utils/masks.dart';
 import '../../../../shared/utils/image_crop_helper.dart';
+import '../../../../core/navigation/adaptive_page_route.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../models/property_local_draft.dart';
 import '../models/property_wizard_pop_result.dart';
@@ -572,7 +573,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   /// do wizard; ao fechar sem confirmar, mantém os valores atuais.
   Future<void> _openPropertyCreationSetup({required bool isInitial}) async {
     final result = await Navigator.of(context).push<PropertyCreationSetupResult>(
-      MaterialPageRoute<PropertyCreationSetupResult>(
+      adaptivePageRoute<PropertyCreationSetupResult>(
         fullscreenDialog: true,
         builder: (_) => PropertyCreationSetupPage(
           initialType: isInitial ? null : _selectedType,

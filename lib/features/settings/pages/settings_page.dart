@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
+
+import '../../../../core/routes/app_routes.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
+import '../../../../shared/services/profile_service.dart';
+import '../../../../shared/services/settings_service.dart';
+import '../../../../shared/services/theme_service.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
-import '../../../../shared/services/settings_service.dart';
-import '../../../../shared/services/profile_service.dart';
-import '../../../../shared/services/theme_service.dart';
+import '../../../../shared/widgets/vivid_chrome.dart';
 
-/// Tela de Configurações
+/// Tela de Configurações — layout vívido (hero + cartões) alinhado às cores da marca.
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
 
@@ -27,6 +30,11 @@ class _SettingsPageState extends State<SettingsPage> {
     _loadData();
   }
 
+  Color _accent(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? AppColors.primary.primaryDarkMode
+          : AppColors.primary.primary;
+
   Future<void> _loadData() async {
     debugPrint('⚙️ [SETTINGS PAGE] Iniciando carregamento de dados');
 
@@ -36,51 +44,25 @@ class _SettingsPageState extends State<SettingsPage> {
     });
 
     try {
-      debugPrint('⚙️ [SETTINGS PAGE] Buscando configurações...');
       final settingsResponse = await SettingsService.instance.getSettings();
-      debugPrint(
-        '⚙️ [SETTINGS PAGE] Configurações recebidas: success=${settingsResponse.success}',
-      );
-
-      debugPrint('⚙️ [SETTINGS PAGE] Buscando perfil...');
       final profileResponse = await ProfileService.instance.getProfile();
-      debugPrint(
-        '⚙️ [SETTINGS PAGE] Perfil recebido: success=${profileResponse.success}',
-      );
 
       if (mounted) {
         setState(() {
           if (settingsResponse.success && settingsResponse.data != null) {
             _settings = settingsResponse.data;
-            debugPrint(
-              '✅ [SETTINGS PAGE] Configurações carregadas com sucesso',
-            );
-          } else {
-            debugPrint('⚠️ [SETTINGS PAGE] Configurações não foram carregadas');
           }
-
           if (profileResponse.success && profileResponse.data != null) {
             _profile = profileResponse.data;
-            debugPrint('✅ [SETTINGS PAGE] Perfil carregado com sucesso');
-          } else {
-            debugPrint('⚠️ [SETTINGS PAGE] Perfil não foi carregado');
           }
-
           _isLoading = false;
-
           if (_settings == null && _profile == null) {
             _errorMessage = 'Erro ao carregar dados';
-            debugPrint('❌ [SETTINGS PAGE] Nenhum dado foi carregado');
-          } else {
-            debugPrint(
-              '✅ [SETTINGS PAGE] Dados carregados: Settings=${_settings != null}, Profile=${_profile != null}',
-            );
           }
         });
       }
     } catch (e, stackTrace) {
-      debugPrint('❌ [SETTINGS PAGE] Erro ao carregar dados: $e');
-      debugPrint('❌ [SETTINGS PAGE] StackTrace: $stackTrace');
+      debugPrint('❌ [SETTINGS PAGE] Erro: $e\n$stackTrace');
       if (mounted) {
         setState(() {
           _errorMessage = 'Erro ao conectar com o servidor';
@@ -94,20 +76,11 @@ class _SettingsPageState extends State<SettingsPage> {
     required bool Function(NotificationSettings) getValue,
     required NotificationSettings Function(NotificationSettings, bool) setValue,
   }) async {
-    if (_settings == null) {
-      debugPrint(
-        '⚠️ [SETTINGS PAGE] Tentativa de atualizar configuração sem dados carregados',
-      );
-      return;
-    }
+    if (_settings == null) return;
 
     final currentNotifications = _settings!.notifications;
     final oldValue = getValue(currentNotifications);
     final newValue = !oldValue;
-
-    debugPrint('⚙️ [SETTINGS PAGE] Atualizando configuração de notificação');
-    debugPrint('   - Valor antigo: $oldValue');
-    debugPrint('   - Novo valor: $newValue');
 
     final updatedNotifications = setValue(currentNotifications, newValue);
     final updatedSettings = Settings(
@@ -116,30 +89,19 @@ class _SettingsPageState extends State<SettingsPage> {
       timezone: _settings!.timezone,
     );
 
-    debugPrint('⚙️ [SETTINGS PAGE] Atualizando estado local...');
     setState(() {
       _settings = updatedSettings;
     });
 
-    debugPrint('⚙️ [SETTINGS PAGE] Enviando atualização para API...');
     final response = await SettingsService.instance.updateSettings(
       updatedSettings,
     );
 
-    debugPrint(
-      '⚙️ [SETTINGS PAGE] Resposta da API: success=${response.success}',
-    );
-
     if (response.success) {
-      debugPrint('✅ [SETTINGS PAGE] Configuração atualizada com sucesso!');
       if (response.data != null) {
-        setState(() {
-          _settings = response.data;
-        });
+        setState(() => _settings = response.data);
       }
     } else if (mounted) {
-      debugPrint('❌ [SETTINGS PAGE] Erro ao atualizar: ${response.message}');
-      // Reverter mudança em caso de erro
       setState(() {
         _settings = Settings(
           notifications: currentNotifications,
@@ -147,8 +109,6 @@ class _SettingsPageState extends State<SettingsPage> {
           timezone: _settings!.timezone,
         );
       });
-      debugPrint('⚙️ [SETTINGS PAGE] Configuração revertida ao valor anterior');
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(
@@ -178,37 +138,45 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final accent = _accent(context);
 
     return AppScaffold(
       title: 'Configurações',
       currentBottomNavIndex: 4,
       showBottomNavigation: true,
       body: _isLoading
-          ? _buildSkeleton(context, theme)
-          : _errorMessage != null && _settings == null
-          ? _buildErrorState(context, theme)
+          ? _buildSkeleton(context, theme, accent)
+          : _errorMessage != null && _settings == null && _profile == null
+          ? _buildErrorState(context, theme, accent)
           : RefreshIndicator(
+              color: accent,
               onRefresh: _loadData,
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 100),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Seção de Notificações
-                    _buildNotificationsSection(context, theme),
-                    const SizedBox(height: 32),
-
-                    // Seção de Preferências de Notificação
-                    _buildNotificationPreferencesSection(context, theme),
-                    const SizedBox(height: 32),
-
-                    // Seção de Aparência
-                    _buildAppearanceSection(context, theme),
-                    const SizedBox(height: 32),
-
-                    // Seção de Conta
-                    _buildAccountSection(context, theme),
+                    VividChrome.heroBanner(
+                      context,
+                      accent: accent,
+                      eyebrow: 'Preferências',
+                      title: 'Configurações',
+                      subtitle:
+                          'Canais de alerta, eventos e aparência do app. Os interruptores gravam no servidor quando a API responde.',
+                      icon: Icons.settings_suggest_rounded,
+                    ),
+                    const SizedBox(height: 20),
+                    if (_profile != null)
+                      _buildProfileSpotlight(context, theme, accent, _profile!),
+                    if (_profile != null) const SizedBox(height: 22),
+                    _buildNotificationsSection(context, theme, accent),
+                    const SizedBox(height: 22),
+                    _buildNotificationPreferencesSection(context, theme, accent),
+                    const SizedBox(height: 22),
+                    _buildAppearanceSection(context, theme, accent),
+                    const SizedBox(height: 22),
+                    _buildAccountSection(context, theme, accent),
                   ],
                 ),
               ),
@@ -216,133 +184,57 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildSkeleton(BuildContext context, ThemeData theme) {
+  Widget _buildSkeleton(
+    BuildContext context,
+    ThemeData theme,
+    Color accent,
+  ) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 100),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Skeleton do perfil
-          SkeletonCard(
-            child: Row(
-              children: [
-                SkeletonBox(width: 64, height: 64, borderRadius: 32),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SkeletonText(
-                        width: 150,
-                        height: 20,
-                        margin: const EdgeInsets.only(bottom: 8),
-                      ),
-                      SkeletonText(width: 200, height: 16),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+          SkeletonBox(
+            width: double.infinity,
+            height: 118,
+            borderRadius: 20,
           ),
-          const SizedBox(height: 32),
-
-          // Skeleton de seções
+          const SizedBox(height: 20),
+          SkeletonBox(
+            width: double.infinity,
+            height: 112,
+            borderRadius: 22,
+          ),
+          const SizedBox(height: 22),
           SkeletonText(
-            width: 120,
+            width: 160,
             height: 18,
-            margin: const EdgeInsets.only(bottom: 16),
+            margin: const EdgeInsets.only(bottom: 10),
           ),
           SkeletonCard(
             child: Column(
               children: List.generate(
                 3,
-                (index) => Padding(
-                  padding: EdgeInsets.only(bottom: index < 2 ? 16 : 0),
+                (i) => Padding(
+                  padding: EdgeInsets.only(bottom: i < 2 ? 14 : 0),
                   child: Row(
                     children: [
-                      SkeletonBox(width: 24, height: 24, borderRadius: 12),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SkeletonText(
-                              width: 100,
-                              height: 16,
-                              margin: const EdgeInsets.only(bottom: 4),
-                            ),
-                            SkeletonText(width: 180, height: 14),
-                          ],
-                        ),
-                      ),
-                      SkeletonBox(width: 48, height: 28, borderRadius: 14),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 32),
-
-          // Segunda seção
-          SkeletonText(
-            width: 120,
-            height: 18,
-            margin: const EdgeInsets.only(bottom: 16),
-          ),
-          SkeletonCard(
-            child: Column(
-              children: List.generate(
-                2,
-                (index) => Padding(
-                  padding: EdgeInsets.only(bottom: index < 1 ? 16 : 0),
-                  child: Row(
-                    children: [
-                      SkeletonBox(width: 24, height: 24, borderRadius: 12),
-                      const SizedBox(width: 16),
+                      SkeletonBox(width: 46, height: 46, borderRadius: 14),
+                      const SizedBox(width: 14),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             SkeletonText(
                               width: 120,
-                              height: 16,
-                              margin: const EdgeInsets.only(bottom: 4),
+                              height: 15,
+                              margin: const EdgeInsets.only(bottom: 6),
                             ),
-                            SkeletonText(width: 200, height: 14),
+                            SkeletonText(width: 200, height: 12),
                           ],
                         ),
                       ),
-                      SkeletonBox(width: 48, height: 28, borderRadius: 14),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 32),
-
-          // Terceira seção
-          SkeletonText(
-            width: 120,
-            height: 18,
-            margin: const EdgeInsets.only(bottom: 16),
-          ),
-          SkeletonCard(
-            child: Column(
-              children: List.generate(
-                2,
-                (index) => Padding(
-                  padding: EdgeInsets.only(bottom: index < 1 ? 12 : 0),
-                  child: Row(
-                    children: [
-                      SkeletonBox(width: 24, height: 24, borderRadius: 12),
-                      const SizedBox(width: 16),
-                      Expanded(child: SkeletonText(width: 150, height: 16)),
-                      const Icon(
-                        Icons.chevron_right,
-                        color: Colors.transparent,
-                      ),
+                      SkeletonBox(width: 48, height: 30, borderRadius: 16),
                     ],
                   ),
                 ),
@@ -354,30 +246,140 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildErrorState(BuildContext context, ThemeData theme) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.error_outline, size: 64, color: AppColors.status.error),
-            const SizedBox(height: 16),
-            Text(
-              _errorMessage ?? 'Erro ao carregar dados',
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: ThemeHelpers.textSecondaryColor(context),
-              ),
-              textAlign: TextAlign.center,
+  Widget _buildErrorState(
+    BuildContext context,
+    ThemeData theme,
+    Color accent,
+  ) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 40),
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        VividChrome.heroBanner(
+          context,
+          accent: accent,
+          eyebrow: 'Erro',
+          title: 'Não foi possível carregar',
+          subtitle:
+              'Verifique a ligação e tente novamente. Se o problema persistir, contacte o suporte.',
+          icon: Icons.cloud_off_rounded,
+        ),
+        const SizedBox(height: 20),
+        VividChrome.mutedMessage(
+          context,
+          _errorMessage ?? 'Erro ao carregar dados',
+          accent: accent,
+        ),
+        const SizedBox(height: 24),
+        FilledButton.icon(
+          onPressed: _loadData,
+          icon: const Icon(Icons.refresh_rounded),
+          label: const Text('Tentar novamente'),
+          style: FilledButton.styleFrom(
+            backgroundColor: accent,
+            foregroundColor: ThemeHelpers.onPrimaryColor(context),
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
             ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: _loadData,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Tentar novamente'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary.primary,
-                foregroundColor: ThemeHelpers.onPrimaryColor(context),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProfileSpotlight(
+    BuildContext context,
+    ThemeData theme,
+    Color accent,
+    Profile p,
+  ) {
+    final borderSoft = Colors.white.withValues(alpha: 0.35);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(22),
+        gradient: LinearGradient(
+          colors: [
+            accent.withValues(alpha: 0.2),
+            AppColors.secondary.secondary.withValues(alpha: 0.12),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: accent.withValues(alpha: 0.38)),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withValues(alpha: 0.12),
+            blurRadius: 24,
+            offset: const Offset(0, 12),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: borderSoft, width: 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.12),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: ClipOval(
+                child: p.avatar != null && p.avatar!.isNotEmpty
+                    ? Image.network(
+                        p.avatar!,
+                        width: 72,
+                        height: 72,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _avatarFallback(accent),
+                      )
+                    : _avatarFallback(accent),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    p.name,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: ThemeHelpers.textColor(context),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    p.email,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: ThemeHelpers.textSecondaryColor(context),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      _roleChip(context, accent, p.role),
+                      if (p.companyName != null &&
+                          p.companyName!.trim().isNotEmpty)
+                        _roleChip(
+                          context,
+                          AppColors.secondary.secondary,
+                          p.companyName!.trim(),
+                          filled: false,
+                        ),
+                    ],
+                  ),
+                ],
               ),
             ),
           ],
@@ -386,50 +388,129 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildNotificationsSection(BuildContext context, ThemeData theme) {
+  Widget _avatarFallback(Color accent) {
+    return Container(
+      width: 72,
+      height: 72,
+      color: accent.withValues(alpha: 0.15),
+      alignment: Alignment.center,
+      child: Icon(Icons.person_rounded, size: 36, color: accent),
+    );
+  }
+
+  Widget _roleChip(
+    BuildContext context,
+    Color tone,
+    String label, {
+    bool filled = true,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: filled ? tone.withValues(alpha: 0.22) : Colors.transparent,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: tone.withValues(alpha: filled ? 0.35 : 0.55),
+        ),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          color: ThemeHelpers.textColor(context),
+          letterSpacing: 0.2,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVividSection({
+    required BuildContext context,
+    required ThemeData theme,
+    required Color accent,
+    required String sectionTitle,
+    required List<Widget> children,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        VividChrome.sectionLabel(context, sectionTitle, accent: accent),
+        VividChrome.insetCard(
+          context,
+          accent: accent,
+          padding: EdgeInsets.zero,
+          child: Column(
+            children: [
+              for (var i = 0; i < children.length; i++) ...[
+                if (i > 0)
+                  Divider(
+                    height: 1,
+                    thickness: 1,
+                    color: ThemeHelpers.borderColor(context)
+                        .withValues(alpha: 0.35),
+                  ),
+                children[i],
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNotificationsSection(
+    BuildContext context,
+    ThemeData theme,
+    Color accent,
+  ) {
     final notifications = _settings?.notifications;
 
-    return _buildSection(
+    return _buildVividSection(
       context: context,
       theme: theme,
-      title: 'Notificações',
+      accent: accent,
+      sectionTitle: 'Canais de notificação',
       children: [
-        _buildSwitchTile(
+        _buildSwitchRow(
           context: context,
           theme: theme,
+          accent: accent,
           title: 'Email',
           subtitle: 'Receber notificações por email',
           value: notifications?.email ?? true,
           icon: Icons.email_outlined,
-          onChanged: (value) {
+          onChanged: (_) {
             _updateNotificationSetting(
               getValue: (n) => n.email,
               setValue: (n, v) => n.copyWith(email: v),
             );
           },
         ),
-        _buildSwitchTile(
+        _buildSwitchRow(
           context: context,
           theme: theme,
+          accent: accent,
           title: 'Push',
           subtitle: 'Receber notificações push',
           value: notifications?.push ?? true,
-          icon: Icons.notifications_outlined,
-          onChanged: (value) {
+          icon: Icons.notifications_active_outlined,
+          onChanged: (_) {
             _updateNotificationSetting(
               getValue: (n) => n.push,
               setValue: (n, v) => n.copyWith(push: v),
             );
           },
         ),
-        _buildSwitchTile(
+        _buildSwitchRow(
           context: context,
           theme: theme,
+          accent: accent,
           title: 'SMS',
           subtitle: 'Receber notificações por SMS',
           value: notifications?.sms ?? false,
           icon: Icons.sms_outlined,
-          onChanged: (value) {
+          onChanged: (_) {
             _updateNotificationSetting(
               getValue: (n) => n.sms,
               setValue: (n, v) => n.copyWith(sms: v),
@@ -443,50 +524,55 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _buildNotificationPreferencesSection(
     BuildContext context,
     ThemeData theme,
+    Color accent,
   ) {
     final notifications = _settings?.notifications;
 
-    return _buildSection(
+    return _buildVividSection(
       context: context,
       theme: theme,
-      title: 'Preferências de Notificação',
+      accent: accent,
+      sectionTitle: 'O que notificar',
       children: [
-        _buildSwitchTile(
+        _buildSwitchRow(
           context: context,
           theme: theme,
-          title: 'Novos Matches',
-          subtitle: 'Notificar sobre novos matches',
+          accent: accent,
+          title: 'Novos matches',
+          subtitle: 'Alertas quando surgirem matches',
           value: notifications?.newMatches ?? true,
-          icon: Icons.favorite_outline,
-          onChanged: (value) {
+          icon: Icons.favorite_rounded,
+          onChanged: (_) {
             _updateNotificationSetting(
               getValue: (n) => n.newMatches,
               setValue: (n, v) => n.copyWith(newMatches: v),
             );
           },
         ),
-        _buildSwitchTile(
+        _buildSwitchRow(
           context: context,
           theme: theme,
-          title: 'Novas Mensagens',
-          subtitle: 'Notificar sobre novas mensagens',
+          accent: accent,
+          title: 'Novas mensagens',
+          subtitle: 'Alertas de conversas',
           value: notifications?.newMessages ?? true,
           icon: Icons.chat_bubble_outline,
-          onChanged: (value) {
+          onChanged: (_) {
             _updateNotificationSetting(
               getValue: (n) => n.newMessages,
               setValue: (n, v) => n.copyWith(newMessages: v),
             );
           },
         ),
-        _buildSwitchTile(
+        _buildSwitchRow(
           context: context,
           theme: theme,
-          title: 'Lembretes de Compromissos',
-          subtitle: 'Notificar sobre lembretes de compromissos',
+          accent: accent,
+          title: 'Compromissos',
+          subtitle: 'Lembretes de agenda',
           value: notifications?.appointmentReminders ?? true,
-          icon: Icons.calendar_today_outlined,
-          onChanged: (value) {
+          icon: Icons.event_available_outlined,
+          onChanged: (_) {
             _updateNotificationSetting(
               getValue: (n) => n.appointmentReminders,
               setValue: (n, v) => n.copyWith(appointmentReminders: v),
@@ -497,253 +583,393 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildAppearanceSection(BuildContext context, ThemeData theme) {
-    return _buildSection(
+  Widget _buildAppearanceSection(
+    BuildContext context,
+    ThemeData theme,
+    Color accent,
+  ) {
+    return _buildVividSection(
       context: context,
       theme: theme,
-      title: 'Aparência',
-      children: [_buildThemeTile(context, theme)],
+      accent: accent,
+      sectionTitle: 'Aparência',
+      children: [
+        _buildThemeRow(context, theme, accent),
+      ],
     );
   }
 
-  Widget _buildThemeTile(BuildContext context, ThemeData theme) {
+  Widget _buildThemeRow(
+    BuildContext context,
+    ThemeData theme,
+    Color accent,
+  ) {
     final themeService = ThemeService.instance;
 
-    return ListTile(
-      leading: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: AppColors.primary.primary.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Icon(
-          themeService.getThemeIcon(),
-          color: AppColors.primary.primary,
-          size: 20,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _showThemeSheet(context, accent),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
+            children: [
+              _iconPlate(context, accent, themeService.getThemeIcon()),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Tema do app',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: ThemeHelpers.textColor(context),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      themeService.getThemeName(),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: ThemeHelpers.textSecondaryColor(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: accent,
+                size: 28,
+              ),
+            ],
+          ),
         ),
       ),
-      title: Text(
-        'Tema',
-        style: theme.textTheme.bodyLarge?.copyWith(
-          fontWeight: FontWeight.w600,
-          color: ThemeHelpers.textColor(context),
-        ),
-      ),
-      subtitle: Text(
-        themeService.getThemeName(),
-        style: theme.textTheme.bodySmall?.copyWith(
-          color: ThemeHelpers.textSecondaryColor(context),
-        ),
-      ),
-      trailing: Icon(
-        Icons.chevron_right,
-        color: ThemeHelpers.textSecondaryColor(context),
-      ),
-      onTap: () {
-        _showThemeDialog(context);
+    );
+  }
+
+  Future<void> _showThemeSheet(BuildContext context, Color accent) async {
+    final themeService = ThemeService.instance;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            bottom: MediaQuery.paddingOf(sheetContext).bottom + 16,
+          ),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: ThemeHelpers.cardBackgroundColor(sheetContext),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                color: accent.withValues(alpha: 0.25),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.18),
+                  blurRadius: 28,
+                  offset: const Offset(0, -4),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 10),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: ThemeHelpers.textSecondaryColor(sheetContext)
+                        .withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Tema',
+                          style: Theme.of(sheetContext)
+                              .textTheme
+                              .titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w900),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(sheetContext),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  child: Column(
+                    children: [
+                      _themeOptionTile(
+                        sheetContext,
+                        accent,
+                        ThemeMode.light,
+                        'Claro',
+                        'Melhor em ambientes luminosos',
+                        Icons.light_mode_rounded,
+                        themeService,
+                      ),
+                      _themeOptionTile(
+                        sheetContext,
+                        accent,
+                        ThemeMode.dark,
+                        'Escuro',
+                        'Menos cansaço visual à noite',
+                        Icons.dark_mode_rounded,
+                        themeService,
+                      ),
+                      _themeOptionTile(
+                        sheetContext,
+                        accent,
+                        ThemeMode.system,
+                        'Sistema',
+                        'Segue o tema do telemóvel',
+                        Icons.brightness_auto_rounded,
+                        themeService,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+            ),
+          ),
+        );
       },
     );
   }
 
-  void _showThemeDialog(BuildContext context) {
-    final themeService = ThemeService.instance;
-    final currentThemeMode = themeService.themeMode;
+  Widget _themeOptionTile(
+    BuildContext sheetContext,
+    Color accent,
+    ThemeMode mode,
+    String title,
+    String subtitle,
+    IconData icon,
+    ThemeService themeService,
+  ) {
+    final selected = themeService.themeMode == mode;
+    final theme = Theme.of(sheetContext);
 
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Escolher Tema'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            RadioListTile<ThemeMode>(
-              title: const Text('Claro'),
-              subtitle: const Text('Usar tema claro'),
-              value: ThemeMode.light,
-              groupValue: currentThemeMode,
-              onChanged: (value) async {
-                if (value != null) {
-                  await themeService.setThemeMode(value);
-                  if (context.mounted) {
-                    Navigator.of(context).pop();
-                  }
-                }
-              },
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () async {
+            await themeService.setThemeMode(mode);
+            if (sheetContext.mounted) Navigator.pop(sheetContext);
+          },
+          child: Ink(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              gradient: selected
+                  ? LinearGradient(
+                      colors: [
+                        accent.withValues(alpha: 0.2),
+                        AppColors.secondary.secondary
+                            .withValues(alpha: 0.1),
+                      ],
+                    )
+                  : null,
+              color: selected
+                  ? null
+                  : ThemeHelpers.cardBackgroundColor(sheetContext),
+              border: Border.all(
+                color: selected
+                    ? accent.withValues(alpha: 0.55)
+                    : ThemeHelpers.borderColor(sheetContext)
+                        .withValues(alpha: 0.4),
+                width: selected ? 1.5 : 1,
+              ),
             ),
-            RadioListTile<ThemeMode>(
-              title: const Text('Escuro'),
-              subtitle: const Text('Usar tema escuro'),
-              value: ThemeMode.dark,
-              groupValue: currentThemeMode,
-              onChanged: (value) async {
-                if (value != null) {
-                  await themeService.setThemeMode(value);
-                  if (context.mounted) {
-                    Navigator.of(context).pop();
-                  }
-                }
-              },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  _iconPlate(sheetContext, accent, icon),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        Text(
+                          subtitle,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color:
+                                ThemeHelpers.textSecondaryColor(sheetContext),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    selected
+                        ? Icons.check_circle_rounded
+                        : Icons.circle_outlined,
+                    color: selected
+                        ? accent
+                        : ThemeHelpers.textSecondaryColor(sheetContext),
+                  ),
+                ],
+              ),
             ),
-            RadioListTile<ThemeMode>(
-              title: const Text('Sistema'),
-              subtitle: const Text('Seguir configuração do sistema'),
-              value: ThemeMode.system,
-              groupValue: currentThemeMode,
-              onChanged: (value) async {
-                if (value != null) {
-                  await themeService.setThemeMode(value);
-                  if (context.mounted) {
-                    Navigator.of(context).pop();
-                  }
-                }
-              },
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-            },
-            child: const Text('Cancelar'),
           ),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _buildAccountSection(BuildContext context, ThemeData theme) {
-    return _buildSection(
+  Widget _buildAccountSection(
+    BuildContext context,
+    ThemeData theme,
+    Color accent,
+  ) {
+    return _buildVividSection(
       context: context,
       theme: theme,
-      title: 'Conta',
+      accent: accent,
+      sectionTitle: 'Conta',
       children: [
-        _buildListTile(
-          context: context,
-          theme: theme,
-          title: 'Perfil',
-          subtitle: 'Editar informações do perfil',
-          icon: Icons.person_outline,
-          onTap: () {
-            Navigator.pushNamed(context, '/profile');
-          },
-        ),
-      ],
-    );
-  }
-
-
-  Widget _buildSection({
-    required BuildContext context,
-    required ThemeData theme,
-    required String title,
-    required List<Widget> children,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w600,
-            color: ThemeHelpers.textColor(context),
-          ),
-        ),
-        const SizedBox(height: 16),
-        Container(
-          decoration: BoxDecoration(
-            color: ThemeHelpers.cardBackgroundColor(context),
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: ThemeHelpers.shadowColor(context),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () {
+              Navigator.pushNamed(context, AppRoutes.profile);
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                children: [
+                  _iconPlate(context, accent, Icons.person_rounded),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Perfil',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: ThemeHelpers.textColor(context),
+                          ),
+                        ),
+                        Text(
+                          'Nome, contacto e foto',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: ThemeHelpers.textSecondaryColor(context),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: accent,
+                    size: 28,
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-          child: Column(children: children),
         ),
       ],
     );
   }
 
-  Widget _buildSwitchTile({
+  Widget _iconPlate(BuildContext context, Color accent, IconData icon) {
+    return Container(
+      width: 46,
+      height: 46,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        gradient: LinearGradient(
+          colors: [
+            accent.withValues(alpha: 0.22),
+            accent.withValues(alpha: 0.06),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: accent.withValues(alpha: 0.35)),
+      ),
+      alignment: Alignment.center,
+      child: Icon(icon, color: accent, size: 22),
+    );
+  }
+
+  Widget _buildSwitchRow({
     required BuildContext context,
     required ThemeData theme,
+    required Color accent,
     required String title,
     required String subtitle,
     required bool value,
     required IconData icon,
     required ValueChanged<bool> onChanged,
   }) {
-    return ListTile(
-      leading: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: AppColors.primary.primary.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Icon(icon, color: AppColors.primary.primary, size: 20),
-      ),
-      title: Text(
-        title,
-        style: theme.textTheme.bodyLarge?.copyWith(
-          fontWeight: FontWeight.w600,
-          color: ThemeHelpers.textColor(context),
-        ),
-      ),
-      subtitle: Text(
-        subtitle,
-        style: theme.textTheme.bodySmall?.copyWith(
-          color: ThemeHelpers.textSecondaryColor(context),
-        ),
-      ),
-      trailing: Switch(
-        value: value,
-        onChanged: onChanged,
-        activeTrackColor: AppColors.primary.primary.withOpacity(0.5),
-        activeThumbColor: AppColors.primary.primary,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          _iconPlate(context, accent, icon),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: ThemeHelpers.textColor(context),
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    height: 1.25,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            activeThumbColor: accent,
+            activeTrackColor: accent.withValues(alpha: 0.45),
+            inactiveTrackColor:
+                ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+          ),
+        ],
       ),
     );
   }
-
-  Widget _buildListTile({
-    required BuildContext context,
-    required ThemeData theme,
-    required String title,
-    required String subtitle,
-    required IconData icon,
-    required VoidCallback onTap,
-  }) {
-    return ListTile(
-      leading: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: AppColors.primary.primary.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Icon(icon, color: AppColors.primary.primary, size: 20),
-      ),
-      title: Text(
-        title,
-        style: theme.textTheme.bodyLarge?.copyWith(
-          fontWeight: FontWeight.w600,
-          color: ThemeHelpers.textColor(context),
-        ),
-      ),
-      subtitle: Text(
-        subtitle,
-        style: theme.textTheme.bodySmall?.copyWith(
-          color: ThemeHelpers.textSecondaryColor(context),
-        ),
-      ),
-      trailing: Icon(
-        Icons.chevron_right,
-        color: ThemeHelpers.textSecondaryColor(context),
-      ),
-      onTap: onTap,
-    );
-  }
-
 }

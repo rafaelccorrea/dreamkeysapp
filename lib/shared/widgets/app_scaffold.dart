@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
+
+import '../../core/navigation/adaptive_page_route.dart';
 import '../../core/routes/app_routes.dart';
 import '../../core/theme/theme_helpers.dart';
 import '../../features/chat/widgets/chat_floating_button.dart';
@@ -50,8 +51,9 @@ class AppScaffold extends StatelessWidget {
     final navIndex = AppBottomNavigation.getIndexForRoute(currentRoute);
     final isMainScreen = _isMainScreen(currentRoute);
 
-    final isIosPhone =
-        !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+    // Mesmo critério que [useCupertinoNativeTransitions]: iOS nativo sem web —
+    // desliga o arrasto do drawer na borda para não competir com o gesto de voltar.
+    final disableDrawerEdgeDrag = useCupertinoNativeTransitions;
 
     return PopScope(
       canPop: !isMainScreen,
@@ -68,7 +70,7 @@ class AppScaffold extends StatelessWidget {
       },
       child: Scaffold(
         backgroundColor: Colors.transparent,
-        drawerEnableOpenDragGesture: !(isIosPhone && showDrawer),
+        drawerEnableOpenDragGesture: !(disableDrawerEdgeDrag && showDrawer),
         drawer: showDrawer
             ? AppDrawer(
                 userName: userName,

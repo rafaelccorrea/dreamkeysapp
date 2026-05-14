@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+
+import '../../core/navigation/adaptive_page_route.dart';
 import 'package:image_cropper/image_cropper.dart';
 
 import '../../core/theme/app_colors.dart';
@@ -40,7 +42,7 @@ class ImageCropHelper {
     }
     if (!context.mounted) return null;
     return Navigator.of(context).push<File?>(
-      MaterialPageRoute<File?>(
+      adaptivePageRoute<File?>(
         builder: (_) => SquarePhotoEditorPage(sourceFile: file),
         fullscreenDialog: true,
       ),

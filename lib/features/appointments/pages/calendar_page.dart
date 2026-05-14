@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:table_calendar/table_calendar.dart';
 
+import '../../../core/navigation/adaptive_page_route.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/widgets/app_scaffold.dart';
@@ -127,7 +128,7 @@ class _CalendarPageState extends State<CalendarPage>
     );
     Navigator.push(
       context,
-      MaterialPageRoute(
+      adaptivePageRoute<void>(
         builder: (_) => CreateAppointmentPage(
           initialStartDate: start,
           initialEndDate: start.add(const Duration(hours: 1)),
@@ -142,7 +143,7 @@ class _CalendarPageState extends State<CalendarPage>
   void _openDetails(Appointment a) {
     Navigator.push(
       context,
-      MaterialPageRoute(
+      adaptivePageRoute<void>(
         builder: (_) => AppointmentDetailsPage(appointmentId: a.id),
       ),
     ).then((_) {

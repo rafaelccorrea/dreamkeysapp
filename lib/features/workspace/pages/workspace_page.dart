@@ -90,7 +90,7 @@ class _WorkspacePageState extends State<WorkspacePage> {
         : AppColors.primary.primary;
 
     return AppScaffold(
-      title: 'Equipe e assinatura',
+      title: 'Colaboradores',
       currentBottomNavIndex: -1,
       showBottomNavigation: false,
       body: RefreshIndicator(
@@ -106,7 +106,7 @@ class _WorkspacePageState extends State<WorkspacePage> {
                     context,
                     accent: accent,
                     eyebrow: 'Organização',
-                    title: 'Equipe e assinatura',
+                    title: 'Colaboradores',
                     subtitle:
                         'Utilizadores (GET /admin/users), equipes (GET /teams) e assinatura ativa quando o perfil é admin ou master.',
                     icon: Icons.groups_rounded,

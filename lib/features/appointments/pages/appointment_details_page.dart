@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/navigation/adaptive_page_route.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/widgets/app_scaffold.dart';
@@ -972,7 +973,7 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
               onPressed: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(
+                  adaptivePageRoute<void>(
                     builder: (_) =>
                         EditAppointmentPage(appointmentId: a.id),
                   ),

@@ -20,7 +20,10 @@ import 'skeleton_box.dart';
 import '../../features/notifications/controllers/notification_controller.dart';
 import '../../features/chat/controllers/chat_unread_controller.dart';
 
-/// Drawer (menu lateral) do aplicativo
+/// Drawer (menu lateral) — itens alinhados ao menu **visível** do web
+/// (`imobx-front/src/components/layout/Drawer.tsx`): sem Chat, Matches,
+/// Checklists, Documentos, Vistorias/Chaves no menu (no web estão `hidden`),
+/// sem entradas “em breve”.
 class AppDrawer extends StatefulWidget {
   final String? userName;
   final String? userEmail;
@@ -50,10 +53,9 @@ class _AppDrawerState extends State<AppDrawer> {
   String? _heroRole;
   String? _heroPhone;
 
-  // Estado dos expansion tiles
-  bool _gestaoExpanded = false;
-  bool _documentosExpanded = false;
-  bool _gestaoInternaExpanded = false;
+  // Estado dos expansion tiles (alinhado a grupos do drawer web)
+  bool _imoveisExpanded = false;
+  bool _vendasCrmExpanded = false;
 
   /// Lista para o seletor de empresa (Master)
   List<Company> _masterCompanies = [];
@@ -153,39 +155,27 @@ class _AppDrawerState extends State<AppDrawer> {
     if (!mounted) return;
     final activeRoute = _getCurrentRoute();
 
-    // Verificar se algum item de Gestão de Negócios está ativo
+    bool expandImoveis = false;
+    bool expandVendasCrm = false;
+
     if (activeRoute == AppRoutes.properties ||
         activeRoute == AppRoutes.propertyApprovals ||
-        activeRoute == AppRoutes.clients ||
-        activeRoute == AppRoutes.matches ||
-        activeRoute == AppRoutes.calendar ||
-        activeRoute == AppRoutes.notes ||
-        activeRoute == AppRoutes.checklists ||
-        activeRoute == AppRoutes.kanban ||
-        activeRoute.startsWith('/clients')) {
-      setState(() {
-        _gestaoExpanded = true;
-      });
+        activeRoute.startsWith('/properties')) {
+      expandImoveis = true;
     }
 
-    // Verificar se algum item de Documentos está ativo
-    if (activeRoute == AppRoutes.documents ||
-        activeRoute == AppRoutes.signatures ||
-        activeRoute.startsWith('/documents')) {
-      setState(() {
-        _documentosExpanded = true;
-      });
-    }
-
-    // Verificar se algum item de Gestão Interna está ativo
     if (activeRoute == AppRoutes.kanban ||
-        activeRoute == AppRoutes.workspace ||
-        activeRoute == AppRoutes.inspections ||
-        activeRoute == AppRoutes.keys ||
-        activeRoute.startsWith('/inspections') ||
-        activeRoute.startsWith('/keys')) {
+        activeRoute == AppRoutes.kanbanSubtasks ||
+        activeRoute.startsWith('/kanban/task') ||
+        activeRoute == AppRoutes.clients ||
+        activeRoute.startsWith('/clients')) {
+      expandVendasCrm = true;
+    }
+
+    if (expandImoveis || expandVendasCrm) {
       setState(() {
-        _gestaoInternaExpanded = true;
+        if (expandImoveis) _imoveisExpanded = true;
+        if (expandVendasCrm) _vendasCrmExpanded = true;
       });
     }
   }
@@ -890,15 +880,16 @@ class _AppDrawerState extends State<AppDrawer> {
       );
     }
 
-    final gestaoGroupActive =
+    final imoveisGroupActive =
         activeRoute == AppRoutes.properties ||
         activeRoute == AppRoutes.propertyApprovals ||
-        activeRoute == AppRoutes.clients ||
-        activeRoute == AppRoutes.matches ||
-        activeRoute == AppRoutes.calendar ||
-        activeRoute == AppRoutes.notes ||
-        activeRoute == AppRoutes.checklists ||
+        activeRoute.startsWith('/properties');
+
+    final vendasCrmGroupActive =
         activeRoute == AppRoutes.kanban ||
+        activeRoute == AppRoutes.kanbanSubtasks ||
+        activeRoute.startsWith('/kanban/task') ||
+        activeRoute == AppRoutes.clients ||
         activeRoute.startsWith('/clients');
 
     // Paridade com `Drawer.tsx` do web: item "Aprovações" só aparece se o
@@ -907,27 +898,28 @@ class _AppDrawerState extends State<AppDrawer> {
     final canSeeApprovalsMenu = ModuleAccessService.instance
         .hasAnyPermission(AppPermissions.approvalQueueMenu);
 
-    final documentosGroupActive =
-        activeRoute == AppRoutes.documents ||
-        activeRoute == AppRoutes.signatures ||
-        activeRoute.startsWith('/documents');
-
-    final internaGroupActive =
-        activeRoute == AppRoutes.kanban ||
-        activeRoute == AppRoutes.workspace ||
-        activeRoute == AppRoutes.inspections ||
-        activeRoute == AppRoutes.keys ||
-        activeRoute.startsWith('/inspections') ||
-        activeRoute.startsWith('/keys');
+    final canSeeProperties =
+        ModuleAccessService.instance.hasCompanyModule('property_management') &&
+            ModuleAccessService.instance.hasPermission('property:view');
+    final canSeeKanban =
+        ModuleAccessService.instance.hasCompanyModule('kanban_management') &&
+            ModuleAccessService.instance.hasPermission('kanban:view');
+    final canSeeClients =
+        ModuleAccessService.instance.hasCompanyModule('client_management') &&
+            ModuleAccessService.instance.hasPermission('client:view');
+    final canSeeCalendar =
+        ModuleAccessService.instance.hasCompanyModule('calendar_management') &&
+            ModuleAccessService.instance.hasPermission('calendar:view');
 
     final canSeeNotes =
         ModuleAccessService.instance.hasCompanyModule('notes') &&
             ModuleAccessService.instance.hasPermission('note:view');
-    final canSeeChecklists = ModuleAccessService.instance
-        .hasCompanyModule('checklist_management');
     final canSeeWorkspace =
         ModuleAccessService.instance.hasCompanyModule('user_management') ||
             ModuleAccessService.instance.hasCompanyModule('team_management');
+
+    final showImoveisGroup = canSeeProperties || canSeeApprovalsMenu;
+    final showVendasCrmGroup = canSeeKanban || canSeeClients;
 
     return Drawer(
       backgroundColor: Colors.transparent,
@@ -981,355 +973,197 @@ class _AppDrawerState extends State<AppDrawer> {
                               color: ThemeHelpers.borderLightColor(context)
                                   .withValues(alpha: 0.5),
                             ),
-                            _buildDrawerItem(
-                              context: context,
-                              currentRoute: activeRoute,
-                              route: AppRoutes.chat,
-                              icon: LucideIcons.messageCircle,
-                              activeIcon: LucideIcons.messageCircle,
-                              title: 'Mensagens',
-                              accent: accent,
-                              showLeadingTile: true,
-                              onTap: () {
-                                Navigator.pop(context);
-                                if (activeRoute == AppRoutes.chat ||
-                                    activeRoute.startsWith('/chat')) {
-                                  return;
-                                }
-                                Navigator.of(context).pushNamedAndRemoveUntil(
-                                  AppRoutes.chat,
-                                  (route) => false,
-                                );
-                              },
-                            ),
-                            Divider(
-                              height: 1,
-                              thickness: 1,
-                              color: ThemeHelpers.borderLightColor(context)
-                                  .withValues(alpha: 0.45),
-                            ),
-                            _buildExpansionTile(
-                              context: context,
-                              title: 'Negócios',
-                              icon: LucideIcons.building2,
-                              activeIcon: LucideIcons.building2,
-                              isExpanded: _gestaoExpanded,
-                              groupActive: gestaoGroupActive,
-                              accent: accent,
-                              onExpansionChanged: (expanded) {
-                                setState(() {
-                                  _gestaoExpanded = expanded;
-                                });
-                              },
-                              children: [
-                                _buildDrawerItem(
-                                  context: context,
-                                  currentRoute: activeRoute,
-                                  route: AppRoutes.properties,
-                                  icon: LucideIcons.home,
-                                  activeIcon: LucideIcons.home,
-                                  title: 'Imóveis',
-                                  accent: accent,
-                                  onTap: () {
-                                    Navigator.pop(context);
-                                    if (activeRoute == AppRoutes.properties) return;
-                                    Navigator.of(context).pushNamedAndRemoveUntil(
-                                      AppRoutes.properties,
-                                      (route) => false,
-                                    );
-                                  },
-                                  isSubItem: true,
-                                ),
-                                if (canSeeApprovalsMenu)
-                                  _buildDrawerItem(
-                                    context: context,
-                                    currentRoute: activeRoute,
-                                    route: AppRoutes.propertyApprovals,
-                                    icon: LucideIcons.shieldCheck,
-                                    activeIcon: LucideIcons.shieldCheck,
-                                    title: 'Aprovações',
-                                    accent: accent,
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      if (activeRoute ==
-                                          AppRoutes.propertyApprovals) {
-                                        return;
-                                      }
-                                      Navigator.of(context)
-                                          .pushNamedAndRemoveUntil(
-                                        AppRoutes.propertyApprovals,
-                                        (route) => false,
-                                      );
-                                    },
-                                    isSubItem: true,
-                                  ),
-                                _buildDrawerItem(
-                                  context: context,
-                                  currentRoute: activeRoute,
-                                  route: AppRoutes.clients,
-                                  icon: LucideIcons.users,
-                                  activeIcon: LucideIcons.users,
-                                  title: 'Clientes',
-                                  accent: accent,
-                                  onTap: () {
-                                    Navigator.pop(context);
-                                    if (activeRoute == AppRoutes.clients ||
-                                        activeRoute.startsWith('/clients')) {
-                                      return;
-                                    }
-                                    Navigator.of(context).pushNamedAndRemoveUntil(
-                                      AppRoutes.clients,
-                                      (route) => false,
-                                    );
-                                  },
-                                  isSubItem: true,
-                                ),
-                                _buildDrawerItem(
-                                  context: context,
-                                  currentRoute: activeRoute,
-                                  route: AppRoutes.matches,
-                                  icon: LucideIcons.heart,
-                                  activeIcon: LucideIcons.heart,
-                                  title: 'Matches',
-                                  accent: accent,
-                                  onTap: () {
-                                    Navigator.pop(context);
-                                    if (activeRoute == AppRoutes.matches) return;
-                                    Navigator.of(context).pushNamedAndRemoveUntil(
-                                      AppRoutes.matches,
-                                      (route) => false,
-                                    );
-                                  },
-                                  isSubItem: true,
-                                ),
-                                _buildDrawerItem(
-                                  context: context,
-                                  currentRoute: activeRoute,
-                                  route: AppRoutes.calendar,
-                                  icon: LucideIcons.calendar,
-                                  activeIcon: LucideIcons.calendar,
-                                  title: 'Agenda',
-                                  accent: accent,
-                                  onTap: () {
-                                    Navigator.pop(context);
-                                    if (activeRoute == AppRoutes.calendar) return;
-                                    Navigator.of(context).pushNamedAndRemoveUntil(
-                                      AppRoutes.calendar,
-                                      (route) => false,
-                                    );
-                                  },
-                                  isSubItem: true,
-                                ),
-                                if (canSeeNotes)
-                                  _buildDrawerItem(
-                                    context: context,
-                                    currentRoute: activeRoute,
-                                    route: AppRoutes.notes,
-                                    icon: LucideIcons.scrollText,
-                                    activeIcon: LucideIcons.scrollText,
-                                    title: 'Notas',
-                                    accent: accent,
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      if (activeRoute == AppRoutes.notes) return;
-                                      Navigator.of(context).pushNamedAndRemoveUntil(
-                                        AppRoutes.notes,
-                                        (route) => false,
-                                      );
-                                    },
-                                    isSubItem: true,
-                                  ),
-                                if (canSeeChecklists)
-                                  _buildDrawerItem(
-                                    context: context,
-                                    currentRoute: activeRoute,
-                                    route: AppRoutes.checklists,
-                                    icon: LucideIcons.listChecks,
-                                    activeIcon: LucideIcons.listChecks,
-                                    title: 'Checklists',
-                                    accent: accent,
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      if (activeRoute == AppRoutes.checklists) {
-                                        return;
-                                      }
-                                      Navigator.of(context).pushNamedAndRemoveUntil(
-                                        AppRoutes.checklists,
-                                        (route) => false,
-                                      );
-                                    },
-                                    isSubItem: true,
-                                  ),
-                              ],
-                            ),
-                            _buildExpansionTile(
-                              context: context,
-                              title: 'Documentos',
-                              icon: LucideIcons.folder,
-                              activeIcon: LucideIcons.folder,
-                              isExpanded: _documentosExpanded,
-                              groupActive: documentosGroupActive,
-                              accent: accent,
-                              onExpansionChanged: (expanded) {
-                                setState(() {
-                                  _documentosExpanded = expanded;
-                                });
-                              },
-                              children: [
-                                _buildDrawerItem(
-                                  context: context,
-                                  currentRoute: activeRoute,
-                                  route: AppRoutes.documents,
-                                  icon: LucideIcons.fileText,
-                                  activeIcon: LucideIcons.fileText,
-                                  title: 'Documentos',
-                                  accent: accent,
-                                  onTap: () {
-                                    Navigator.pop(context);
-                                    if (activeRoute == AppRoutes.documents ||
-                                        activeRoute.startsWith('/documents')) {
-                                      return;
-                                    }
-                                    Navigator.of(context).pushNamedAndRemoveUntil(
-                                      AppRoutes.documents,
-                                      (route) => false,
-                                    );
-                                  },
-                                  isSubItem: true,
-                                ),
-                                _buildDrawerItem(
-                                  context: context,
-                                  currentRoute: activeRoute,
-                                  route: AppRoutes.signatures,
-                                  icon: LucideIcons.penTool,
-                                  activeIcon: LucideIcons.penTool,
-                                  title: 'Assinaturas',
-                                  accent: accent,
-                                  onTap: () {
-                                    Navigator.pop(context);
-                                    if (activeRoute == AppRoutes.signatures) {
-                                      return;
-                                    }
-                                    Navigator.of(context).pushNamedAndRemoveUntil(
-                                      AppRoutes.signatures,
-                                      (route) => false,
-                                    );
-                                  },
-                                  isSubItem: true,
-                                ),
-                              ],
-                            ),
-                            _buildExpansionTile(
-                              context: context,
-                              title: 'Interno',
-                              icon: LucideIcons.briefcase,
-                              activeIcon: LucideIcons.briefcase,
-                              isExpanded: _gestaoInternaExpanded,
-                              groupActive: internaGroupActive,
-                              accent: accent,
-                              onExpansionChanged: (expanded) {
-                                setState(() {
-                                  _gestaoInternaExpanded = expanded;
-                                });
-                              },
-                              children: [
-                                _buildDrawerItem(
-                                  context: context,
-                                  currentRoute: activeRoute,
-                                  route: AppRoutes.kanban,
-                                  icon: LucideIcons.clipboardList,
-                                  activeIcon: LucideIcons.clipboardList,
-                                  title: 'Tarefas',
-                                  accent: accent,
-                                  onTap: () {
-                                    Navigator.pop(context);
-                                    if (activeRoute == AppRoutes.kanban) return;
-                                    Navigator.of(context).pushNamedAndRemoveUntil(
-                                      AppRoutes.kanban,
-                                      (route) => false,
-                                    );
-                                  },
-                                  isSubItem: true,
-                                ),
-                                if (canSeeWorkspace)
-                                  _buildDrawerItem(
-                                    context: context,
-                                    currentRoute: activeRoute,
-                                    route: AppRoutes.workspace,
-                                    icon: LucideIcons.users2,
-                                    activeIcon: LucideIcons.users2,
-                                    title: 'Equipe e assinatura',
-                                    accent: accent,
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      if (activeRoute == AppRoutes.workspace) {
-                                        return;
-                                      }
-                                      Navigator.of(context).pushNamedAndRemoveUntil(
-                                        AppRoutes.workspace,
-                                        (route) => false,
-                                      );
-                                    },
-                                    isSubItem: true,
-                                  ),
-                                _buildDrawerItem(
-                                  context: context,
-                                  currentRoute: activeRoute,
-                                  route: AppRoutes.inspections,
-                                  icon: LucideIcons.clipboardCheck,
-                                  activeIcon: LucideIcons.clipboardCheck,
-                                  title: 'Vistorias',
-                                  accent: accent,
-                                  onTap: () {
-                                    Navigator.pop(context);
-                                    if (activeRoute == AppRoutes.inspections ||
-                                        activeRoute.startsWith('/inspections')) {
-                                      return;
-                                    }
-                                    Navigator.of(context).pushNamedAndRemoveUntil(
-                                      AppRoutes.inspections,
-                                      (route) => false,
-                                    );
-                                  },
-                                  isSubItem: true,
-                                ),
-                                _buildDrawerItem(
-                                  context: context,
-                                  currentRoute: activeRoute,
-                                  route: AppRoutes.keys,
-                                  icon: LucideIcons.key,
-                                  activeIcon: LucideIcons.key,
-                                  title: 'Chaves',
-                                  accent: accent,
-                                  onTap: () {
-                                    Navigator.pop(context);
-                                    if (activeRoute == AppRoutes.keys ||
-                                        activeRoute.startsWith('/keys')) {
-                                      return;
-                                    }
-                                    Navigator.of(context).pushNamedAndRemoveUntil(
-                                      AppRoutes.keys,
-                                      (route) => false,
-                                    );
-                                  },
-                                  isSubItem: true,
-                                ),
-                                _buildDrawerItem(
-                                  context: context,
-                                  currentRoute: activeRoute,
-                                  route: '/commissions',
-                                  icon: LucideIcons.dollarSign,
-                                  activeIcon: LucideIcons.dollarSign,
-                                  title: 'Comissões',
-                                  accent: accent,
-                                  onTap: () {
-                                    Navigator.pop(context);
-                                    _showComingSoon(context);
-                                  },
-                                  isSubItem: true,
-                                ),
-                              ],
-                            ),
+                            if (showImoveisGroup) ...[
+                              _buildExpansionTile(
+                                context: context,
+                                title: 'Imóveis',
+                                icon: LucideIcons.home,
+                                activeIcon: LucideIcons.home,
+                                isExpanded: _imoveisExpanded,
+                                groupActive: imoveisGroupActive,
+                                accent: accent,
+                                onExpansionChanged: (expanded) {
+                                  setState(() {
+                                    _imoveisExpanded = expanded;
+                                  });
+                                },
+                                children: [
+                                  if (canSeeProperties)
+                                    _buildDrawerItem(
+                                      context: context,
+                                      currentRoute: activeRoute,
+                                      route: AppRoutes.properties,
+                                      icon: LucideIcons.building2,
+                                      activeIcon: LucideIcons.building2,
+                                      title: 'Propriedades',
+                                      accent: accent,
+                                      onTap: () {
+                                        Navigator.pop(context);
+                                        if (activeRoute == AppRoutes.properties) {
+                                          return;
+                                        }
+                                        Navigator.of(context)
+                                            .pushNamedAndRemoveUntil(
+                                          AppRoutes.properties,
+                                          (route) => false,
+                                        );
+                                      },
+                                      isSubItem: true,
+                                    ),
+                                  if (canSeeApprovalsMenu)
+                                    _buildDrawerItem(
+                                      context: context,
+                                      currentRoute: activeRoute,
+                                      route: AppRoutes.propertyApprovals,
+                                      icon: LucideIcons.shieldCheck,
+                                      activeIcon: LucideIcons.shieldCheck,
+                                      title: 'Aprovações',
+                                      accent: accent,
+                                      onTap: () {
+                                        Navigator.pop(context);
+                                        if (activeRoute ==
+                                            AppRoutes.propertyApprovals) {
+                                          return;
+                                        }
+                                        Navigator.of(context)
+                                            .pushNamedAndRemoveUntil(
+                                          AppRoutes.propertyApprovals,
+                                          (route) => false,
+                                        );
+                                      },
+                                      isSubItem: true,
+                                    ),
+                                ],
+                              ),
+                            ],
+                            if (showVendasCrmGroup) ...[
+                              _buildExpansionTile(
+                                context: context,
+                                title: 'Vendas & CRM',
+                                icon: LucideIcons.target,
+                                activeIcon: LucideIcons.target,
+                                isExpanded: _vendasCrmExpanded,
+                                groupActive: vendasCrmGroupActive,
+                                accent: accent,
+                                onExpansionChanged: (expanded) {
+                                  setState(() {
+                                    _vendasCrmExpanded = expanded;
+                                  });
+                                },
+                                children: [
+                                  if (canSeeKanban)
+                                    _buildDrawerItem(
+                                      context: context,
+                                      currentRoute: activeRoute,
+                                      route: AppRoutes.kanban,
+                                      icon: LucideIcons.layoutGrid,
+                                      activeIcon: LucideIcons.layoutGrid,
+                                      title: 'CRM',
+                                      accent: accent,
+                                      isActive: activeRoute == AppRoutes.kanban ||
+                                          activeRoute
+                                              .startsWith('/kanban/task'),
+                                      onTap: () {
+                                        Navigator.pop(context);
+                                        if (activeRoute == AppRoutes.kanban ||
+                                            activeRoute.startsWith(
+                                                '/kanban/task')) {
+                                          return;
+                                        }
+                                        Navigator.of(context)
+                                            .pushNamedAndRemoveUntil(
+                                          AppRoutes.kanban,
+                                          (route) => false,
+                                        );
+                                      },
+                                      isSubItem: true,
+                                    ),
+                                  if (canSeeClients)
+                                    _buildDrawerItem(
+                                      context: context,
+                                      currentRoute: activeRoute,
+                                      route: AppRoutes.clients,
+                                      icon: LucideIcons.users,
+                                      activeIcon: LucideIcons.users,
+                                      title: 'Clientes',
+                                      accent: accent,
+                                      onTap: () {
+                                        Navigator.pop(context);
+                                        if (activeRoute == AppRoutes.clients ||
+                                            activeRoute
+                                                .startsWith('/clients')) {
+                                          return;
+                                        }
+                                        Navigator.of(context)
+                                            .pushNamedAndRemoveUntil(
+                                          AppRoutes.clients,
+                                          (route) => false,
+                                        );
+                                      },
+                                      isSubItem: true,
+                                    ),
+                                ],
+                              ),
+                            ],
+                            if (canSeeCalendar)
+                              _buildDrawerItem(
+                                context: context,
+                                currentRoute: activeRoute,
+                                route: AppRoutes.calendar,
+                                icon: LucideIcons.calendar,
+                                activeIcon: LucideIcons.calendar,
+                                title: 'Calendário',
+                                accent: accent,
+                                showLeadingTile: true,
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  if (activeRoute == AppRoutes.calendar) return;
+                                  Navigator.of(context).pushNamedAndRemoveUntil(
+                                    AppRoutes.calendar,
+                                    (route) => false,
+                                  );
+                                },
+                              ),
+                            if (canSeeNotes)
+                              _buildDrawerItem(
+                                context: context,
+                                currentRoute: activeRoute,
+                                route: AppRoutes.notes,
+                                icon: LucideIcons.scrollText,
+                                activeIcon: LucideIcons.scrollText,
+                                title: 'Anotações',
+                                accent: accent,
+                                showLeadingTile: true,
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  if (activeRoute == AppRoutes.notes) return;
+                                  Navigator.of(context).pushNamedAndRemoveUntil(
+                                    AppRoutes.notes,
+                                    (route) => false,
+                                  );
+                                },
+                              ),
+                            if (canSeeWorkspace)
+                              _buildDrawerItem(
+                                context: context,
+                                currentRoute: activeRoute,
+                                route: AppRoutes.workspace,
+                                icon: LucideIcons.users2,
+                                activeIcon: LucideIcons.users2,
+                                title: 'Colaboradores',
+                                accent: accent,
+                                showLeadingTile: true,
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  if (activeRoute == AppRoutes.workspace) {
+                                    return;
+                                  }
+                                  Navigator.of(context).pushNamedAndRemoveUntil(
+                                    AppRoutes.workspace,
+                                    (route) => false,
+                                  );
+                                },
+                              ),
                             Divider(
                               height: 1,
                               thickness: 1,
@@ -1602,15 +1436,6 @@ class _AppDrawerState extends State<AppDrawer> {
             ),
           ),
         ),
-      ),
-    );
-  }
-
-  void _showComingSoon(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Funcionalidade em breve'),
-        duration: Duration(seconds: 2),
       ),
     );
   }
