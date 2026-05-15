@@ -425,6 +425,16 @@ class PermissionModuleMapping {
     'gamification:create': 'gamification',
     'gamification:update': 'gamification',
     'gamification:delete': 'gamification',
+
+    // Proposal permissions (fichas de proposta de compra)
+    // Pertencem ao módulo `sale_forms` no backend.
+    'proposal:view': 'sale_forms',
+    'proposal:view_team': 'sale_forms',
+    'proposal:view_all': 'sale_forms',
+    'proposal:create': 'sale_forms',
+    'proposal:update': 'sale_forms',
+    'proposal:delete': 'sale_forms',
+    'proposal:export': 'sale_forms',
   };
 
   /// Mapeamento de rota para módulo
@@ -440,6 +450,7 @@ class PermissionModuleMapping {
     '/commissions': 'commission_management',
     '/matches': 'match_system',
     '/documents': 'document_management',
+    '/proposals': 'sale_forms',
     '/teams': 'team_management',
     '/financial': 'financial_management',
     '/marketing': 'marketing_tools',

@@ -914,6 +914,11 @@ class _AppDrawerState extends State<AppDrawer> {
     final canSeeNotes =
         ModuleAccessService.instance.hasCompanyModule('notes') &&
             ModuleAccessService.instance.hasPermission('note:view');
+    final canSeeProposals =
+        ModuleAccessService.instance.hasCompanyModule('sale_forms') &&
+            (ModuleAccessService.instance.hasPermission('proposal:view') ||
+                ModuleAccessService.instance.hasPermission('proposal:view_team') ||
+                ModuleAccessService.instance.hasPermission('proposal:view_all'));
     final canSeeWorkspace =
         ModuleAccessService.instance.hasCompanyModule('user_management') ||
             ModuleAccessService.instance.hasCompanyModule('team_management');
@@ -1139,6 +1144,27 @@ class _AppDrawerState extends State<AppDrawer> {
                                   if (activeRoute == AppRoutes.notes) return;
                                   Navigator.of(context).pushNamedAndRemoveUntil(
                                     AppRoutes.notes,
+                                    (route) => false,
+                                  );
+                                },
+                              ),
+                            if (canSeeProposals)
+                              _buildDrawerItem(
+                                context: context,
+                                currentRoute: activeRoute,
+                                route: AppRoutes.proposals,
+                                icon: LucideIcons.fileSignature,
+                                activeIcon: LucideIcons.fileSignature,
+                                title: 'Fichas de proposta',
+                                accent: accent,
+                                showLeadingTile: true,
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  if (activeRoute == AppRoutes.proposals) {
+                                    return;
+                                  }
+                                  Navigator.of(context).pushNamedAndRemoveUntil(
+                                    AppRoutes.proposals,
                                     (route) => false,
                                   );
                                 },

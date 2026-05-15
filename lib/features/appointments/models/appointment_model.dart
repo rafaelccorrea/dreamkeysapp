@@ -1,4 +1,5 @@
 import '../../../shared/utils/avatar_url_resolver.dart';
+import '../../../shared/utils/json_datetime.dart';
 
 /// Modelo de dados para Agendamento
 class Appointment {
@@ -57,6 +58,7 @@ class Appointment {
   });
 
   factory Appointment.fromJson(Map<String, dynamic> json) {
+    final createdAt = parseApiDateTime(json['createdAt']);
     return Appointment(
       id: json['id']?.toString() ?? '',
       title: json['title']?.toString() ?? '',
@@ -64,8 +66,8 @@ class Appointment {
       type: AppointmentType.fromString(json['type']?.toString() ?? 'visit'),
       status: AppointmentStatus.fromString(json['status']?.toString() ?? 'scheduled'),
       visibility: AppointmentVisibility.fromString(json['visibility']?.toString() ?? 'private'),
-      startDate: DateTime.parse(json['startDate'].toString()),
-      endDate: DateTime.parse(json['endDate'].toString()),
+      startDate: parseApiDateTime(json['startDate']),
+      endDate: parseApiDateTime(json['endDate']),
       location: json['location']?.toString(),
       notes: json['notes']?.toString(),
       color: json['color']?.toString() ?? '#3B82F6',
@@ -77,13 +79,19 @@ class Appointment {
       participantIds: json['participantIds'] != null
           ? List<String>.from((json['participantIds'] as List).map((e) => e.toString()))
           : [],
-      createdAt: DateTime.parse(json['createdAt'].toString()),
-      updatedAt: DateTime.parse(json['updatedAt'].toString()),
+      createdAt: createdAt,
+      updatedAt: parseApiDateTime(json['updatedAt'], fallback: createdAt),
       property: json['property'] as Map<String, dynamic>?,
       client: json['client'] as Map<String, dynamic>?,
       user: json['user'] as Map<String, dynamic>?,
       invites: json['invites'] != null
-          ? (json['invites'] as List).map((e) => AppointmentInvite.fromJson(e as Map<String, dynamic>)).toList()
+          ? (json['invites'] as List)
+              .map((e) => AppointmentInvite.fromJson(
+                    e as Map<String, dynamic>,
+                    parentAppointmentId: json['id']?.toString(),
+                    parentCompanyId: json['companyId']?.toString(),
+                  ))
+              .toList()
           : null,
       participants: json['participants'] != null
           ? (json['participants'] as List).map((e) => Participant.fromJson(e as Map<String, dynamic>)).toList()
@@ -317,23 +325,36 @@ class AppointmentInvite {
     this.invitedUser,
   });
 
-  factory AppointmentInvite.fromJson(Map<String, dynamic> json) {
+  factory AppointmentInvite.fromJson(
+    Map<String, dynamic> json, {
+    String? parentAppointmentId,
+    String? parentCompanyId,
+  }) {
+    final inviter = json['inviter'] as Map<String, dynamic>?;
+    final invitedUser = json['invitedUser'] as Map<String, dynamic>?;
+    final createdAt = parseApiDateTime(json['createdAt']);
+
     return AppointmentInvite(
       id: json['id']?.toString() ?? '',
-      appointmentId: json['appointmentId']?.toString() ?? '',
-      inviterUserId: json['inviterUserId']?.toString() ?? '',
-      invitedUserId: json['invitedUserId']?.toString() ?? '',
-      companyId: json['companyId']?.toString() ?? '',
+      appointmentId: json['appointmentId']?.toString() ??
+          parentAppointmentId ??
+          '',
+      inviterUserId: json['inviterUserId']?.toString() ??
+          inviter?['id']?.toString() ??
+          '',
+      invitedUserId: json['invitedUserId']?.toString() ??
+          invitedUser?['id']?.toString() ??
+          '',
+      companyId:
+          json['companyId']?.toString() ?? parentCompanyId ?? '',
       status: InviteStatus.fromString(json['status']?.toString() ?? 'pending'),
       message: json['message']?.toString(),
-      respondedAt: json['respondedAt'] != null
-          ? DateTime.parse(json['respondedAt'].toString())
-          : null,
-      createdAt: DateTime.parse(json['createdAt'].toString()),
-      updatedAt: DateTime.parse(json['updatedAt'].toString()),
+      respondedAt: tryParseApiDateTime(json['respondedAt']),
+      createdAt: createdAt,
+      updatedAt: parseApiDateTime(json['updatedAt'], fallback: createdAt),
       appointment: json['appointment'] as Map<String, dynamic>?,
-      inviter: json['inviter'] as Map<String, dynamic>?,
-      invitedUser: json['invitedUser'] as Map<String, dynamic>?,
+      inviter: inviter,
+      invitedUser: invitedUser,
     );
   }
 

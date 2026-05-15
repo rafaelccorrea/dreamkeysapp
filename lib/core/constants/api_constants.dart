@@ -551,6 +551,50 @@ class ApiConstants {
   static String noteArchive(String id) => '/notes/$id/archive';
   static String noteRestore(String id) => '/notes/$id/restore';
 
+  // Fichas de Proposta de Compra (permissões `proposal:*`)
+  // Espelha `PurchaseProposalsController` em `sistema/fichas-proposta`.
+  static const String purchaseProposals = '/sistema/fichas-proposta';
+  static const String purchaseProposalsStats = '/sistema/fichas-proposta/stats';
+  static String purchaseProposalById(String id) => '/sistema/fichas-proposta/$id';
+  static String purchaseProposalHistorico(String id) =>
+      '/sistema/fichas-proposta/$id/historico';
+  static String purchaseProposalCancelar(String id) =>
+      '/sistema/fichas-proposta/$id/cancelar';
+  static String purchaseProposalExcluir(String id) =>
+      '/sistema/fichas-proposta/$id/excluir';
+  static String purchaseProposalPdf(String id) =>
+      '/sistema/fichas-proposta/$id/pdf';
+  static String purchaseProposalAnexos(String id) =>
+      '/sistema/fichas-proposta/$id/anexos';
+  static String purchaseProposalAnexoAprovar(String id, String anexoId) =>
+      '/sistema/fichas-proposta/$id/anexos/$anexoId/aprovar';
+  static String purchaseProposalAnexoRejeitar(String id, String anexoId) =>
+      '/sistema/fichas-proposta/$id/anexos/$anexoId/rejeitar';
+  static String purchaseProposalAssinaturas(String id) =>
+      '/sistema/fichas-proposta/$id/assinaturas';
+  static String purchaseProposalAssinaturaById(String id, String signatureId) =>
+      '/sistema/fichas-proposta/$id/assinaturas/$signatureId';
+  static String purchaseProposalAssinaturaLink(String id, String signatureId) =>
+      '/sistema/fichas-proposta/$id/assinaturas/$signatureId/link';
+  static String purchaseProposalAssinaturaReenviarEmail(
+    String id,
+    String signatureId,
+  ) => '/sistema/fichas-proposta/$id/assinaturas/$signatureId/reenviar-email';
+  static String purchaseProposalAssinaturasReenviarWhatsapp(String id) =>
+      '/sistema/fichas-proposta/$id/assinaturas/reenviar-whatsapp';
+  static String purchaseProposalAssinaturaReenviarWhatsapp(
+    String id,
+    String signatureId,
+  ) => '/sistema/fichas-proposta/$id/assinaturas/$signatureId/reenviar-whatsapp';
+  static String purchaseProposalAssinaturasSync(String id) =>
+      '/sistema/fichas-proposta/$id/assinaturas/sync';
+  static String purchaseProposalReiniciarFluxoAssinaturas(String id) =>
+      '/sistema/fichas-proposta/$id/reiniciar-fluxo-assinaturas';
+  static String purchaseProposalVincularUsuario(String id) =>
+      '/sistema/fichas-proposta/$id/vincular-usuario';
+  static String purchaseProposalUsuarios(String id) =>
+      '/sistema/fichas-proposta/$id/usuarios';
+
   // Endpoints de utilizadores (admin — módulo `user_management`)
   static const String adminUsers = '/admin/users';
 

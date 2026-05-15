@@ -46,6 +46,8 @@ import '../../features/keys/pages/keys_page.dart';
 import '../../features/keys/pages/create_key_page.dart';
 import '../../features/notes/pages/create_note_page.dart';
 import '../../features/notes/pages/notes_page.dart';
+import '../../features/proposals/pages/create_proposal_page.dart';
+import '../../features/proposals/pages/proposals_page.dart';
 import '../../features/checklists/pages/checklists_page.dart';
 import '../../features/workspace/pages/workspace_page.dart';
 import '../../shared/services/property_service.dart';
@@ -130,6 +132,11 @@ class AppRoutes {
   static const String notesCreate = '/notes/create';
   static const String checklists = '/checklists';
   static const String workspace = '/workspace';
+
+  // Fichas de proposta de compra
+  static const String proposals = '/proposals';
+  static const String proposalCreate = '/proposals/create';
+  static String proposalEdit(String id) => '/proposals/$id/edit';
 
   static String propertyOfferDetails(String offerId) =>
       '/properties/offers/$offerId';
@@ -365,6 +372,19 @@ class AppRoutes {
       return _buildRoute(const NotesPage(), settings);
     } else if (routeName == AppRoutes.notesCreate) {
       return _buildRoute(const CreateNotePage(), settings);
+    } else if (routeName == AppRoutes.proposals) {
+      return _buildRoute(const ProposalsPage(), settings);
+    } else if (routeName == AppRoutes.proposalCreate) {
+      return _buildRoute(const CreateProposalPage(), settings);
+    } else if (routeName != null &&
+        routeName.startsWith('/proposals/')) {
+      final segments = routeName.split('/');
+      if (segments.length == 4 && segments[3] == 'edit') {
+        final id = segments[2];
+        if (id.isNotEmpty) {
+          return _buildRoute(CreateProposalPage(proposalId: id), settings);
+        }
+      }
     } else if (routeName == AppRoutes.checklists) {
       return _buildRoute(const ChecklistsPage(), settings);
     } else if (routeName == AppRoutes.workspace) {
