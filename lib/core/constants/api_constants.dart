@@ -545,6 +545,11 @@ class ApiConstants {
   // Endpoints de Anotações (módulo `notes` + permissões `note:*`)
   static const String notes = '/notes';
   static const String notesStats = '/notes/stats';
+  static const String notesReminders = '/notes/reminders';
+  static String noteById(String id) => '/notes/$id';
+  static String noteTogglePin(String id) => '/notes/$id/toggle-pin';
+  static String noteArchive(String id) => '/notes/$id/archive';
+  static String noteRestore(String id) => '/notes/$id/restore';
 
   // Endpoints de utilizadores (admin — módulo `user_management`)
   static const String adminUsers = '/admin/users';

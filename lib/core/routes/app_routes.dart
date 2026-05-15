@@ -44,6 +44,7 @@ import '../../features/inspections/pages/create_inspection_page.dart';
 import '../../features/inspections/pages/edit_inspection_page.dart';
 import '../../features/keys/pages/keys_page.dart';
 import '../../features/keys/pages/create_key_page.dart';
+import '../../features/notes/pages/create_note_page.dart';
 import '../../features/notes/pages/notes_page.dart';
 import '../../features/checklists/pages/checklists_page.dart';
 import '../../features/workspace/pages/workspace_page.dart';
@@ -126,6 +127,7 @@ class AppRoutes {
   static String keyEdit(String id) => '/keys/$id/edit';
 
   static const String notes = '/notes';
+  static const String notesCreate = '/notes/create';
   static const String checklists = '/checklists';
   static const String workspace = '/workspace';
 
@@ -361,6 +363,8 @@ class AppRoutes {
       }
     } else if (routeName == AppRoutes.notes) {
       return _buildRoute(const NotesPage(), settings);
+    } else if (routeName == AppRoutes.notesCreate) {
+      return _buildRoute(const CreateNotePage(), settings);
     } else if (routeName == AppRoutes.checklists) {
       return _buildRoute(const ChecklistsPage(), settings);
     } else if (routeName == AppRoutes.workspace) {
