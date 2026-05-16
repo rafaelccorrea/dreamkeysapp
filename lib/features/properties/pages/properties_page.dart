@@ -460,20 +460,14 @@ class _PropertiesPageState extends State<PropertiesPage> {
           // pela metade.
           ? _buildFullPageSkeleton(context)
           : _errorMessage != null
-              ? Column(
-                  children: [
-                    _buildPortfolioHeader(context),
-                    Expanded(child: _buildErrorState(context)),
-                  ],
+              ? _buildHeaderWithFillingChild(
+                  context,
+                  child: _buildErrorState(context),
                 )
               : _properties.isEmpty
-                  ? Column(
-                      children: [
-                        _buildPortfolioHeader(context),
-                        Expanded(
-                          child: _buildEmptyPropertiesState(context, Theme.of(context)),
-                        ),
-                      ],
+                  ? _buildHeaderWithFillingChild(
+                      context,
+                      child: _buildEmptyPropertiesState(context, Theme.of(context)),
                     )
                   : _buildScrollablePropertiesViewport(context),
     );
@@ -2808,23 +2802,44 @@ class _PropertiesPageState extends State<PropertiesPage> {
       );
     }
 
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 36, 20, 32),
+      child: LayoutBuilder(
+        builder: (_, c) => Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: c.maxWidth > 440 ? 380 : double.infinity,
+            ),
+            child: content(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Header de portfólio + um child (empty/error) ocupando o resto da viewport.
+  ///
+  /// Antes era um `Column` com `Expanded(child)`, mas isso travava o header em
+  /// altura intrínseca dentro de uma viewport fixa e quando o header era maior
+  /// que a tela ele transbordava o `RenderFlex` (ex.: 318px de overflow no
+  /// empty state). Agora usamos um `CustomScrollView` com `SliverFillRemaining`
+  /// para que o header e o conteúdo *role junto* quando a tela for curta — o
+  /// mesmo padrão do viewport com lista cheia (`_buildScrollablePropertiesViewport`).
+  Widget _buildHeaderWithFillingChild(
+    BuildContext context, {
+    required Widget child,
+  }) {
     return RefreshIndicator(
       onRefresh: () => _loadProperties(refresh: true),
-      color: accent,
+      color: AppColors.primary.primary,
       displacement: 44,
-      child: ListView(
+      child: CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(20, 36, 20, 32),
-        children: [
-          LayoutBuilder(
-            builder: (_, c) => Center(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: c.maxWidth > 440 ? 380 : double.infinity,
-                ),
-                child: content(),
-              ),
-            ),
+        slivers: [
+          SliverToBoxAdapter(child: _buildPortfolioHeader(context)),
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: child,
           ),
         ],
       ),

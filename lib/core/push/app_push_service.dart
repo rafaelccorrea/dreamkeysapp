@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' show Color;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -8,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart' show SchedulerBinding;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../constants/api_constants.dart';
 import '../navigation/app_navigator.dart';
@@ -17,11 +19,24 @@ import '../../features/notifications/controllers/notification_controller.dart';
 import '../../shared/services/api_service.dart';
 import '../../shared/services/secure_storage_service.dart';
 
+/// Identidade visual da notificação (espelha `AppColors.primary.primary`).
+///
+/// Mantemos hardcoded aqui para não importar a árvore de tema no isolate de
+/// background (`firebaseMessagingBackgroundHandler` roda fora do widget tree).
+const Color _brandRed = Color(0xFFD32F2F);
+
+/// Ícone branco monocromático gerado em
+/// `tools/generate_notification_icon.ps1` a partir de `ic_launcher_foreground`.
+/// Android aplica o tint do canal/notification por cima — sem isto o sistema
+/// renderiza um quadradinho branco genérico em vez do logo.
+const String _smallIconResource = 'ic_notification';
+
 const AndroidNotificationChannel _pushChannel = AndroidNotificationChannel(
   'imobx_alerts',
   'Alertas do sistema',
   description: 'Notificações do Intellisys (leads, tarefas, agenda…)',
   importance: Importance.high,
+  ledColor: _brandRed,
 );
 
 final FlutterLocalNotificationsPlugin _localNotifications =
@@ -29,6 +44,11 @@ final FlutterLocalNotificationsPlugin _localNotifications =
 
 bool _firebaseCoreReady = false;
 bool _listenersAttached = false;
+bool _localNotificationsReady = false;
+
+/// Chave em [SharedPreferences] para garantir que a notificação de boas-vindas
+/// seja exibida só uma vez por instalação (não em todo login/reabertura).
+const String _welcomeShownPrefsKey = 'imobx_push_welcome_shown_v1';
 bool _isDuplicateDefaultFirebaseAppError(Object error) {
   if (error is FirebaseException) {
     return error.code == 'duplicate-app';
@@ -97,11 +117,14 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
   try {
     await _ensureLocalNotificationsInBackground();
+    final resolvedTitle = title.isEmpty ? 'Intellisys' : title;
+    final resolvedBody =
+        body.isEmpty ? 'Abra o app para ver a notificação.' : body;
     await _localNotifications.show(
       id: message.messageId?.hashCode.abs() ??
           DateTime.now().millisecondsSinceEpoch.remainder(100000),
-      title: title.isEmpty ? 'Intellisys' : title,
-      body: body.isEmpty ? 'Abra o app para ver a notificação.' : body,
+      title: resolvedTitle,
+      body: resolvedBody,
       notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           _pushChannel.id,
@@ -109,7 +132,16 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
           channelDescription: _pushChannel.description,
           importance: Importance.high,
           priority: Priority.high,
-          icon: '@mipmap/ic_launcher',
+          icon: _smallIconResource,
+          color: _brandRed,
+          colorized: false,
+          // BigText permite o usuário expandir mensagens longas sem truncar
+          // — hábito que o usuário pega do WhatsApp/Insta/Slack.
+          styleInformation: BigTextStyleInformation(
+            resolvedBody,
+            contentTitle: resolvedTitle,
+            summaryText: 'Intellisys',
+          ),
         ),
       ),
       payload: jsonEncode(message.data),
@@ -162,12 +194,16 @@ class AppPushService {
   }
 
   Future<void> initListenersAndLocalNotifications() async {
+    // Notificações locais NÃO dependem do Firebase — usadas pra welcome,
+    // foreground display de mensagens FCM e para refletir badges. Inicializa
+    // sempre para o `showWelcomeNotificationIfNeeded` funcionar mesmo se
+    // o Firebase ainda estiver com placeholders.
+    await _ensureLocalNotificationsInitialized();
+
     if (!_firebaseCoreReady || _listenersAttached) {
       return;
     }
     _listenersAttached = true;
-
-    await _setupLocalNotifications();
 
     final messaging = FirebaseMessaging.instance;
 
@@ -199,8 +235,12 @@ class AppPushService {
     await initListenersAndLocalNotifications();
   }
 
-  Future<void> _setupLocalNotifications() async {
-    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+  /// Inicialização idempotente das notificações locais — pode ser chamada de
+  /// vários pontos (welcome, listeners FCM, etc) sem efeito colateral.
+  Future<void> _ensureLocalNotificationsInitialized() async {
+    if (_localNotificationsReady) return;
+
+    const androidInit = AndroidInitializationSettings(_smallIconResource);
     const iosInit = DarwinInitializationSettings(
       requestAlertPermission: false,
       requestBadgePermission: false,
@@ -224,6 +264,8 @@ class AppPushService {
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>();
     await androidPlugin?.createNotificationChannel(_pushChannel);
+
+    _localNotificationsReady = true;
   }
 
   Future<bool> requestUserPermission() async {
@@ -237,20 +279,60 @@ class AppPushService {
       }
     }
 
-    final settings = await FirebaseMessaging.instance.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-      provisional: false,
-    );
-    final ok = settings.authorizationStatus == AuthorizationStatus.authorized ||
-        settings.authorizationStatus == AuthorizationStatus.provisional;
-    if (!ok) {
-      debugPrint(
-        '📱 [PUSH] Permissão FCM não autorizada: ${settings.authorizationStatus}',
+    // No iOS o `requestPermission` precisa do Firebase inicializado. No
+    // Android a permissão de SO já foi resolvida via permission_handler
+    // acima, e o requestPermission adicional só é útil quando há FCM.
+    bool ok = true;
+    if (_firebaseCoreReady) {
+      final settings = await FirebaseMessaging.instance.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+        provisional: false,
       );
+      ok = settings.authorizationStatus == AuthorizationStatus.authorized ||
+          settings.authorizationStatus == AuthorizationStatus.provisional;
+      if (!ok) {
+        debugPrint(
+          '📱 [PUSH] Permissão FCM não autorizada: ${settings.authorizationStatus}',
+        );
+      }
     }
+
+    if (ok) {
+      // Boas-vindas só uma vez por instalação — disparada após o usuário
+      // aceitar notificações pra confirmar visualmente que tudo funciona.
+      // Não depende do Firebase: roda local mesmo se FCM ainda não estiver
+      // configurado ou o backend ainda não tiver mandado nada.
+      unawaited(_showWelcomeNotificationIfNeeded());
+    }
+
     return ok;
+  }
+
+  /// Notificação local "Bem-vindo" — disparada uma vez por instalação,
+  /// imediatamente após o usuário conceder permissão. Usa o mesmo
+  /// estilo (BigText + cor da marca + ícone monocromático) que as
+  /// notificações reais, então serve também como preview da identidade.
+  Future<void> _showWelcomeNotificationIfNeeded() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool(_welcomeShownPrefsKey) == true) {
+        return;
+      }
+
+      await _ensureLocalNotificationsInitialized();
+      await _showLocalNotification(
+        title: 'Bem-vindo ao Intellisys',
+        body:
+            'Notificações ativadas. A partir de agora você recebe leads, '
+            'tarefas e lembretes direto no seu celular — mesmo com o app fechado.',
+      );
+
+      await prefs.setBool(_welcomeShownPrefsKey, true);
+    } catch (e) {
+      debugPrint('📱 [PUSH] welcome notification: $e');
+    }
   }
 
   /// Após login / splash com sessão válida: permissão do sistema + registo do token (FCM).
@@ -358,12 +440,22 @@ class AppPushService {
           channelDescription: _pushChannel.description,
           importance: Importance.high,
           priority: Priority.high,
-          icon: '@mipmap/ic_launcher',
+          icon: _smallIconResource,
+          color: _brandRed,
+          colorized: false,
+          styleInformation: BigTextStyleInformation(
+            body,
+            contentTitle: title,
+            summaryText: 'Intellisys',
+          ),
         ),
         iOS: const DarwinNotificationDetails(
           presentAlert: true,
           presentBadge: true,
           presentSound: true,
+          // Subtítulo discreto abaixo do título — espelha o "app name" bold
+          // do iOS sem precisar de Notification Service Extension.
+          subtitle: 'Intellisys',
         ),
       ),
       payload: payload,

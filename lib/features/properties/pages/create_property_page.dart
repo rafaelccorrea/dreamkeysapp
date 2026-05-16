@@ -2026,29 +2026,35 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     try {
       final companyId =
           (await SecureStorageService.instance.getCompanyId()) ?? '';
-      final id = _activeLocalDraftId ??
-          'ld_${DateTime.now().millisecondsSinceEpoch}';
-
-      final paths = await _draftStorage.copyImagesToDraftFolder(
-        draftId: id,
-        sources: List<File>.from(_selectedImages),
-      );
-
-      final draft = PropertyLocalDraft(
-        id: id,
+      // Sincroniza primeiro com o backend (campos do form + wizard step) para
+      // obter um id estável de servidor — só então copiamos as imagens
+      // para a pasta nomeada por esse id. Imagens permanecem locais.
+      final draftToSave = PropertyLocalDraft(
+        id: _activeLocalDraftId ?? '',
         displayTitle: trimmed,
         companyId: companyId,
         updatedAt: DateTime.now(),
         wizardStep: _currentStep.clamp(0, _totalSteps - 1),
         formJson: _freezeFormState(),
-        imagePaths: paths,
+        imagePaths: const [],
       );
 
-      await _draftStorage.save(draft);
+      final saved = await _draftStorage.save(draftToSave);
+
+      List<String> paths = const [];
+      if (_selectedImages.isNotEmpty) {
+        paths = await _draftStorage.copyImagesToDraftFolder(
+          draftId: saved.id,
+          sources: List<File>.from(_selectedImages),
+        );
+        await _draftStorage.setLocalImagePaths(saved.id, paths);
+      } else {
+        await _draftStorage.setLocalImagePaths(saved.id, const []);
+      }
 
       if (mounted) {
         setState(() {
-          _activeLocalDraftId = id;
+          _activeLocalDraftId = saved.id;
           _activeLocalDraftDisplayTitle = trimmed;
           _selectedImages.clear();
           for (final p in paths) {
@@ -2061,7 +2067,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content:
-                Text('Rascunho «$trimmed» guardado neste dispositivo.'),
+                Text('Rascunho «$trimmed» sincronizado com a sua conta.'),
             backgroundColor: AppColors.status.success,
           ),
         );

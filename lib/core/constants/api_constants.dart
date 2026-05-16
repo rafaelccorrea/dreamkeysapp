@@ -542,6 +542,11 @@ class ApiConstants {
   static String saleChecklistsByProperty(String propertyId) =>
       '/sale-checklists?propertyId=$propertyId';
 
+  // Endpoints de Rascunhos de imóvel (privado por usuário). Espelha o
+  // `PropertyDraftsController` no backend (`/property-drafts`).
+  static const String propertyDrafts = '/property-drafts';
+  static String propertyDraftById(String id) => '/property-drafts/$id';
+
   // Endpoints de Anotações (módulo `notes` + permissões `note:*`)
   static const String notes = '/notes';
   static const String notesStats = '/notes/stats';

@@ -47,19 +47,19 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'REPLACE_WITH_FIREBASE_API_KEY',
-    appId: 'REPLACE_WITH_MOBILESDK_APP_ID',
-    messagingSenderId: 'REPLACE_WITH_SENDER_ID',
-    projectId: 'REPLACE_WITH_PROJECT_ID',
-    storageBucket: 'REPLACE_WITH_PROJECT_ID.appspot.com',
+    apiKey: 'AIzaSyCR7HQ7n7nLpRuzxbzjiK3inmDLOBu4W88',
+    appId: '1:213709429896:android:b9a3267431c41a5b24133d',
+    messagingSenderId: '213709429896',
+    projectId: 'intellisys-68ea0',
+    storageBucket: 'intellisys-68ea0.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'REPLACE_WITH_FIREBASE_API_KEY',
-    appId: 'REPLACE_WITH_IOS_APP_ID',
-    messagingSenderId: 'REPLACE_WITH_SENDER_ID',
-    projectId: 'REPLACE_WITH_PROJECT_ID',
-    storageBucket: 'REPLACE_WITH_PROJECT_ID.appspot.com',
+    apiKey: 'AIzaSyC0tznbXaxwPepgcjDqnCbmgekP4LWIP1w',
+    appId: '1:213709429896:ios:66196bcf49edcab124133d',
+    messagingSenderId: '213709429896',
+    projectId: 'intellisys-68ea0',
+    storageBucket: 'intellisys-68ea0.firebasestorage.app',
     iosBundleId: 'com.dreamkeys.corretor',
   );
 }
