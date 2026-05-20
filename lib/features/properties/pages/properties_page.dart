@@ -7,6 +7,7 @@ import '../../../../shared/services/module_access_service.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
 import '../../../../shared/widgets/shimmer_image.dart';
+import '../../../../shared/state/screen_state_cache.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/shell_visual_tokens.dart';
 import '../../../../core/theme/theme_helpers.dart';
@@ -135,6 +136,10 @@ class _PropertiesPageState extends State<PropertiesPage> {
 
   int _localDraftCount = 0;
 
+  /// Chave usada para guardar/restaurar estado desta tela quando o usuário
+  /// sai e volta em curto prazo (filtros + termo de busca).
+  static const String _stateCacheKey = 'properties:list';
+
   /// Carrossel de imóveis em destaque (`isFeatured`).
   late final PageController _featuredPageController =
       PageController(viewportFraction: 0.86);
@@ -143,6 +148,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
   @override
   void initState() {
     super.initState();
+    _restoreCachedState();
     _loadProperties();
     _refreshLocalDraftCount();
     _scrollController.addListener(_onScroll);
@@ -150,11 +156,38 @@ class _PropertiesPageState extends State<PropertiesPage> {
 
   @override
   void dispose() {
+    _persistState();
     _searchController.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _featuredPageController.dispose();
     super.dispose();
+  }
+
+  /// Restaura `_searchQuery` e `_filters` da cache em memória (se houver).
+  /// Chamado uma vez no `initState` antes do primeiro `_loadProperties`.
+  void _restoreCachedState() {
+    final cache = ScreenStateCache.instance.read<Map<String, dynamic>>(
+      _stateCacheKey,
+    );
+    if (cache == null) return;
+    final cachedSearch = cache['search'] as String?;
+    final cachedFilters = cache['filters'];
+    if (cachedSearch != null && cachedSearch.isNotEmpty) {
+      _searchQuery = cachedSearch;
+      _searchController.text = cachedSearch;
+    }
+    if (cachedFilters is PropertyFilters) {
+      _filters = cachedFilters;
+    }
+  }
+
+  /// Guarda o estado atual da listagem (busca + filtros) na cache global.
+  void _persistState() {
+    ScreenStateCache.instance.save(_stateCacheKey, {
+      'search': _searchQuery,
+      'filters': _filters,
+    });
   }
 
   Future<void> _refreshLocalDraftCount() async {
@@ -652,6 +685,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
               initialFilters: _filters,
               onFiltersChanged: (filters) {
                 setState(() => _filters = filters);
+                _persistState();
                 _loadProperties(refresh: true);
               },
             ),
@@ -925,6 +959,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
                               onClear: () {
                                 _searchController.clear();
                                 setState(() => _searchQuery = '');
+                                _persistState();
                                 _loadProperties(refresh: true);
                               },
                             ),
@@ -935,6 +970,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
                               'Filtros aplicados',
                               onClear: () {
                                 setState(() => _filters = null);
+                                _persistState();
                                 _loadProperties(refresh: true);
                               },
                             ),
@@ -2145,6 +2181,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
         onClear: () {
           _searchController.clear();
           setState(() => _searchQuery = '');
+          _persistState();
           Navigator.of(sheetCtx).pop();
           _loadProperties(refresh: true);
         },
@@ -2156,6 +2193,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
     setState(() {
       _searchQuery = query;
     });
+    _persistState();
     _loadProperties(refresh: true);
   }
 
@@ -2609,6 +2647,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
         _searchQuery = '';
         _filters = null;
       });
+      _persistState();
       _loadProperties(refresh: true);
     }
 

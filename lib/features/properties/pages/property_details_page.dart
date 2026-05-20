@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../shared/services/property_service.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
@@ -246,6 +247,16 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return access.hasPermission(AppPermissions.propertyApprovePublication) ||
         access.hasPermission(AppPermissions.propertyApproveAvailability);
   }
+
+  /// Define a imagem principal direto pelo carrossel fullscreen. Liberado para:
+  ///   - quem pode editar a ficha do imóvel (responsável/captador/gestão)
+  ///   - quem tem permissão de aprovação (mesma regra do botão de excluir foto)
+  ///
+  /// Backend: `PATCH /gallery/:id/set-main`. Em caso de sucesso, o front
+  /// atualiza local + sinaliza ao detalhe pra recarregar e mostrar a nova
+  /// foto principal no carrossel + cards.
+  bool get _canSetMainPropertyImage =>
+      _canEditProperty || _canDeletePropertyImages;
 
   @override
   void initState() {
@@ -1268,6 +1279,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           initialIndex: initial,
           propertyId: _property?.id ?? '',
           canDelete: _canDeletePropertyImages,
+          canSetMain: _canSetMainPropertyImage,
         ),
         transitionsBuilder: (_, anim, __, child) =>
             FadeTransition(opacity: anim, child: child),
@@ -1576,7 +1588,15 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           ),
         ],
 
-        // Footer extra (responsável, captador, etc) — quando existe,
+        // Captação — bloco editorial dedicado: apresenta todos os captadores
+        // (multi) com avatar/iniciais + nome + canal de contato (telefone).
+        // Quando não há captadores (lista vazia), nada é renderizado.
+        if (_hasCaptorsContent(property)) ...[
+          const SizedBox(height: 14),
+          _buildCaptorsBlock(context, theme, property, isDark, muted),
+        ],
+
+        // Footer extra (responsável, datas) — quando existe,
         // separado por linha fina pra dividir hierarquia
         if (hasFooter) ...[
           const SizedBox(height: 14),
@@ -1589,6 +1609,140 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           _buildIdentityFooter(theme, property, muted),
         ],
       ],
+    );
+  }
+
+  /// Lista normalizada de captadores. Prioriza `captors` (multi, vindo da API
+  /// de detalhe). Cai para `capturedBy` (single, legacy) se o multi não veio.
+  List<PropertyCaptor> _resolveCaptors(Property property) {
+    final multi = property.captors ?? const <PropertyCaptor>[];
+    if (multi.isNotEmpty) {
+      // Deduplica por id pra evitar repetição quando o backend devolve tanto
+      // legacy quanto multi (raríssimo, mas mantém UI limpa).
+      final seen = <String>{};
+      return multi.where((c) => seen.add(c.id)).toList();
+    }
+    final legacy = property.capturedBy;
+    if (legacy != null && legacy.name.isNotEmpty) {
+      return [
+        PropertyCaptor(
+          id: legacy.id,
+          name: legacy.name,
+          email: legacy.email,
+          phone: legacy.phone,
+          avatar: legacy.avatar,
+        ),
+      ];
+    }
+    return const [];
+  }
+
+  bool _hasCaptorsContent(Property property) => _resolveCaptors(property).isNotEmpty;
+
+  /// Bloco refinado de captação:
+  ///   - eyebrow "CAPTAÇÃO" + contador de captadores
+  ///   - lista de cards com avatar (foto ou iniciais coloridas), nome,
+  ///     e linha de contato (telefone) abaixo
+  ///   - botão de "Ligar" e botão de "WhatsApp" quando há telefone
+  Widget _buildCaptorsBlock(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+    bool isDark,
+    Color muted,
+  ) {
+    final captors = _resolveCaptors(property);
+    final accent = isDark
+        ? AppColors.primary.primaryDarkMode
+        : AppColors.primary.primary;
+    final cardBg = isDark
+        ? Colors.white.withValues(alpha: 0.035)
+        : Colors.white;
+    final borderColor = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : Colors.black.withValues(alpha: 0.06);
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.022)
+            : accent.withValues(alpha: 0.04),
+        border: Border.all(
+          color: accent.withValues(alpha: isDark ? 0.18 : 0.16),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Icon(
+                  Icons.flag_circle_rounded,
+                  size: 14,
+                  color: accent,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'CAPTAÇÃO',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.6,
+                  color: muted,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: accent.withValues(alpha: 0.32),
+                  ),
+                ),
+                child: Text(
+                  captors.length == 1
+                      ? '1 captador'
+                      : '${captors.length} captadores',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.3,
+                    color: accent,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Column(
+            children: [
+              for (var i = 0; i < captors.length; i++) ...[
+                if (i > 0) const SizedBox(height: 8),
+                _CaptorTile(
+                  captor: captors[i],
+                  accent: accent,
+                  cardBg: cardBg,
+                  borderColor: borderColor,
+                  isDark: isDark,
+                  muted: muted,
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -1675,14 +1829,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   }
 
   bool _hasIdentityFooterContent(Property property) {
-    return property.updatedAt.isNotEmpty ||
-        property.capturedBy != null ||
-        property.createdAt.isNotEmpty;
+    return property.updatedAt.isNotEmpty || property.createdAt.isNotEmpty;
   }
 
   Widget _buildIdentityFooter(ThemeData theme, Property property, Color muted) {
     final updatedAgo = _humanRelativeTime(property.updatedAt);
-    final captured = property.capturedBy?.name;
     final createdAgo = _humanRelativeTime(property.createdAt);
 
     return Wrap(
@@ -1693,13 +1844,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           _identityMicroInfo(
             icon: Icons.history_rounded,
             label: 'Atualizado $updatedAgo',
-            muted: muted,
-            theme: theme,
-          ),
-        if (captured != null && captured.isNotEmpty)
-          _identityMicroInfo(
-            icon: Icons.person_pin_circle_outlined,
-            label: 'Captado por $captured',
             muted: muted,
             theme: theme,
           ),
@@ -6015,12 +6159,14 @@ class _FullscreenGallery extends StatefulWidget {
     required this.initialIndex,
     required this.propertyId,
     this.canDelete = false,
+    this.canSetMain = false,
   });
 
   final List<PropertyImage> images;
   final int initialIndex;
   final String propertyId;
   final bool canDelete;
+  final bool canSetMain;
 
   @override
   State<_FullscreenGallery> createState() => _FullscreenGalleryState();
@@ -6032,6 +6178,7 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
   late int _index;
   bool _didMutate = false;
   bool _deleting = false;
+  bool _settingMain = false;
 
   /// Cache de dimensões reais (decodificadas) por url. Evita resolver de
   /// novo a cada rebuild e permite mostrar o ratio na barra inferior.
@@ -6120,6 +6267,74 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
       default:
         return raw[0].toUpperCase() + raw.substring(1);
     }
+  }
+
+  /// Define a foto atual como principal. Sem confirmação por modal — a ação
+  /// é reversível (basta marcar outra) e o feedback fica no snackbar.
+  Future<void> _setCurrentAsMain() async {
+    if (!widget.canSetMain || _settingMain) return;
+    final img = _currentImage;
+    if (img == null || img.id.isEmpty) return;
+    if (img.isMain) return;
+
+    setState(() => _settingMain = true);
+
+    final res = await GalleryService.instance.setMainImage(img.id);
+
+    if (!mounted) return;
+
+    if (!res.success) {
+      setState(() => _settingMain = false);
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          backgroundColor: AppColors.status.error,
+          behavior: SnackBarBehavior.floating,
+          content: Text(
+            res.message ?? 'Não foi possível definir a foto principal.',
+            style: const TextStyle(color: Colors.white),
+          ),
+        ),
+      );
+      return;
+    }
+
+    // Atualiza local: a nova vira principal e todas as outras saem como
+    // principal. Espelha o comportamento do backend (single-main).
+    setState(() {
+      _images = _images
+          .map(
+            (e) => PropertyImage(
+              id: e.id,
+              url: e.url,
+              thumbnailUrl: e.thumbnailUrl,
+              category: e.category,
+              isMain: e.id == img.id,
+              createdAt: e.createdAt,
+            ),
+          )
+          .toList();
+      _didMutate = true;
+      _settingMain = false;
+    });
+
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      const SnackBar(
+        backgroundColor: Color(0xFFE0AA3E),
+        behavior: SnackBarBehavior.floating,
+        content: Row(
+          children: [
+            Icon(Icons.star_rounded, color: Colors.white, size: 18),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Foto principal atualizada.',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _confirmAndDelete() async {
@@ -6305,6 +6520,23 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
                         ),
                       ),
                     ),
+                  if (widget.canSetMain && current != null) ...[
+                    const SizedBox(width: 10),
+                    _GalleryRoundIconButton(
+                      // Amarelo "principal": estrela cheia quando já é a
+                      // principal (somente leitura), contorno quando tap.
+                      icon: current.isMain
+                          ? Icons.star_rounded
+                          : Icons.star_outline_rounded,
+                      onTap: current.isMain ? null : _setCurrentAsMain,
+                      tint: const Color(0xFFE0AA3E),
+                      busy: _settingMain,
+                      filled: current.isMain,
+                      tooltip: current.isMain
+                          ? 'Já é a foto principal'
+                          : 'Definir como foto principal',
+                    ),
+                  ],
                   if (widget.canDelete && current != null) ...[
                     const SizedBox(width: 10),
                     _GalleryRoundIconButton(
@@ -6541,10 +6773,15 @@ class _GalleryRoundIconButton extends StatelessWidget {
     required this.onTap,
     this.tint,
     this.busy = false,
+    this.filled = false,
+    this.tooltip,
   });
 
   final IconData icon;
-  final VoidCallback onTap;
+
+  /// `null` desabilita o tap (estado "somente leitura" — usado, por
+  /// exemplo, na estrela quando a foto JÁ é a principal).
+  final VoidCallback? onTap;
 
   /// Cor de destaque opcional (usada na ação destrutiva de excluir).
   /// Quando setada, o botão herda essa cor no fundo (com alpha) e na borda.
@@ -6553,21 +6790,40 @@ class _GalleryRoundIconButton extends StatelessWidget {
   /// Quando `true`, mostra spinner em lugar do ícone e desabilita o tap.
   final bool busy;
 
+  /// Quando `true`, pinta o botão sólido na cor `tint` — usado para o
+  /// estado "ativo" (ex.: estrela cheia indicando foto principal).
+  final bool filled;
+
+  /// Texto opcional do `Tooltip` (long-press).
+  final String? tooltip;
+
   @override
   Widget build(BuildContext context) {
     final hasTint = tint != null;
-    final fg = hasTint ? tint! : Colors.white;
-    final bg = hasTint
-        ? tint!.withValues(alpha: 0.18)
-        : Colors.black.withValues(alpha: 0.55);
-    final borderColor = hasTint
-        ? tint!.withValues(alpha: 0.6)
-        : Colors.white.withValues(alpha: 0.18);
+    Color fg;
+    Color bg;
+    Color borderColor;
 
-    return Material(
+    if (filled && hasTint) {
+      fg = Colors.white;
+      bg = tint!;
+      borderColor = tint!;
+    } else if (hasTint) {
+      fg = tint!;
+      bg = tint!.withValues(alpha: 0.18);
+      borderColor = tint!.withValues(alpha: 0.6);
+    } else {
+      fg = Colors.white;
+      bg = Colors.black.withValues(alpha: 0.55);
+      borderColor = Colors.white.withValues(alpha: 0.18);
+    }
+
+    final disabled = onTap == null || busy;
+
+    final button = Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: busy ? null : onTap,
+        onTap: disabled ? null : onTap,
         borderRadius: BorderRadius.circular(22),
         child: Container(
           width: 44,
@@ -6576,6 +6832,15 @@ class _GalleryRoundIconButton extends StatelessWidget {
             color: bg,
             shape: BoxShape.circle,
             border: Border.all(color: borderColor),
+            boxShadow: filled
+                ? [
+                    BoxShadow(
+                      color: (tint ?? Colors.black).withValues(alpha: 0.36),
+                      blurRadius: 14,
+                      spreadRadius: -2,
+                    ),
+                  ]
+                : null,
           ),
           child: busy
               ? Padding(
@@ -6589,6 +6854,11 @@ class _GalleryRoundIconButton extends StatelessWidget {
         ),
       ),
     );
+
+    if (tooltip != null && tooltip!.isNotEmpty) {
+      return Tooltip(message: tooltip!, child: button);
+    }
+    return button;
   }
 }
 
@@ -6785,6 +7055,246 @@ class _ExpandToggle extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Card refinado para um único captador.
+///
+/// Layout:
+///   [Avatar 36px] [Nome (bold) + linha de contato (telefone/email muted)]
+///   [Ações em ícone à direita: Ligar / WhatsApp — só quando há telefone]
+///
+/// Avatar: foto se houver `avatar`, senão iniciais do nome em fundo gradiente
+/// derivado do accent (ou de um palette estável por hash do nome).
+class _CaptorTile extends StatelessWidget {
+  const _CaptorTile({
+    required this.captor,
+    required this.accent,
+    required this.cardBg,
+    required this.borderColor,
+    required this.isDark,
+    required this.muted,
+  });
+
+  final PropertyCaptor captor;
+  final Color accent;
+  final Color cardBg;
+  final Color borderColor;
+  final bool isDark;
+  final Color muted;
+
+  /// Iniciais para o avatar quando não há foto. Pega a primeira letra do
+  /// primeiro e do último nome — em pessoas com nome único, repete a primeira.
+  String _initials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty || parts.first.isEmpty) return '?';
+    if (parts.length == 1) {
+      return parts.first.characters.first.toUpperCase();
+    }
+    return (parts.first.characters.first + parts.last.characters.first)
+        .toUpperCase();
+  }
+
+  /// Telefone formatado pra exibição. Aceita E.164, dígitos puros, "(xx) ...".
+  String _displayPhone(String phone) {
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    if (digits.length == 11) {
+      return '(${digits.substring(0, 2)}) ${digits.substring(2, 7)}-${digits.substring(7)}';
+    }
+    if (digits.length == 10) {
+      return '(${digits.substring(0, 2)}) ${digits.substring(2, 6)}-${digits.substring(6)}';
+    }
+    return phone;
+  }
+
+  Future<void> _call(String phone) async {
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) return;
+    final uri = Uri(scheme: 'tel', path: digits);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    }
+  }
+
+  Future<void> _whatsapp(String phone) async {
+    var digits = phone.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) return;
+    // Garante DDI 55 quando vem só DDD + número.
+    if (digits.length <= 11 && !digits.startsWith('55')) {
+      digits = '55$digits';
+    }
+    final uri = Uri.parse('https://wa.me/$digits');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final name = (captor.name ?? '').trim();
+    final email = (captor.email ?? '').trim();
+    final phone = (captor.phone ?? '').trim();
+    final displayName = name.isNotEmpty ? name : 'Captador';
+    final hasPhone = phone.isNotEmpty;
+    final hasAvatar = (captor.avatar ?? '').isNotEmpty;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 9, 8, 9),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderColor),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: hasAvatar
+                  ? null
+                  : LinearGradient(
+                      colors: [
+                        accent,
+                        accent.withValues(alpha: 0.65),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+              image: hasAvatar
+                  ? DecorationImage(
+                      image: NetworkImage(captor.avatar!),
+                      fit: BoxFit.cover,
+                    )
+                  : null,
+              border: Border.all(
+                color: accent.withValues(alpha: 0.35),
+                width: 1.2,
+              ),
+            ),
+            alignment: Alignment.center,
+            child: hasAvatar
+                ? null
+                : Text(
+                    _initials(displayName),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  displayName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    color: isDark ? Colors.white : Colors.black87,
+                    letterSpacing: -0.1,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    Icon(
+                      hasPhone
+                          ? Icons.phone_rounded
+                          : (email.isNotEmpty
+                              ? Icons.mail_outline_rounded
+                              : Icons.person_outline_rounded),
+                      size: 12,
+                      color: muted,
+                    ),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        hasPhone
+                            ? _displayPhone(phone)
+                            : (email.isNotEmpty ? email : 'Sem contato'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: muted,
+                          letterSpacing: -0.05,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          if (hasPhone) ...[
+            const SizedBox(width: 4),
+            _CaptorActionButton(
+              icon: Icons.phone_rounded,
+              tint: accent,
+              tooltip: 'Ligar',
+              onTap: () => _call(phone),
+            ),
+            const SizedBox(width: 4),
+            _CaptorActionButton(
+              icon: Icons.chat_rounded,
+              tint: const Color(0xFF25D366),
+              tooltip: 'WhatsApp',
+              onTap: () => _whatsapp(phone),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _CaptorActionButton extends StatelessWidget {
+  const _CaptorActionButton({
+    required this.icon,
+    required this.tint,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final Color tint;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: tint.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: tint.withValues(alpha: 0.32)),
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, size: 16, color: tint),
           ),
         ),
       ),

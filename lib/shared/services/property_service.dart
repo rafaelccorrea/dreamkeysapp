@@ -412,6 +412,10 @@ class Property {
   final String? capturedById;
   final List<String>? capturedByIds;
   final PropertyCapturedBy? capturedBy;
+  /// Lista completa de captadores (multi) com dados básicos (id/nome/email/phone).
+  /// Vem em `/properties/:id` (paridade com o web). Pode coexistir com `capturedBy`
+  /// (legacy single). UI deve preferir esta quando presente.
+  final List<PropertyCaptor>? captors;
   /// Status da autorização de venda / contrato de agenciamento do proprietário
   /// (ex.: `signed`). Quando assinada, responsável/captador deixam de poder
   /// editar a ficha — apenas gestão (master/admin/manager) e aprovadores.
@@ -509,6 +513,7 @@ class Property {
     this.capturedById,
     this.capturedByIds,
     this.capturedBy,
+    this.captors,
     this.ownerAuthStatus,
     this.ownerAuthSignedAt,
     this.availabilityRejectedAt,
@@ -655,6 +660,18 @@ class Property {
       sitePublicationApprovalDesired:
           json['sitePublicationApprovalDesired'] as bool? ??
               json['site_publication_approval_desired'] as bool?,
+      captors: () {
+        final raw = json['captors'];
+        if (raw is List) {
+          return raw
+              .whereType<Map>()
+              .map((e) =>
+                  PropertyCaptor.fromJson(Map<String, dynamic>.from(e)))
+              .where((c) => c.id.isNotEmpty)
+              .toList();
+        }
+        return null;
+      }(),
       capturedBy: json['capturedBy'] != null
           ? PropertyCapturedBy.fromJson(json['capturedBy'] as Map<String, dynamic>)
           : json['captured_by'] != null
@@ -722,6 +739,35 @@ class PropertyCapturedBy {
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
       email: json['email']?.toString() ?? '',
+      phone: json['phone']?.toString(),
+      avatar: AvatarUrlResolver.resolve(json['avatar']?.toString()),
+    );
+  }
+}
+
+/// Captador (multi). O backend devolve `captors` em /properties/:id com
+/// `{ id, name?, email?, phone? }`. O `avatar` é opcional e quase nunca vem,
+/// então a UI cai pro fallback de iniciais.
+class PropertyCaptor {
+  final String id;
+  final String? name;
+  final String? email;
+  final String? phone;
+  final String? avatar;
+
+  PropertyCaptor({
+    required this.id,
+    this.name,
+    this.email,
+    this.phone,
+    this.avatar,
+  });
+
+  factory PropertyCaptor.fromJson(Map<String, dynamic> json) {
+    return PropertyCaptor(
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString(),
+      email: json['email']?.toString(),
       phone: json['phone']?.toString(),
       avatar: AvatarUrlResolver.resolve(json['avatar']?.toString()),
     );

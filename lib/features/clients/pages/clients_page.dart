@@ -10,6 +10,7 @@ import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/utils/masks.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import '../../../shared/state/screen_state_cache.dart';
 import '../../matches/models/match_model.dart';
 import '../../matches/services/match_service.dart';
 import '../models/client_model.dart';
@@ -82,9 +83,13 @@ class _ClientsPageState extends State<ClientsPage> {
   String _searchQuery = '';
   ClientStatistics? _statistics;
 
+  /// Chave usada para preservar estado (busca + filtros) ao sair e voltar.
+  static const String _stateCacheKey = 'clients:list';
+
   @override
   void initState() {
     super.initState();
+    _restoreCachedState();
     _scrollController.addListener(_onScroll);
     _loadClients(refresh: true);
     _loadStatistics();
@@ -92,11 +97,37 @@ class _ClientsPageState extends State<ClientsPage> {
 
   @override
   void dispose() {
+    _persistState();
     _searchController.dispose();
     _scrollController
       ..removeListener(_onScroll)
       ..dispose();
     super.dispose();
+  }
+
+  /// Restaura `_searchQuery` e `_filters` da cache global em memória.
+  void _restoreCachedState() {
+    final cached = ScreenStateCache.instance.read<Map<String, dynamic>>(
+      _stateCacheKey,
+    );
+    if (cached == null) return;
+    final s = cached['search'] as String?;
+    final f = cached['filters'];
+    if (s != null && s.isNotEmpty) {
+      _searchQuery = s;
+      _searchController.text = s;
+    }
+    if (f is ClientSearchFilters) {
+      _filters = f;
+    }
+  }
+
+  /// Persiste o estado atual para restauração rápida ao voltar para a tela.
+  void _persistState() {
+    ScreenStateCache.instance.save(_stateCacheKey, {
+      'search': _searchQuery,
+      'filters': _filters,
+    });
   }
 
   void _onScroll() {
@@ -190,6 +221,7 @@ class _ClientsPageState extends State<ClientsPage> {
     setState(() {
       _searchQuery = query;
     });
+    _persistState();
     await _loadClients(refresh: true);
   }
 
@@ -638,6 +670,7 @@ class _ClientsPageState extends State<ClientsPage> {
                               'Filtros aplicados',
                               onClear: () {
                                 setState(() => _filters = null);
+                                _persistState();
                                 _loadClients(refresh: true);
                                 _loadStatistics();
                               },
@@ -2460,6 +2493,7 @@ class _ClientsPageState extends State<ClientsPage> {
                                   _searchQuery = '';
                                   _filters = null;
                                 });
+                                _persistState();
                                 _loadClients(refresh: true);
                                 _loadStatistics();
                               },
@@ -2526,6 +2560,7 @@ class _ClientsPageState extends State<ClientsPage> {
         initialFilters: _filters,
         onFiltersChanged: (filters) {
           setState(() => _filters = filters);
+          _persistState();
           _loadClients(refresh: true);
           _loadStatistics();
         },
