@@ -35,7 +35,12 @@ dependencies:
   lottie: ^3.0.0
   socket_io_client: ^3.1.4
   url_launcher: ^6.2.5
-  lucide_icons: ^0.257.0
+  # Substitui o antigo `lucide_icons` (0.257.0, abandonado): aquela versão
+  # estendia `IconData`, que virou `final class` no Flutter 3.44+ — o build
+  # iOS quebrava com "The class 'IconData' can't be extended outside of its
+  # library because it's a final class". Este fork (`lucide_icons_flutter`)
+  # mantém a mesma API (`import .../lucide_icons.dart` + `LucideIcons.xxx`).
+  lucide_icons_flutter: ^3.1.14+1
   device_info_plus: ^13.1.0
   firebase_core: ^4.7.0
   firebase_messaging: ^16.2.0

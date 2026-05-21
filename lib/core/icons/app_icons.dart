@@ -3,12 +3,12 @@
 ///
 /// No Flutter, use a mesma família via [LucideIcons]:
 /// ```dart
-/// import 'package:lucide_icons/lucide_icons.dart';
+/// import 'package:lucide_icons_flutter/lucide_icons.dart';
 /// Icon(LucideIcons.home, size: AppIconSize.md);
 /// ```
 library;
 
-export 'package:lucide_icons/lucide_icons.dart' show LucideIcons;
+export 'package:lucide_icons_flutter/lucide_icons.dart' show LucideIcons;
 
 /// Tamanhos úteis (Lucide = traço único; equivalente visual ao web ~20–24px).
 class AppIconSize {
