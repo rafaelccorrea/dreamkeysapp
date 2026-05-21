@@ -52,22 +52,25 @@ end
 File.write(podfile_path, podfile_content)
 puts "Podfile modificado e salvo com sucesso."
 
-# Opcional: Para garantir que o Xcode Project também reflita a mudança
-# Isso é mais complexo e geralmente o pod install já faz isso, mas é um fallback
-# begin
-#   project_path = Dir.glob(File.join(Dir.pwd, 'ios', '*.xcodeproj')).first
-#   if project_path
-#     project = Xcodeproj::Project.open(project_path)
-#     project.targets.each do |target|
-#       target.build_configurations.each do |config|
-#         config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
-#       end
-#     end
-#     project.save
-#     puts "Xcode project #{project_path} atualizado com deployment target 15.0."
-#   else
-#     puts "Aviso: Arquivo .xcodeproj não encontrado para atualização direta."
-#   end
-# rescue => e
-#   puts "Erro ao tentar atualizar o arquivo .xcodeproj: #{e.message}"
-# end
+# Força o Runner.xcodeproj a ter IPHONEOS_DEPLOYMENT_TARGET = 15.0 em todos
+# os targets/configurações. Sem isso, o erro "Target Integrity (Xcode): The
+# package product 'firebase-messaging' requires minimum platform version
+# 15.0 ... but this target supports 13.0" volta em qualquer rebuild do
+# pbxproj (CI, Flutter SDK upgrades, etc.).
+begin
+  project_path = Dir.glob(File.join(Dir.pwd, 'ios', '*.xcodeproj')).first
+  if project_path
+    project = Xcodeproj::Project.open(project_path)
+    project.targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+      end
+    end
+    project.save
+    puts "Xcode project #{project_path} atualizado com deployment target 15.0."
+  else
+    puts "Aviso: Arquivo .xcodeproj não encontrado para atualização direta."
+  end
+rescue => e
+  puts "Erro ao tentar atualizar o arquivo .xcodeproj: #{e.message}"
+end
