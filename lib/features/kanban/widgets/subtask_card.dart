@@ -7,12 +7,18 @@ import '../../../core/theme/theme_helpers.dart';
 import '../models/kanban_subtask_models.dart';
 import 'subtask_visual_helpers.dart';
 
-/// Linha **fluida** de uma subtarefa — sem caixa em volta, apenas
-/// faixa-timeline lateral + ícone do tipo + conteúdo rico que respira.
+/// Card visual de uma subtarefa — agora é um cartão de verdade com
+/// fundo, borda e sombra, NÃO uma linha listada.
 ///
-/// Pensado pra conviver direto sobre o gradiente do shell, com **dividers
-/// sutis** entre itens (gerenciados pelo pai), entregando densidade
-/// editorial sem visual encapsulado.
+/// Estrutura:
+///   [Stripe colorido lateral 4px] [conteúdo do card]
+///
+/// O conteúdo tem:
+///   - Header: chip do bucket (status) + chip do tipo + ações à direita
+///   - Título grande
+///   - Descrição (opcional, 2 linhas)
+///   - Parent card line (opcional)
+///   - Meta footer com chips densos (data, autor, comentários, criada há)
 class SubTaskCard extends StatelessWidget {
   final KanbanSubTask subtask;
   final bool showParentCard;
@@ -43,79 +49,203 @@ class SubTaskCard extends StatelessWidget {
         : AppColors.status.error;
     final typeStyle = SubTaskTypeStyle.of(context, subtask.taskType);
     final bucketColor = subtaskBucketColor(context, subtask);
+    final completed = subtask.isCompleted;
+    final cardBg = isDark
+        ? AppColors.background.cardBackgroundDarkMode
+        : AppColors.background.cardBackground;
+    final borderColor = isDark
+        ? AppColors.border.borderDarkMode
+        : AppColors.border.border;
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        splashColor: typeStyle.color.withValues(alpha: 0.08),
-        highlightColor: typeStyle.color.withValues(alpha: 0.04),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          child: IntrinsicHeight(
-            child: Row(
+    // Cor de borda tintada na cor do bucket — substitui a stripe lateral
+    // sem precisar de Row+stretch (que estourava layout em scroll vertical)
+    // e sem violar a regra do Flutter de "borderRadius exige borda uniforme".
+    final tintedBorder = completed
+        ? borderColor.withValues(alpha: 0.55)
+        : bucketColor.withValues(alpha: isDark ? 0.36 : 0.26);
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      decoration: BoxDecoration(
+        color: completed
+            ? (isDark
+                ? cardBg.withValues(alpha: 0.62)
+                : cardBg.withValues(alpha: 0.86))
+            : cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: tintedBorder, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: isDark
+                ? Colors.black.withValues(alpha: 0.18)
+                : Colors.black.withValues(alpha: 0.04),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+            spreadRadius: -6,
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          onLongPress: (onEdit != null || onDelete != null)
+              ? () => _showLongPressMenu(context, danger)
+              : null,
+          borderRadius: BorderRadius.circular(16),
+          splashColor: bucketColor.withValues(alpha: 0.08),
+          highlightColor: bucketColor.withValues(alpha: 0.04),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                _Timeline(color: bucketColor),
-                const SizedBox(width: 10),
-                _TypeIcon(style: typeStyle),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _TitleRow(
-                        title: subtask.title,
-                        isCompleted: subtask.isCompleted,
-                        statusLabel: subtaskBucketLabel(subtask),
-                        statusColor: bucketColor,
-                        statusIcon: _bucketIcon(subtask.bucket),
-                      ),
-                      if ((subtask.description ?? '').isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        Text(
-                          subtask.description!,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: neutral,
-                            fontWeight: FontWeight.w500,
-                            height: 1.4,
-                          ),
+                // ── Row 1: título grande + check (sem menu) ──────────
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        subtask.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          color: ThemeHelpers.textColor(context),
+                          height: 1.22,
+                          letterSpacing: -0.25,
+                          decoration: completed
+                              ? TextDecoration.lineThrough
+                              : null,
+                          decorationColor:
+                              neutral.withValues(alpha: 0.6),
                         ),
-                      ],
-                      if (showParentCard &&
-                          (subtask.parentTask?.title.isNotEmpty == true ||
-                              (subtask.parentTaskTitle ?? '').isNotEmpty)) ...[
-                        const SizedBox(height: 8),
-                        _ParentCardLine(subtask: subtask),
-                      ],
-                      const SizedBox(height: 8),
-                      _MetaWrap(
-                        subtask: subtask,
-                        typeStyle: typeStyle,
-                        bucketColor: bucketColor,
                       ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(width: 8),
+                    _CheckCircle(
+                      completed: completed,
+                      color: bucketColor,
+                      busy: busy,
+                      onTap: onToggle,
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                _RightActions(
-                  isCompleted: subtask.isCompleted,
-                  color: bucketColor,
-                  busy: busy,
-                  onToggle: onToggle,
-                  onEdit: onEdit,
-                  onDelete: onDelete,
+                const SizedBox(height: 8),
+                // ── Row 2: chips de contexto (status, tipo, prazo) ──
+                _ContextChips(
+                  bucketLabel: subtaskBucketLabel(subtask),
+                  bucketColor: bucketColor,
+                  bucketIcon: _bucketIcon(subtask.bucket),
+                  typeStyle: typeStyle,
+                  typeLabel: subtask.taskType?.label,
+                  dueLabel: _formatDuePill(subtask),
+                  dueIsOverdue: subtask.bucket == 'overdue',
+                  dueIsToday: subtask.bucket == 'today',
                   dangerColor: danger,
                 ),
+                if ((subtask.description ?? '').isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    subtask.description!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: neutral,
+                      fontWeight: FontWeight.w500,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+                if (showParentCard &&
+                    (subtask.parentTask?.title.isNotEmpty == true ||
+                        (subtask.parentTaskTitle ?? '').isNotEmpty)) ...[
+                  const SizedBox(height: 9),
+                  _ParentCardLine(subtask: subtask),
+                ],
+                const SizedBox(height: 9),
+                // ── Row final: footer (autor + comentários + criada há) ──
+                _FooterMeta(subtask: subtask),
               ],
             ),
           ),
         ),
       ),
     );
+  }
+
+  /// Long-press menu — substitui o `_MoreMenu` no canto do card, mantendo
+  /// a tela limpa mas sem perder as ações de editar/excluir.
+  Future<void> _showLongPressMenu(BuildContext context, Color dangerColor) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final res = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: isDark
+          ? AppColors.background.cardBackgroundDarkMode
+          : AppColors.background.cardBackground,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: ThemeHelpers.borderColor(ctx)
+                    .withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (onEdit != null)
+              ListTile(
+                leading: const Icon(LucideIcons.edit2, size: 18),
+                title: const Text('Editar'),
+                onTap: () => Navigator.of(ctx).pop('edit'),
+              ),
+            if (onDelete != null)
+              ListTile(
+                leading: Icon(LucideIcons.trash2,
+                    size: 18, color: dangerColor),
+                title: Text('Excluir',
+                    style: TextStyle(color: dangerColor)),
+                onTap: () => Navigator.of(ctx).pop('delete'),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (res == 'edit') onEdit?.call();
+    if (res == 'delete') onDelete?.call();
+  }
+
+  String? _formatDuePill(KanbanSubTask st) {
+    if (st.dueDate == null) return null;
+    final d = st.dueDate!.toLocal();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final dueDay = DateTime(d.year, d.month, d.day);
+    String dateStr;
+    if (dueDay == today) {
+      dateStr = 'Hoje';
+    } else if (dueDay == today.add(const Duration(days: 1))) {
+      dateStr = 'Amanhã';
+    } else if (dueDay == today.subtract(const Duration(days: 1))) {
+      dateStr = 'Ontem';
+    } else {
+      dateStr = DateFormat('d MMM', 'pt_BR').format(d);
+    }
+    if (st.dueTime != null && st.dueTime!.isNotEmpty) {
+      return '$dateStr · ${st.dueTime!}';
+    }
+    return dateStr;
   }
 
   IconData _bucketIcon(String bucket) {
@@ -137,142 +267,358 @@ class SubTaskCard extends StatelessWidget {
   }
 }
 
-/// Divider sutil entre subtarefas (use no pai entre itens consecutivos).
+/// **DEPRECADO** — mantido por compatibilidade com a tela ainda não
+/// migrada. Os cards novos têm separação por gap, não por divider.
+/// Renderiza um `SizedBox` neutro de 10px.
 class SubTaskDivider extends StatelessWidget {
   const SubTaskDivider({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      // Recuo na esquerda para alinhar com o ícone do próximo item — dá
-      // a sensação de "linha de tempo contínua" entre as tarefas.
-      padding: const EdgeInsets.only(left: 12),
-      child: Container(
-        height: 1,
-        color:
-            ThemeHelpers.borderLightColor(context).withValues(alpha: 0.55),
-      ),
-    );
+    return const SizedBox(height: 10);
   }
 }
 
 // ─── Internals ──────────────────────────────────────────────────────────
 
-class _Timeline extends StatelessWidget {
+/// Linha única e calma de "chips de contexto" — bucket, tipo, prazo.
+/// Mantém densidade de informação sem virar "header bar" pesado: os chips
+/// são inline, com bg sutilíssimo, e respiram com o resto do card.
+class _ContextChips extends StatelessWidget {
+  final String bucketLabel;
+  final Color bucketColor;
+  final IconData bucketIcon;
+  final SubTaskTypeStyle typeStyle;
+  final String? typeLabel;
+  final String? dueLabel;
+  final bool dueIsOverdue;
+  final bool dueIsToday;
+  final Color dangerColor;
+
+  const _ContextChips({
+    required this.bucketLabel,
+    required this.bucketColor,
+    required this.bucketIcon,
+    required this.typeStyle,
+    required this.typeLabel,
+    required this.dueLabel,
+    required this.dueIsOverdue,
+    required this.dueIsToday,
+    required this.dangerColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final dueColor = dueIsOverdue
+        ? dangerColor
+        : (dueIsToday ? bucketColor : ThemeHelpers.textSecondaryColor(context));
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        _BucketChip(
+          label: bucketLabel,
+          color: bucketColor,
+          icon: bucketIcon,
+        ),
+        if (typeLabel != null && typeLabel!.isNotEmpty)
+          _TypeChip(style: typeStyle, label: typeLabel!),
+        if (dueLabel != null)
+          _DueChip(
+            label: dueLabel!,
+            color: dueColor,
+            emphasis: dueIsOverdue || dueIsToday,
+          ),
+      ],
+    );
+  }
+}
+
+/// Chip discreto de prazo. Não tem bg cheio — só borda + ícone tintados.
+class _DueChip extends StatelessWidget {
+  final String label;
   final Color color;
-  const _Timeline({required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 3,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              color.withValues(alpha: 0.85),
-              color.withValues(alpha: 0.40),
-            ],
-          ),
-          borderRadius: BorderRadius.circular(2),
-        ),
-      ),
-    );
-  }
-}
-
-class _TypeIcon extends StatelessWidget {
-  final SubTaskTypeStyle style;
-  const _TypeIcon({required this.style});
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      width: 42,
-      height: 42,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            style.color.withValues(alpha: isDark ? 0.34 : 0.20),
-            style.color.withValues(alpha: isDark ? 0.14 : 0.08),
-          ],
-        ),
-        border: Border.all(
-          color: style.color.withValues(alpha: isDark ? 0.5 : 0.32),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: style.color.withValues(alpha: isDark ? 0.18 : 0.10),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-            spreadRadius: -3,
-          ),
-        ],
-      ),
-      child: Icon(style.icon, color: style.color, size: 19),
-    );
-  }
-}
-
-class _TitleRow extends StatelessWidget {
-  final String title;
-  final bool isCompleted;
-  final String statusLabel;
-  final Color statusColor;
-  final IconData statusIcon;
-
-  const _TitleRow({
-    required this.title,
-    required this.isCompleted,
-    required this.statusLabel,
-    required this.statusColor,
-    required this.statusIcon,
+  final bool emphasis;
+  const _DueChip({
+    required this.label,
+    required this.color,
+    required this.emphasis,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final neutral = ThemeHelpers.textSecondaryColor(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    final isDark = theme.brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: emphasis
+            ? color.withValues(alpha: isDark ? 0.12 : 0.07)
+            : Colors.transparent,
+        border: Border.all(
+          color: emphasis
+              ? color.withValues(alpha: isDark ? 0.32 : 0.22)
+              : ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(LucideIcons.calendar, size: 11.5, color: color),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: emphasis ? color : ThemeHelpers.textColor(context),
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.1,
+              fontSize: 10.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Footer com meta — assignee + comentários + "criada há…". Linha
+/// horizontal de "pegadas" pequenas — informativa sem ser barulhenta.
+class _FooterMeta extends StatelessWidget {
+  final KanbanSubTask subtask;
+  const _FooterMeta({required this.subtask});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    final hasAssignee =
+        subtask.assignedTo != null && subtask.assignedTo!.name.isNotEmpty;
+    final commentsCount = subtask.commentsCount ?? 0;
+    final createdRel = _relativeShort(subtask.createdAt.toLocal());
+
+    if (!hasAssignee && commentsCount == 0 && createdRel.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Row(
       children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(statusIcon, size: 12, color: statusColor),
-            const SizedBox(width: 5),
-            Text(
-              statusLabel.toUpperCase(),
+        if (hasAssignee) ...[
+          _AssigneeChip(
+            name: subtask.assignedTo!.name,
+            avatarUrl: subtask.assignedTo!.avatar,
+            isDark: isDark,
+          ),
+          if (commentsCount > 0 || createdRel.isNotEmpty)
+            const SizedBox(width: 8),
+        ],
+        if (commentsCount > 0) ...[
+          Icon(LucideIcons.messageSquare, size: 12, color: muted),
+          const SizedBox(width: 4),
+          Text(
+            '$commentsCount',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: muted,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.1,
+            ),
+          ),
+          if (createdRel.isNotEmpty) const SizedBox(width: 10),
+        ],
+        if (createdRel.isNotEmpty)
+          Expanded(
+            child: Text(
+              'Criada $createdRel',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
               style: theme.textTheme.labelSmall?.copyWith(
-                color: statusColor,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1.2,
-                fontSize: 10,
+                color: muted,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.1,
               ),
             ),
-          ],
+          ),
+      ],
+    );
+  }
+
+  static String _relativeShort(DateTime when) {
+    final diff = DateTime.now().difference(when);
+    if (diff.inMinutes < 1) return 'agora';
+    if (diff.inMinutes < 60) return 'há ${diff.inMinutes} min';
+    if (diff.inHours < 24) return 'há ${diff.inHours} h';
+    if (diff.inDays < 30) return 'há ${diff.inDays} d';
+    return 'em ${DateFormat('dd/MM', 'pt_BR').format(when)}';
+  }
+}
+
+/// Chip do responsável com avatar (foto ou iniciais) + primeiro nome.
+class _AssigneeChip extends StatelessWidget {
+  final String name;
+  final String? avatarUrl;
+  final bool isDark;
+  const _AssigneeChip({
+    required this.name,
+    required this.avatarUrl,
+    required this.isDark,
+  });
+
+  String get _initials {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty || parts.first.isEmpty) return '?';
+    if (parts.length == 1) {
+      return parts.first.characters.first.toUpperCase();
+    }
+    return (parts.first.characters.first + parts.last.characters.first)
+        .toUpperCase();
+  }
+
+  String get _firstName {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    return parts.isEmpty ? name : parts.first;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final hasAvatar = (avatarUrl ?? '').isNotEmpty;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 18,
+          height: 18,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: hasAvatar
+                ? null
+                : LinearGradient(
+                    colors: [
+                      const Color(0xFF7C3AED),
+                      const Color(0xFF4F46E5),
+                    ],
+                  ),
+            image: hasAvatar
+                ? DecorationImage(
+                    image: NetworkImage(avatarUrl!),
+                    fit: BoxFit.cover,
+                  )
+                : null,
+            border: Border.all(
+              color: Colors.white.withValues(alpha: isDark ? 0.10 : 0.4),
+            ),
+          ),
+          alignment: Alignment.center,
+          child: hasAvatar
+              ? null
+              : Text(
+                  _initials,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w900,
+                    height: 1,
+                  ),
+                ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(width: 5),
         Text(
-          title,
-          maxLines: 2,
+          _firstName,
+          maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w900,
-            color: ThemeHelpers.textColor(context),
-            height: 1.22,
-            letterSpacing: -0.25,
-            decoration: isCompleted ? TextDecoration.lineThrough : null,
-            decorationColor: neutral.withValues(alpha: 0.6),
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: muted,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.1,
           ),
         ),
       ],
+    );
+  }
+}
+
+class _BucketChip extends StatelessWidget {
+  final String label;
+  final Color color;
+  final IconData icon;
+  const _BucketChip({
+    required this.label,
+    required this.color,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: color.withValues(alpha: isDark ? 0.16 : 0.10),
+        border: Border.all(
+          color: color.withValues(alpha: isDark ? 0.36 : 0.26),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 5),
+          Text(
+            label.toUpperCase(),
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.0,
+              fontSize: 10,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TypeChip extends StatelessWidget {
+  final SubTaskTypeStyle style;
+  final String label;
+  const _TypeChip({required this.style, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: style.color.withValues(alpha: isDark ? 0.12 : 0.07),
+        border: Border.all(
+          color: style.color.withValues(alpha: isDark ? 0.28 : 0.18),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(style.icon, size: 12, color: style.color),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: style.color,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.3,
+              fontSize: 10.5,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -358,208 +704,6 @@ class _ParentCardLine extends StatelessWidget {
   }
 }
 
-class _MetaWrap extends StatelessWidget {
-  final KanbanSubTask subtask;
-  final SubTaskTypeStyle typeStyle;
-  final Color bucketColor;
-
-  const _MetaWrap({
-    required this.subtask,
-    required this.typeStyle,
-    required this.bucketColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final neutral = ThemeHelpers.textSecondaryColor(context);
-    final pieces = <_MetaPiece>[];
-
-    if (subtask.taskType != null) {
-      pieces.add(_MetaPiece(
-        icon: typeStyle.icon,
-        label: subtask.taskType!.label,
-        color: typeStyle.color,
-        emphasis: true,
-      ));
-    }
-
-    final due = _formatDue(subtask);
-    if (due != null) {
-      pieces.add(_MetaPiece(
-        icon: LucideIcons.calendar,
-        label: due,
-        color: neutral,
-      ));
-    }
-
-    if (subtask.assignedTo != null && subtask.assignedTo!.name.isNotEmpty) {
-      pieces.add(_MetaPiece(
-        icon: LucideIcons.user,
-        label: _firstName(subtask.assignedTo!.name),
-        color: neutral,
-      ));
-    }
-
-    if ((subtask.commentsCount ?? 0) > 0) {
-      pieces.add(_MetaPiece(
-        icon: LucideIcons.messageSquare,
-        label: '${subtask.commentsCount}',
-        color: neutral,
-      ));
-    }
-
-    final relativeCreated = _relativeShort(subtask.createdAt.toLocal());
-    if (relativeCreated.isNotEmpty) {
-      pieces.add(_MetaPiece(
-        icon: LucideIcons.clock,
-        label: 'criada $relativeCreated',
-        color: neutral,
-      ));
-    }
-
-    if (pieces.isEmpty) return const SizedBox.shrink();
-
-    final widgets = <Widget>[];
-    for (var i = 0; i < pieces.length; i++) {
-      widgets.add(_pieceWidget(theme, pieces[i]));
-      if (i < pieces.length - 1) widgets.add(_dot(neutral));
-    }
-    return Wrap(
-      spacing: 4,
-      runSpacing: 5,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: widgets,
-    );
-  }
-
-  Widget _pieceWidget(ThemeData theme, _MetaPiece piece) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(piece.icon, size: 12, color: piece.color),
-        const SizedBox(width: 4),
-        Text(
-          piece.label,
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: piece.color,
-            fontWeight: piece.emphasis ? FontWeight.w800 : FontWeight.w600,
-            letterSpacing: 0.1,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _dot(Color color) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2),
-      child: Text(
-        '·',
-        style: TextStyle(
-          color: color.withValues(alpha: 0.5),
-          fontWeight: FontWeight.w900,
-          fontSize: 13,
-        ),
-      ),
-    );
-  }
-
-  static String? _formatDue(KanbanSubTask st) {
-    if (st.dueDate == null) return null;
-    final d = st.dueDate!.toLocal();
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final dueDay = DateTime(d.year, d.month, d.day);
-
-    String dateStr;
-    if (dueDay == today) {
-      dateStr = 'Hoje';
-    } else if (dueDay == today.add(const Duration(days: 1))) {
-      dateStr = 'Amanhã';
-    } else if (dueDay == today.subtract(const Duration(days: 1))) {
-      dateStr = 'Ontem';
-    } else {
-      dateStr = DateFormat("d MMM", 'pt_BR').format(d);
-    }
-
-    if (st.dueTime != null && st.dueTime!.isNotEmpty) {
-      return '$dateStr · ${st.dueTime!}';
-    }
-    return dateStr;
-  }
-
-  static String _firstName(String full) {
-    final parts = full.trim().split(RegExp(r'\s+'));
-    if (parts.isEmpty) return '';
-    return parts.first;
-  }
-
-  static String _relativeShort(DateTime when) {
-    final diff = DateTime.now().difference(when);
-    if (diff.inMinutes < 1) return 'agora';
-    if (diff.inMinutes < 60) return 'há ${diff.inMinutes} min';
-    if (diff.inHours < 24) return 'há ${diff.inHours} h';
-    if (diff.inDays < 30) return 'há ${diff.inDays} d';
-    return 'em ${DateFormat('dd/MM', 'pt_BR').format(when)}';
-  }
-}
-
-class _MetaPiece {
-  final IconData icon;
-  final String label;
-  final Color color;
-  final bool emphasis;
-  const _MetaPiece({
-    required this.icon,
-    required this.label,
-    required this.color,
-    this.emphasis = false,
-  });
-}
-
-class _RightActions extends StatelessWidget {
-  final bool isCompleted;
-  final Color color;
-  final bool busy;
-  final VoidCallback? onToggle;
-  final VoidCallback? onEdit;
-  final VoidCallback? onDelete;
-  final Color dangerColor;
-
-  const _RightActions({
-    required this.isCompleted,
-    required this.color,
-    required this.busy,
-    required this.onToggle,
-    required this.onEdit,
-    required this.onDelete,
-    required this.dangerColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      mainAxisAlignment: MainAxisAlignment.start,
-      children: [
-        _CheckCircle(
-          completed: isCompleted,
-          color: color,
-          busy: busy,
-          onTap: onToggle,
-        ),
-        if (onEdit != null || onDelete != null)
-          _MoreMenu(
-            busy: busy,
-            onEdit: onEdit,
-            onDelete: onDelete,
-            dangerColor: dangerColor,
-          ),
-      ],
-    );
-  }
-}
 
 class _CheckCircle extends StatelessWidget {
   final bool completed;
@@ -622,59 +766,3 @@ class _CheckCircle extends StatelessWidget {
   }
 }
 
-class _MoreMenu extends StatelessWidget {
-  final bool busy;
-  final VoidCallback? onEdit;
-  final VoidCallback? onDelete;
-  final Color dangerColor;
-
-  const _MoreMenu({
-    required this.busy,
-    required this.onEdit,
-    required this.onDelete,
-    required this.dangerColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final neutral = ThemeHelpers.textSecondaryColor(context);
-    return PopupMenuButton<String>(
-      tooltip: 'Mais ações',
-      enabled: !busy,
-      icon: Icon(LucideIcons.moreHorizontal, size: 16, color: neutral),
-      padding: EdgeInsets.zero,
-      splashRadius: 16,
-      onSelected: (key) {
-        if (key == 'edit') onEdit?.call();
-        if (key == 'delete') onDelete?.call();
-      },
-      itemBuilder: (ctx) => [
-        if (onEdit != null)
-          const PopupMenuItem<String>(
-            value: 'edit',
-            child: Row(
-              children: [
-                Icon(LucideIcons.edit2, size: 16),
-                SizedBox(width: 10),
-                Text('Editar'),
-              ],
-            ),
-          ),
-        if (onDelete != null)
-          PopupMenuItem<String>(
-            value: 'delete',
-            child: Row(
-              children: [
-                Icon(LucideIcons.trash2, size: 16, color: dangerColor),
-                const SizedBox(width: 10),
-                Text(
-                  'Excluir',
-                  style: TextStyle(color: dangerColor),
-                ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-}

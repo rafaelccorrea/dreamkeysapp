@@ -369,6 +369,27 @@ enum PropertyStatus {
       return null;
     }
   }
+
+  /// Versão compacta do label — útil pra pills de lista em telas pequenas
+  /// onde "Aguardando autorização do proprietário" não cabe.
+  String get shortLabel {
+    switch (this) {
+      case PropertyStatus.draft:
+        return 'Rascunho';
+      case PropertyStatus.pendingApproval:
+        return 'Aguardando aprov.';
+      case PropertyStatus.pendingOwnerAuthorization:
+        return 'Aguard. proprietário';
+      case PropertyStatus.available:
+        return 'Disponível';
+      case PropertyStatus.rented:
+        return 'Alugado';
+      case PropertyStatus.sold:
+        return 'Vendido';
+      case PropertyStatus.maintenance:
+        return 'Manutenção';
+    }
+  }
 }
 
 /// Modelo de Property
@@ -926,6 +947,20 @@ class PropertiesListResponse {
 }
 
 /// Filtros de propriedades
+/// Escopo "carteira" do corretor — paridade com web `portfolioScope`.
+/// O backend aceita este parâmetro para filtrar imóveis por uma combinação
+/// pré-definida de status/flags (ex.: pendentes inclui `pending_approval` e
+/// `pending_owner_authorization`).
+enum PortfolioScope {
+  available('available'),
+  pending('pending'),
+  rejected('rejected'),
+  sold('sold');
+
+  final String value;
+  const PortfolioScope(this.value);
+}
+
 class PropertyFilters {
   final PropertyType? type;
   final PropertyStatus? status;
@@ -946,6 +981,8 @@ class PropertyFilters {
   final String? responsibleUserId;
   final String? search;
   final bool? onlyMyData;
+  final PortfolioScope? portfolioScope;
+  final bool? includeInactive;
 
   PropertyFilters({
     this.type,
@@ -967,6 +1004,8 @@ class PropertyFilters {
     this.responsibleUserId,
     this.search,
     this.onlyMyData,
+    this.portfolioScope,
+    this.includeInactive,
   });
 
   Map<String, dynamic> toQueryParams() {
@@ -990,6 +1029,10 @@ class PropertyFilters {
     if (responsibleUserId != null) params['responsibleUserId'] = responsibleUserId;
     if (search != null && search!.isNotEmpty) params['search'] = search;
     if (onlyMyData != null) params['onlyMyData'] = onlyMyData;
+    if (portfolioScope != null) {
+      params['portfolioScope'] = portfolioScope!.value;
+    }
+    if (includeInactive != null) params['includeInactive'] = includeInactive;
     return params;
   }
 
@@ -1013,6 +1056,8 @@ class PropertyFilters {
     String? responsibleUserId,
     String? search,
     bool? onlyMyData,
+    PortfolioScope? portfolioScope,
+    bool? includeInactive,
   }) {
     return PropertyFilters(
       type: type ?? this.type,
@@ -1034,6 +1079,53 @@ class PropertyFilters {
       responsibleUserId: responsibleUserId ?? this.responsibleUserId,
       search: search ?? this.search,
       onlyMyData: onlyMyData ?? this.onlyMyData,
+      portfolioScope: portfolioScope ?? this.portfolioScope,
+      includeInactive: includeInactive ?? this.includeInactive,
+    );
+  }
+
+  /// Versão que aceita `null` explícito para resetar campos
+  /// (necessário pra "Todos" — limpar portfolioScope sem perder o resto).
+  PropertyFilters copyWithNullable({
+    PortfolioScope? portfolioScope,
+    bool? includeInactive,
+    bool resetPortfolioScope = false,
+    bool resetIncludeInactive = false,
+    String? responsibleUserId,
+    bool resetResponsibleUserId = false,
+    bool? onlyMyData,
+    bool resetOnlyMyData = false,
+    bool? isActive,
+    bool resetIsActive = false,
+  }) {
+    return PropertyFilters(
+      type: type,
+      status: status,
+      city: city,
+      state: state,
+      neighborhood: neighborhood,
+      minPrice: minPrice,
+      maxPrice: maxPrice,
+      minArea: minArea,
+      maxArea: maxArea,
+      bedrooms: bedrooms,
+      bathrooms: bathrooms,
+      parkingSpaces: parkingSpaces,
+      features: features,
+      isActive: resetIsActive ? null : (isActive ?? this.isActive),
+      isFeatured: isFeatured,
+      companyId: companyId,
+      responsibleUserId: resetResponsibleUserId
+          ? null
+          : (responsibleUserId ?? this.responsibleUserId),
+      search: search,
+      onlyMyData: resetOnlyMyData ? null : (onlyMyData ?? this.onlyMyData),
+      portfolioScope: resetPortfolioScope
+          ? null
+          : (portfolioScope ?? this.portfolioScope),
+      includeInactive: resetIncludeInactive
+          ? null
+          : (includeInactive ?? this.includeInactive),
     );
   }
 }
@@ -1059,11 +1151,15 @@ class PropertyService {
       final queryParams = <String, dynamic>{
         'page': page.toString(),
         'limit': limit.toString(),
+        // Paridade web (`getCombinedFilters`): sempre envia
+        // includeLastActivity=true para trazer o último evento por imóvel.
+        'includeLastActivity': 'true',
       };
 
       if (filters != null) {
         queryParams.addAll(filters.toQueryParams());
       }
+      debugPrint('   - filters: $queryParams');
 
       final response = await _apiService.get<Map<String, dynamic>>(
         '/properties',

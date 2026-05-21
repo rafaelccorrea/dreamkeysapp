@@ -1,17 +1,28 @@
-import 'package:flutter/material.dart';
 import 'dart:io';
+
+import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../../../../core/theme/app_colors.dart';
-import '../../../../core/theme/shell_visual_tokens.dart';
-import '../../../../core/theme/theme_helpers.dart';
+
 import '../../../../core/routes/app_routes.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/theme_helpers.dart';
 import '../../../../shared/services/profile_service.dart';
+import '../../../../shared/utils/masks.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
 import '../widgets/avatar_edit_modal.dart';
 import '../widgets/change_password_modal.dart';
 import '../widgets/sessions_modal.dart';
 
+/// Página de Perfil — identidade visual unificada com o resto do app.
+///
+/// Convenções:
+///   • Conteúdo flat (sem cards encapsulando), tudo flui no fundo da tela.
+///   • Eyebrows accent uppercase pequenos (10.5px w900 letterSpacing 1.65).
+///   • Paleta única: primary accent + neutros (text + secondary). Verde
+///     reservado para estado "ativo"; âmbar para avisos. Sem rainbow.
+///   • Mesmo layout para light e dark mode — sem wrapper "glass" exclusivo.
+///   • Ícones outline 18–22px, sem chips coloridos de 44×44.
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
 
@@ -26,43 +37,40 @@ class _ProfilePageState extends State<ProfilePage> {
   bool _isUpdatingVisibility = false;
   int? _sessionCount;
 
+  // ─── Lifecycle ──────────────────────────────────────────────────────────
+
   @override
   void initState() {
     super.initState();
     _loadProfile();
   }
 
-  Color _accent(BuildContext context) => AppColors.primary.primary;
-
-  static const Color _colorEmail    = Color(0xFF4A90E2);
-  static const Color _colorPhone    = Color(0xFF3FA66B);
-  static const Color _colorRole     = Color(0xFFE6B84C);
-  static const Color _colorName     = Color(0xFFD32F2F);
-  static const Color _colorSessions = Color(0xFF8B5CF6);
-  static const Color _colorCompany  = Color(0xFF3FA66B);
-  static const Color _colorLock     = Color(0xFF4A90E2);
-  static const Color _colorPublic   = Color(0xFF3FA66B);
-
-  // ─── Lógica ──────────────────────────────────────────────────────────────
-
   Future<void> _loadProfile() async {
-    setState(() { _isLoading = true; _errorMessage = null; });
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
     try {
       final response = await ProfileService.instance.getProfile();
-      if (mounted) {
-        if (response.success && response.data != null) {
-          setState(() { _profile = response.data; _isLoading = false; });
-          _loadSessionCount();
-        } else {
-          setState(() {
-            _errorMessage = response.message ?? 'Erro ao carregar perfil';
-            _isLoading = false;
-          });
-        }
+      if (!mounted) return;
+      if (response.success && response.data != null) {
+        setState(() {
+          _profile = response.data;
+          _isLoading = false;
+        });
+        _loadSessionCount();
+      } else {
+        setState(() {
+          _errorMessage = response.message ?? 'Erro ao carregar perfil';
+          _isLoading = false;
+        });
       }
     } catch (e) {
       if (mounted) {
-        setState(() { _errorMessage = 'Erro ao conectar com o servidor'; _isLoading = false; });
+        setState(() {
+          _errorMessage = 'Erro ao conectar com o servidor';
+          _isLoading = false;
+        });
       }
     }
   }
@@ -71,440 +79,133 @@ class _ProfilePageState extends State<ProfilePage> {
     try {
       final r = await SessionService.instance.getSessions();
       if (!mounted) return;
-      if (r.success && r.data != null) setState(() => _sessionCount = r.data!.length);
+      if (r.success && r.data != null) {
+        setState(() => _sessionCount = r.data!.length);
+      }
     } catch (_) {
       if (mounted) setState(() => _sessionCount = null);
     }
   }
 
+  // ─── Avatar ─────────────────────────────────────────────────────────────
+
   Future<void> _handleAvatarChange(String? avatarUrlOrPath) async {
     if (avatarUrlOrPath == null) {
       final response = await ProfileService.instance.removeAvatar();
-      if (mounted) {
-        if (response.success && response.data != null) {
-          setState(() { _profile = response.data; });
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: const Text('Avatar removido com sucesso'),
-            backgroundColor: AppColors.status.success,
-          ));
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(response.message ?? 'Erro ao remover avatar'),
-            backgroundColor: AppColors.status.error,
-          ));
-        }
+      if (!mounted) return;
+      if (response.success && response.data != null) {
+        setState(() => _profile = response.data);
+        _toast('Avatar removido com sucesso', success: true);
+      } else {
+        _toast(response.message ?? 'Erro ao remover avatar', success: false);
       }
-    } else {
-      final imageFile = File(avatarUrlOrPath);
-      if (!await imageFile.exists()) {
+      return;
+    }
+
+    final imageFile = File(avatarUrlOrPath);
+    if (!await imageFile.exists()) {
+      if (!mounted) return;
+      _toast('Arquivo não encontrado', success: false);
+      return;
+    }
+    setState(() => _isLoading = true);
+    try {
+      final response = await ProfileService.instance.uploadAvatar(imageFile);
+      if (!mounted) return;
+      if (response.success && response.data != null) {
+        await _loadProfile();
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: const Text('Arquivo não encontrado'),
-          backgroundColor: AppColors.status.error,
-        ));
-        return;
+        _toast('Avatar atualizado com sucesso!', success: true);
+      } else {
+        _toast(
+          response.message ?? 'Erro ao fazer upload do avatar',
+          success: false,
+        );
       }
-      setState(() { _isLoading = true; });
-      try {
-        final response = await ProfileService.instance.uploadAvatar(imageFile);
-        if (mounted) {
-          if (response.success && response.data != null) {
-            await _loadProfile();
-            if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: const Text('Avatar atualizado com sucesso!'),
-              backgroundColor: AppColors.status.success,
-            ));
-          } else {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text(response.message ?? 'Erro ao fazer upload do avatar'),
-              backgroundColor: AppColors.status.error,
-            ));
-          }
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Erro: ${e.toString()}'),
-            backgroundColor: AppColors.status.error,
-          ));
-        }
-      } finally {
-        if (mounted) setState(() { _isLoading = false; });
-      }
+    } catch (e) {
+      if (mounted) _toast('Erro: $e', success: false);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _togglePublicVisibility() async {
     if (_profile == null) return;
-    setState(() { _isUpdatingVisibility = true; });
+    setState(() => _isUpdatingVisibility = true);
     try {
       final response = await ProfileService.instance.updatePublicVisibility(
         !_profile!.isAvailableForPublicSite,
       );
-      if (mounted) {
-        if (response.success) {
-          final newVisibility = response.data ?? _profile!.isAvailableForPublicSite;
-          setState(() {
-            _profile = Profile(
-              id: _profile!.id,
-              name: _profile!.name,
-              email: _profile!.email,
-              phone: _profile!.phone,
-              cellphone: _profile!.cellphone,
-              avatar: _profile!.avatar,
-              role: _profile!.role,
-              companyId: _profile!.companyId,
-              companyName: _profile!.companyName,
-              isAvailableForPublicSite: newVisibility,
-              preferences: _profile!.preferences,
-              tagIds: _profile!.tagIds,
-              createdAt: _profile!.createdAt,
-              updatedAt: _profile!.updatedAt,
-            );
-          });
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(response.message ?? 'Erro ao atualizar visibilidade'),
-            backgroundColor: AppColors.status.error,
-          ));
-        }
+      if (!mounted) return;
+      if (response.success) {
+        final newVisibility = response.data ?? _profile!.isAvailableForPublicSite;
+        setState(() {
+          _profile = Profile(
+            id: _profile!.id,
+            name: _profile!.name,
+            email: _profile!.email,
+            phone: _profile!.phone,
+            cellphone: _profile!.cellphone,
+            avatar: _profile!.avatar,
+            role: _profile!.role,
+            companyId: _profile!.companyId,
+            companyName: _profile!.companyName,
+            isAvailableForPublicSite: newVisibility,
+            preferences: _profile!.preferences,
+            tagIds: _profile!.tagIds,
+            createdAt: _profile!.createdAt,
+            updatedAt: _profile!.updatedAt,
+          );
+        });
+      } else {
+        _toast(
+          response.message ?? 'Erro ao atualizar visibilidade',
+          success: false,
+        );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Erro: ${e.toString()}'),
-          backgroundColor: AppColors.status.error,
-        ));
-      }
+      if (mounted) _toast('Erro: $e', success: false);
     } finally {
-      if (mounted) setState(() { _isUpdatingVisibility = false; });
+      if (mounted) setState(() => _isUpdatingVisibility = false);
     }
   }
 
-  // ─── Formatação ──────────────────────────────────────────────────────────
+  void _toast(String msg, {required bool success}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: success
+            ? AppColors.status.success
+            : AppColors.status.error,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  // ─── Formatação ─────────────────────────────────────────────────────────
 
   String _formatDate(String dateString) {
     try {
       return DateFormat('dd/MM/yyyy', 'pt_BR').format(DateTime.parse(dateString));
-    } catch (e) { return dateString; }
-  }
-
-  String _formatTodayLine() =>
-      DateFormat("EEEE · d 'de' MMMM", 'pt_BR').format(DateTime.now());
-
-  String _getRoleLabel(String role) {
-    switch (role.toLowerCase()) {
-      case 'admin':   return 'Administrador';
-      case 'master':  return 'Master';
-      case 'manager': return 'Gerente';
-      default:        return 'Usuário';
+    } catch (_) {
+      return dateString;
     }
   }
 
-  // ─── Componentes de layout flat ──────────────────────────────────────────
-
-  /// Cabeçalho de seção: rótulo pequeno + linha full-width.
-  Widget _sectionHeader(BuildContext context, ThemeData theme, String label, {Color? color}) {
-    final c = color ?? _accent(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 32, 20, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 3,
-                height: 13,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(2),
-                  color: c,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: c,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 1.6,
-                  fontSize: 11,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Divider(
-            height: 1,
-            thickness: 1,
-            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
-          ),
-        ],
-      ),
-    );
+  String _getRoleLabel(String role) {
+    switch (role.toLowerCase()) {
+      case 'admin':
+        return 'Administrador';
+      case 'master':
+        return 'Master';
+      case 'manager':
+        return 'Gerente';
+      default:
+        return 'Corretor';
+    }
   }
 
-  /// Linha de informação flat: ícone colorido + label + valor.
-  Widget _infoRow(
-    BuildContext context,
-    ThemeData theme, {
-    required IconData icon,
-    required Color iconColor,
-    required String label,
-    required String value,
-    bool last = false,
-  }) {
-    final isDark = theme.brightness == Brightness.dark;
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  color: iconColor.withValues(alpha: isDark ? 0.18 : 0.10),
-                  border: Border.all(
-                    color: iconColor.withValues(alpha: isDark ? 0.26 : 0.18),
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: Icon(icon, size: 21, color: iconColor),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: iconColor.withValues(alpha: isDark ? 0.80 : 0.70),
-                        fontWeight: FontWeight.w800,
-                        fontSize: 10.5,
-                        letterSpacing: 0.6,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    SelectableText(
-                      value,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: ThemeHelpers.textColor(context),
-                        fontWeight: FontWeight.w600,
-                        height: 1.3,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        if (!last)
-          Padding(
-            padding: const EdgeInsets.only(left: 80),
-            child: Divider(
-              height: 1,
-              thickness: 0.8,
-              color: ThemeHelpers.borderLightColor(context).withValues(alpha: 0.6),
-            ),
-          ),
-      ],
-    );
-  }
-
-  /// Linha de ação flat: ícone + título + subtítulo + chevron.
-  Widget _actionRow(
-    BuildContext context,
-    ThemeData theme, {
-    required IconData icon,
-    required Color iconColor,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-    Widget? trailing,
-    bool last = false,
-  }) {
-    final isDark = theme.brightness == Brightness.dark;
-    return Column(
-      children: [
-        InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    color: iconColor.withValues(alpha: isDark ? 0.18 : 0.10),
-                    border: Border.all(
-                      color: iconColor.withValues(alpha: isDark ? 0.26 : 0.18),
-                    ),
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(icon, size: 21, color: iconColor),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: ThemeHelpers.textColor(context),
-                          letterSpacing: -0.1,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        subtitle,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                          height: 1.35,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                trailing ??
-                    Icon(
-                      Icons.chevron_right_rounded,
-                      size: 22,
-                      color: ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.55),
-                    ),
-              ],
-            ),
-          ),
-        ),
-        if (!last)
-          Padding(
-            padding: const EdgeInsets.only(left: 80),
-            child: Divider(
-              height: 1,
-              thickness: 0.8,
-              color: ThemeHelpers.borderLightColor(context).withValues(alpha: 0.6),
-            ),
-          ),
-      ],
-    );
-  }
-
-  // ─── Avatar ──────────────────────────────────────────────────────────────
-
-  Widget _avatarRing(BuildContext context, ThemeData theme, Profile p) {
-    final isDark = theme.brightness == Brightness.dark;
-    const size = 108.0;
-    const ringSize = 116.0;
-
-    return Material(
-      color: Colors.transparent,
-      child: Semantics(
-        label: 'Alterar foto de perfil',
-        button: true,
-        child: InkWell(
-          onTap: () => AvatarEditModal.show(
-            context: context,
-            onSave: _handleAvatarChange,
-            currentAvatar: p.avatar,
-          ),
-          borderRadius: BorderRadius.circular(ringSize / 2),
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              // Anel na paleta da marca: vermelho → vinho → vermelho escuro
-              Container(
-                width: ringSize,
-                height: ringSize,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: SweepGradient(
-                    colors: [
-                      Color(0xFFD32F2F),
-                      Color(0xFFE53935),
-                      Color(0xFF592722),
-                      Color(0xFFB71C1C),
-                      Color(0xFF8B1515),
-                      Color(0xFFD32F2F),
-                    ],
-                  ),
-                ),
-              ),
-              // Separador
-              Container(
-                width: size + 5,
-                height: size + 5,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: isDark ? AppColors.background.backgroundDarkMode : Colors.white,
-                ),
-              ),
-              // Foto
-              Container(
-                width: size,
-                height: size,
-                clipBehavior: Clip.antiAlias,
-                decoration: const BoxDecoration(shape: BoxShape.circle),
-                child: p.avatar != null && p.avatar!.isNotEmpty
-                    ? Image.network(
-                        p.avatar!,
-                        fit: BoxFit.cover,
-                        width: size,
-                        height: size,
-                        errorBuilder: (_, _, _) => _avatarFallback(context, isDark),
-                      )
-                    : _avatarFallback(context, isDark),
-              ),
-              // Botão câmera
-              Positioned(
-                bottom: 3,
-                right: 3,
-                child: Container(
-                  padding: const EdgeInsets.all(7),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.primary,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: isDark ? AppColors.background.backgroundDarkMode : Colors.white,
-                      width: 2.5,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primary.primary.withValues(alpha: 0.45),
-                        blurRadius: 8,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
-                  ),
-                  child: const Icon(Icons.photo_camera_rounded, color: Colors.white, size: 15),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _avatarFallback(BuildContext context, bool isDark) {
-    return Container(
-      color: isDark ? AppColors.background.backgroundSecondaryDarkMode : const Color(0xFFF0F4F8),
-      child: Icon(Icons.person_rounded, size: 50, color: AppColors.primary.primary.withValues(alpha: 0.45)),
-    );
-  }
-
-  // ─── Build ────────────────────────────────────────────────────────────────
+  // ─── Build ──────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -520,19 +221,22 @@ class _ProfilePageState extends State<ProfilePage> {
       actions: [
         IconButton(
           icon: const Icon(Icons.refresh),
-          onPressed: () { _loadProfile(); _loadSessionCount(); },
+          onPressed: () {
+            _loadProfile();
+            _loadSessionCount();
+          },
           tooltip: 'Atualizar',
         ),
       ],
       body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 240),
+        duration: const Duration(milliseconds: 220),
         switchInCurve: Curves.easeOut,
         switchOutCurve: Curves.easeIn,
         child: _isLoading
             ? Padding(
                 key: const ValueKey('loading'),
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                child: _buildSkeleton(context, theme),
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
+                child: _buildSkeleton(),
               )
             : _errorMessage != null
                 ? Padding(
@@ -549,382 +253,727 @@ class _ProfilePageState extends State<ProfilePage> {
                     },
                     child: SingleChildScrollView(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: EdgeInsets.zero,
+                      padding: const EdgeInsets.only(bottom: 56),
                       child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _buildHero(context, theme),
-                        if (theme.brightness == Brightness.dark)
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              _buildActionsSection(context, theme),
-                              _buildDetailsSection(context, theme),
-                              _buildPrivacySection(context, theme),
-                              const SizedBox(height: 48),
-                            ],
-                          )
-                        else
-                          Container(
-                            width: double.infinity,
-                            decoration: BoxDecoration(
-                              color: ShellVisualTokens.profileGlassFill(context),
-                              borderRadius:
-                                  const BorderRadius.vertical(top: Radius.circular(22)),
-                              border: Border(
-                                top: BorderSide(
-                                  color: ThemeHelpers.borderColor(context)
-                                      .withValues(alpha: 0.42),
-                                ),
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.045),
-                                  blurRadius: 24,
-                                  offset: const Offset(0, -8),
-                                  spreadRadius: -10,
-                                ),
-                              ],
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                _buildActionsSection(context, theme),
-                                _buildDetailsSection(context, theme),
-                                _buildPrivacySection(context, theme),
-                                const SizedBox(height: 48),
-                              ],
-                            ),
-                          ),
-                      ],
-                    ),
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _buildHero(context, theme),
+                          const SizedBox(height: 4),
+                          _buildActionsSection(context, theme),
+                          const SizedBox(height: 26),
+                          _buildDetailsSection(context, theme),
+                          const SizedBox(height: 26),
+                          _buildPrivacySection(context, theme),
+                        ],
+                      ),
                     ),
                   ),
       ),
     );
   }
 
-  // ─── Skeleton ─────────────────────────────────────────────────────────────
+  // ─── Hero ───────────────────────────────────────────────────────────────
 
-  Widget _buildSkeleton(BuildContext context, ThemeData theme) {
+  Widget _buildHero(BuildContext context, ThemeData theme) {
+    final accent = AppColors.primary.primary;
+    final p = _profile!;
+    final textColor = ThemeHelpers.textColor(context);
+    final secondaryColor = ThemeHelpers.textSecondaryColor(context);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Eyebrow accent (mesmo padrão dos atalhos do corretor).
+          Row(
+            children: [
+              Icon(Icons.account_circle_outlined, size: 14, color: accent),
+              const SizedBox(width: 6),
+              Text(
+                'PERFIL DA CONTA',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: accent,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.65,
+                  fontSize: 10.5,
+                ),
+              ),
+              const Spacer(),
+              _AvatarStatusDot(active: true),
+            ],
+          ),
+          const SizedBox(height: 14),
+          // Bloco principal: avatar + nome + email.
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              _AvatarPlate(
+                profile: p,
+                onTap: () => AvatarEditModal.show(
+                  context: context,
+                  onSave: _handleAvatarChange,
+                  currentAvatar: p.avatar,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      p.name.isEmpty ? 'Usuário' : p.name,
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: textColor,
+                        letterSpacing: -0.5,
+                        height: 1.05,
+                        fontSize: 22,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      p.email,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: secondaryColor,
+                        fontWeight: FontWeight.w500,
+                        height: 1.3,
+                        fontSize: 13,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          // Pills de meta — cargo, empresa, sessões.
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              _MetaPill(
+                icon: Icons.workspace_premium_outlined,
+                label: _getRoleLabel(p.role),
+                tone: accent,
+              ),
+              if ((p.companyName ?? '').trim().isNotEmpty)
+                _MetaPill(
+                  icon: Icons.apartment_rounded,
+                  label: p.companyName!.trim(),
+                  tone: secondaryColor,
+                ),
+              _MetaPill(
+                icon: Icons.devices_rounded,
+                label: _sessionCount != null
+                    ? '$_sessionCount sessã${_sessionCount == 1 ? "o" : "ões"}'
+                    : 'Sessões…',
+                tone: secondaryColor,
+              ),
+              _MetaPill(
+                icon: Icons.event_outlined,
+                label: 'Desde ${_formatDate(p.createdAt)}',
+                tone: secondaryColor,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Ações ──────────────────────────────────────────────────────────────
+
+  Widget _buildActionsSection(BuildContext context, ThemeData theme) {
+    final accent = AppColors.primary.primary;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Center(child: SkeletonBox(width: 116, height: 116, borderRadius: 58)),
-        const SizedBox(height: 16),
-        Center(child: SkeletonBox(width: 160, height: 22, borderRadius: 6)),
-        const SizedBox(height: 10),
-        Center(child: SkeletonBox(width: 220, height: 14, borderRadius: 4)),
-        const SizedBox(height: 28),
-        SkeletonBox(width: double.infinity, height: 56, borderRadius: 12),
-        const SizedBox(height: 12),
-        SkeletonBox(width: double.infinity, height: 56, borderRadius: 12),
-        const SizedBox(height: 24),
-        SkeletonBox(width: 120, height: 12, borderRadius: 4),
-        const SizedBox(height: 14),
-        SkeletonBox(width: double.infinity, height: 56, borderRadius: 12),
-        const SizedBox(height: 8),
-        SkeletonBox(width: double.infinity, height: 56, borderRadius: 12),
-        const SizedBox(height: 8),
-        SkeletonBox(width: double.infinity, height: 56, borderRadius: 12),
+        _SectionLabel(label: 'AÇÕES'),
+        const SizedBox(height: 6),
+        _FlatActionRow(
+          icon: Icons.tune_rounded,
+          tone: accent,
+          title: 'Editar dados do perfil',
+          subtitle: 'Nome, telefone, foto e informações pessoais.',
+          onTap: () => Navigator.pushNamed(context, AppRoutes.profileEdit),
+        ),
+        _FlatActionRow(
+          icon: Icons.devices_outlined,
+          tone: accent,
+          title: 'Sessões e dispositivos',
+          subtitle: _sessionCount != null
+              ? '$_sessionCount sessã${_sessionCount == 1 ? "o" : "ões"} ativa${_sessionCount == 1 ? "" : "s"}.'
+              : 'Gerencie onde sua conta está conectada.',
+          trailing: _sessionCount != null
+              ? _OutlineCounterBadge(value: '$_sessionCount', tone: accent)
+              : null,
+          onTap: () => SessionsModal.show(context: context)
+              .then((_) => _loadSessionCount()),
+        ),
       ],
     );
   }
 
-  // ─── Error ────────────────────────────────────────────────────────────────
+  // ─── Detalhes ───────────────────────────────────────────────────────────
+
+  Widget _buildDetailsSection(BuildContext context, ThemeData theme) {
+    final p = _profile!;
+    final hasPhone = (p.phone ?? '').trim().isNotEmpty;
+    final hasCell = (p.cellphone ?? '').trim().isNotEmpty;
+    final hasCompany = (p.companyName ?? '').trim().isNotEmpty;
+
+    String? phoneLabel;
+    String? phoneValue;
+    if (hasPhone && hasCell) {
+      phoneLabel = 'TELEFONE / CELULAR';
+      phoneValue =
+          '${Masks.phone(p.phone!.trim())}  ·  ${Masks.phone(p.cellphone!.trim())}';
+    } else if (hasPhone) {
+      phoneLabel = 'TELEFONE';
+      phoneValue = Masks.phone(p.phone!.trim());
+    } else if (hasCell) {
+      phoneLabel = 'CELULAR';
+      phoneValue = Masks.phone(p.cellphone!.trim());
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _SectionLabel(label: 'DETALHES DO CADASTRO'),
+        const SizedBox(height: 6),
+        _FlatInfoRow(
+          icon: Icons.person_outline_rounded,
+          label: 'Nome completo',
+          value: p.name,
+        ),
+        _FlatInfoRow(
+          icon: Icons.mail_outline_rounded,
+          label: 'E-mail',
+          value: p.email,
+        ),
+        if (phoneValue != null)
+          _FlatInfoRow(
+            icon: Icons.phone_iphone_rounded,
+            label: phoneLabel!.toLowerCase(),
+            value: phoneValue,
+          ),
+        _FlatInfoRow(
+          icon: Icons.workspace_premium_outlined,
+          label: 'Cargo / função',
+          value: _getRoleLabel(p.role),
+        ),
+        if (hasCompany)
+          _FlatInfoRow(
+            icon: Icons.apartment_rounded,
+            label: 'Empresa',
+            value: p.companyName!.trim(),
+          ),
+      ],
+    );
+  }
+
+  // ─── Segurança e privacidade ────────────────────────────────────────────
+
+  Widget _buildPrivacySection(BuildContext context, ThemeData theme) {
+    final accent = AppColors.primary.primary;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _SectionLabel(label: 'SEGURANÇA E PRIVACIDADE'),
+        const SizedBox(height: 6),
+        _FlatActionRow(
+          icon: Icons.lock_outline_rounded,
+          tone: accent,
+          title: 'Alterar senha',
+          subtitle: 'Fluxo seguro · sessões antigas podem ser invalidadas.',
+          onTap: () => ChangePasswordModal.show(context: context),
+        ),
+        _FlatToggleRow(
+          icon: Icons.public_rounded,
+          tone: AppColors.status.success,
+          title: 'Presença no site público',
+          hint: 'Aparecer na lista de corretores do site.',
+          value: _profile?.isAvailableForPublicSite ?? false,
+          isLoading: _isUpdatingVisibility,
+          onTap: _togglePublicVisibility,
+        ),
+      ],
+    );
+  }
+
+  // ─── Skeleton / Error ───────────────────────────────────────────────────
+
+  Widget _buildSkeleton() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: const [
+        Row(
+          children: [
+            SkeletonBox(width: 88, height: 88, borderRadius: 44),
+            SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SkeletonBox(width: 180, height: 18, borderRadius: 5),
+                  SizedBox(height: 8),
+                  SkeletonBox(width: 220, height: 13, borderRadius: 4),
+                ],
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: 22),
+        SkeletonBox(width: 140, height: 11, borderRadius: 4),
+        SizedBox(height: 14),
+        SkeletonBox(width: double.infinity, height: 56, borderRadius: 12),
+        SizedBox(height: 8),
+        SkeletonBox(width: double.infinity, height: 56, borderRadius: 12),
+        SizedBox(height: 24),
+        SkeletonBox(width: 160, height: 11, borderRadius: 4),
+        SizedBox(height: 14),
+        SkeletonBox(width: double.infinity, height: 56, borderRadius: 12),
+        SizedBox(height: 8),
+        SkeletonBox(width: double.infinity, height: 56, borderRadius: 12),
+      ],
+    );
+  }
 
   Widget _buildErrorState(BuildContext context, ThemeData theme) {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Icon(Icons.cloud_off_outlined, size: 52, color: AppColors.status.error.withValues(alpha: 0.9)),
-        const SizedBox(height: 20),
+        Icon(
+          Icons.cloud_off_outlined,
+          size: 48,
+          color: AppColors.status.error.withValues(alpha: 0.9),
+        ),
+        const SizedBox(height: 18),
         Text(
           'Não foi possível carregar',
           style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w800,
             color: ThemeHelpers.textColor(context),
           ),
           textAlign: TextAlign.center,
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 8),
         Text(
           _errorMessage ?? '',
           style: theme.textTheme.bodyMedium?.copyWith(
             color: ThemeHelpers.textSecondaryColor(context),
-            height: 1.45,
+            height: 1.4,
           ),
           textAlign: TextAlign.center,
         ),
-        const SizedBox(height: 28),
+        const SizedBox(height: 22),
         TextButton.icon(
           onPressed: _loadProfile,
           icon: const Icon(Icons.refresh),
           label: const Text('Tentar de novo'),
-          style: TextButton.styleFrom(foregroundColor: AppColors.primary.primary),
+          style: TextButton.styleFrom(
+            foregroundColor: AppColors.primary.primary,
+          ),
         ),
       ],
     );
   }
+}
 
-  // ─── Hero ─────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────
+// Widgets de UI (todos flat, sem cards encapsulando)
+// ──────────────────────────────────────────────────────────────────────────
 
-  Widget _buildHero(BuildContext context, ThemeData theme) {
-    final isDark = theme.brightness == Brightness.dark;
-    final accent = _accent(context);
-    final amber  = AppColors.status.warning;
-    final wine   = AppColors.secondary.secondary;
-    final p = _profile!;
-    final nameParts  = p.name.trim().split(' ');
-    final firstName  = nameParts.isNotEmpty ? nameParts.first : 'Usuário';
-    final lastName   = nameParts.length > 1 ? nameParts.sublist(1).join(' ') : '';
+/// Eyebrow accent uppercase pequeno — mesmo padrão dos atalhos do corretor.
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel({required this.label});
+  final String label;
 
-    final content = Padding(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Avatar + info lado a lado
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              _avatarRing(context, theme, p),
-              const SizedBox(width: 20),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Badge de perfil
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(999),
-                        gradient: LinearGradient(colors: [accent, AppColors.secondary.secondary]),
-                      ),
-                      child: Text(
-                        'PERFIL DA CONTA',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.5,
-                          fontSize: 9.5,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    // Nome em duas linhas se necessário
-                    RichText(
-                      text: TextSpan(
-                        children: [
-                          TextSpan(
-                            text: '$firstName ',
-                            style: theme.textTheme.headlineSmall?.copyWith(
-                              fontWeight: FontWeight.w900,
-                              color: ThemeHelpers.textColor(context),
-                              height: 1.1,
-                            ),
-                          ),
-                          if (lastName.isNotEmpty)
-                            TextSpan(
-                              text: lastName,
-                              style: theme.textTheme.headlineSmall?.copyWith(
-                                fontWeight: FontWeight.w400,
-                                color: ThemeHelpers.textColor(context),
-                                height: 1.1,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    // E-mail
-                    Row(
-                      children: [
-                        Icon(Icons.mail_rounded, size: 13, color: _colorEmail),
-                        const SizedBox(width: 5),
-                        Flexible(
-                          child: Text(
-                            p.email,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: ThemeHelpers.textSecondaryColor(context),
-                              height: 1.3,
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    // Status ativo
-                    Row(
-                      children: [
-                        Container(
-                          width: 7,
-                          height: 7,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: AppColors.status.success,
-                            boxShadow: [
-                              BoxShadow(
-                                color: AppColors.status.success.withValues(alpha: 0.5),
-                                blurRadius: 4,
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            'Ativo · membro desde ${_formatDate(p.createdAt)}',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: ThemeHelpers.textSecondaryColor(context),
-                              fontWeight: FontWeight.w500,
-                              fontSize: 11,
-                            ),
-                            maxLines: 2,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 22),
-          // Linha separadora
-          Divider(
-            height: 1,
-            thickness: 0.8,
-            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.40),
-          ),
-          const SizedBox(height: 18),
-          // Pills de contexto
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _heroPill(context, theme, Icons.badge_outlined, _getRoleLabel(p.role), _colorName),
-              _heroPill(context, theme, Icons.calendar_month_outlined,
-                  'Desde ${_formatDate(p.createdAt)}', _colorEmail),
-              if (p.companyName != null && p.companyName!.trim().isNotEmpty)
-                _heroPill(context, theme, Icons.apartment_rounded, p.companyName!.trim(), _colorCompany),
-              _heroPill(
-                context, theme,
-                Icons.devices_outlined,
-                _sessionCount != null ? '$_sessionCount sessões ativas' : 'Sessões…',
-                _colorSessions,
-              ),
-              _heroPill(context, theme, Icons.today_outlined, _formatTodayLine(), accent),
-            ],
-          ),
-        ],
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final accent = AppColors.primary.primary;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+      child: Text(
+        label,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: accent,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 1.65,
+          fontSize: 10.5,
+        ),
       ),
     );
+  }
+}
 
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        // Base quente neutra — bege/creme no light, charcoal quente no dark
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: isDark
-              ? const [Color(0xFF14100F), Color(0xFF0E0A0A)]
-              : const [Color(0xFFFCF9F7), Color(0xFFF5EFEB)],
-        ),
-        border: Border(
-          bottom: BorderSide(
-            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
-          ),
-        ),
-      ),
-      child: Stack(
-        clipBehavior: Clip.hardEdge,
+/// Linha de informação flat — ícone outline + label + valor selecionável.
+/// Sem chip 44x44 colorido, sem divisor pesado. Apenas hierarquia tipográfica.
+class _FlatInfoRow extends StatelessWidget {
+  const _FlatInfoRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final textColor = ThemeHelpers.textColor(context);
+    final secondaryColor = ThemeHelpers.textSecondaryColor(context);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Glow vermelho radial atrás do avatar (canto superior esquerdo)
-          Positioned(
-            left: -80,
-            top: -80,
-            child: Container(
-              width: 280,
-              height: 280,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    accent.withValues(alpha: isDark ? 0.32 : 0.18),
-                    accent.withValues(alpha: 0.0),
-                  ],
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Icon(icon, size: 18, color: secondaryColor),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label.toUpperCase(),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: secondaryColor,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 10,
+                    letterSpacing: 0.8,
+                  ),
                 ),
-              ),
+                const SizedBox(height: 3),
+                SelectableText(
+                  value,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: textColor,
+                    fontWeight: FontWeight.w700,
+                    height: 1.25,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
             ),
           ),
-          // Glow âmbar/dourado no canto superior direito (calor + premium)
-          Positioned(
-            right: -100,
-            top: -60,
-            child: Container(
-              width: 240,
-              height: 240,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    amber.withValues(alpha: isDark ? 0.18 : 0.16),
-                    amber.withValues(alpha: 0.0),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          // Glow vinho profundo no canto inferior direito (ancoragem da paleta)
-          Positioned(
-            right: -120,
-            bottom: -90,
-            child: Container(
-              width: 300,
-              height: 300,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    wine.withValues(alpha: isDark ? 0.26 : 0.10),
-                    wine.withValues(alpha: 0.0),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          // Conteúdo
-          content,
         ],
       ),
     );
   }
+}
 
-  Widget _heroPill(BuildContext context, ThemeData theme, IconData icon, String label, Color color) {
-    final isDark = theme.brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+/// Linha de ação flat — ícone outline + título + subtítulo + chevron/trailing.
+/// Splash sutil no tap. Sem moldura, sem card.
+class _FlatActionRow extends StatelessWidget {
+  const _FlatActionRow({
+    required this.icon,
+    required this.tone,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.trailing,
+  });
+
+  final IconData icon;
+  final Color tone;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final textColor = ThemeHelpers.textColor(context);
+    final secondaryColor = ThemeHelpers.textSecondaryColor(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        splashColor: tone.withValues(alpha: 0.10),
+        highlightColor: tone.withValues(alpha: 0.05),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Icon(icon, size: 22, color: tone),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: textColor,
+                        letterSpacing: -0.15,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: secondaryColor,
+                        height: 1.3,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              trailing ??
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    size: 22,
+                    color: secondaryColor.withValues(alpha: 0.55),
+                  ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Linha de toggle flat — ícone outline + título + hint + pill switch
+/// (mesmo padrão usado no painel de atalhos do corretor).
+class _FlatToggleRow extends StatelessWidget {
+  const _FlatToggleRow({
+    required this.icon,
+    required this.tone,
+    required this.title,
+    required this.hint,
+    required this.value,
+    required this.isLoading,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final Color tone;
+  final String title;
+  final String hint;
+  final bool value;
+  final bool isLoading;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final textColor = ThemeHelpers.textColor(context);
+    final secondaryColor = ThemeHelpers.textSecondaryColor(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: isLoading ? null : onTap,
+        splashColor: tone.withValues(alpha: 0.10),
+        highlightColor: tone.withValues(alpha: 0.05),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Icon(icon, size: 22, color: value ? tone : secondaryColor),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: value ? tone : textColor,
+                        letterSpacing: -0.15,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      hint,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: secondaryColor,
+                        height: 1.3,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              if (isLoading)
+                SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.4,
+                    color: tone,
+                  ),
+                )
+              else
+                _PillSwitch(active: value, tone: tone),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Switch tipo pill — gradient + glow quando on, neutro quando off.
+/// Mesma identidade do `_PillSwitch` da `PropertiesPage`.
+class _PillSwitch extends StatelessWidget {
+  const _PillSwitch({required this.active, required this.tone});
+  final bool active;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final borderColor = ThemeHelpers.borderColor(context);
+    final toneDeep = HSLColor.fromColor(tone)
+        .withLightness(
+          (HSLColor.fromColor(tone).lightness * 0.78).clamp(0.0, 1.0),
+        )
+        .toColor();
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      width: 48,
+      height: 28,
+      padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
+        gradient: active
+            ? LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [tone, toneDeep],
+              )
+            : null,
+        color: active
+            ? null
+            : (isDark
+                ? Colors.white.withValues(alpha: 0.08)
+                : borderColor.withValues(alpha: 0.45)),
         borderRadius: BorderRadius.circular(999),
-        color: color.withValues(alpha: isDark ? 0.15 : 0.09),
-        border: Border.all(color: color.withValues(alpha: isDark ? 0.30 : 0.22)),
+        border: Border.all(
+          color: active
+              ? toneDeep.withValues(alpha: 0.45)
+              : borderColor.withValues(alpha: isDark ? 0.30 : 0.30),
+          width: 1,
+        ),
+        boxShadow: active
+            ? [
+                BoxShadow(
+                  color: tone.withValues(alpha: isDark ? 0.45 : 0.30),
+                  blurRadius: 10,
+                  spreadRadius: 0.2,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : null,
+      ),
+      child: AnimatedAlign(
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+        alignment: active ? Alignment.centerRight : Alignment.centerLeft,
+        child: Container(
+          width: 20,
+          height: 20,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.16),
+                blurRadius: 5,
+                offset: const Offset(0, 1),
+              ),
+            ],
+          ),
+          alignment: Alignment.center,
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            transitionBuilder: (child, anim) =>
+                FadeTransition(opacity: anim, child: child),
+            child: active
+                ? Icon(
+                    Icons.check_rounded,
+                    key: const ValueKey('on'),
+                    size: 13,
+                    color: toneDeep,
+                  )
+                : const SizedBox.shrink(key: ValueKey('off')),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Pill outline simples — ícone + label numa única cor (sem fill colorido
+/// agressivo). Cor neutra por padrão.
+class _MetaPill extends StatelessWidget {
+  const _MetaPill({
+    required this.icon,
+    required this.label,
+    required this.tone,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: isDark ? 0.14 : 0.08),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: tone.withValues(alpha: isDark ? 0.30 : 0.22),
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 13, color: color),
-          const SizedBox(width: 6),
+          Icon(icon, size: 12, color: tone),
+          const SizedBox(width: 5),
           Flexible(
             child: Text(
               label,
-              style: theme.textTheme.labelSmall?.copyWith(
-                fontWeight: FontWeight.w700,
-                color: ThemeHelpers.textColor(context),
-                fontSize: 11.5,
+              style: TextStyle(
+                color: tone,
+                fontWeight: FontWeight.w800,
+                fontSize: 11,
+                letterSpacing: 0.15,
+                height: 1,
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -934,194 +983,212 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
     );
   }
+}
 
-  // ─── Seção de ações ───────────────────────────────────────────────────────
+/// Badge outline pra contagem ao lado de um item (ex.: nº de sessões).
+class _OutlineCounterBadge extends StatelessWidget {
+  const _OutlineCounterBadge({required this.value, required this.tone});
+  final String value;
+  final Color tone;
 
-  Widget _buildActionsSection(BuildContext context, ThemeData theme) {
-    final accent = _accent(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        _sectionHeader(context, theme, 'AÇÕES', color: accent),
-        _actionRow(
-          context, theme,
-          icon: Icons.tune_rounded,
-          iconColor: accent,
-          title: 'Editar dados do perfil',
-          subtitle: 'Nome, telefone, foto e informações pessoais.',
-          onTap: () => Navigator.pushNamed(context, AppRoutes.profileEdit),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: tone.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: tone.withValues(alpha: 0.32)),
+          ),
+          child: Text(
+            value,
+            style: TextStyle(
+              color: tone,
+              fontWeight: FontWeight.w900,
+              fontSize: 11,
+              letterSpacing: 0.2,
+            ),
+          ),
         ),
-        _actionRow(
-          context, theme,
-          icon: Icons.devices_rounded,
-          iconColor: _colorSessions,
-          title: 'Sessões e dispositivos',
-          subtitle: _sessionCount != null
-              ? '$_sessionCount sessão${_sessionCount == 1 ? '' : 'ões'} ativa${_sessionCount == 1 ? '' : 's'} neste momento.'
-              : 'Gerencie onde sua conta está conectada.',
-          onTap: () => SessionsModal.show(context: context).then((_) => _loadSessionCount()),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (_sessionCount != null)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(999),
-                    color: _colorSessions.withValues(alpha: 0.15),
+        const SizedBox(width: 6),
+        Icon(
+          Icons.chevron_right_rounded,
+          size: 22,
+          color: ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.55),
+        ),
+      ],
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Avatar (com chip da câmera para editar)
+// ──────────────────────────────────────────────────────────────────────────
+
+class _AvatarPlate extends StatelessWidget {
+  const _AvatarPlate({required this.profile, required this.onTap});
+
+  final Profile profile;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = AppColors.primary.primary;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    const size = 88.0;
+
+    return Semantics(
+      label: 'Alterar foto de perfil',
+      button: true,
+      child: Material(
+        color: Colors.transparent,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: SizedBox(
+            width: size + 12,
+            height: size + 12,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Center(
+                  child: Container(
+                    width: size,
+                    height: size,
+                    clipBehavior: Clip.antiAlias,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: ThemeHelpers.cardBackgroundColor(context),
+                      border: Border.all(
+                        color: accent.withValues(alpha: isDark ? 0.45 : 0.32),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: (profile.avatar ?? '').isNotEmpty
+                        ? Image.network(
+                            profile.avatar!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => _fallback(context, isDark),
+                          )
+                        : _fallback(context, isDark),
                   ),
-                  child: Text(
-                    '$_sessionCount',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: _colorSessions,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 12,
+                ),
+                Positioned(
+                  bottom: 0,
+                  right: 0,
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: accent,
+                      border: Border.all(
+                        color: ThemeHelpers.cardBackgroundColor(context),
+                        width: 2,
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.photo_camera_rounded,
+                      color: Colors.white,
+                      size: 13,
                     ),
                   ),
                 ),
-              const SizedBox(width: 4),
-              Icon(
-                Icons.chevron_right_rounded,
-                size: 22,
-                color: ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.55),
-              ),
-            ],
+              ],
+            ),
           ),
-          last: true,
         ),
-      ],
+      ),
     );
   }
 
-  // ─── Seção de detalhes ────────────────────────────────────────────────────
+  Widget _fallback(BuildContext context, bool isDark) {
+    final parts = profile.name.trim().split(RegExp(r'\s+'));
+    final initials = parts.isEmpty || parts.first.isEmpty
+        ? '?'
+        : parts.length == 1
+            ? parts.first[0].toUpperCase()
+            : (parts.first[0] + parts.last[0]).toUpperCase();
+    final accent = AppColors.primary.primary;
+    final toneDeep = HSLColor.fromColor(accent)
+        .withLightness(
+          (HSLColor.fromColor(accent).lightness * 0.78).clamp(0.0, 1.0),
+        )
+        .toColor();
 
-  Widget _buildDetailsSection(BuildContext context, ThemeData theme) {
-    final p = _profile!;
-    final hasPhone = p.phone != null && p.phone!.trim().isNotEmpty;
-    final hasCell  = p.cellphone != null && p.cellphone!.trim().isNotEmpty;
-
-    String? phoneLabel;
-    String? phoneValue;
-    if (hasPhone && hasCell) {
-      phoneLabel = 'TELEFONE / CELULAR';
-      phoneValue = '${p.phone!.trim()}  ·  ${p.cellphone!.trim()}';
-    } else if (hasPhone) {
-      phoneLabel = 'TELEFONE';
-      phoneValue = p.phone!.trim();
-    } else if (hasCell) {
-      phoneLabel = 'CELULAR';
-      phoneValue = p.cellphone!.trim();
-    }
-
-    final hasCompany = p.companyName != null && p.companyName!.trim().isNotEmpty;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _sectionHeader(context, theme, 'DETALHES DO CADASTRO', color: _colorEmail),
-        _infoRow(context, theme,
-          icon: Icons.person_rounded,
-          iconColor: _colorName,
-          label: 'NOME COMPLETO',
-          value: p.name,
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [accent, toneDeep],
         ),
-        _infoRow(context, theme,
-          icon: Icons.mail_rounded,
-          iconColor: _colorEmail,
-          label: 'E-MAIL',
-          value: p.email,
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        initials,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w900,
+          fontSize: 28,
+          letterSpacing: 0.5,
         ),
-        if (phoneValue != null)
-          _infoRow(context, theme,
-            icon: Icons.phone_iphone_rounded,
-            iconColor: _colorPhone,
-            label: phoneLabel!,
-            value: phoneValue,
-          ),
-        _infoRow(context, theme,
-          icon: Icons.workspace_premium_rounded,
-          iconColor: _colorRole,
-          label: 'CARGO / FUNÇÃO',
-          value: _getRoleLabel(p.role),
-          last: !hasCompany,
-        ),
-        if (hasCompany)
-          _infoRow(context, theme,
-            icon: Icons.apartment_rounded,
-            iconColor: _colorCompany,
-            label: 'EMPRESA',
-            value: p.companyName!.trim(),
-            last: true,
-          ),
-      ],
+      ),
     );
   }
+}
 
-  // ─── Seção de segurança e privacidade ────────────────────────────────────
+class _AvatarStatusDot extends StatelessWidget {
+  const _AvatarStatusDot({required this.active});
+  final bool active;
 
-  Widget _buildPrivacySection(BuildContext context, ThemeData theme) {
-    final isDark = theme.brightness == Brightness.dark;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _sectionHeader(context, theme, 'SEGURANÇA E PRIVACIDADE', color: _colorLock),
-        // Alterar senha
-        _actionRow(
-          context, theme,
-          icon: Icons.lock_rounded,
-          iconColor: _colorLock,
-          title: 'Alterar senha',
-          subtitle: 'Fluxo seguro · sessões antigas podem ser invalidadas.',
-          onTap: () => ChangePasswordModal.show(context: context),
-          trailing: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+  @override
+  Widget build(BuildContext context) {
+    final color = active
+        ? AppColors.status.success
+        : ThemeHelpers.textSecondaryColor(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.32)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(999),
-              color: _colorLock.withValues(alpha: isDark ? 0.18 : 0.10),
-              border: Border.all(color: _colorLock.withValues(alpha: 0.22)),
-            ),
-            child: Text(
-              'Alterar',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: _colorLock,
-                fontWeight: FontWeight.w900,
-                fontSize: 11.5,
-              ),
+              shape: BoxShape.circle,
+              color: color,
+              boxShadow: active
+                  ? [
+                      BoxShadow(
+                        color: color.withValues(alpha: 0.55),
+                        blurRadius: 4,
+                      ),
+                    ]
+                  : null,
             ),
           ),
-        ),
-        // Visibilidade pública
-        _actionRow(
-          context, theme,
-          icon: Icons.public_rounded,
-          iconColor: _colorPublic,
-          title: 'Presença no site público',
-          subtitle: 'Lista de corretores · visível para novos contatos.',
-          onTap: _togglePublicVisibility,
-          trailing: _isUpdatingVisibility
-              ? SizedBox(
-                  width: 26,
-                  height: 26,
-                  child: CircularProgressIndicator(strokeWidth: 2.5, color: _colorPublic),
-                )
-              : SwitchTheme(
-                  data: SwitchThemeData(
-                    thumbColor: WidgetStateProperty.resolveWith((states) =>
-                        states.contains(WidgetState.selected) ? Colors.white : ThemeHelpers.textSecondaryColor(context)),
-                    trackColor: WidgetStateProperty.resolveWith((states) =>
-                        states.contains(WidgetState.selected)
-                            ? _colorPublic.withValues(alpha: 0.70)
-                            : ThemeHelpers.borderLightColor(context).withValues(alpha: 0.88)),
-                    trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
-                  ),
-                  child: Switch.adaptive(
-                    value: _profile?.isAvailableForPublicSite ?? false,
-                    onChanged: (_) => _togglePublicVisibility(),
-                  ),
-                ),
-          last: true,
-        ),
-      ],
+          const SizedBox(width: 5),
+          Text(
+            active ? 'Ativo' : 'Inativo',
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w800,
+              fontSize: 10.5,
+              letterSpacing: 0.2,
+              height: 1,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

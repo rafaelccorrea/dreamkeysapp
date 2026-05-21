@@ -56,6 +56,7 @@ class _AppDrawerState extends State<AppDrawer> {
   // Estado dos expansion tiles (alinhado a grupos do drawer web)
   bool _imoveisExpanded = false;
   bool _vendasCrmExpanded = false;
+  bool _colaboradoresExpanded = false;
 
   /// Lista para o seletor de empresa (Master)
   List<Company> _masterCompanies = [];
@@ -157,6 +158,7 @@ class _AppDrawerState extends State<AppDrawer> {
 
     bool expandImoveis = false;
     bool expandVendasCrm = false;
+    bool expandColaboradores = false;
 
     if (activeRoute == AppRoutes.properties ||
         activeRoute == AppRoutes.propertyApprovals ||
@@ -172,10 +174,17 @@ class _AppDrawerState extends State<AppDrawer> {
       expandVendasCrm = true;
     }
 
-    if (expandImoveis || expandVendasCrm) {
+    if (activeRoute == AppRoutes.users ||
+        activeRoute == AppRoutes.teams ||
+        activeRoute == AppRoutes.workspace) {
+      expandColaboradores = true;
+    }
+
+    if (expandImoveis || expandVendasCrm || expandColaboradores) {
       setState(() {
         if (expandImoveis) _imoveisExpanded = true;
         if (expandVendasCrm) _vendasCrmExpanded = true;
+        if (expandColaboradores) _colaboradoresExpanded = true;
       });
     }
   }
@@ -919,9 +928,32 @@ class _AppDrawerState extends State<AppDrawer> {
             (ModuleAccessService.instance.hasPermission('proposal:view') ||
                 ModuleAccessService.instance.hasPermission('proposal:view_team') ||
                 ModuleAccessService.instance.hasPermission('proposal:view_all'));
-    final canSeeWorkspace =
-        ModuleAccessService.instance.hasCompanyModule('user_management') ||
-            ModuleAccessService.instance.hasCompanyModule('team_management');
+    // Colaboradores → Usuários (drawer item).
+    // Paridade com web: `user:view` AND (`create` OR `update` OR `delete`),
+    // com bypass admin/master/manager via `hasAnyPermission`.
+    final canSeeUsers =
+        ModuleAccessService.instance.hasCompanyModule('user_management') &&
+            ModuleAccessService.instance.hasPermission(AppPermissions.userView) &&
+            ModuleAccessService.instance
+                .hasAnyPermission(AppPermissions.userManageMenu);
+    // Colaboradores → Equipes (drawer item).
+    final canSeeTeams =
+        ModuleAccessService.instance.hasCompanyModule('team_management') &&
+            ModuleAccessService.instance.hasPermission(AppPermissions.teamView);
+    final canSeeWorkspace = canSeeUsers || canSeeTeams;
+
+    /// Visibilidade do item "Check-in": liberado pra master/admin/manager
+    /// (gestores veem tudo) ou para quem tem `check_in:do` / `check_in:view`.
+    /// O backend bate as permissões finais; aqui é só gating de menu.
+    final checkInRole =
+        ModuleAccessService.instance.userRole?.toLowerCase().trim() ?? '';
+    final isCheckInPrivileged = checkInRole == 'master' ||
+        checkInRole == 'admin' ||
+        checkInRole == 'manager';
+    final canSeeCheckIn = isCheckInPrivileged ||
+        ModuleAccessService.instance.hasPermission(AppPermissions.checkInDo) ||
+        ModuleAccessService.instance
+            .hasPermission(AppPermissions.checkInView);
 
     final showImoveisGroup = canSeeProperties || canSeeApprovalsMenu;
     final showVendasCrmGroup = canSeeKanban || canSeeClients;
@@ -1169,26 +1201,88 @@ class _AppDrawerState extends State<AppDrawer> {
                                   );
                                 },
                               ),
-                            if (canSeeWorkspace)
+                            if (canSeeCheckIn)
                               _buildDrawerItem(
                                 context: context,
                                 currentRoute: activeRoute,
-                                route: AppRoutes.workspace,
-                                icon: LucideIcons.users2,
-                                activeIcon: LucideIcons.users2,
-                                title: 'Colaboradores',
+                                route: AppRoutes.checkIn,
+                                icon: LucideIcons.mapPin,
+                                activeIcon: LucideIcons.mapPin,
+                                title: 'Check-in',
                                 accent: accent,
                                 showLeadingTile: true,
                                 onTap: () {
                                   Navigator.pop(context);
-                                  if (activeRoute == AppRoutes.workspace) {
+                                  if (activeRoute == AppRoutes.checkIn) {
                                     return;
                                   }
-                                  Navigator.of(context).pushNamedAndRemoveUntil(
-                                    AppRoutes.workspace,
-                                    (route) => false,
+                                  Navigator.of(context).pushNamed(
+                                    AppRoutes.checkIn,
                                   );
                                 },
+                              ),
+                            if (canSeeWorkspace)
+                              _buildExpansionTile(
+                                context: context,
+                                title: 'Colaboradores',
+                                icon: LucideIcons.users2,
+                                activeIcon: LucideIcons.users2,
+                                isExpanded: _colaboradoresExpanded,
+                                groupActive: activeRoute == AppRoutes.users ||
+                                    activeRoute == AppRoutes.teams ||
+                                    activeRoute == AppRoutes.workspace,
+                                accent: accent,
+                                onExpansionChanged: (expanded) {
+                                  setState(() {
+                                    _colaboradoresExpanded = expanded;
+                                  });
+                                },
+                                children: [
+                                  if (canSeeUsers)
+                                    _buildDrawerItem(
+                                      context: context,
+                                      currentRoute: activeRoute,
+                                      route: AppRoutes.users,
+                                      icon: LucideIcons.users,
+                                      activeIcon: LucideIcons.users,
+                                      title: 'Usuários',
+                                      accent: accent,
+                                      onTap: () {
+                                        Navigator.pop(context);
+                                        if (activeRoute == AppRoutes.users) {
+                                          return;
+                                        }
+                                        Navigator.of(context)
+                                            .pushNamedAndRemoveUntil(
+                                          AppRoutes.users,
+                                          (route) => false,
+                                        );
+                                      },
+                                      isSubItem: true,
+                                    ),
+                                  if (canSeeTeams)
+                                    _buildDrawerItem(
+                                      context: context,
+                                      currentRoute: activeRoute,
+                                      route: AppRoutes.teams,
+                                      icon: LucideIcons.users2,
+                                      activeIcon: LucideIcons.users2,
+                                      title: 'Equipes',
+                                      accent: accent,
+                                      onTap: () {
+                                        Navigator.pop(context);
+                                        if (activeRoute == AppRoutes.teams) {
+                                          return;
+                                        }
+                                        Navigator.of(context)
+                                            .pushNamedAndRemoveUntil(
+                                          AppRoutes.teams,
+                                          (route) => false,
+                                        );
+                                      },
+                                      isSubItem: true,
+                                    ),
+                                ],
                               ),
                             Divider(
                               height: 1,

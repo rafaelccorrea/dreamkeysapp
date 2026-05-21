@@ -32,6 +32,15 @@ class AppPermissions {
   static const String propertyManageApprovalSettings =
       'property:manage_approval_settings';
 
+  // ─── Check-in por localização ──────────────────────────────────────────
+  /// Permite fazer / desfazer o próprio check-in e check-out.
+  static const String checkInDo = 'check_in:do';
+  /// Permite ver o histórico (lista) de check-ins (próprios e da equipe).
+  static const String checkInView = 'check_in:view';
+  /// Permite editar configurações (raio, duração, localização da empresa)
+  /// e desfazer check-in de outros usuários.
+  static const String checkInManageSettings = 'check_in:manage_settings';
+
   // ─── Conjuntos úteis para gating de UI ─────────────────────────────────
   /// Permissões que liberam a entrada do menu/atalho da Fila de Aprovação.
   /// Espelha exatamente a `customPermission` do `Drawer.tsx` no web:
@@ -52,4 +61,29 @@ class AppPermissions {
     propertyView,
     propertyCreate,
   ];
+
+  // ─── Users (Colaboradores → Usuários) ──────────────────────────────────
+  static const String userView = 'user:view';
+  static const String userCreate = 'user:create';
+  static const String userUpdate = 'user:update';
+  static const String userDelete = 'user:delete';
+  static const String userTransfer = 'user:transfer';
+
+  /// Permissões que liberam a entrada do menu/atalho de Usuários no drawer.
+  /// Espelha o `customPermission` do `Drawer.tsx` web:
+  /// `user:view` AND (`create` OR `update` OR `delete`). A checagem prática
+  /// fica como "qualquer ação de gestão"; o módulo `user_management` e o
+  /// bypass admin/master/manager continuam aplicáveis.
+  static const List<String> userManageMenu = [
+    userCreate,
+    userUpdate,
+    userDelete,
+  ];
+
+  // ─── Teams (Colaboradores → Equipes) ───────────────────────────────────
+  static const String teamView = 'team:view';
+  static const String teamCreate = 'team:create';
+  static const String teamUpdate = 'team:update';
+  static const String teamDelete = 'team:delete';
+  static const String teamManageMembers = 'team:manage_members';
 }

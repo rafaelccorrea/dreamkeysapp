@@ -24,6 +24,7 @@ import '../../../../shared/services/gallery_service.dart';
 import '../../../../shared/services/module_access_service.dart';
 import '../../../../core/constants/app_permissions.dart';
 import '../utils/property_edit_permissions.dart';
+import '../utils/property_status_visual.dart';
 
 // Formatter de moeda
 final _currencyFormatter = NumberFormat.currency(
@@ -1067,12 +1068,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             ),
           ),
 
-          if (property.isFeatured)
-            Positioned(
-              top: 16,
-              right: 16,
-              child: _buildHeroFeaturedChip(),
-            ),
           if (mediaCount > 1)
             Positioned(
               right: 16,
@@ -1330,45 +1325,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  Widget _buildHeroFeaturedChip() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFFFE082), Color(0xFFFFA000)],
-        ),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.6), width: 0.85),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFFFFA000).withValues(alpha: 0.42),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: const [
-          Icon(Icons.star_rounded, size: 14, color: Color(0xFF4E342E)),
-          SizedBox(width: 5),
-          Text(
-            'Em destaque',
-            style: TextStyle(
-              color: Color(0xFF3E2723),
-              fontWeight: FontWeight.w900,
-              fontSize: 11,
-              height: 1,
-              letterSpacing: -0.15,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildHeroMediaCounter(int current, int total) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
@@ -1511,7 +1467,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Linha código + matches — informação meta, em peso secundário
+        // 1) Linha CRM: código (à esquerda) + matches badge (canto direito).
         Row(
           children: [
             if (hasCode) ...[
@@ -1559,12 +1515,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               ),
               const SizedBox(width: 10),
             ],
-            // Matches badge — vai pra direita pra ficar visualmente equilibrado
             Expanded(
               child: Align(
-                alignment: hasCode
-                    ? Alignment.centerLeft
-                    : Alignment.centerLeft,
+                alignment: Alignment.centerLeft,
                 child: MatchesBadge(
                   propertyId: widget.propertyId,
                   onClick: () => Navigator.pushNamed(
@@ -1578,9 +1531,27 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           ],
         ),
 
-        // Pills de meta-status (público, MCMV, aceita proposta, etc)
+        // 2) STATUS DO IMÓVEL + SITUAÇÃO — primeira coisa que o corretor
+        // precisa ver. Acompanha a paridade com a versão web (badge roxa
+        // "Aguardando autorização do proprietário" + badge verde "Ativo").
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            PropertyStatusPill(status: property.status),
+            PropertySituationPill(
+              isActive: property.isActive,
+              isAvailableForSite: property.isAvailableForSite ?? false,
+            ),
+          ],
+        ),
+
+        // 3) Pills de meta secundárias (MCMV, aceita proposta, ofertas
+        //    pendentes, sem fotos). Já excluímos "no site"/"privado" do
+        //    helper porque agora vem na PropertySituationPill.
         if (pills.isNotEmpty) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 6),
           Wrap(
             spacing: 6,
             runSpacing: 6,
@@ -1588,16 +1559,14 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           ),
         ],
 
-        // Captação — bloco editorial dedicado: apresenta todos os captadores
-        // (multi) com avatar/iniciais + nome + canal de contato (telefone).
-        // Quando não há captadores (lista vazia), nada é renderizado.
+        // 4) Captação — agora FLAT (sem moldura externa), só conteúdo
+        // direto no fundo da página.
         if (_hasCaptorsContent(property)) ...[
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           _buildCaptorsBlock(context, theme, property, isDark, muted),
         ],
 
-        // Footer extra (responsável, datas) — quando existe,
-        // separado por linha fina pra dividir hierarquia
+        // 5) Footer (responsável, datas)
         if (hasFooter) ...[
           const SizedBox(height: 14),
           Container(
@@ -1662,102 +1631,71 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ? Colors.white.withValues(alpha: 0.08)
         : Colors.black.withValues(alpha: 0.06);
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.022)
-            : accent.withValues(alpha: 0.04),
-        border: Border.all(
-          color: accent.withValues(alpha: isDark ? 0.18 : 0.16),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 22,
-                height: 22,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(6),
+    // Bloco flat (sem moldura externa) — segue a identidade do hero da
+    // PropertiesPage: eyebrow accent + contador + lista de captadores.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.flag_outlined, size: 13, color: accent),
+            const SizedBox(width: 6),
+            Text(
+              'CAPTAÇÃO',
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.6,
+                color: accent,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: accent.withValues(alpha: 0.32),
                 ),
-                child: Icon(
-                  Icons.flag_circle_rounded,
-                  size: 14,
+              ),
+              child: Text(
+                captors.length == 1
+                    ? '1 captador'
+                    : '${captors.length} captadores',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.3,
                   color: accent,
                 ),
               ),
-              const SizedBox(width: 8),
-              Text(
-                'CAPTAÇÃO',
-                style: TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 1.6,
-                  color: muted,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(
-                    color: accent.withValues(alpha: 0.32),
-                  ),
-                ),
-                child: Text(
-                  captors.length == 1
-                      ? '1 captador'
-                      : '${captors.length} captadores',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.3,
-                    color: accent,
-                  ),
-                ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Column(
+          children: [
+            for (var i = 0; i < captors.length; i++) ...[
+              if (i > 0) const SizedBox(height: 8),
+              _CaptorTile(
+                captor: captors[i],
+                accent: accent,
+                cardBg: cardBg,
+                borderColor: borderColor,
+                isDark: isDark,
+                muted: muted,
               ),
             ],
-          ),
-          const SizedBox(height: 10),
-          Column(
-            children: [
-              for (var i = 0; i < captors.length; i++) ...[
-                if (i > 0) const SizedBox(height: 8),
-                _CaptorTile(
-                  captor: captors[i],
-                  accent: accent,
-                  cardBg: cardBg,
-                  borderColor: borderColor,
-                  isDark: isDark,
-                  muted: muted,
-                ),
-              ],
-            ],
-          ),
-        ],
-      ),
+          ],
+        ),
+      ],
     );
   }
 
   /// Pills com meta-info do imóvel: público, MCMV, aceita proposta, ofertas.
   List<Widget> _buildIdentityMetaPills(Property property, bool isDark) {
     final pills = <Widget>[];
-
-    final publicLive =
-        property.isAvailableForSite == true && property.isActive;
-    pills.add(_metaPill(
-      icon: publicLive ? Icons.public : Icons.lock_outline_rounded,
-      label: publicLive ? 'No site' : 'Privado',
-      color: publicLive ? AppColors.status.success : AppColors.text.textSecondary,
-      isDark: isDark,
-    ));
 
     if (property.acceptsNegotiation == true) {
       pills.add(_metaPill(

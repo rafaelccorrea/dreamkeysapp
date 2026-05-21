@@ -292,12 +292,17 @@ class GalleryService {
     }
   }
 
-  /// Define imagem principal
+  /// Define imagem principal.
+  ///
+  /// Backend espera `PUT /gallery/:imageId/set-main` (paridade com web
+  /// `galleryApi.setMainImage`). O método HTTP anterior era `PATCH`, o que
+  /// causava "cannot PATCH /gallery/..." porque a rota não existe nesse
+  /// verbo no `gallery.controller.ts`.
   Future<ApiResponse<GalleryImage>> setMainImage(String imageId) async {
     debugPrint('🖼️ [GALLERY_SERVICE] Definindo imagem principal: $imageId');
 
     try {
-      final response = await _apiService.patch<Map<String, dynamic>>(
+      final response = await _apiService.put<Map<String, dynamic>>(
         '/gallery/$imageId/set-main',
       );
 
@@ -333,12 +338,13 @@ class GalleryService {
     }
   }
 
-  /// Reordena imagens
+  /// Reordena imagens. Backend espera `PUT /gallery/reorder` (paridade
+  /// com web `galleryApi.reorderImages`).
   Future<ApiResponse<void>> reorderImages(List<String> imageIds) async {
     debugPrint('🖼️ [GALLERY_SERVICE] Reordenando ${imageIds.length} imagens');
 
     try {
-      final response = await _apiService.patch<Map<String, dynamic>>(
+      final response = await _apiService.put<Map<String, dynamic>>(
         '/gallery/reorder',
         body: {'imageIds': imageIds},
       );

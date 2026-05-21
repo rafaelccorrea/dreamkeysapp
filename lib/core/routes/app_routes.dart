@@ -50,6 +50,10 @@ import '../../features/proposals/pages/create_proposal_page.dart';
 import '../../features/proposals/pages/proposals_page.dart';
 import '../../features/checklists/pages/checklists_page.dart';
 import '../../features/workspace/pages/workspace_page.dart';
+import '../../features/workspace/pages/users_page.dart';
+import '../../features/workspace/pages/teams_page.dart';
+import '../../features/check_in/pages/check_in_page.dart';
+import '../../features/check_in/pages/check_in_list_page.dart';
 import '../../shared/services/property_service.dart';
 
 /// Rotas da aplicação com transições customizadas
@@ -132,6 +136,16 @@ class AppRoutes {
   static const String notesCreate = '/notes/create';
   static const String checklists = '/checklists';
   static const String workspace = '/workspace';
+
+  // Colaboradores → sub-rotas
+  static const String users = '/users';
+  static const String teams = '/teams';
+
+  // Check-in (presença na imobiliária por geolocalização)
+  /// Tela principal — fazer check-in / check-out + estado atual.
+  static const String checkIn = '/check-in';
+  /// Histórico de check-ins (lista paginada com filtros).
+  static const String checkInList = '/check-in/list';
 
   // Fichas de proposta de compra
   static const String proposals = '/proposals';
@@ -389,6 +403,14 @@ class AppRoutes {
       return _buildRoute(const ChecklistsPage(), settings);
     } else if (routeName == AppRoutes.workspace) {
       return _buildRoute(const WorkspacePage(), settings);
+    } else if (routeName == AppRoutes.users) {
+      return _buildRoute(const UsersPage(), settings);
+    } else if (routeName == AppRoutes.teams) {
+      return _buildRoute(const TeamsPage(), settings);
+    } else if (routeName == AppRoutes.checkIn) {
+      return _buildRoute(const CheckInPage(), settings);
+    } else if (routeName == AppRoutes.checkInList) {
+      return _buildRoute(const CheckInListPage(), settings);
     }
 
     // Rota não encontrada

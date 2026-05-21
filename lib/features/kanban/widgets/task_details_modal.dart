@@ -1486,8 +1486,11 @@ class _MetaAvatarPill extends StatelessWidget {
         children: [
           _SolidAvatar(user: user, size: 22),
           const SizedBox(width: 8),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 160),
+          // `Flexible` (em vez de `ConstrainedBox(maxWidth: 160)`) deixa o
+          // texto encolher quando o `Expanded` pai for menor que a soma
+          // mínima dos chips — antes estourava por uns 3px em telas
+          // estreitas.
+          Flexible(
             child: Text(
               user.name,
               maxLines: 1,

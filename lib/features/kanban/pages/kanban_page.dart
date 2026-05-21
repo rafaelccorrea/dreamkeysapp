@@ -272,93 +272,99 @@ class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
+  /// Cabeçalho do quadro — pequeno meta (etapas/cards) + ações rápidas
+  /// (criar, atualizar). Sem chips/pills acima do board.
   Widget _kanbanBoardChromeHeader(
     BuildContext context,
     KanbanController controller,
   ) {
     final theme = Theme.of(context);
     final accent = _kanbanAccentColor(context);
-    final n = controller.displayColumns.length;
     final canCreateTask = controller.permissions?.canCreateTasks ?? true;
+    final cols = controller.displayColumns;
+    final totalTasks = controller.tasks.length;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.view_kanban_rounded,
-                color: accent,
-                size: 22,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Quadro · $n etapas',
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.35,
-                        height: 1.1,
-                        color: ThemeHelpers.textColor(context),
+          Expanded(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(8),
+                    border:
+                        Border.all(color: accent.withValues(alpha: 0.28)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.view_kanban_rounded, color: accent, size: 14),
+                      const SizedBox(width: 6),
+                      Text(
+                        'QUADRO',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.6,
+                          color: accent,
+                          fontSize: 10.5,
+                        ),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Arraste cards entre colunas.',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: ThemeHelpers.textSecondaryColor(context),
-                        height: 1.35,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              if (canCreateTask) ...[
-                _kanbanQuickAction(
-                  context,
-                  icon: Icons.add_rounded,
-                  label: 'Cria',
-                  isPrimary: true,
-                  onPressed: () =>
-                      _openHeroCreateNegotiationModal(context, controller),
+                    ],
+                  ),
                 ),
                 const SizedBox(width: 8),
+                Text(
+                  '${cols.length}',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: ThemeHelpers.textColor(context),
+                    letterSpacing: -0.25,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    '· ${_compactIntFormatter.format(totalTasks)} cards',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: ThemeHelpers.textSecondaryColor(context),
+                      fontWeight: FontWeight.w700,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
-              _kanbanIconAction(
-                context,
-                icon: Icons.refresh_rounded,
-                tooltip: 'Atualizar',
-                onPressed: () => controller.loadBoard(),
-              ),
-            ],
+            ),
           ),
-          const SizedBox(height: 10),
-          Divider(
-            height: 1,
-            thickness: 1,
-            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.38),
+          // Ações coladas na margem direita.
+          _kanbanIconAction(
+            context,
+            icon: Icons.refresh_rounded,
+            tooltip: 'Atualizar',
+            onPressed: () => controller.loadBoard(),
           ),
+          if (canCreateTask) ...[
+            const SizedBox(width: 8),
+            _kanbanCreateButton(
+              context,
+              onPressed: () =>
+                  _openHeroCreateNegotiationModal(context, controller),
+            ),
+          ],
         ],
       ),
     );
   }
 
   /// Botão de ação só com ícone (usado pro "Atualizar" no header do quadro).
-  /// Mantém alinhamento visual com `_kanbanQuickAction` (mesmo border-radius e
-  /// borda) sem ocupar largura com texto.
+  /// Versão premium: chip arredondado tintado com a cor do funil e borda fina.
   Widget _kanbanIconAction(
     BuildContext context, {
     required IconData icon,
@@ -373,26 +379,88 @@ class _KanbanPageState extends State<KanbanPage> {
       color: Colors.transparent,
       child: InkWell(
         onTap: onPressed,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
+        splashColor: accent.withValues(alpha: 0.16),
+        highlightColor: accent.withValues(alpha: 0.08),
         child: Ink(
-          width: 40,
-          height: 40,
+          width: 42,
+          height: 42,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            color: ThemeHelpers.cardBackgroundColor(context),
+            borderRadius: BorderRadius.circular(12),
+            color: accent.withValues(alpha: isDark ? 0.12 : 0.08),
             border: Border.all(
-              color: ThemeHelpers.borderColor(context).withValues(
-                alpha: isDark ? 0.55 : 0.5,
-              ),
+              color: accent.withValues(alpha: isDark ? 0.32 : 0.22),
+              width: 1,
             ),
           ),
-          child: Icon(icon, size: 18, color: accent),
+          child: Icon(icon, size: 19, color: accent),
         ),
       ),
     );
 
     if (tooltip == null) return button;
     return Tooltip(message: tooltip, child: button);
+  }
+
+  /// Botão "Criar" — versão premium com gradient diagonal, glow colorido
+  /// e tipografia em peso forte. Substitui o antigo `_kanbanQuickAction`
+  /// (que era genérico) por algo desenhado pra ser o CTA da tela.
+  Widget _kanbanCreateButton(
+    BuildContext context, {
+    required VoidCallback onPressed,
+  }) {
+    final accent = _kanbanAccentColor(context);
+    final theme = Theme.of(context);
+    final accentDeep = HSLColor.fromColor(accent)
+        .withLightness(
+          (HSLColor.fromColor(accent).lightness * 0.78).clamp(0.0, 1.0),
+        )
+        .toColor();
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(12),
+        splashColor: Colors.white.withValues(alpha: 0.18),
+        highlightColor: Colors.white.withValues(alpha: 0.08),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [accent, accentDeep],
+            ),
+            border: Border.all(
+              color: accentDeep.withValues(alpha: 0.45),
+              width: 1,
+            ),
+          ),
+          child: Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.add_rounded, size: 18, color: Colors.white),
+                const SizedBox(width: 7),
+                Text(
+                  'Criar',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13,
+                    height: 1.1,
+                    letterSpacing: 0.1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildKanbanBoard(KanbanController controller) {
@@ -715,75 +783,51 @@ class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
-  Widget _kanbanQuickAction(
+  /// Micro-chip (pill compacta) — versão refinada do antigo
+  /// `_kanbanActiveContextChip`, agora pra contexto leve do hero
+  /// (time, atualização, filtro). Usa cor tom-on-tom com leve borda.
+  Widget _kanbanMicroChip(
     BuildContext context, {
     required IconData icon,
     required String label,
-    required VoidCallback onPressed,
-    bool isPrimary = false,
-    bool highlight = false,
+    required Color tone,
   }) {
-    final accent = _kanbanAccentColor(context);
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final style = theme.textTheme.labelLarge?.copyWith(
-      fontWeight: FontWeight.w800,
-      fontSize: 12.75,
-      height: 1.15,
-      letterSpacing: -0.1,
-      color: isPrimary
-          ? Colors.white
-          : highlight
-              ? accent
-              : ThemeHelpers.textColor(context),
-    );
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(16),
-        child: Ink(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            color: isPrimary
-                ? accent
-                : Colors.transparent,
-            border: Border.all(
-              color: isPrimary
-                  ? accent
-                  : highlight
-                      ? accent.withValues(alpha: 0.52)
-                      : ThemeHelpers.borderColor(context)
-                          .withValues(alpha: isDark ? 0.45 : 0.4),
-            ),
-            boxShadow: isPrimary
-                ? [
-                    BoxShadow(
-                      color: accent.withValues(alpha: 0.32),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ]
-                : null,
-          ),
-          child: Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 18, color: isPrimary ? Colors.white : accent),
-                const SizedBox(width: 8),
-                Text(label, style: style),
-              ],
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 4, 10, 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: tone.withValues(alpha: isDark ? 0.14 : 0.08),
+        border: Border.all(color: tone.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: tone),
+          const SizedBox(width: 5),
+          Flexible(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 220),
+              child: Text(
+                label,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: ThemeHelpers.textColor(context),
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.05,
+                  fontSize: 11.25,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
 
+  // ignore: unused_element
   Widget _kanbanActiveContextChip(
     BuildContext context,
     IconData icon,
@@ -1144,22 +1188,8 @@ class _KanbanPageState extends State<KanbanPage> {
         (controller.filterAssigneeId != null &&
             controller.filterAssigneeId!.trim().isNotEmpty);
 
-    final teamName = controller.team?.name;
     final q = controller.searchQuery?.trim() ?? '';
-    final subtitleParts = [
-      DateFormat("'Atualização' HH:mm · d MMMM", 'pt_BR')
-          .format(DateTime.now()),
-      if (teamName != null && teamName.isNotEmpty) teamName,
-      '${controller.displayColumns.length} etapas · ${_compactIntFormatter.format(controller.tasks.length)} cards',
-      if (hasSearch)
-        'busca: “${q.length > 28 ? '${q.substring(0, 28)}…' : q}”'
-      else if (hasFilters)
-        'recorte por prioridade / responsável',
-    ].where((s) => s.trim().isNotEmpty).join(' · ');
-
     final headline = hasSearch ? 'Radar de leads' : 'Pipeline de leads';
-
-    final spread = width >= 480;
 
     final mainTitles = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1179,16 +1209,38 @@ class _KanbanPageState extends State<KanbanPage> {
       ],
     );
 
-    final dateLineWidget = Text(
-      subtitleParts,
-      style: theme.textTheme.bodySmall?.copyWith(
-        color: ThemeHelpers.textSecondaryColor(context),
-        fontWeight: FontWeight.w600,
-        height: 1.35,
-      ),
-      maxLines: 3,
-      overflow: TextOverflow.ellipsis,
-      textAlign: spread ? TextAlign.right : TextAlign.start,
+    // Linha de contexto reescrita: time + última atualização (em chip leve,
+    // sem repetir contagem de etapas/cards — isso vai aparecer na navegação
+    // por etapas logo abaixo, evitando a redundância antiga).
+    final updatedAtLabel = DateFormat("HH:mm · d MMM", 'pt_BR')
+        .format(DateTime.now());
+
+    final contextStrip = Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        _kanbanMicroChip(
+          context,
+          icon: Icons.update_rounded,
+          label: 'Atualização $updatedAtLabel',
+          tone: ThemeHelpers.textSecondaryColor(context),
+        ),
+        if (hasSearch)
+          _kanbanMicroChip(
+            context,
+            icon: Icons.search_rounded,
+            label: q.length > 28 ? '${q.substring(0, 28)}…' : 'busca: $q',
+            tone: _kanbanAccentColor(context),
+          )
+        else if (hasFilters)
+          _kanbanMicroChip(
+            context,
+            icon: Icons.tune_rounded,
+            label: 'Filtros aplicados',
+            tone: _kanbanAccentColor(context),
+          ),
+      ],
     );
 
     final Widget heroTop = Row(
@@ -1202,13 +1254,14 @@ class _KanbanPageState extends State<KanbanPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               mainTitles,
-              const SizedBox(height: 6),
-              dateLineWidget,
+              const SizedBox(height: 10),
+              contextStrip,
             ],
           ),
         ),
       ],
     );
+
 
     return Padding(
       padding: EdgeInsets.fromLTRB(
@@ -1222,39 +1275,7 @@ class _KanbanPageState extends State<KanbanPage> {
         children: [
           Padding(
             padding: const EdgeInsets.only(top: _kHeaderPadVTop),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                heroTop,
-                if (hasSearch || hasFilters) ...[
-                  SizedBox(height: compact ? 14 : 16),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      if (hasSearch)
-                        _kanbanActiveContextChip(
-                          context,
-                          Icons.search_rounded,
-                          q.isEmpty ? 'Busca' : q,
-                          onClear: () => context
-                              .read<KanbanController>()
-                              .clearFilters(),
-                        ),
-                      if (hasFilters)
-                        _kanbanActiveContextChip(
-                          context,
-                          Icons.tune_rounded,
-                          'Filtros aplicados',
-                          onClear: () => context
-                              .read<KanbanController>()
-                              .clearFilters(),
-                        ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
+            child: heroTop,
           ),
           if (toolsContinuation != null) ...[
             SizedBox(height: compact ? 18 : 22),
@@ -2067,6 +2088,12 @@ class _KanbanPageState extends State<KanbanPage> {
     final tags = task.displayTags;
     final hasTags = tags != null && tags.isNotEmpty;
 
+    // Cor primária do card: usa o accent do prazo > prioridade > primary
+    final cardAccent = accent ?? priorityColor ?? theme.colorScheme.primary;
+    final assigned = task.assignedTo;
+    final descriptionText = task.description?.trim() ?? '';
+    final hasDescription = descriptionText.isNotEmpty;
+
     return GestureDetector(
       onDoubleTap: bulkMode
           ? null
@@ -2081,29 +2108,65 @@ class _KanbanPageState extends State<KanbanPage> {
             },
       child: Container(
         width: double.infinity,
-        margin: bulkMode ? EdgeInsets.zero : const EdgeInsets.only(bottom: 4),
+        margin: bulkMode ? EdgeInsets.zero : const EdgeInsets.only(bottom: 6),
         decoration: BoxDecoration(
           color: tintedSurface,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(color: borderColor, width: borderWidth),
+          boxShadow: [
+            BoxShadow(
+              color: cardAccent.withValues(alpha: isDark ? 0.10 : 0.06),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+              spreadRadius: -4,
+            ),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.04),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+              spreadRadius: -2,
+            ),
+          ],
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(14),
           child: Stack(
             children: [
+              // Glow sutil diagonal (canto superior direito) com a cor do
+              // card. Dá vida ao card sem virar uma cara colorida cheia.
+              Positioned(
+                top: -22,
+                right: -22,
+                child: IgnorePointer(
+                  child: Container(
+                    width: 110,
+                    height: 110,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [
+                          cardAccent.withValues(alpha: isDark ? 0.20 : 0.13),
+                          cardAccent.withValues(alpha: 0.0),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              // Tira lateral em gradiente (mantida — é a identidade)
               if (leftStripe != null)
                 Positioned(
                   left: 0,
                   top: 0,
                   bottom: 0,
-                  width: 3,
+                  width: 4,
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          leftStripe.withValues(alpha: 0.95),
+                          leftStripe.withValues(alpha: 1.0),
                           leftStripe.withValues(alpha: 0.55),
                         ],
                       ),
@@ -2115,13 +2178,13 @@ class _KanbanPageState extends State<KanbanPage> {
                   top: 0,
                   left: 0,
                   right: 0,
-                  height: 1.5,
+                  height: 2,
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         colors: [
                           accent!.withValues(alpha: 0.0),
-                          accent.withValues(alpha: 0.85),
+                          accent.withValues(alpha: 0.95),
                           accent.withValues(alpha: 0.0),
                         ],
                         stops: const [0.0, 0.5, 1.0],
@@ -2131,40 +2194,82 @@ class _KanbanPageState extends State<KanbanPage> {
                 ),
               Padding(
                 padding: EdgeInsets.fromLTRB(
-                  leftStripe != null ? 14 : 12,
-                  16,
-                  10,
-                  16,
+                  leftStripe != null ? 16 : 14,
+                  14,
+                  12,
+                  14,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // ─── HEADER: avatar grande à esquerda + título à direita
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         if (bulkMode)
                           Padding(
-                            padding: const EdgeInsets.only(right: 8, top: 1),
+                            padding:
+                                const EdgeInsets.only(right: 10, top: 2),
                             child: Icon(
                               bulkSelected
                                   ? Icons.check_box_rounded
                                   : Icons.check_box_outline_blank_rounded,
-                              size: 20,
+                              size: 22,
                               color: theme.colorScheme.primary,
                             ),
+                          )
+                        else
+                          _taskCardLeadAvatar(
+                            assigned: assigned,
+                            accent: cardAccent,
                           ),
+                        const SizedBox(width: 10),
                         Expanded(
-                          child: Text(
-                            task.title,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 14.5,
-                              height: 1.32,
-                              letterSpacing: -0.1,
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                task.title,
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 15,
+                                  height: 1.25,
+                                  letterSpacing: -0.2,
+                                  color: ThemeHelpers.textColor(context),
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              if (assigned != null && !bulkMode) ...[
+                                const SizedBox(height: 3),
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.person_outline_rounded,
+                                      size: 11,
+                                      color: secondaryText,
+                                    ),
+                                    const SizedBox(width: 3),
+                                    Flexible(
+                                      child: Text(
+                                        _firstName(assigned.name),
+                                        style: theme.textTheme.labelSmall
+                                            ?.copyWith(
+                                          fontWeight: FontWeight.w700,
+                                          color: secondaryText,
+                                          fontSize: 11,
+                                          letterSpacing: -0.05,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ],
                           ),
                         ),
                         if (task.isCompleted)
@@ -2172,32 +2277,49 @@ class _KanbanPageState extends State<KanbanPage> {
                             padding: const EdgeInsets.only(left: 6, top: 1),
                             child: Icon(
                               Icons.check_circle_rounded,
-                              size: 16,
+                              size: 18,
                               color: theme.colorScheme.primary,
                             ),
                           ),
                         if (!bulkMode) _buildTaskCardMenu(task),
                       ],
                     ),
-                    if (task.description != null &&
-                        task.description!.trim().isNotEmpty) ...[
+
+                    // ─── DESCRIÇÃO opcional (mais discreta agora)
+                    if (hasDescription) ...[
                       const SizedBox(height: 10),
-                      Text(
-                        task.description!.trim(),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: secondaryText,
-                          fontSize: 12.5,
-                          height: 1.45,
+                      Container(
+                        padding: const EdgeInsets.fromLTRB(10, 8, 10, 9),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(10),
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.03)
+                              : Colors.black.withValues(alpha: 0.025),
+                          border: Border.all(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.05)
+                                : Colors.black.withValues(alpha: 0.04),
+                          ),
                         ),
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
+                        child: Text(
+                          descriptionText,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: secondaryText,
+                            fontSize: 12.25,
+                            height: 1.45,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ],
+
+                    // ─── PILLS de contexto (prioridade, prazo, resultado, tags)
                     if (task.priority != null ||
                         deadline.isVisible ||
                         hasTags ||
                         task.hasClosedResult) ...[
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
                       Wrap(
                         spacing: 6,
                         runSpacing: 6,
@@ -2211,64 +2333,70 @@ class _KanbanPageState extends State<KanbanPage> {
                         ],
                       ),
                     ],
-                    const SizedBox(height: 14),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.schedule_rounded,
-                          size: 12,
-                          color: secondaryText,
-                        ),
-                        const SizedBox(width: 4),
-                        Flexible(
-                          child: Text(
-                            _relativeCardTime(task.createdAt),
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: secondaryText,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+
+                    // ─── FOOTER: data + comentários (à esquerda), separados
+                    // por divisor sutil
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.only(top: 10),
+                      decoration: BoxDecoration(
+                        border: Border(
+                          top: BorderSide(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.05)
+                                : Colors.black.withValues(alpha: 0.05),
                           ),
                         ),
-                        if (task.commentsCount != null &&
-                            task.commentsCount! > 0) ...[
-                          const SizedBox(width: 10),
-                          Icon(
-                            Icons.mode_comment_outlined,
-                            size: 12,
+                      ),
+                      child: Row(
+                        children: [
+                          _taskCardMetric(
+                            icon: Icons.schedule_rounded,
+                            label: _relativeCardTime(task.createdAt),
                             color: secondaryText,
                           ),
-                          const SizedBox(width: 3),
-                          Text(
-                            '${task.commentsCount}',
-                            style: TextStyle(
-                              fontSize: 11,
+                          if (task.commentsCount != null &&
+                              task.commentsCount! > 0) ...[
+                            const SizedBox(width: 12),
+                            _taskCardMetric(
+                              icon: Icons.mode_comment_outlined,
+                              label: '${task.commentsCount}',
                               color: secondaryText,
-                              fontWeight: FontWeight.w600,
                             ),
-                          ),
-                        ],
-                        const Spacer(),
-                        if (task.assignedTo != null) ...[
-                          Flexible(
-                            child: Text(
-                              _firstName(task.assignedTo!.name),
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: secondaryText,
-                                fontWeight: FontWeight.w700,
+                          ],
+                          const Spacer(),
+                          // Tag "Nova" para tarefas criadas há menos de 24h
+                          if (DateTime.now()
+                                  .difference(task.createdAt)
+                                  .inHours <
+                              24)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 2,
                               ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              textAlign: TextAlign.right,
+                              decoration: BoxDecoration(
+                                color: cardAccent.withValues(
+                                  alpha: isDark ? 0.20 : 0.12,
+                                ),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: cardAccent.withValues(alpha: 0.4),
+                                ),
+                              ),
+                              child: Text(
+                                'NOVA',
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 9,
+                                  letterSpacing: 1.2,
+                                  color: cardAccent,
+                                  height: 1,
+                                ),
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 6),
-                          _assigneeAvatar(task.assignedTo!),
                         ],
-                      ],
+                      ),
                     ),
                   ],
                 ),
@@ -2277,6 +2405,82 @@ class _KanbanPageState extends State<KanbanPage> {
           ),
         ),
       ),
+    );
+  }
+
+  /// Avatar do responsável no canto superior esquerdo do card — quando
+  /// não há responsável, mostra um "ghost" tintado pra manter o ritmo
+  /// visual sem brigar com o título.
+  Widget _taskCardLeadAvatar({
+    required dynamic assigned,
+    required Color accent,
+  }) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    if (assigned == null) {
+      return Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: accent.withValues(alpha: isDark ? 0.12 : 0.08),
+          border: Border.all(
+            color: accent.withValues(alpha: 0.30),
+            style: BorderStyle.solid,
+          ),
+        ),
+        child: Icon(
+          Icons.person_outline_rounded,
+          size: 18,
+          color: accent.withValues(alpha: 0.65),
+        ),
+      );
+    }
+    return SizedBox(
+      width: 36,
+      height: 36,
+      child: Stack(
+        children: [
+          Positioned.fill(child: _assigneeAvatar(assigned)),
+          // anel da cor do card em volta do avatar
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: accent.withValues(alpha: 0.55),
+                    width: 1.5,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _taskCardMetric({
+    required IconData icon,
+    required String label,
+    required Color color,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 12, color: color),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            color: color,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.05,
+          ),
+        ),
+      ],
     );
   }
 
@@ -3160,3 +3364,4 @@ class _KanbanTaskDeadline {
     }
   }
 }
+

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -16,10 +16,10 @@ import '../widgets/intelligent_search_modal.dart';
 import '../widgets/export_import_dialog.dart';
 import '../services/property_local_draft_storage.dart';
 import '../../../../shared/services/ai_service.dart';
-import '../../matches/widgets/matches_badge.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../models/property_wizard_pop_result.dart';
 import '../utils/property_edit_permissions.dart';
+import '../utils/property_status_visual.dart';
 
 // Formatter de moeda
 final _currencyFormatter = NumberFormat.currency(
@@ -98,28 +98,6 @@ class _PropertiesPageState extends State<PropertiesPage> {
     }
   }
 
-  /// Quantidade máxima de cards no carrossel "Adicionados recentemente".
-  static const int _kRecentCarouselSize = 5;
-
-  /// Imóveis recém-adicionados (top [_kRecentCarouselSize] mais recentes por
-  /// `createdAt` desc). Substitui o filtro antigo `isFeatured`: o destaque
-  /// agora é cronológico — o que entrou por último ganha o palco.
-  List<Property> get _featuredProperties {
-    if (_properties.isEmpty) return const <Property>[];
-    final sorted = List<Property>.from(_properties)
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    return sorted.take(_kRecentCarouselSize).toList(growable: false);
-  }
-
-  /// Demais imóveis — vão para a grade compacta abaixo do carrossel.
-  /// Excluímos os IDs já em destaque para não duplicar a renderização.
-  List<Property> get _nonFeaturedProperties {
-    final highlightedIds = _featuredProperties.map((p) => p.id).toSet();
-    return _properties
-        .where((p) => !highlightedIds.contains(p.id))
-        .toList(growable: false);
-  }
-
   final PropertyService _propertyService = PropertyService.instance;
   bool _isLoading = true;
   bool _isLoadingMore = false;
@@ -140,11 +118,6 @@ class _PropertiesPageState extends State<PropertiesPage> {
   /// sai e volta em curto prazo (filtros + termo de busca).
   static const String _stateCacheKey = 'properties:list';
 
-  /// Carrossel de imóveis em destaque (`isFeatured`).
-  late final PageController _featuredPageController =
-      PageController(viewportFraction: 0.86);
-  int _currentFeaturedIndex = 0;
-
   @override
   void initState() {
     super.initState();
@@ -160,7 +133,6 @@ class _PropertiesPageState extends State<PropertiesPage> {
     _searchController.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
-    _featuredPageController.dispose();
     super.dispose();
   }
 
@@ -252,16 +224,34 @@ class _PropertiesPageState extends State<PropertiesPage> {
     }
   }
 
+  /// Espelha a `normalizeListingScope` do `useProperties.ts` do front web.
+  ///
+  /// Alguns ambientes do backend não interpretam `onlyMyData` consistentemente
+  /// (em alguns lugares vira "criado por mim" e zera a lista para corretores
+  /// que atuam como responsáveis sem ter criado a ficha). Por isso, quando
+  /// o usuário ativa o toggle "Minhas propriedades", trocamos:
+  ///   `onlyMyData: true` → `responsibleUserId: currentUserId`
+  /// e mandamos `onlyMyData: false` na requisição. É exatamente o que a
+  /// `useProperties.normalizeListingScope` faz no front web.
+  PropertyFilters? _normalizeListingScope(PropertyFilters? filters) {
+    if (filters == null) return null;
+    if (filters.onlyMyData != true) return filters;
+    final currentUserId = ModuleAccessService.instance.userId;
+    if (currentUserId == null || currentUserId.trim().isEmpty) {
+      return filters;
+    }
+    return filters.copyWithNullable(
+      responsibleUserId: filters.responsibleUserId ?? currentUserId,
+      onlyMyData: false,
+    );
+  }
+
   Future<void> _loadProperties({bool refresh = false}) async {
     if (refresh) {
       setState(() {
         _currentPage = 1;
         _properties.clear();
-        _currentFeaturedIndex = 0;
       });
-      if (_featuredPageController.hasClients) {
-        _featuredPageController.jumpToPage(0);
-      }
     }
 
     setState(() {
@@ -270,13 +260,14 @@ class _PropertiesPageState extends State<PropertiesPage> {
     });
 
     try {
-      final filters =
+      final rawFilters =
           _filters?.copyWith(
             search: _searchQuery.trim().isEmpty ? null : _searchQuery.trim(),
           ) ??
           (_searchQuery.trim().isNotEmpty
               ? PropertyFilters(search: _searchQuery.trim())
               : null);
+      final filters = _normalizeListingScope(rawFilters);
 
       final response = await _propertyService.getProperties(
         page: _currentPage,
@@ -332,13 +323,14 @@ class _PropertiesPageState extends State<PropertiesPage> {
 
     try {
       final nextPage = _currentPage + 1;
-      final filters =
+      final rawFilters =
           _filters?.copyWith(
             search: _searchQuery.trim().isEmpty ? null : _searchQuery.trim(),
           ) ??
           (_searchQuery.trim().isNotEmpty
               ? PropertyFilters(search: _searchQuery.trim())
               : null);
+      final filters = _normalizeListingScope(rawFilters);
 
       final response = await _propertyService.getProperties(
         page: nextPage,
@@ -479,7 +471,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
   @override
   Widget build(BuildContext context) {
     return AppScaffold(
-      title: 'Imóveis',
+      title: 'Propriedades',
       currentBottomNavIndex: 1,
       showBottomNavigation: true,
       actions: [
@@ -647,6 +639,220 @@ class _PropertiesPageState extends State<PropertiesPage> {
   }
 
   /// Radar / KPIs / atalhos — hero alinhado ao painel principal (dashboard).
+  // ────────────────────────────────────────────────────────────────────
+  // Atalhos do corretor (broker UX) — paridade com web `PropertiesPage`:
+  // chip strip por escopo da carteira + toggle "Minhas propriedades".
+  // ────────────────────────────────────────────────────────────────────
+
+  PortfolioScope? get _activeScope => _filters?.portfolioScope;
+
+  /// "Apenas inativos" — verdadeiro filtro: backend recebe `isActive=false`
+  /// e devolve SÓ cadastros desativados. (O antigo `includeInactive` apenas
+  /// _incluía_ inativos junto com ativos, o que confundia o corretor.)
+  bool get _onlyInactive => _filters?.isActive == false;
+
+  bool get _onlyMyProperties => _filters?.onlyMyData == true;
+
+  void _setPortfolioScope(PortfolioScope? scope) {
+    final base = _filters ?? PropertyFilters();
+    setState(() {
+      _filters = base.copyWithNullable(
+        portfolioScope: scope,
+        resetPortfolioScope: scope == null,
+      );
+    });
+    _persistState();
+    _loadProperties(refresh: true);
+  }
+
+  void _toggleOnlyInactive() {
+    final base = _filters ?? PropertyFilters();
+    final next = !_onlyInactive;
+    setState(() {
+      _filters = base.copyWithNullable(
+        isActive: next ? false : null,
+        resetIsActive: !next,
+        // Limpamos `includeInactive` antigo para não conflitar com a nova
+        // semântica baseada em `isActive`.
+        resetIncludeInactive: true,
+      );
+    });
+    _persistState();
+    _loadProperties(refresh: true);
+  }
+
+  void _toggleOnlyMyProperties() {
+    final base = _filters ?? PropertyFilters();
+    final next = !_onlyMyProperties;
+    setState(() {
+      _filters = base.copyWithNullable(
+        onlyMyData: next,
+        resetOnlyMyData: !next,
+      );
+    });
+    _persistState();
+    _loadProperties(refresh: true);
+  }
+
+  /// Painel unificado de atalhos do corretor — substitui o antigo bloco
+  /// "INSIGHT PORTFÓLIO" do hero. Concentra "Minhas propriedades" (em
+  /// destaque), as chips de escopo da carteira e o toggle "Ver inativos"
+  /// em um único bloco visual coeso.
+  ///
+  /// Permissões: a tela em si já é gated por `property:view` (rota +
+  /// drawer). Os filtros aqui só refinam a consulta — não há ação
+  /// destrutiva, portanto não há gating adicional necessário. O backend
+  /// continua aplicando RLS / role bypass para "minhas propriedades" e
+  /// "pendentes" exatamente como na web.
+  /// Painel de atalhos do corretor — totalmente flat, sem cards, sem
+  /// bordas, sem sombras. Tudo vive direto no background do hero como
+  /// o resto dos elementos do cabeçalho. Espaçamentos verticais
+  /// compactos pra dar a sensação de "lista solta" e não de "form".
+  Widget _buildBrokerFiltersPanel(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = _portfolioAccentColor(context);
+
+    final activeCount = (_activeScope != null ? 1 : 0) +
+        (_onlyMyProperties ? 1 : 0) +
+        (_onlyInactive ? 1 : 0);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.filter_alt_rounded, size: 14, color: accent),
+            const SizedBox(width: 6),
+            Text(
+              'ATALHOS DO CORRETOR',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: accent,
+                letterSpacing: 1.65,
+                fontWeight: FontWeight.w900,
+                fontSize: 10.5,
+              ),
+            ),
+            const Spacer(),
+            if (activeCount > 0)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 3,
+                ),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: isDark ? 0.18 : 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: accent.withValues(alpha: 0.35),
+                  ),
+                ),
+                child: Text(
+                  '$activeCount ativo${activeCount > 1 ? 's' : ''}',
+                  style: TextStyle(
+                    color: accent,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 10.5,
+                    letterSpacing: 0.25,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        _FlatToggleRow(
+          icon: Icons.person_rounded,
+          inactiveIcon: Icons.person_outline_rounded,
+          label: 'Minhas propriedades',
+          hint: _onlyMyProperties
+              ? 'Mostrando apenas imóveis sob sua responsabilidade'
+              : 'Filtrar pelos imóveis onde você é responsável ou captador',
+          active: _onlyMyProperties,
+          tone: accent,
+          onTap: _toggleOnlyMyProperties,
+        ),
+        const SizedBox(height: 4),
+        _FlatToggleRow(
+          icon: Icons.archive_rounded,
+          inactiveIcon: Icons.archive_outlined,
+          label: _onlyInactive
+              ? 'Mostrando só inativos'
+              : 'Apenas inativos',
+          hint: _onlyInactive
+              ? 'Lista filtrada para cadastros desativados'
+              : 'Filtrar somente cadastros desativados',
+          active: _onlyInactive,
+          tone: const Color(0xFF6366F1),
+          onTap: _toggleOnlyInactive,
+        ),
+        const SizedBox(height: 12),
+        _buildPortfolioScopeStrip(context),
+      ],
+    );
+  }
+
+  /// Chip strip por status do portfólio (Todos / Disponíveis / Vendidos /
+  /// Pendentes / Recusados). Em `Wrap` — sem scroll horizontal; quando
+  /// não couber, quebra pra linha de baixo.
+  Widget _buildPortfolioScopeStrip(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    final chips = <_ScopeChipData>[
+      _ScopeChipData(
+        label: 'Todos',
+        icon: Icons.apps_rounded,
+        active: _activeScope == null,
+        tone: theme.colorScheme.primary,
+        onTap: () => _setPortfolioScope(null),
+      ),
+      _ScopeChipData(
+        label: 'Disponíveis',
+        icon: Icons.check_circle_rounded,
+        active: _activeScope == PortfolioScope.available,
+        tone: const Color(0xFF10B981),
+        onTap: () => _setPortfolioScope(PortfolioScope.available),
+      ),
+      _ScopeChipData(
+        label: 'Vendidos',
+        icon: Icons.sell_rounded,
+        active: _activeScope == PortfolioScope.sold,
+        tone: const Color(0xFF8B5CF6),
+        onTap: () => _setPortfolioScope(PortfolioScope.sold),
+      ),
+      _ScopeChipData(
+        label: 'Pendentes',
+        icon: Icons.schedule_rounded,
+        active: _activeScope == PortfolioScope.pending,
+        tone: const Color(0xFFF59E0B),
+        onTap: () => _setPortfolioScope(PortfolioScope.pending),
+      ),
+      _ScopeChipData(
+        label: 'Recusados',
+        icon: Icons.cancel_rounded,
+        active: _activeScope == PortfolioScope.rejected,
+        tone: const Color(0xFFEF4444),
+        onTap: () => _setPortfolioScope(PortfolioScope.rejected),
+      ),
+    ];
+
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        for (final c in chips)
+          _PortfolioScopeChip(
+            label: c.label,
+            icon: c.icon,
+            active: c.active,
+            tone: c.tone,
+            isDark: isDark,
+            onTap: c.onTap,
+          ),
+      ],
+    );
+  }
+
   Widget _buildPortfolioHeader(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
@@ -719,7 +925,6 @@ class _PropertiesPageState extends State<PropertiesPage> {
         final narrow = w < 332;
         final spread = w >= 480;
         final actionsTop = w >= 640;
-        final pillsBesideInsight = w >= 520;
 
         final padH = narrow ? 12.0 : (compact ? 16.0 : _kHeaderPadH);
         // Gap mais amplo agora que os KPIs são fluidos (sem moldura) — dá
@@ -791,12 +996,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
           );
         }
 
-        Widget insightBlock() => _buildPortfolioHeroInsight(
-              context,
-              gatedGlobal: gatedGlobal,
-              hasSearch: hasSearch,
-              hasFilters: hasFilters,
-            );
+        Widget insightBlock() => _buildBrokerFiltersPanel(context);
 
         Widget actionsBar() {
           return Wrap(
@@ -876,26 +1076,12 @@ class _PropertiesPageState extends State<PropertiesPage> {
                 ],
               ),
               const SizedBox(height: 12),
-              if (pillsBesideInsight)
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      flex: 42,
-                      child: pillRow(),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      flex: 58,
-                      child: insightBlock(),
-                    ),
-                  ],
-                )
-              else ...[
-                pillRow(),
-                const SizedBox(height: 10),
-                insightBlock(),
-              ],
+              // O painel de atalhos do corretor sempre ocupa a largura
+              // inteira do hero, mesmo em telas largas — assim os toggles
+              // e chips não ficam apertados num quadrante centralizado.
+              pillRow(),
+              const SizedBox(height: 12),
+              insightBlock(),
               if (!actionsTop) ...[
                 const SizedBox(height: 10),
                 Align(
@@ -1236,91 +1422,6 @@ class _PropertiesPageState extends State<PropertiesPage> {
     ];
   }
 
-  Widget _buildPortfolioHeroInsight(
-    BuildContext context, {
-    required bool gatedGlobal,
-    required bool hasSearch,
-    required bool hasFilters,
-  }) {
-    final theme = Theme.of(context);
-    final gs = _globalStats;
-    final m = _listedPropertyMetrics();
-
-    late final IconData insightIcon;
-    late final Color iconBg;
-    late final Color iconFg;
-    late final String body;
-
-    if (hasSearch) {
-      insightIcon = Icons.manage_search_rounded;
-      iconBg = ThemeHelpers.borderColor(context).withValues(alpha: 0.2);
-      iconFg = ThemeHelpers.textSecondaryColor(context);
-      body =
-          'Resultados combinam busca textual com os filtros deste momento — use os KPIs para validar distribuição na página atual.';
-    } else if (hasFilters) {
-      insightIcon = Icons.tune_rounded;
-      iconBg = _portfolioAccentColor(context).withValues(alpha: 0.14);
-      iconFg = _portfolioAccentColor(context);
-      body =
-          'Métricas da listagem espelham o filtro granular. Limpe os chips de contexto ou redefina os filtros para alinhar ao CRM global.';
-    } else if (gs != null && gatedGlobal) {
-      insightIcon = Icons.auto_graph_rounded;
-      iconFg = AppColors.status.success;
-      iconBg = AppColors.status.success.withValues(alpha: 0.14);
-      body =
-          '${_compactIntFormatter.format(gs.total)} imóveis catalogados · '
-          '${_compactIntFormatter.format(gs.available)} disponíveis neste panorama · '
-          '${m.negotiationFriendly} aceitam negociação na página atual.';
-    } else {
-      insightIcon = Icons.layers_outlined;
-      iconFg = ThemeHelpers.textSecondaryColor(context);
-      iconBg = ThemeHelpers.borderColor(context).withValues(alpha: 0.18);
-      body = '$_total registros combinam filtros pesquisáveis · '
-          '${m.available} listados livres · ${m.negotiationFriendly} flexíveis a proposta.';
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(11),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: iconBg,
-            ),
-            child: Icon(insightIcon, color: iconFg, size: 22),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'INSIGHT PORTFÓLIO',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.65,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  body,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: ThemeHelpers.textColor(context),
-                    fontWeight: FontWeight.w700,
-                    height: 1.32,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _buildPortfolioIconBadge(
     BuildContext context,
@@ -2197,334 +2298,12 @@ class _PropertiesPageState extends State<PropertiesPage> {
     _loadProperties(refresh: true);
   }
 
-  /// Carrossel premium dos imóveis "adicionados recentemente".
-  ///
-  /// Usa `PageView` com snap por página e cards bem maiores que a grade.
-  /// O cabeçalho é minimalista (apenas ícone + título). Quando não há
-  /// imóveis na listagem atual, a área é completamente omitida.
-  Widget _buildFeaturedCarousel(
-    BuildContext context,
-    ThemeData theme, {
-    required double horizontalPad,
-  }) {
-    final featured = _featuredProperties;
-    if (featured.isEmpty) return const SizedBox.shrink();
-
-    final w = MediaQuery.sizeOf(context).width;
-    final accent = AppColors.primary.primary;
-
-    final cardH = (w * 1.12).clamp(360.0, 460.0);
-    final currentIdx = _currentFeaturedIndex.clamp(0, featured.length - 1);
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 14, bottom: 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: EdgeInsets.fromLTRB(horizontalPad, 0, horizontalPad, 10),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.auto_awesome_rounded,
-                  size: 18,
-                  color: accent,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Adicionados recentemente',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.25,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          SizedBox(
-            height: cardH,
-            child: PageView.builder(
-              controller: _featuredPageController,
-              physics: const BouncingScrollPhysics(),
-              padEnds: false,
-              onPageChanged: (i) => setState(() => _currentFeaturedIndex = i),
-              itemCount: featured.length,
-              itemBuilder: (context, i) {
-                final isActive = i == currentIdx;
-                return AnimatedPadding(
-                  duration: const Duration(milliseconds: 240),
-                  curve: Curves.easeOut,
-                  padding: EdgeInsets.fromLTRB(
-                    i == 0 ? horizontalPad : 6,
-                    isActive ? 0 : 14,
-                    i == featured.length - 1 ? horizontalPad : 6,
-                    isActive ? 0 : 14,
-                  ),
-                  child: _buildPremiumFeaturedCard(
-                    context,
-                    theme,
-                    featured[i],
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Card grande do carrossel "Em destaque" — imagem hero + bottom-sheet
-  /// translúcido com preço, título, localização e specs. Borda em gradiente
-  /// dourado/marca, sombra forte. NUNCA usado dentro da grade.
-  Widget _buildPremiumFeaturedCard(
-    BuildContext context,
-    ThemeData theme,
-    Property property,
-  ) {
-    final isDark = theme.brightness == Brightness.dark;
-    final accent = AppColors.primary.primary;
-    final price = _formatMainPrice(property);
-    final specs = _editorialSpecsLine(property);
-    final locCompact = _compactLocationLine(property);
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () => Navigator.of(context)
-            .pushNamed(
-              AppRoutes.propertyDetails(property.id),
-              arguments: {'property': property},
-            ),
-        onLongPress: () {
-          HapticFeedback.mediumImpact();
-          _showPropertyQuickActionsSheet(context, theme, property);
-        },
-        borderRadius: BorderRadius.circular(28),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(28),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                const Color(0xFFFBD06A).withValues(alpha: 0.92),
-                accent.withValues(alpha: 0.85),
-                const Color(0xFFB71C1C).withValues(alpha: 0.92),
-              ],
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: accent.withValues(alpha: isDark ? 0.32 : 0.22),
-                blurRadius: 32,
-                offset: const Offset(0, 14),
-                spreadRadius: -6,
-              ),
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.55 : 0.16),
-                blurRadius: 22,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          padding: const EdgeInsets.all(2),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(26),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                if (property.mainImage != null)
-                  ShimmerImage(
-                    imageUrl: property.mainImage!.url,
-                    width: double.infinity,
-                    height: double.infinity,
-                    fit: BoxFit.cover,
-                    errorWidget: _buildPropertyImageFallback(context, theme),
-                  )
-                else
-                  _buildPropertyImageFallback(context, theme),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      stops: const [0.0, 0.32, 0.62, 1.0],
-                      colors: [
-                        Colors.black.withValues(alpha: 0.42),
-                        Colors.transparent,
-                        Colors.black.withValues(alpha: 0.40),
-                        Colors.black.withValues(alpha: 0.96),
-                      ],
-                    ),
-                  ),
-                ),
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: RadialGradient(
-                          center: const Alignment(-0.85, -0.95),
-                          radius: 1.25,
-                          colors: [
-                            Colors.white.withValues(alpha: 0.18),
-                            Colors.transparent,
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  top: 14,
-                  left: 14,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(999),
-                      // Chip "NOVO" — paleta verde menta (mais "fresco/recente"
-                      // que o âmbar de destaque). Mantém contraste forte.
-                      gradient: const LinearGradient(
-                        colors: [
-                          Color(0xFF6EE7B7),
-                          Color(0xFF10B981),
-                        ],
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.28),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.fiber_new_rounded,
-                          size: 14,
-                          color: Color(0xFF064E3B),
-                        ),
-                        const SizedBox(width: 5),
-                        Text(
-                          'NOVO',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            fontWeight: FontWeight.w900,
-                            color: const Color(0xFF064E3B),
-                            letterSpacing: 0.8,
-                            fontSize: 10.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                Positioned(
-                  top: 10,
-                  right: 10,
-                  child: _buildPropertyActionsMenu(context, theme, property),
-                ),
-                Positioned(
-                  left: 18,
-                  right: 18,
-                  bottom: 18,
-                  child: MatchesBadge(
-                    propertyId: property.id,
-                    onClick: () => Navigator.pushNamed(
-                      context,
-                      AppRoutes.matchesByProperty(property.id),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          price.value,
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w900,
-                            height: 1.0,
-                            letterSpacing: -0.4,
-                            fontSize: 22,
-                            shadows: const [
-                              Shadow(
-                                offset: Offset(0, 1),
-                                blurRadius: 10,
-                                color: Colors.black87,
-                              ),
-                            ],
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          property.title,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: Colors.white.withValues(alpha: 0.96),
-                            fontWeight: FontWeight.w700,
-                            height: 1.15,
-                            fontSize: 13,
-                            shadows: const [
-                              Shadow(
-                                offset: Offset(0, 1),
-                                blurRadius: 8,
-                                color: Colors.black54,
-                              ),
-                            ],
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          [locCompact, ?specs].join('  ·  '),
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: Colors.white.withValues(alpha: 0.78),
-                            fontWeight: FontWeight.w700,
-                            fontSize: 10.5,
-                            letterSpacing: 0.1,
-                            height: 1.15,
-                            fontFeatures: const [
-                              FontFeature.tabularFigures(),
-                            ],
-                            shadows: const [
-                              Shadow(
-                                offset: Offset(0, 1),
-                                blurRadius: 6,
-                                color: Colors.black54,
-                              ),
-                            ],
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Radar e grade explorável no mobile, estilo galeria; sem fila larga vertical de propriedades.
+  /// situação, título, endereço, specs e preço — tudo visível de relance.
   Widget _buildScrollablePropertiesViewport(BuildContext context) {
     final theme = Theme.of(context);
     final w = MediaQuery.sizeOf(context).width;
-    final cols = _exploreGridCrossAxisCount(w);
-    final horizontal = w < 360 ? 10.0 : (cols >= 3 ? 14.0 : 12.0);
-    final aspect = _exploreGridChildAspectRatio(cols);
-    final featured = _featuredProperties;
-    final rest = _nonFeaturedProperties;
+    final horizontal = w < 360 ? 10.0 : 14.0;
+    final all = _properties;
 
     return RefreshIndicator(
       onRefresh: () => _loadProperties(refresh: true),
@@ -2537,64 +2316,18 @@ class _PropertiesPageState extends State<PropertiesPage> {
         slivers: [
           SliverToBoxAdapter(child: _buildPortfolioHeader(context)),
           SliverToBoxAdapter(
-            child: _buildFeaturedCarousel(
-              context,
-              theme,
-              horizontalPad: horizontal,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(horizontal, 16, horizontal, 10),
+              child: _buildPropertiesListHeader(context, theme, all.length),
             ),
           ),
-          if (featured.isNotEmpty && rest.isNotEmpty)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(horizontal, 18, horizontal, 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Divider(
-                        color: theme.dividerColor.withValues(alpha: 0.38),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Text(
-                        'Explorar o restante',
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: ThemeHelpers.textSecondaryColor(context),
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: Divider(
-                        color: theme.dividerColor.withValues(alpha: 0.38),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
           SliverPadding(
-            padding: EdgeInsets.fromLTRB(
-              horizontal,
-              featured.isNotEmpty ? 2 : 14,
-              horizontal,
-              8,
-            ),
-            sliver: SliverGrid.builder(
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: cols,
-                crossAxisSpacing: cols >= 3 ? 9 : 11,
-                mainAxisSpacing: cols >= 3 ? 11 : 13,
-                childAspectRatio: aspect,
-              ),
-              itemCount: rest.length,
+            padding: EdgeInsets.fromLTRB(horizontal, 0, horizontal, 8),
+            sliver: SliverList.separated(
+              itemCount: all.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 10),
               itemBuilder: (context, index) {
-                return _buildPropertyExploreTile(
-                  context,
-                  theme,
-                  rest[index],
-                  featuredStripLayout: false,
-                );
+                return _buildPropertyBrokerRow(context, theme, all[index]);
               },
             ),
           ),
@@ -2604,10 +2337,10 @@ class _PropertiesPageState extends State<PropertiesPage> {
                 padding: const EdgeInsets.symmetric(vertical: 18),
                 child: Center(
                   child: SizedBox(
-                    width: 28,
-                    height: 28,
+                    width: 24,
+                    height: 24,
                     child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
+                      strokeWidth: 2.3,
                       color: AppColors.primary.primary,
                     ),
                   ),
@@ -2628,6 +2361,380 @@ class _PropertiesPageState extends State<PropertiesPage> {
         ],
       ),
     );
+  }
+
+  /// Header da listagem — eyebrow accent + contagem (ex.: "23 IMÓVEIS").
+  /// Fica entre o hero e a lista, dando contexto sem ocupar muito espaço.
+  Widget _buildPropertiesListHeader(
+    BuildContext context,
+    ThemeData theme,
+    int total,
+  ) {
+    final accent = _portfolioAccentColor(context);
+    return Row(
+      children: [
+        Icon(Icons.view_list_rounded, size: 14, color: accent),
+        const SizedBox(width: 6),
+        Text(
+          'LISTAGEM',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: accent,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.65,
+            fontSize: 10.5,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          '· $total imóve${total == 1 ? "l" : "is"} carregado${total == 1 ? "" : "s"}'
+          '${_totalPages > 1 ? " · pg $_currentPage/$_totalPages" : ""}',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: ThemeHelpers.textSecondaryColor(context),
+            fontWeight: FontWeight.w700,
+            fontSize: 11,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Row CRM (broker UX): thumbnail à esquerda + bloco denso com info
+  /// operacional à direita. Status, código, título, endereço, specs e
+  /// preço — TUDO visível sem precisar abrir o imóvel.
+  Widget _buildPropertyBrokerRow(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    final isDark = theme.brightness == Brightness.dark;
+    final textColor = ThemeHelpers.textColor(context);
+    final secondaryColor = ThemeHelpers.textSecondaryColor(context);
+    final borderColor = ThemeHelpers.borderColor(context);
+    final price = _formatMainPrice(property);
+    final locCompact = _compactLocationLine(property);
+    final hasCode = (property.code ?? '').isNotEmpty;
+    final cardBg = isDark
+        ? Colors.white.withValues(alpha: 0.025)
+        : Colors.white;
+
+    final specBits = <_SpecBit>[];
+    if (property.bedrooms != null && property.bedrooms! > 0) {
+      specBits.add(
+        _SpecBit(icon: Icons.bed_rounded, label: '${property.bedrooms}'),
+      );
+    }
+    if (property.suites != null && property.suites! > 0) {
+      specBits.add(
+        _SpecBit(
+          icon: Icons.king_bed_rounded,
+          label: '${property.suites} suíte${property.suites! > 1 ? "s" : ""}',
+        ),
+      );
+    }
+    if (property.bathrooms != null && property.bathrooms! > 0) {
+      specBits.add(
+        _SpecBit(icon: Icons.bathtub_rounded, label: '${property.bathrooms}'),
+      );
+    }
+    if (property.parkingSpaces != null && property.parkingSpaces! > 0) {
+      specBits.add(
+        _SpecBit(
+          icon: Icons.directions_car_rounded,
+          label: '${property.parkingSpaces}',
+        ),
+      );
+    }
+    final area = property.builtArea ?? property.totalArea;
+    if (area > 0) {
+      specBits.add(
+        _SpecBit(
+          icon: Icons.square_foot_rounded,
+          label: '${area.toStringAsFixed(0)} m²',
+        ),
+      );
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => Navigator.of(context).pushNamed(
+          AppRoutes.propertyDetails(property.id),
+          arguments: {'property': property},
+        ),
+        onLongPress: () {
+          HapticFeedback.mediumImpact();
+          _showPropertyQuickActionsSheet(context, theme, property);
+        },
+        splashColor: AppColors.primary.primary.withValues(alpha: 0.10),
+        highlightColor: AppColors.primary.primary.withValues(alpha: 0.05),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: cardBg,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: borderColor.withValues(alpha: 0.55),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 10, 6, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Thumbnail 92×92.
+                _BrokerRowThumbnail(
+                  property: property,
+                  fallback: _buildPropertyImageFallback(context, theme),
+                ),
+                const SizedBox(width: 12),
+                // Coluna direita: info densa.
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // L1: status + situação + kebab no canto direito.
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Wrap(
+                              spacing: 5,
+                              runSpacing: 4,
+                              children: [
+                                PropertyStatusPill(
+                                  status: property.status,
+                                  short: true,
+                                  dense: true,
+                                ),
+                                PropertySituationPill(
+                                  isActive: property.isActive,
+                                  isAvailableForSite:
+                                      property.isAvailableForSite ?? false,
+                                  dense: true,
+                                ),
+                              ],
+                            ),
+                          ),
+                          SizedBox(
+                            height: 32,
+                            child: _buildPropertyActionsMenu(
+                              context,
+                              theme,
+                              property,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      // L2: código + tipo de imóvel.
+                      Row(
+                        children: [
+                          if (hasCode) ...[
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: secondaryColor.withValues(alpha: 0.10),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: secondaryColor.withValues(alpha: 0.22),
+                                ),
+                              ),
+                              child: Text(
+                                '#${property.code}',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: secondaryColor,
+                                  letterSpacing: 0.3,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                          ],
+                          Icon(
+                            _typeIconCompact(property.type),
+                            size: 12,
+                            color: secondaryColor,
+                          ),
+                          const SizedBox(width: 3),
+                          Flexible(
+                            child: Text(
+                              property.type.label,
+                              style: TextStyle(
+                                color: secondaryColor,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 11,
+                                letterSpacing: -0.05,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      // L3: título (1 linha bold).
+                      Text(
+                        property.title.isEmpty
+                            ? 'Sem título'
+                            : property.title,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: textColor,
+                          fontWeight: FontWeight.w900,
+                          height: 1.15,
+                          letterSpacing: -0.25,
+                          fontSize: 14,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      // L4: endereço.
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.location_on_rounded,
+                            size: 11,
+                            color: secondaryColor,
+                          ),
+                          const SizedBox(width: 3),
+                          Flexible(
+                            child: Text(
+                              locCompact,
+                              style: TextStyle(
+                                color: secondaryColor,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 11,
+                                height: 1.2,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      // L5: specs (quartos/banheiros/area/vagas).
+                      if (specBits.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 3,
+                          children: [
+                            for (final s in specBits)
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    s.icon,
+                                    size: 12,
+                                    color: textColor.withValues(alpha: 0.8),
+                                  ),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    s.label,
+                                    style: TextStyle(
+                                      color: textColor,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 11.5,
+                                      height: 1.0,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                          ],
+                        ),
+                      ],
+                      const SizedBox(height: 8),
+                      // L6: preço (destaque) + divisor invisível.
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              price.value,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                color: textColor,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.4,
+                                fontSize: 15.5,
+                                height: 1.0,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (property.hasPendingOffers == true) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF59E0B)
+                                    .withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: const Color(0xFFF59E0B)
+                                      .withValues(alpha: 0.32),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: const [
+                                  Icon(
+                                    Icons.request_quote_outlined,
+                                    size: 11,
+                                    color: Color(0xFFF59E0B),
+                                  ),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'Oferta',
+                                    style: TextStyle(
+                                      color: Color(0xFFF59E0B),
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 10.5,
+                                      letterSpacing: 0.2,
+                                      height: 1,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  IconData _typeIconCompact(PropertyType type) {
+    switch (type) {
+      case PropertyType.house:
+        return Icons.home_outlined;
+      case PropertyType.apartment:
+        return Icons.apartment;
+      case PropertyType.commercial:
+        return Icons.storefront_outlined;
+      case PropertyType.land:
+        return Icons.terrain_outlined;
+      case PropertyType.rural:
+        return Icons.agriculture_outlined;
+    }
   }
 
   Widget _buildEmptyPropertiesState(BuildContext context, ThemeData theme) {
@@ -2885,395 +2992,16 @@ class _PropertiesPageState extends State<PropertiesPage> {
     );
   }
 
-  /// Resumo editorial (sem „grade de formulário”) — detalhe completo na ficha.
-  String? _editorialSpecsLine(Property property) {
-    final parts = <String>[];
-    if (property.bedrooms != null && property.bedrooms! > 0) {
-      parts.add('${property.bedrooms} qt');
-    }
-    if (property.bathrooms != null && property.bathrooms! > 0) {
-      parts.add('${property.bathrooms} ban');
-    }
-    if (property.parkingSpaces != null && property.parkingSpaces! > 0) {
-      parts.add('${property.parkingSpaces} vag');
-    }
-    if (property.totalArea > 0) {
-      parts.add('${property.totalArea.toInt()} m²');
-    }
-    if (parts.isEmpty) return null;
-    return parts.join(' · ');
-  }
-
-  /// Localização curta só para preview na grade (bairro · cidade quando existir).
+  /// Localização curta só para preview na lista (bairro · cidade quando existir).
   String _compactLocationLine(Property property) {
     final n = property.neighborhood.trim();
     final c = property.city.trim();
-    final s =
-        (n.isNotEmpty && c.isNotEmpty) ? '$n · $c' : _formatPropertyLocation(property);
+    final s = (n.isNotEmpty && c.isNotEmpty)
+        ? '$n · $c'
+        : _formatPropertyLocation(property);
     if (s.length <= 38) return s;
     return '${s.substring(0, 36)}…';
   }
-
-  List<BoxShadow> _exploreTileBoxShadows(bool isDark, bool featuredStripLayout) {
-    if (!featuredStripLayout) {
-      return [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: isDark ? 0.42 : 0.08),
-          blurRadius: isDark ? 18 : 12,
-          offset: const Offset(0, 8),
-          spreadRadius: -3,
-        ),
-      ];
-    }
-    final primary = isDark
-        ? AppColors.primary.primaryDarkMode
-        : AppColors.primary.primary;
-    return [
-      BoxShadow(
-        color: primary.withValues(alpha: isDark ? 0.26 : 0.2),
-        blurRadius: 28,
-        offset: const Offset(0, 11),
-        spreadRadius: -7,
-      ),
-      BoxShadow(
-        color: Colors.black.withValues(alpha: isDark ? 0.48 : 0.1),
-        blurRadius: isDark ? 22 : 16,
-        offset: const Offset(0, 12),
-        spreadRadius: -4,
-      ),
-    ];
-  }
-
-  LinearGradient _exploreTileFeaturedRingGradient(bool isDark) {
-    final p = isDark
-        ? AppColors.primary.primaryDarkMode
-        : AppColors.primary.primary;
-    final pLight = isDark
-        ? AppColors.primary.primaryLightDarkMode
-        : AppColors.primary.primaryLight;
-    return LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [
-        pLight.withValues(alpha: 0.85),
-        const Color(0xFFFFB74D).withValues(alpha: 0.55),
-        p.withValues(alpha: 0.75),
-      ],
-      stops: const [0.0, 0.45, 1.0],
-    );
-  }
-
-  Widget _buildPropertyFeaturedChip({required bool stripLayout}) {
-    final compact = !stripLayout;
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: compact ? 6 : 9,
-        vertical: compact ? 3 : 5,
-      ),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(compact ? 10 : 14),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color(0xFFFFE082),
-            Color(0xFFFFA000),
-          ],
-        ),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.55),
-          width: 0.85,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFFFFA000).withValues(alpha: 0.38),
-            blurRadius: compact ? 6 : 10,
-            offset: Offset(0, compact ? 2 : 3),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.star_rounded,
-            size: compact ? 12 : 14,
-            color: const Color(0xFF4E342E),
-          ),
-          if (!compact) ...[
-            const SizedBox(width: 4),
-            Text(
-              'Em destaque',
-              style: TextStyle(
-                color: const Color(0xFF3E2723),
-                fontSize: 10,
-                fontWeight: FontWeight.w900,
-                height: 1,
-                letterSpacing: -0.15,
-              ),
-            ),
-          ] else
-            Padding(
-              padding: const EdgeInsets.only(left: 1),
-              child: Text(
-                'Destaque',
-                style: TextStyle(
-                  color: const Color(0xFF3E2723),
-                  fontSize: 8.5,
-                  fontWeight: FontWeight.w900,
-                  height: 1,
-                  letterSpacing: -0.1,
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  /// Célula da grade: foto cheia + overlay (explorar, não lista linear).
-  /// [featuredStripLayout] ativa moldura luminosa + overlay na faixa de destaques.
-  Widget _buildPropertyExploreTile(
-    BuildContext context,
-    ThemeData theme,
-    Property property, {
-    bool featuredStripLayout = false,
-  }) {
-    final isDark = theme.brightness == Brightness.dark;
-    final price = _formatMainPrice(property);
-    final specs = _editorialSpecsLine(property);
-    final locCompact = _compactLocationLine(property);
-    const innerRadius = 20.0;
-    final ringPad = featuredStripLayout ? 1.5 : 0.0;
-    final outerRadius = innerRadius + ringPad;
-
-    final inner = ClipRRect(
-      borderRadius: BorderRadius.circular(innerRadius),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () =>
-              Navigator.of(context).pushNamed(
-                AppRoutes.propertyDetails(property.id),
-                arguments: {'property': property},
-              ),
-          onLongPress: () {
-            HapticFeedback.mediumImpact();
-            _showPropertyQuickActionsSheet(context, theme, property);
-          },
-          splashColor: AppColors.primary.primary.withValues(alpha: 0.18),
-          highlightColor: Colors.white.withValues(alpha: 0.06),
-          child: Ink(
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: featuredStripLayout
-                    ? Colors.white.withValues(alpha: isDark ? 0.12 : 0.24)
-                    : ShellVisualTokens.propertyListCardBorder(context),
-                width: featuredStripLayout ? 0.85 : 1,
-              ),
-            ),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                if (property.mainImage != null)
-                  ShimmerImage(
-                    imageUrl: property.mainImage!.url,
-                    width: double.infinity,
-                    height: double.infinity,
-                    fit: BoxFit.cover,
-                    errorWidget: _buildPropertyImageFallback(context, theme),
-                  )
-                else
-                  _buildPropertyImageFallback(context, theme),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      stops: featuredStripLayout
-                          ? const [0.0, 0.28, 0.72, 1.0]
-                          : const [0.0, 0.32, 1.0],
-                      colors: featuredStripLayout
-                          ? [
-                              Colors.black.withValues(alpha: 0.5),
-                              Colors.transparent,
-                              Colors.black.withValues(alpha: 0.35),
-                              Colors.black.withValues(alpha: 0.92),
-                            ]
-                          : [
-                              Colors.black.withValues(alpha: 0.52),
-                              Colors.transparent,
-                              Colors.black.withValues(alpha: 0.9),
-                            ],
-                    ),
-                  ),
-                ),
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: RadialGradient(
-                          center: const Alignment(-0.75, -0.9),
-                          radius: 1.15,
-                          colors: [
-                            Colors.white.withValues(
-                              alpha: featuredStripLayout ? 0.09 : 0.05,
-                            ),
-                            Colors.transparent,
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  top: 7,
-                  left: 7,
-                  right: 50,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (property.isFeatured) ...[
-                        if (featuredStripLayout)
-                          _buildPropertyFeaturedChip(stripLayout: true)
-                        else
-                          Flexible(
-                            child: FittedBox(
-                              alignment: Alignment.centerLeft,
-                              fit: BoxFit.scaleDown,
-                              child: _buildPropertyFeaturedChip(
-                                stripLayout: false,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ],
-                  ),
-                ),
-                Positioned(
-                  top: 6,
-                  right: 6,
-                  child: _buildPropertyActionsMenu(context, theme, property),
-                ),
-                Positioned(
-                  left: 8,
-                  right: 8,
-                  bottom: 9,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        price.value,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w900,
-                          height: 1.05,
-                          letterSpacing: -0.35,
-                          fontSize: featuredStripLayout ? 14.25 : 13.5,
-                          shadows: const [
-                            Shadow(
-                              offset: Offset(0, 1),
-                              blurRadius: 10,
-                              color: Colors.black87,
-                            ),
-                            Shadow(
-                              offset: Offset(0, 2),
-                              blurRadius: 18,
-                              color: Colors.black54,
-                            ),
-                          ],
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 4),
-                      MatchesBadge(
-                        propertyId: property.id,
-                        onClick: () => Navigator.pushNamed(
-                          context,
-                          AppRoutes.matchesByProperty(property.id),
-                        ),
-                        child: Text(
-                          property.title,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: Colors.white.withValues(alpha: 0.97),
-                            fontWeight: FontWeight.w800,
-                            height: 1.2,
-                            fontSize: featuredStripLayout ? 11.75 : 11.25,
-                            shadows: const [
-                              Shadow(
-                                offset: Offset(0, 1),
-                                blurRadius: 8,
-                                color: Colors.black54,
-                              ),
-                            ],
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        locCompact,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: Colors.white.withValues(
-                            alpha: featuredStripLayout ? 0.76 : 0.72,
-                          ),
-                          fontWeight: FontWeight.w600,
-                          fontSize: featuredStripLayout ? 9.25 : 9,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      if (specs != null) ...[
-                        const SizedBox(height: 3),
-                        Text(
-                          specs,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: Colors.white.withValues(
-                              alpha: featuredStripLayout ? 0.66 : 0.62,
-                            ),
-                            fontWeight: FontWeight.w700,
-                            fontSize: featuredStripLayout ? 8.75 : 8.5,
-                            height: 1.05,
-                            fontFeatures: const [FontFeature.tabularFigures()],
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-
-    if (featuredStripLayout) {
-      return Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(outerRadius),
-          boxShadow: _exploreTileBoxShadows(isDark, true),
-          gradient: _exploreTileFeaturedRingGradient(isDark),
-        ),
-        padding: EdgeInsets.all(ringPad),
-        child: inner,
-      );
-    }
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(innerRadius),
-        boxShadow: _exploreTileBoxShadows(isDark, false),
-      ),
-      child: inner,
-    );
-  }
-
 
   Widget _buildPropertyImageFallback(BuildContext context, ThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
@@ -6216,6 +5944,394 @@ class _PropertyQuickActionTile extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Atalhos do corretor: chip strip de escopo + toggles utilitários.
+// ──────────────────────────────────────────────────────────────────────────
+
+class _ScopeChipData {
+  const _ScopeChipData({
+    required this.label,
+    required this.icon,
+    required this.active,
+    required this.tone,
+    required this.onTap,
+  });
+  final String label;
+  final IconData icon;
+  final bool active;
+  final Color tone;
+  final VoidCallback onTap;
+}
+
+class _PortfolioScopeChip extends StatelessWidget {
+  const _PortfolioScopeChip({
+    required this.label,
+    required this.icon,
+    required this.active,
+    required this.tone,
+    required this.isDark,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool active;
+  final Color tone;
+  final bool isDark;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = active ? tone : ThemeHelpers.textColor(context);
+    final bg = active
+        ? tone.withValues(alpha: isDark ? 0.18 : 0.12)
+        : ThemeHelpers.cardBackgroundColor(context);
+    final border = active
+        ? tone.withValues(alpha: isDark ? 0.50 : 0.42)
+        : ThemeHelpers.borderColor(context).withValues(alpha: 0.55);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        splashColor: tone.withValues(alpha: 0.14),
+        highlightColor: tone.withValues(alpha: 0.07),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: border, width: 1),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: fg),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: fg,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 12.5,
+                  letterSpacing: -0.1,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Pareamento (ícone, label) usado dentro do row CRM para specs (quartos,
+/// banheiros, área, vagas).
+class _SpecBit {
+  const _SpecBit({required this.icon, required this.label});
+  final IconData icon;
+  final String label;
+}
+
+/// Thumbnail do row CRM — 92×92 com borda fina e fallback gracioso quando
+/// não há `mainImage`. Inclui um chip pequeno no canto inferior direito com
+/// o contador total de imagens, útil pro corretor saber qual ficha tem mais
+/// material visual.
+class _BrokerRowThumbnail extends StatelessWidget {
+  const _BrokerRowThumbnail({
+    required this.property,
+    required this.fallback,
+  });
+
+  final Property property;
+  final Widget fallback;
+
+  @override
+  Widget build(BuildContext context) {
+    final imageCount = property.imageCount ?? property.images?.length ?? 0;
+    final hasMain = (property.mainImage?.url ?? '').trim().isNotEmpty;
+    final borderColor = ThemeHelpers.borderColor(context);
+
+    return SizedBox(
+      width: 92,
+      height: 92,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(11),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: borderColor.withValues(alpha: 0.5),
+                ),
+              ),
+              child: hasMain
+                  ? ShimmerImage(
+                      imageUrl: property.mainImage!.url,
+                      width: 92,
+                      height: 92,
+                      fit: BoxFit.cover,
+                      errorWidget: fallback,
+                    )
+                  : fallback,
+            ),
+            if (imageCount > 1)
+              Positioned(
+                right: 4,
+                bottom: 4,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.2),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.photo_library_outlined,
+                        size: 9,
+                        color: Colors.white,
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        '$imageCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 9.5,
+                          height: 1,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            if (!hasMain)
+              const Positioned(
+                top: 6,
+                left: 6,
+                child: Icon(
+                  Icons.image_not_supported_rounded,
+                  size: 14,
+                  color: Colors.white70,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Toggle 100% flat — ícone + label + hint + switch. Sem background, sem
+/// borda, sem sombra: o conteúdo vive direto no fundo do hero. Tap area
+/// preservada via `InkWell` com splash sutil.
+class _FlatToggleRow extends StatelessWidget {
+  const _FlatToggleRow({
+    required this.icon,
+    required this.inactiveIcon,
+    required this.label,
+    required this.hint,
+    required this.active,
+    required this.tone,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final IconData inactiveIcon;
+  final String label;
+  final String hint;
+  final bool active;
+  final Color tone;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final textColor = ThemeHelpers.textColor(context);
+    final secondaryColor = ThemeHelpers.textSecondaryColor(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        splashColor: tone.withValues(alpha: 0.10),
+        highlightColor: tone.withValues(alpha: 0.05),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Row(
+            children: [
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                transitionBuilder: (child, anim) =>
+                    FadeTransition(opacity: anim, child: child),
+                child: Icon(
+                  active ? icon : inactiveIcon,
+                  key: ValueKey<bool>(active),
+                  size: 19,
+                  color: active ? tone : secondaryColor,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      label,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: active ? tone : textColor,
+                        letterSpacing: -0.15,
+                        height: 1.1,
+                        fontSize: 13.5,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      hint,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: secondaryColor,
+                        fontWeight: FontWeight.w500,
+                        fontSize: 11.5,
+                        height: 1.3,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              _PillSwitch(active: active, tone: tone),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Switch tipo "pill" — versão premium: track com gradient quando ativo,
+/// glow colorido em volta do thumb, ícone de check dentro do thumb quando
+/// ligado, e ponto sutil quando desligado. Curva e durações coreografadas.
+class _PillSwitch extends StatelessWidget {
+  const _PillSwitch({required this.active, required this.tone});
+
+  final bool active;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final borderColor = ThemeHelpers.borderColor(context);
+    final toneDeep = HSLColor.fromColor(tone)
+        .withLightness((HSLColor.fromColor(tone).lightness * 0.78)
+            .clamp(0.0, 1.0))
+        .toColor();
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      width: 48,
+      height: 28,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        gradient: active
+            ? LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [tone, toneDeep],
+              )
+            : null,
+        color: active
+            ? null
+            : (isDark
+                ? Colors.white.withValues(alpha: 0.08)
+                : borderColor.withValues(alpha: 0.45)),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: active
+              ? toneDeep.withValues(alpha: 0.45)
+              : borderColor.withValues(alpha: isDark ? 0.30 : 0.30),
+          width: 1,
+        ),
+        boxShadow: active
+            ? [
+                BoxShadow(
+                  color: tone.withValues(alpha: isDark ? 0.45 : 0.30),
+                  blurRadius: 10,
+                  spreadRadius: 0.2,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : null,
+      ),
+      child: Stack(
+        children: [
+          AnimatedAlign(
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
+            alignment: active ? Alignment.centerRight : Alignment.centerLeft,
+            child: Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.16),
+                    blurRadius: 5,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
+              ),
+              alignment: Alignment.center,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                transitionBuilder: (child, anim) => ScaleTransition(
+                  scale: anim,
+                  child: FadeTransition(opacity: anim, child: child),
+                ),
+                child: active
+                    ? Icon(
+                        Icons.check_rounded,
+                        key: const ValueKey('on'),
+                        size: 13,
+                        color: toneDeep,
+                      )
+                    : Container(
+                        key: const ValueKey('off'),
+                        width: 5,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: borderColor.withValues(alpha: 0.65),
+                        ),
+                      ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

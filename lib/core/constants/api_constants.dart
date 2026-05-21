@@ -602,6 +602,18 @@ class ApiConstants {
 
   // Endpoints de utilizadores (admin — módulo `user_management`)
   static const String adminUsers = '/admin/users';
+  static String adminUserById(String id) => '/admin/users/$id';
+  static const String adminUsersStats = '/admin/users/stats';
+  static String adminUserActivate(String id) => '/admin/users/$id/activate';
+  static String adminUserDeactivate(String id) =>
+      '/admin/users/$id/deactivate';
+
+  // Endpoints de Equipes (módulo `team_management`)
+  static const String teamsFiltered = '/teams/filtered';
+  static String teamMemberByUser(String teamId, String userId) =>
+      '/teams/$teamId/members/$userId';
+  static String teamProjectCount(String teamId) =>
+      '/teams/$teamId/project-count';
 
   // Endpoints de Subscriptions (admin/master — ver `RolesGuard` no Nest)
   static const String subscriptionsMyActive =

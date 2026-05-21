@@ -47,6 +47,19 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
   SubTasksListResponse _response = SubTasksListResponse.empty;
   SubTasksListStats _heroStats = SubTasksListStats.zero;
 
+  /// Contagens globais (absolutas) por bucket — populadas por chamadas
+  /// dedicadas SEM filtro de bucket aplicado. Usadas pelos pills de
+  /// navegação pra mostrar o "tem 30, tem 100, tem 200…" real, e não a
+  /// contagem CAPADA pelo filtro atual.
+  ///
+  /// `total` aqui = total absoluto da query (respeitando só o escopo
+  /// onlyMine e a busca por card-pai, se houver).
+  int _baselineTotal = 0;
+  int _baselinePending = 0;
+  int _baselineOverdue = 0;
+  int _baselineCompleted = 0;
+  int _baselineToday = 0;
+
   _Bucket _activeBucket = _Bucket.pending;
   int _pagingGeneration = 0;
   final ScrollController _scrollController = ScrollController();
@@ -88,7 +101,69 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
         _error = res.message ?? 'Erro ao carregar tarefas';
       }
     });
+    // Em paralelo, busca as contagens reais por bucket — sem cobrir
+    // o flow de exibir a tela. Fica em segundo plano.
+    unawaited(_loadBaselineCounts());
     if (generation != _pagingGeneration) return;
+  }
+
+  /// Faz uma série de chamadas LEVES (limit=1) sem filtro de bucket pra
+  /// descobrir as contagens absolutas por categoria. A primeira chamada
+  /// (sem filtro) já devolve `total / pending / completed / overdue` via
+  /// `stats`; a segunda fecha o "hoje".
+  ///
+  /// Por que: o `getMySubTasks` filtrado por bucket retorna `total` e
+  /// `stats` ESCOPADOS àquela query. Sem isso aqui, as pills mostrariam
+  /// "30" pra todo bucket — exatamente a queixa do usuário.
+  Future<void> _loadBaselineCounts() async {
+    final scope = _baseScopeFilters(
+      cardSearch: _appliedSearch,
+      page: 1,
+      limit: 1,
+    );
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    try {
+      final results = await Future.wait([
+        // (1) sem filtro de bucket — devolve stats absolutas + total real
+        //     respeitando o escopo (onlyMine) e a busca.
+        KanbanSubtaskService.instance.getMySubTasks(
+          filters: scope,
+          useCache: false,
+        ),
+        // (2) só "hoje" — pra contagem precisa do pill correspondente.
+        KanbanSubtaskService.instance.getMySubTasks(
+          filters: scope.copyWith(
+            isCompleted: false,
+            dueDateFrom: today,
+            dueDateTo: today,
+          ),
+          useCache: false,
+        ),
+      ]);
+      if (!mounted) return;
+      final r0 = results[0];
+      final r1 = results[1];
+      setState(() {
+        if (r0.success && r0.data != null) {
+          _baselineTotal = r0.data!.total > 0
+              ? r0.data!.total
+              : r0.data!.stats.total;
+          _baselinePending = r0.data!.stats.pending;
+          _baselineOverdue = r0.data!.stats.overdue;
+          _baselineCompleted = r0.data!.stats.completed;
+        }
+        if (r1.success && r1.data != null) {
+          _baselineToday = r1.data!.total > 0
+              ? r1.data!.total
+              : r1.data!.data.length;
+        }
+      });
+    } catch (_) {
+      // Sem fallback — se baseline falhar, pills exibem `_heroStats`
+      // que pode estar capado pelo filtro corrente. Não é UX ideal mas
+      // não trava a tela.
+    }
   }
 
   @override
@@ -218,6 +293,7 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
         _error = res.message ?? 'Erro ao carregar tarefas';
       }
     });
+    unawaited(_loadBaselineCounts());
     if (generation != _pagingGeneration) return;
   }
 
@@ -416,20 +492,49 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
 
   // ─── Visual helpers ──────────────────────────────────────────────────
 
+  /// Paleta da tela — TIRAMOS o vermelho coral. Agora violet/indigo
+  /// como acento neutro, e o vermelho é reservado SOMENTE pra atraso real.
   Color _accentColor(BuildContext context) {
     return Theme.of(context).brightness == Brightness.dark
-        ? const Color(0xFFFF4D67)
-        : AppColors.primary.primary;
+        ? const Color(0xFF8B5CF6) // violet-500
+        : const Color(0xFF7C3AED); // violet-600
+  }
+
+  Color _accentSecondary(BuildContext context) {
+    return Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFF6366F1) // indigo-500
+        : const Color(0xFF4F46E5); // indigo-600
   }
 
   List<Widget> _ambientHighlights(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final accent = _accentColor(context);
-    final cool = isDark ? const Color(0xFF4F46E5) : const Color(0xFF818CF8);
+    final secondary = _accentSecondary(context);
     return [
+      // Glow superior direito — violet sutil (não mais cool isolado).
       Positioned(
-        top: -72,
-        right: -48,
+        top: -90,
+        right: -60,
+        child: IgnorePointer(
+          child: Container(
+            width: 260,
+            height: 260,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: [
+                  accent.withValues(alpha: isDark ? 0.12 : 0.055),
+                  accent.withValues(alpha: 0),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+      // Glow lateral esquerdo — indigo (par harmônico com violet).
+      Positioned(
+        top: 180,
+        left: -100,
         child: IgnorePointer(
           child: Container(
             width: 240,
@@ -438,27 +543,8 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
               shape: BoxShape.circle,
               gradient: RadialGradient(
                 colors: [
-                  cool.withValues(alpha: isDark ? 0.14 : 0.065),
-                  cool.withValues(alpha: 0),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-      Positioned(
-        top: 120,
-        left: -80,
-        child: IgnorePointer(
-          child: Container(
-            width: 220,
-            height: 220,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: RadialGradient(
-                colors: [
-                  accent.withValues(alpha: isDark ? 0.16 : 0.07),
-                  accent.withValues(alpha: 0),
+                  secondary.withValues(alpha: isDark ? 0.10 : 0.045),
+                  secondary.withValues(alpha: 0),
                 ],
               ),
             ),
@@ -505,10 +591,8 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
                               children: [
                                 _buildGreeting(context),
                                 const SizedBox(height: 14),
-                                _buildKpiInline(context),
-                                const SizedBox(height: _kSectionGap),
                                 _buildSearchField(context),
-                                const SizedBox(height: _kSectionGap + 1),
+                                const SizedBox(height: _kSectionGap + 2),
                               ],
                             ),
                           ),
@@ -537,291 +621,141 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
   Widget _buildGreeting(BuildContext context) {
     final theme = Theme.of(context);
     final accent = _accentColor(context);
+    final secondary = _accentSecondary(context);
     final isDark = theme.brightness == Brightness.dark;
     final stats = _heroStats;
-    final pending = stats.pending;
-    final overdue = stats.overdue;
-    final completed = stats.completed;
-    final total = stats.total;
-    final completionPct = total > 0 ? ((completed * 100) / total).round() : 0;
+    final overdue = _baselineOverdue > 0 ? _baselineOverdue : stats.overdue;
+    // Total HONESTO do filtro atual: prefere `_response.total` (autoridade
+    // do backend pra essa query), e cai pro stats só como fallback até a
+    // resposta chegar. Quando o bucket é "Todas" e o baseline já está
+    // populado, usa esse pra cobrir o caso de servidores que retornam
+    // total escopado pela paginação.
+    final filteredTotal = _response.total > 0
+        ? _response.total
+        : (_activeBucket == _Bucket.all
+            ? _baselineTotal
+            : stats.total);
     final danger = isDark
         ? AppColors.status.errorDarkMode
         : AppColors.status.error;
     final subtitleColor = ThemeHelpers.textSecondaryColor(context);
-    final updatedAtLabel = _formatHeroTimestamp(DateTime.now());
-    final activeBucketLabel = _bucketLabel(_activeBucket);
     final hasSearch = _appliedSearch.trim().isNotEmpty;
-    final progressTone = completionPct >= 70
-        ? (isDark ? AppColors.status.greenDarkMode : AppColors.status.green)
-        : accent;
-    final pendingTone = pending > 0
-        ? (isDark ? AppColors.status.warningDarkMode : AppColors.status.warning)
-        : (isDark ? AppColors.status.greenDarkMode : AppColors.status.green);
+    final hasOverdue = overdue > 0;
 
-    final headline = pending == 0
-        ? 'Tudo em dia por aqui'
-        : (pending == 1
-            ? '1 tarefa aguarda você'
-            : '$pending tarefas aguardam você');
+    // Headline curta — não tenta gritar "X tarefas aguardam você". Só
+    // diz o que a tela é. O contexto (filtro, busca) vai no chip ao lado.
+    const headline = 'Suas tarefas';
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 2),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
+              // Ícone "marca" — gradiente violet/indigo, calmo,
+              // sem nada de vermelho.
               Container(
-                width: 46,
-                height: 46,
+                width: 44,
+                height: 44,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(13),
                   gradient: LinearGradient(
-                    colors: [accent, const Color(0xFF7C3AED)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [accent, secondary],
                   ),
                   border: Border.all(
-                    color: Colors.white.withValues(alpha: isDark ? 0.16 : 0.34),
+                    color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.32),
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: isDark
-                          ? accent.withValues(alpha: 0.35)
-                          : accent.withValues(alpha: 0.22),
-                      blurRadius: isDark ? 14 : 11,
-                      offset: Offset(0, isDark ? 8 : 4),
-                      spreadRadius: isDark ? 0 : -1,
+                      color: accent.withValues(alpha: isDark ? 0.32 : 0.18),
+                      blurRadius: 14,
+                      offset: const Offset(0, 6),
+                      spreadRadius: -4,
                     ),
                   ],
                 ),
                 child: const Icon(
-                  LucideIcons.checkSquare,
+                  LucideIcons.listChecks,
                   color: Colors.white,
                   size: 22,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 13),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'TAREFAS DO CRM',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: accent,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 2.2,
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          headline,
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            color: ThemeHelpers.textColor(context),
+                            letterSpacing: -0.4,
+                            height: 1.05,
+                          ),
+                        ),
+                        const SizedBox(width: 9),
+                        // Badge com o TOTAL real do filtro corrente.
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 9,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(999),
+                            color: accent.withValues(
+                                alpha: isDark ? 0.16 : 0.08),
+                            border: Border.all(
+                              color: accent.withValues(
+                                  alpha: isDark ? 0.34 : 0.22),
+                            ),
+                          ),
+                          child: Text(
+                            '$filteredTotal',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: accent,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.2,
+                              fontSize: 11.5,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 5),
+                    const SizedBox(height: 3),
                     Text(
-                      headline,
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        color: ThemeHelpers.textColor(context),
-                        height: 1.08,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Atualizado $updatedAtLabel · Visão ${activeBucketLabel[0].toUpperCase()}${activeBucketLabel.substring(1)} · Progresso $completionPct%',
+                      hasSearch
+                          ? 'Filtradas por "${_appliedSearch.trim()}"'
+                          : 'Visão · ${_bucketLabel(_activeBucket)[0].toUpperCase()}${_bucketLabel(_activeBucket).substring(1)}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: subtitleColor,
                         fontWeight: FontWeight.w700,
-                        height: 1.3,
+                        height: 1.25,
                       ),
-                    ),
-                    if (hasSearch) ...[
-                      const SizedBox(height: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 9,
-                          vertical: 5,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? accent.withValues(alpha: 0.11)
-                              : accent.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(
-                            color: isDark
-                                ? accent.withValues(alpha: 0.24)
-                                : accent.withValues(alpha: 0.22),
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(LucideIcons.search, size: 13, color: accent),
-                            const SizedBox(width: 6),
-                            ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 230),
-                              child: Text(
-                                'Filtro "${_appliedSearch.trim()}"',
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: ThemeHelpers.textColor(context),
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 0.15,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 7,
-                      runSpacing: 7,
-                      children: [
-                        _buildHeroMiniStatChip(
-                          context,
-                          icon: LucideIcons.inbox,
-                          label: 'Pendentes',
-                          value: pending,
-                          tone: pendingTone,
-                        ),
-                        _buildHeroMiniStatChip(
-                          context,
-                          icon: LucideIcons.alertTriangle,
-                          label: 'Atrasadas',
-                          value: overdue,
-                          tone: danger,
-                        ),
-                        _buildHeroMiniStatChip(
-                          context,
-                          icon: LucideIcons.checkCircle2,
-                          label: 'Concluídas',
-                          value: completed,
-                          tone: progressTone,
-                        ),
-                      ],
                     ),
                   ],
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 11),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.03)
-                  : Colors.white.withValues(alpha: 0.55),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: isDark
-                    ? Colors.white.withValues(alpha: 0.08)
-                    : ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
-              ),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 3,
-                  height: 30,
-                  margin: const EdgeInsets.only(top: 1),
-                  decoration: BoxDecoration(
-                    color: overdue > 0 ? danger : pendingTone,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
+              // Alerta de atraso (se houver) — chip compacto, vermelho
+              // SÓ aqui, onde faz sentido. Sem pulse dot solto.
+              if (hasOverdue) ...[
                 const SizedBox(width: 8),
-                Container(
-                  width: 26,
-                  height: 26,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: overdue > 0
-                        ? danger.withValues(alpha: 0.16)
-                        : pendingTone.withValues(alpha: 0.16),
-                  ),
-                  child: Icon(
-                    overdue > 0 ? LucideIcons.alertTriangle : LucideIcons.sparkles,
-                    size: 14,
-                    color: overdue > 0 ? danger : pendingTone,
-                  ),
+                _OverdueAlertButton(
+                  count: overdue,
+                  danger: danger,
+                  onTap: () => _selectBucket(_Bucket.overdue),
                 ),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Text(
-                    overdue > 0
-                        ? '$overdue ${overdue == 1 ? 'tarefa atrasada precisa de atenção agora.' : 'tarefas atrasadas pedem ação imediata.'}'
-                        : (pending > 0
-                            ? '$pending ${pending == 1 ? 'pendência ativa no seu fluxo.' : 'pendências ativas no seu fluxo.'}'
-                            : 'Nenhuma pendência ativa. Continue mantendo esse ritmo.'),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textColor(context),
-                      fontWeight: FontWeight.w700,
-                      height: 1.32,
-                    ),
-                  ),
-                ),
-                if (overdue > 0) ...[
-                  const SizedBox(width: 8),
-                  _PulseDot(color: danger),
-                ],
               ],
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            'Lembretes do que fazer com cada lead.',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: subtitleColor,
-              height: 1.3,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHeroMiniStatChip(
-    BuildContext context, {
-    required IconData icon,
-    required String label,
-    required int value,
-    required Color tone,
-  }) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-      decoration: BoxDecoration(
-        color: isDark ? tone.withValues(alpha: 0.11) : tone.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: isDark ? tone.withValues(alpha: 0.28) : tone.withValues(alpha: 0.22),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 13, color: tone),
-          const SizedBox(width: 6),
-          Text(
-            '$value',
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: tone,
-              fontWeight: FontWeight.w900,
-              height: 1,
-            ),
-          ),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: ThemeHelpers.textColor(context),
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.15,
-            ),
+            ],
           ),
         ],
       ),
@@ -843,19 +777,147 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
     }
   }
 
-  String _formatHeroTimestamp(DateTime dt) {
-    String two(int v) => v.toString().padLeft(2, '0');
-    return '${two(dt.hour)}:${two(dt.minute)}';
+  // ─── Search ──────────────────────────────────────────────────────────
+
+  Widget _buildSearchField(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = _accentColor(context);
+    final hasFocus = _searchController.text.isNotEmpty;
+    final cardBg = isDark
+        ? AppColors.background.cardBackgroundDarkMode
+        : AppColors.background.cardBackground;
+    final borderColor = isDark
+        ? AppColors.border.borderDarkMode
+        : AppColors.border.border;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: hasFocus
+              ? accent.withValues(alpha: isDark ? 0.55 : 0.42)
+              : borderColor,
+        ),
+        boxShadow: hasFocus
+            ? [
+                BoxShadow(
+                  color: accent.withValues(alpha: isDark ? 0.20 : 0.14),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
+                  spreadRadius: -4,
+                ),
+              ]
+            : [
+                BoxShadow(
+                  color: isDark
+                      ? Colors.black.withValues(alpha: 0.18)
+                      : Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                  spreadRadius: -4,
+                ),
+              ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        child: Row(
+          children: [
+            // Ícone da busca dentro de um "bullet" sutil tintado.
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: hasFocus
+                    ? accent.withValues(alpha: isDark ? 0.18 : 0.10)
+                    : Colors.transparent,
+              ),
+              alignment: Alignment.center,
+              child: Icon(
+                LucideIcons.search,
+                size: 16,
+                color: hasFocus
+                    ? accent
+                    : ThemeHelpers.textSecondaryColor(context),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                controller: _searchController,
+                onChanged: (v) {
+                  _onSearchChanged(v);
+                  setState(() {});
+                },
+                textInputAction: TextInputAction.search,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: ThemeHelpers.textColor(context),
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.1,
+                ),
+                cursorColor: accent,
+                decoration: InputDecoration(
+                  hintText: 'Buscar tarefas pelo card pai…',
+                  hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context)
+                        .withValues(alpha: 0.7),
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: -0.1,
+                  ),
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  contentPadding:
+                      const EdgeInsets.symmetric(vertical: 12),
+                  isDense: true,
+                ),
+              ),
+            ),
+            if (_searchController.text.isNotEmpty) ...[
+              const SizedBox(width: 4),
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: () {
+                    _searchController.clear();
+                    _onSearchChanged('');
+                    setState(() {});
+                  },
+                  child: Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.06)
+                          : Colors.black.withValues(alpha: 0.04),
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      LucideIcons.x,
+                      size: 14,
+                      color: ThemeHelpers.textSecondaryColor(context),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
-  // ─── KPI inline (sem card) ───────────────────────────────────────────
+  // ─── Bucket pills ────────────────────────────────────────────────────
 
-  /// Stats expandidas horizontalmente direto abaixo do hero — cada KPI é
-  /// só **número grande + label**, separados por divisor vertical sutil.
-  /// Sem card glass, sem caixa: respiro total e leitura imediata.
-  Widget _buildKpiInline(BuildContext context) {
+  Widget _buildBucketsRail(BuildContext context) {
     final theme = Theme.of(context);
-    final screenWidth = MediaQuery.sizeOf(context).width;
     final isDark = theme.brightness == Brightness.dark;
     final accent = _accentColor(context);
     final ok = isDark
@@ -867,122 +929,7 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
     final danger = isDark
         ? AppColors.status.errorDarkMode
         : AppColors.status.error;
-
-    final stats = _heroStats;
-    final items = [
-      _KpiItem(label: 'Total', value: stats.total, color: accent),
-      _KpiItem(label: 'Pendentes', value: stats.pending, color: warn),
-      _KpiItem(label: 'Atrasadas', value: stats.overdue, color: danger),
-      _KpiItem(label: 'Concluídas', value: stats.completed, color: ok),
-    ];
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 2),
-      child: Builder(
-        builder: (context) {
-          // Em telas largas distribuímos no espaço total; em telas
-          // estreitas mantemos scroll horizontal pra não estourar.
-          final dividerColor = ThemeHelpers.borderColor(context)
-              .withValues(alpha: 0.32);
-          if (screenWidth < 360) {
-            return SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              padding: const EdgeInsets.symmetric(horizontal: 2),
-              child: Row(
-                children: [
-                  for (var i = 0; i < items.length; i++) ...[
-                    _KpiInlineTile(item: items[i], theme: theme),
-                    if (i < items.length - 1)
-                      Container(
-                        width: 1,
-                        height: 28,
-                        margin: const EdgeInsets.symmetric(horizontal: 14),
-                        color: dividerColor,
-                      ),
-                  ],
-                ],
-              ),
-            );
-          }
-          return Row(
-            children: [
-              for (var i = 0; i < items.length; i++) ...[
-                Expanded(
-                  child: _KpiInlineTile(item: items[i], theme: theme),
-                ),
-                if (i < items.length - 1)
-                  Container(
-                    width: 1,
-                    height: 28,
-                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                    color: dividerColor,
-                  ),
-              ],
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  // ─── Search ──────────────────────────────────────────────────────────
-
-  Widget _buildSearchField(BuildContext context) {
-    final theme = Theme.of(context);
-    final accent = _accentColor(context);
-    return TextField(
-      controller: _searchController,
-      onChanged: (v) {
-        _onSearchChanged(v);
-        setState(() {});
-      },
-      textInputAction: TextInputAction.search,
-      style: theme.textTheme.bodyMedium?.copyWith(
-        color: ThemeHelpers.textColor(context),
-        fontWeight: FontWeight.w600,
-      ),
-      decoration: InputDecoration(
-        hintText: 'Buscar pelo card pai…',
-        hintStyle: theme.textTheme.bodyMedium?.copyWith(
-          color: ThemeHelpers.textSecondaryColor(context),
-          fontWeight: FontWeight.w500,
-        ),
-        prefixIcon: Padding(
-          padding: const EdgeInsets.only(left: 14, right: 8),
-          child: Icon(LucideIcons.search, size: 18, color: accent),
-        ),
-        prefixIconConstraints:
-            const BoxConstraints(minWidth: 38, minHeight: 38),
-        suffixIcon: _searchController.text.isEmpty
-            ? null
-            : IconButton(
-                icon: const Icon(LucideIcons.x, size: 16),
-                splashRadius: 18,
-                onPressed: () {
-                  _searchController.clear();
-                  _onSearchChanged('');
-                  setState(() {});
-                },
-              ),
-      ),
-    );
-  }
-
-  // ─── Bucket pills ────────────────────────────────────────────────────
-
-  Widget _buildBucketsRail(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final accent = _accentColor(context);
-    final ok = isDark
-        ? AppColors.status.greenDarkMode
-        : AppColors.status.green;
-    final warn = isDark
-        ? AppColors.status.warningDarkMode
-        : AppColors.status.warning;
-    final danger = isDark
-        ? AppColors.status.errorDarkMode
-        : AppColors.status.error;
+    final subtitleColor = ThemeHelpers.textSecondaryColor(context);
 
     final stats = _heroStats;
 
@@ -991,55 +938,116 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
         bucket: _Bucket.pending,
         icon: LucideIcons.inbox,
         label: 'Pendentes',
-        count: stats.pending,
+        // Contagem REAL do bucket (vinda do baseline desfiltrado), com
+        // fallback pro `_heroStats` enquanto o baseline ainda não chegou.
+        count:
+            _baselinePending > 0 ? _baselinePending : stats.pending,
         color: warn,
       ),
       _BucketSpec(
         bucket: _Bucket.today,
         icon: LucideIcons.calendar,
         label: 'Hoje',
-        count: _todayCount(),
+        count: _baselineToday > 0 ? _baselineToday : _todayCount(),
         color: accent,
       ),
       _BucketSpec(
         bucket: _Bucket.overdue,
         icon: LucideIcons.alertTriangle,
         label: 'Atrasadas',
-        count: stats.overdue,
+        count:
+            _baselineOverdue > 0 ? _baselineOverdue : stats.overdue,
         color: danger,
       ),
       _BucketSpec(
         bucket: _Bucket.completed,
         icon: LucideIcons.checkCircle2,
         label: 'Concluídas',
-        count: stats.completed,
+        count: _baselineCompleted > 0
+            ? _baselineCompleted
+            : stats.completed,
         color: ok,
       ),
       _BucketSpec(
         bucket: _Bucket.all,
         icon: LucideIcons.list,
         label: 'Todas',
-        count: stats.total,
+        count: _baselineTotal > 0 ? _baselineTotal : stats.total,
         color: const Color(0xFF7C3AED),
       ),
     ];
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(14, 0, 14, 0),
-      child: Row(
-        children: [
-          for (var i = 0; i < tabs.length; i++) ...[
-            _BucketPill(
-              spec: tabs[i],
-              selected: _activeBucket == tabs[i].bucket,
-              onTap: () => _selectBucket(tabs[i].bucket),
-            ),
-            if (i < tabs.length - 1) const SizedBox(width: 8),
-          ],
-        ],
-      ),
+    final activeSpec = tabs.firstWhere(
+      (t) => t.bucket == _activeBucket,
+      orElse: () => tabs.first,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Header da seção de navegação — orienta o usuário e mostra
+        // claramente qual filtro está ativo no momento (não fica só
+        // no destaque visual da pill).
+        Padding(
+          padding: const EdgeInsets.fromLTRB(_kPagePadH, 0, _kPagePadH, 8),
+          child: Row(
+            children: [
+              Icon(LucideIcons.slidersHorizontal, size: 12, color: subtitleColor),
+              const SizedBox(width: 6),
+              Text(
+                'FILTRAR POR',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: subtitleColor,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 2.0,
+                  fontSize: 10,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Container(
+                width: 4,
+                height: 4,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: subtitleColor.withValues(alpha: 0.45),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Flexible(
+                child: Text(
+                  '${activeSpec.label} · ${activeSpec.count}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: activeSpec.color,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.4,
+                    fontSize: 11,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        // Row scrollable das pills.
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: _kPagePadH - 2),
+          child: Row(
+            children: [
+              for (var i = 0; i < tabs.length; i++) ...[
+                _BucketPill(
+                  spec: tabs[i],
+                  selected: _activeBucket == tabs[i].bucket,
+                  onTap: () => _selectBucket(tabs[i].bucket),
+                ),
+                if (i < tabs.length - 1) const SizedBox(width: 8),
+              ],
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -1075,6 +1083,7 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (var i = 0; i < _response.data.length; i++) ...[
+          if (i > 0) const SizedBox(height: 10),
           SubTaskCard(
             subtask: _response.data[i],
             showParentCard: true,
@@ -1095,7 +1104,6 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
                 duration: 240.ms,
                 curve: Curves.easeOutCubic,
               ),
-          if (i < _response.data.length - 1) const SubTaskDivider(),
         ],
         if (_hasMorePages || _loadingMore) ...[
           const SizedBox(height: 12),
@@ -1223,33 +1231,6 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                // KPI inline (4 mini blocos)
-                Row(
-                  children: [
-                    for (var i = 0; i < 4; i++) ...[
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SkeletonBox(
-                              width: 32,
-                              height: 22,
-                              borderRadius: 6,
-                            ),
-                            const SizedBox(height: 6),
-                            SkeletonBox(
-                              width: 64,
-                              height: 9,
-                              borderRadius: 4,
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (i < 3) const SizedBox(width: 12),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: _kSectionGap + 4),
                 // Search
                 SkeletonBox(
                   width: double.infinity,
@@ -1410,64 +1391,6 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
 
 // ─── Subwidgets ────────────────────────────────────────────────────────
 
-class _KpiItem {
-  final String label;
-  final int value;
-  final Color color;
-  _KpiItem({required this.label, required this.value, required this.color});
-}
-
-/// KPI inline (sem caixa) — número grande colorido + label uppercase
-/// pequena. Usado direto sob o hero, distribuído na horizontal.
-class _KpiInlineTile extends StatelessWidget {
-  final _KpiItem item;
-  final ThemeData theme;
-  const _KpiInlineTile({required this.item, required this.theme});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        AnimatedSwitcher(
-          duration: const Duration(milliseconds: 240),
-          transitionBuilder: (child, anim) => FadeTransition(
-            opacity: anim,
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, 0.2),
-                end: Offset.zero,
-              ).animate(anim),
-              child: child,
-            ),
-          ),
-          child: Text(
-            '${item.value}',
-            key: ValueKey(item.value),
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w900,
-              color: item.color,
-              letterSpacing: -0.85,
-              height: 1.0,
-            ),
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          item.label.toUpperCase(),
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(context),
-            fontWeight: FontWeight.w900,
-            letterSpacing: 1.4,
-            fontSize: 10,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _BucketSpec {
   final _Bucket bucket;
   final IconData icon;
@@ -1588,27 +1511,54 @@ class _BucketPill extends StatelessWidget {
   }
 }
 
-class _PulseDot extends StatelessWidget {
-  final Color color;
-  const _PulseDot({required this.color});
+/// Botão compacto de "atenção: tem atraso" — aparece no canto direito do
+/// hero somente quando há overdue. Clique pula direto pra esse bucket.
+class _OverdueAlertButton extends StatelessWidget {
+  final int count;
+  final Color danger;
+  final VoidCallback onTap;
+  const _OverdueAlertButton({
+    required this.count,
+    required this.danger,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 8,
-      height: 8,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        splashColor: danger.withValues(alpha: 0.18),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            color: danger.withValues(alpha: isDark ? 0.14 : 0.08),
+            border: Border.all(
+              color: danger.withValues(alpha: isDark ? 0.34 : 0.24),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(LucideIcons.alertTriangle, size: 14, color: danger),
+              const SizedBox(width: 6),
+              Text(
+                '$count',
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: danger,
+                      fontWeight: FontWeight.w900,
+                      height: 1,
+                    ),
+              ),
+            ],
+          ),
+        ),
       ),
-    )
-        .animate(onPlay: (c) => c.repeat(reverse: true))
-        .scaleXY(
-          begin: 1,
-          end: 1.5,
-          duration: 700.ms,
-          curve: Curves.easeInOut,
-        )
-        .fadeIn(begin: 0.55, duration: 700.ms);
+    );
   }
 }
+
