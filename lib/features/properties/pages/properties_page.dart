@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -110,6 +111,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
   PropertyFilters? _filters;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
+  Timer? _searchDebounce;
   final ScrollController _scrollController = ScrollController();
 
   int _localDraftCount = 0;
@@ -130,6 +132,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
   @override
   void dispose() {
     _persistState();
+    _searchDebounce?.cancel();
     _searchController.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
@@ -246,6 +249,60 @@ class _PropertiesPageState extends State<PropertiesPage> {
     );
   }
 
+  /// Monta os filtros enviados à API — paridade com `getCombinedFilters` (web).
+  ///
+  /// - `search` vem do campo de busca do header.
+  /// - Aba **Todos** (`portfolioScope` nulo) sempre envia `includeInactive=true`
+  ///   para listar ativos e inativos, todos os status.
+  PropertyFilters? _buildRequestFilters() {
+    final searchTrim = _searchQuery.trim();
+    final base = _filters ?? PropertyFilters();
+    final isTodosTab = _activeScope == null;
+
+    var combined = base.copyWith(
+      search: searchTrim.isEmpty ? null : searchTrim,
+    );
+
+    if (isTodosTab) {
+      combined = combined.copyWith(includeInactive: true);
+    } else {
+      combined = combined.copyWithNullable(resetIncludeInactive: true);
+    }
+
+    if (isTodosTab) {
+      return _normalizeListingScope(combined);
+    }
+
+    if (searchTrim.isEmpty && _filtersPayloadIsEmpty(base)) {
+      return _normalizeListingScope(null);
+    }
+
+    return _normalizeListingScope(combined);
+  }
+
+  bool _filtersPayloadIsEmpty(PropertyFilters f) {
+    return f.type == null &&
+        f.status == null &&
+        f.city == null &&
+        f.state == null &&
+        f.neighborhood == null &&
+        f.minPrice == null &&
+        f.maxPrice == null &&
+        f.minArea == null &&
+        f.maxArea == null &&
+        f.bedrooms == null &&
+        f.bathrooms == null &&
+        f.parkingSpaces == null &&
+        (f.features == null || f.features!.isEmpty) &&
+        f.isActive == null &&
+        f.isFeatured == null &&
+        f.companyId == null &&
+        f.responsibleUserId == null &&
+        f.onlyMyData != true &&
+        f.portfolioScope == null &&
+        f.includeInactive != true;
+  }
+
   Future<void> _loadProperties({bool refresh = false}) async {
     if (refresh) {
       setState(() {
@@ -260,14 +317,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
     });
 
     try {
-      final rawFilters =
-          _filters?.copyWith(
-            search: _searchQuery.trim().isEmpty ? null : _searchQuery.trim(),
-          ) ??
-          (_searchQuery.trim().isNotEmpty
-              ? PropertyFilters(search: _searchQuery.trim())
-              : null);
-      final filters = _normalizeListingScope(rawFilters);
+      final filters = _buildRequestFilters();
 
       final response = await _propertyService.getProperties(
         page: _currentPage,
@@ -323,14 +373,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
 
     try {
       final nextPage = _currentPage + 1;
-      final rawFilters =
-          _filters?.copyWith(
-            search: _searchQuery.trim().isEmpty ? null : _searchQuery.trim(),
-          ) ??
-          (_searchQuery.trim().isNotEmpty
-              ? PropertyFilters(search: _searchQuery.trim())
-              : null);
-      final filters = _normalizeListingScope(rawFilters);
+      final filters = _buildRequestFilters();
 
       final response = await _propertyService.getProperties(
         page: nextPage,
@@ -996,7 +1039,14 @@ class _PropertiesPageState extends State<PropertiesPage> {
           );
         }
 
-        Widget insightBlock() => _buildBrokerFiltersPanel(context);
+        Widget insightBlock() => Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildHeaderSearchField(context),
+                const SizedBox(height: 12),
+                _buildBrokerFiltersPanel(context),
+              ],
+            );
 
         Widget actionsBar() {
           return Wrap(
@@ -2296,6 +2346,111 @@ class _PropertiesPageState extends State<PropertiesPage> {
     });
     _persistState();
     _loadProperties(refresh: true);
+  }
+
+  void _onSearchChanged(String value) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 400), () {
+      if (!mounted) return;
+      final trimmed = value.trim();
+      if (trimmed == _searchQuery.trim()) return;
+      _performSearch(trimmed);
+    });
+  }
+
+  void _onSearchSubmitted(String value) {
+    _searchDebounce?.cancel();
+    _performSearch(value.trim());
+  }
+
+  void _clearHeaderSearch() {
+    _searchDebounce?.cancel();
+    _searchController.clear();
+    if (_searchQuery.isEmpty) return;
+    setState(() => _searchQuery = '');
+    _persistState();
+    _loadProperties(refresh: true);
+  }
+
+  /// Campo de busca livre no header — paridade com web `PropertiesPage`.
+  /// Busca endereço, bairro, condomínio, empreendimento, lote, código etc.
+  Widget _buildHeaderSearchField(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = _portfolioAccentColor(context);
+    final hasText = _searchController.text.trim().isNotEmpty;
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: hasText
+            ? Color.alphaBlend(
+                accent.withValues(alpha: isDark ? 0.10 : 0.05),
+                ThemeHelpers.cardBackgroundColor(context),
+              )
+            : ThemeHelpers.cardBackgroundColor(context),
+        border: Border.all(
+          color: hasText
+              ? accent.withValues(alpha: isDark ? 0.55 : 0.38)
+              : ThemeHelpers.borderColor(context),
+          width: hasText ? 1.35 : 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(width: 12),
+          Icon(
+            Icons.search_rounded,
+            size: 20,
+            color: hasText
+                ? accent
+                : ThemeHelpers.textSecondaryColor(context),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              textInputAction: TextInputAction.search,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                height: 1.2,
+              ),
+              decoration: InputDecoration(
+                hintText:
+                    'Buscar por endereço, bairro, condomínio, lote, código…',
+                hintStyle: theme.textTheme.bodySmall?.copyWith(
+                  color: ThemeHelpers.textSecondaryColor(context),
+                  fontWeight: FontWeight.w500,
+                ),
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 13),
+              ),
+              onChanged: (value) {
+                setState(() {});
+                _onSearchChanged(value);
+              },
+              onSubmitted: _onSearchSubmitted,
+            ),
+          ),
+          if (hasText)
+            IconButton(
+              icon: Icon(
+                Icons.clear_rounded,
+                size: 18,
+                color: ThemeHelpers.textSecondaryColor(context),
+              ),
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Limpar busca',
+              onPressed: _clearHeaderSearch,
+            )
+          else
+            const SizedBox(width: 4),
+        ],
+      ),
+    );
   }
 
   /// situação, título, endereço, specs e preço — tudo visível de relance.
@@ -3675,7 +3830,7 @@ class _PropertiesOverflowSheet extends StatelessWidget {
                     _OverflowTile(
                       icon: Icons.search_rounded,
                       label: 'Busca rápida',
-                      subtitle: 'Por título, código ou descrição',
+                      subtitle: 'Endereço, bairro, condomínio, lote, código…',
                       color: const Color(0xFF0891B2), // cyan
                       onTap: () => Navigator.of(context).pop('search'),
                     ),
@@ -4153,7 +4308,7 @@ class _PropertiesSearchSheetState extends State<_PropertiesSearchSheet> {
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              'Por título, código ou descrição',
+                              'Por endereço, bairro, condomínio, lote ou código',
                               style: theme.textTheme.bodySmall?.copyWith(
                                 fontWeight: FontWeight.w600,
                                 color: ThemeHelpers.textSecondaryColor(
@@ -4242,7 +4397,7 @@ class _PropertiesSearchSheetState extends State<_PropertiesSearchSheet> {
                                   ),
                                   decoration: InputDecoration(
                                     hintText:
-                                        'palavras-chave, endereço, código…',
+                                        'Buscar por endereço, bairro, condomínio, lote, código…',
                                     hintStyle:
                                         theme.textTheme.bodyMedium?.copyWith(
                                       color:
