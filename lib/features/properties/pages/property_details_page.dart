@@ -513,9 +513,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Desfazer venda?'),
+        title: const Text('Tornar imóvel disponível?'),
         content: Text(
-          'O imóvel${property.code != null && property.code!.trim().isNotEmpty ? ' ${property.code!.trim()}' : ''} voltará a ficar disponível no cadastro. A data de venda será removida e a ficha será reativada.',
+          'O status de vendido será removido. O imóvel${property.code != null && property.code!.trim().isNotEmpty ? ' ${property.code!.trim()}' : ''} voltará ao cadastro como disponível e a ficha será reativada.',
         ),
         actions: [
           TextButton(
@@ -1625,13 +1625,57 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           spacing: 6,
           runSpacing: 6,
           children: [
-            PropertyStatusPill(
-              status: property.status,
-              onTap: canUndoSold && !_undoSoldLoading
-                  ? _confirmAndUndoSold
-                  : null,
-              actionSuffix: canUndoSold ? ' · Desvender' : null,
-            ),
+            PropertyStatusPill(status: property.status),
+            if (canUndoSold)
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: _undoSoldLoading ? null : _confirmAndUndoSold,
+                  borderRadius: BorderRadius.circular(999),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withValues(
+                        alpha: isDark ? 0.14 : 0.1,
+                      ),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: const Color(0xFF10B981).withValues(
+                          alpha: isDark ? 0.45 : 0.35,
+                        ),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _undoSoldLoading
+                              ? Icons.hourglass_top_rounded
+                              : Icons.check_circle_outline_rounded,
+                          size: 14,
+                          color: const Color(0xFF059669),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          _undoSoldLoading
+                              ? 'Tornando disponível...'
+                              : 'Tornar disponível',
+                          style: const TextStyle(
+                            color: Color(0xFF059669),
+                            fontWeight: FontWeight.w800,
+                            fontSize: 11,
+                            letterSpacing: 0.15,
+                            height: 1,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             PropertySituationPill(
               isActive: property.isActive,
               isAvailableForSite: property.isAvailableForSite ?? false,
