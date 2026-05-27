@@ -90,6 +90,8 @@ class PropertyStatusPill extends StatelessWidget {
     this.short = false,
     this.solid = false,
     this.dense = false,
+    this.onTap,
+    this.actionSuffix,
   });
 
   /// Status do imóvel.
@@ -106,46 +108,72 @@ class PropertyStatusPill extends StatelessWidget {
   /// Quando `true`, reduz padding e fonte (para uso em cards pequenos).
   final bool dense;
 
+  /// Quando informado, torna o pill interativo (ex.: desfazer venda).
+  final VoidCallback? onTap;
+
+  /// Texto extra após o label (ex.: " · Desvender").
+  final String? actionSuffix;
+
   @override
   Widget build(BuildContext context) {
     final v = PropertyStatusVisual.of(status);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     if (solid) {
-      return _renderSolid(v);
+      return _wrapInteractive(_renderSolid(v));
     }
 
-    return Container(
-      padding: dense
-          ? const EdgeInsets.symmetric(horizontal: 7, vertical: 3)
-          : const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-      decoration: BoxDecoration(
-        color: v.color.withValues(alpha: isDark ? 0.18 : 0.12),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: v.color.withValues(alpha: isDark ? 0.50 : 0.42),
+    return _wrapInteractive(
+      Container(
+        padding: dense
+            ? const EdgeInsets.symmetric(horizontal: 7, vertical: 3)
+            : const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+        decoration: BoxDecoration(
+          color: v.color.withValues(alpha: isDark ? 0.18 : 0.12),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: v.color.withValues(alpha: isDark ? 0.50 : 0.42),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(v.icon, size: dense ? 11 : 12, color: v.color),
+            const SizedBox(width: 5),
+            Flexible(
+              child: Text(
+                _labelText(v),
+                style: TextStyle(
+                  color: v.color,
+                  fontWeight: FontWeight.w900,
+                  fontSize: dense ? 9.5 : 10.5,
+                  letterSpacing: 0.2,
+                  height: 1,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
         ),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(v.icon, size: dense ? 11 : 12, color: v.color),
-          const SizedBox(width: 5),
-          Flexible(
-            child: Text(
-              short ? v.shortLabel : v.label,
-              style: TextStyle(
-                color: v.color,
-                fontWeight: FontWeight.w900,
-                fontSize: dense ? 9.5 : 10.5,
-                letterSpacing: 0.2,
-                height: 1,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
+    );
+  }
+
+  String _labelText(PropertyStatusVisual v) {
+    final base = short ? v.shortLabel : v.label;
+    if (actionSuffix == null || actionSuffix!.isEmpty) return base;
+    return '$base$actionSuffix';
+  }
+
+  Widget _wrapInteractive(Widget child) {
+    if (onTap == null) return child;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: child,
       ),
     );
   }
@@ -173,7 +201,7 @@ class PropertyStatusPill extends StatelessWidget {
           const SizedBox(width: 5),
           Flexible(
             child: Text(
-              short ? v.shortLabel : v.label,
+              _labelText(v),
               style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w900,

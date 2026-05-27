@@ -1712,6 +1712,61 @@ class PropertyService {
     }
   }
 
+  /// Altera o status do imóvel (transições validadas no backend).
+  Future<ApiResponse<Property>> changePropertyStatus(
+    String id, {
+    required PropertyStatus status,
+    String? notes,
+  }) async {
+    debugPrint(
+      '🏠 [PROPERTY_SERVICE] Alterando status da propriedade $id → ${status.value}',
+    );
+
+    try {
+      final body = <String, dynamic>{'status': status.value};
+      if (notes != null && notes.trim().isNotEmpty) {
+        body['notes'] = notes.trim();
+      }
+
+      final response = await _apiService.patch<Map<String, dynamic>>(
+        '/properties/$id/status',
+        body: body,
+      );
+
+      if (response.success && response.data != null) {
+        try {
+          final property = Property.fromJson(response.data!);
+          debugPrint(
+            '✅ [PROPERTY_SERVICE] Status alterado: $id → ${status.value}',
+          );
+          return ApiResponse.success(
+            data: property,
+            statusCode: response.statusCode,
+          );
+        } catch (e) {
+          debugPrint('❌ [PROPERTY_SERVICE] Erro ao parsear resposta: $e');
+          return ApiResponse.error(
+            message: 'Erro ao processar dados: ${e.toString()}',
+            statusCode: response.statusCode,
+            data: response.error,
+          );
+        }
+      }
+
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao alterar status do imóvel',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [PROPERTY_SERVICE] Erro de conexão: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
   /// Marca propriedade como vendida
   Future<ApiResponse<Property>> markAsSold(String id, {String? notes}) async {
     debugPrint('🏠 [PROPERTY_SERVICE] Marcando propriedade como vendida: $id');

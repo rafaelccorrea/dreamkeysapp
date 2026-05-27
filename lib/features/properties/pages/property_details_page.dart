@@ -259,6 +259,16 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   bool get _canSetMainPropertyImage =>
       _canEditProperty || _canDeletePropertyImages;
 
+  /// Apenas master/admin podem desfazer venda (SOLD → AVAILABLE).
+  bool get _canUndoSold {
+    final access = ModuleAccessService.instance;
+    final role = access.userRole?.toLowerCase() ?? '';
+    if (role != 'master' && role != 'admin') return false;
+    return _property?.status == PropertyStatus.sold;
+  }
+
+  bool _undoSoldLoading = false;
+
   @override
   void initState() {
     super.initState();
@@ -491,6 +501,77 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           }
           _isLoading = false;
         });
+      }
+    }
+  }
+
+  Future<void> _confirmAndUndoSold() async {
+    if (!_canUndoSold || _undoSoldLoading) return;
+    final property = _property;
+    if (property == null || property.id.trim().isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Desfazer venda?'),
+        content: Text(
+          'O imóvel${property.code != null && property.code!.trim().isNotEmpty ? ' ${property.code!.trim()}' : ''} voltará a ficar disponível no cadastro. A data de venda será removida e a ficha será reativada.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Tornar disponível'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _undoSoldLoading = true);
+    try {
+      final response = await _propertyService.changePropertyStatus(
+        property.id,
+        status: PropertyStatus.available,
+        notes: 'Venda desfeita — imóvel disponível novamente',
+      );
+
+      if (!mounted) return;
+
+      if (response.success && response.data != null) {
+        setState(() => _property = response.data);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Imóvel disponível novamente.'),
+            backgroundColor: AppColors.status.success,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              response.message ?? 'Não foi possível desfazer a venda.',
+            ),
+            backgroundColor: AppColors.status.error,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro: ${e.toString()}'),
+            backgroundColor: AppColors.status.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _undoSoldLoading = false);
       }
     }
   }
@@ -1463,6 +1544,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final pills = _buildIdentityMetaPills(property, isDark);
     final hasFooter = _hasIdentityFooterContent(property);
     final hasCode = property.code != null && property.code!.isNotEmpty;
+    final access = ModuleAccessService.instance;
+    final role = access.userRole?.toLowerCase() ?? '';
+    final canUndoSold =
+        (role == 'master' || role == 'admin') &&
+        property.status == PropertyStatus.sold;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1539,7 +1625,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           spacing: 6,
           runSpacing: 6,
           children: [
-            PropertyStatusPill(status: property.status),
+            PropertyStatusPill(
+              status: property.status,
+              onTap: canUndoSold && !_undoSoldLoading
+                  ? _confirmAndUndoSold
+                  : null,
+              actionSuffix: canUndoSold ? ' · Desvender' : null,
+            ),
             PropertySituationPill(
               isActive: property.isActive,
               isAvailableForSite: property.isAvailableForSite ?? false,
