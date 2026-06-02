@@ -3194,13 +3194,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _buildFlushSection(
-          theme: theme,
-          title: 'Nota de qualidade',
-          icon: Icons.grade_rounded,
-          tone: const Color(0xFF059669),
-          child: PropertyScorePanel(result: scoreResult),
-        ),
+        // Paridade web: `PropertyScoreDetails` flush no step Desempenho (sem
+        // `PropertyDetailSection` duplicando o título).
+        PropertyScorePanel(result: scoreResult),
+        const SizedBox(height: 20),
         _buildFlushSection(
           theme: theme,
           title: 'Engajamento no site',
