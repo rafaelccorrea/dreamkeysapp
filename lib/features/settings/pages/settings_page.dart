@@ -954,6 +954,19 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           onTap: () => openTestFlightUpdateUrl(),
         ),
+        _rowDivider(context),
+        _NavigationRow(
+          tone: _toneApp,
+          icon: Icons.policy_rounded,
+          title: 'Política de privacidade',
+          subtitle: 'Como coletamos, usamos e compartilhamos seus dados.',
+          trailing: Icon(
+            Icons.open_in_new_rounded,
+            size: 18,
+            color: ThemeHelpers.textSecondaryColor(context),
+          ),
+          onTap: () => openPrivacyPolicyUrl(),
+        ),
       ],
     );
   }

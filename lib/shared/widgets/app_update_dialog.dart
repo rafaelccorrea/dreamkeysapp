@@ -15,6 +15,16 @@ Future<void> maybePromptAppUpdate(
   await showAppUpdateDialog(context, info);
 }
 
+/// URL pública da política de privacidade (mesma do web / App Store Connect).
+const String kPrivacyPolicyUrl =
+    'https://intellisysbr.com/sistema/politica-de-privacidade';
+
+Future<bool> openPrivacyPolicyUrl() async {
+  final uri = Uri.tryParse(kPrivacyPolicyUrl);
+  if (uri == null) return false;
+  return launchUrl(uri, mode: LaunchMode.externalApplication);
+}
+
 /// Abre o link público do TestFlight (instala/atualiza o app beta).
 Future<bool> openTestFlightUpdateUrl([String? url]) async {
   final uri = Uri.tryParse(

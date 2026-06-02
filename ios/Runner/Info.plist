@@ -64,7 +64,7 @@
 	<key>NSUserNotificationsUsageDescription</key>
 	<string>O Intellisys envia notificações sobre leads, agendamentos e atualizações da sua carteira de imóveis.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>O Intellisys utiliza sua localização para mostrar imóveis próximos quando autorizado.</string>
+	<string>O Intellisys usa sua localização apenas quando você autoriza, para registrar check-in de visitas e atividades de campo vinculadas à sua conta.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
