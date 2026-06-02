@@ -1,14 +1,19 @@
 import ActivityKit
-import WidgetKit
+import CryptoKit
 import SwiftUI
+import WidgetKit
 
+// ⚠️ DEVE ser idêntico ao `LiveActivitiesAppAttributes` do plugin `live_activities`
+// (incluindo ContentState com `appGroupId`). Schema diferente = ilha vazia.
 struct LiveActivitiesAppAttributes: ActivityAttributes, Identifiable {
   public typealias LiveDeliveryData = ContentState
-  public struct ContentState: Codable, Hashable {}
+
+  public struct ContentState: Codable, Hashable {
+    var appGroupId: String
+  }
+
   var id = UUID()
 }
-
-let sharedDefault = UserDefaults(suiteName: "group.com.dreamkeys.corretor")!
 
 extension LiveActivitiesAppAttributes {
   func prefixedKey(_ key: String) -> String {
@@ -16,56 +21,116 @@ extension LiveActivitiesAppAttributes {
   }
 }
 
-// MARK: - Design tokens
+// MARK: - App Group + leitura de dados (UserDefaults)
+
+private let kDefaultAppGroup = "group.com.dreamkeys.corretor"
+private let kCheckInActivityName = "checkin"
+
+private func appGroupDefaults(_ context: ActivityViewContext<LiveActivitiesAppAttributes>) -> UserDefaults? {
+  let groupId = context.state.appGroupId.isEmpty ? kDefaultAppGroup : context.state.appGroupId
+  return UserDefaults(suiteName: groupId)
+}
+
+/// Mesmo algoritmo do plugin (`uuid5`) para achar chaves se `attributes.id` falhar.
+private func uuid5(namespace: UUID, name: String) -> UUID {
+  var data = withUnsafeBytes(of: namespace.uuid) { Data($0) }
+  data.append(Data(name.utf8))
+  let hash = Insecure.SHA1.hash(data: data)
+  var bytes = Array(hash.prefix(16))
+  bytes[6] = (bytes[6] & 0x0F) | 0x50
+  bytes[8] = (bytes[8] & 0x3F) | 0x80
+  return UUID(uuid: uuid_t(
+    bytes[0], bytes[1], bytes[2], bytes[3],
+    bytes[4], bytes[5], bytes[6], bytes[7],
+    bytes[8], bytes[9], bytes[10], bytes[11],
+    bytes[12], bytes[13], bytes[14], bytes[15]
+  ))
+}
+
+private let kNamespaceDNS = UUID(uuidString: "6ba7b810-9dad-11d1-80b4-00c04fd430c8")!
+
+private func prefixedKeys(for id: UUID, field: String) -> [String] {
+  let base = "\(id.uuidString)_\(field)"
+  let legacy = "\(id)_\(field)"
+  let pluginId = uuid5(namespace: kNamespaceDNS, name: kCheckInActivityName)
+  return [
+    base,
+    legacy,
+    "\(pluginId.uuidString)_\(field)",
+    "\(pluginId)_\(field)",
+  ]
+}
+
+private func readString(
+  _ context: ActivityViewContext<LiveActivitiesAppAttributes>,
+  field: String
+) -> String? {
+  guard let ud = appGroupDefaults(context) else { return nil }
+  let primary = context.attributes.prefixedKey(field)
+  if let s = ud.string(forKey: primary), !s.trimmingCharacters(in: .whitespaces).isEmpty {
+    return s.trimmingCharacters(in: .whitespaces)
+  }
+  for key in prefixedKeys(for: context.attributes.id, field: field) {
+    if let s = ud.string(forKey: key), !s.trimmingCharacters(in: .whitespaces).isEmpty {
+      return s.trimmingCharacters(in: .whitespaces)
+    }
+  }
+  let suffix = "_\(field)"
+  for (key, value) in ud.dictionaryRepresentation() {
+    guard key.hasSuffix(suffix) else { continue }
+    if let s = value as? String, !s.trimmingCharacters(in: .whitespaces).isEmpty {
+      return s.trimmingCharacters(in: .whitespaces)
+    }
+  }
+  return nil
+}
+
+private func readEpochMs(
+  _ context: ActivityViewContext<LiveActivitiesAppAttributes>,
+  field: String
+) -> Double {
+  guard let ud = appGroupDefaults(context) else { return 0 }
+  let primary = context.attributes.prefixedKey(field)
+  if let n = ud.object(forKey: primary) as? NSNumber { return n.doubleValue }
+  if let s = ud.string(forKey: primary), let v = Double(s) { return v }
+  for key in prefixedKeys(for: context.attributes.id, field: field) {
+    if let n = ud.object(forKey: key) as? NSNumber { return n.doubleValue }
+    if let s = ud.string(forKey: key), let v = Double(s) { return v }
+  }
+  let suffix = "_\(field)"
+  for (key, value) in ud.dictionaryRepresentation() {
+    guard key.hasSuffix(suffix) else { continue }
+    if let n = value as? NSNumber { return n.doubleValue }
+    if let s = value as? String, let v = Double(s) { return v }
+  }
+  return 0
+}
+
+// MARK: - Modelo visual
 
 private enum CK {
-  static let emerald = Color(red: 0.063, green: 0.725, blue: 0.506)
-  static let emeraldGlow = Color(red: 0.298, green: 0.949, blue: 0.769)
+  static let green = Color(red: 0.063, green: 0.725, blue: 0.506)
   static let amber = Color(red: 0.961, green: 0.620, blue: 0.043)
   static let orange = Color(red: 0.976, green: 0.451, blue: 0.086)
   static let red = Color(red: 0.937, green: 0.267, blue: 0.267)
-  static let violet = Color(red: 0.388, green: 0.400, blue: 0.945)
-
-  /// Texto na ilha (fundo OLED preto do sistema).
-  static let islandPrimary = Color.white
-  static let islandSecondary = Color.white.opacity(0.62)
-  static let islandTertiary = Color.white.opacity(0.42)
 }
 
-private enum CheckInPhase {
+private enum Phase {
   case active, expiring, critical, expired
 
-  var accent: Color {
+  var color: Color {
     switch self {
-    case .active: return CK.emerald
+    case .active: return CK.green
     case .expiring: return CK.amber
     case .critical: return CK.orange
     case .expired: return CK.red
     }
   }
 
-  var glow: Color {
-    switch self {
-    case .active: return CK.emeraldGlow
-    case .expiring: return CK.amber
-    case .critical: return CK.orange
-    case .expired: return CK.red
-    }
-  }
-
-  var title: String {
+  var label: String {
     switch self {
     case .active: return "Na imobiliária"
     case .expiring: return "Expira em breve"
-    case .critical: return "Quase no fim"
-    case .expired: return "Expirado"
-    }
-  }
-
-  var shortTitle: String {
-    switch self {
-    case .active: return "Ativo"
-    case .expiring: return "Em breve"
     case .critical: return "Urgente"
     case .expired: return "Expirado"
     }
@@ -75,45 +140,35 @@ private enum CheckInPhase {
     switch self {
     case .active: return "building.2.fill"
     case .expiring: return "clock.fill"
-    case .critical: return "bolt.fill"
+    case .critical: return "exclamationmark.triangle.fill"
     case .expired: return "xmark.circle.fill"
     }
   }
 }
 
-// MARK: - Data
-
-private func laEpochMs(_ ctx: ActivityViewContext<LiveActivitiesAppAttributes>, key: String) -> Double {
-  let k = ctx.attributes.prefixedKey(key)
-  if let n = sharedDefault.object(forKey: k) as? NSNumber { return n.doubleValue }
-  if let s = sharedDefault.string(forKey: k), let v = Double(s) { return v }
-  return 0
-}
-
-private func laString(_ ctx: ActivityViewContext<LiveActivitiesAppAttributes>, key: String) -> String {
-  sharedDefault.string(forKey: ctx.attributes.prefixedKey(key)) ?? ""
-}
-
-private struct CheckInSnapshot {
-  let userName: String
+private struct Snap {
+  let name: String
   let checkedIn: Date
   let expires: Date
-  let phase: CheckInPhase
+  let phase: Phase
+  let hasRealData: Bool
 
-  init(context: ActivityViewContext<LiveActivitiesAppAttributes>) {
-    let raw = laString(context, key: "userName").trimmingCharacters(in: .whitespacesAndNewlines)
-    userName = raw.isEmpty ? "Corretor" : raw
+  init(_ context: ActivityViewContext<LiveActivitiesAppAttributes>) {
+    let rawName = readString(context, field: "userName")
+    name = rawName ?? "Check-in ativo"
 
-    let checkedMs = laEpochMs(context, key: "checkedInAtEpoch")
-    let expiresMs = laEpochMs(context, key: "expiresAtEpoch")
+    let checkedMs = readEpochMs(context, field: "checkedInAtEpoch")
+    let expiresMs = readEpochMs(context, field: "expiresAtEpoch")
     let now = Date()
+
+    hasRealData = expiresMs > 0 || checkedMs > 0 || rawName != nil
 
     checkedIn = checkedMs > 0
       ? Date(timeIntervalSince1970: checkedMs / 1000.0)
       : now
     expires = expiresMs > 0
       ? Date(timeIntervalSince1970: expiresMs / 1000.0)
-      : now.addingTimeInterval(3600)
+      : now.addingTimeInterval(2 * 3600)
 
     let left = expires.timeIntervalSince(now)
     if left <= 1 { phase = .expired }
@@ -121,358 +176,103 @@ private struct CheckInSnapshot {
     else if left < 15 * 60 { phase = .expiring }
     else { phase = .active }
   }
-
-  var remainingRatio: Double {
-    let total = expires.timeIntervalSince(checkedIn)
-    guard total > 1 else { return 0 }
-    let left = max(0, expires.timeIntervalSinceNow)
-    return min(1, max(0, left / total))
-  }
-
-  var elapsedRatio: Double { 1 - remainingRatio }
-
-  var entryTime: String {
-    let f = DateFormatter()
-    f.locale = Locale(identifier: "pt_BR")
-    f.dateFormat = "HH:mm"
-    return f.string(from: checkedIn)
-  }
-
-  var expiryLabel: String {
-    let f = DateFormatter()
-    f.locale = Locale(identifier: "pt_BR")
-    f.dateFormat = "HH:mm"
-    return f.string(from: expires)
-  }
 }
 
-// MARK: - Primitives
+// MARK: - Componentes (sempre cores sólidas — legíveis na ilha preta)
 
-private struct IslandTimer: View {
-  let expires: Date
-  let phase: CheckInPhase
-  var font: Font = .system(size: 12, weight: .semibold, design: .rounded)
-  var gradient: Bool = false
-  var solidColor: Color? = nil
+private struct LiveTimer: View {
+  let end: Date
+  let color: Color
+  var size: CGFloat = 12
 
   var body: some View {
     Group {
-      if expires.timeIntervalSinceNow > 1 {
-        Text(timerInterval: Date()...expires, countsDown: true)
+      if end.timeIntervalSinceNow > 1 {
+        Text(timerInterval: Date()...end, countsDown: true)
       } else {
         Text("0:00")
       }
     }
-    .font(font)
+    .font(.system(size: size, weight: .bold, design: .rounded))
     .monospacedDigit()
-    .foregroundStyle(timerStyle)
-  }
-
-  private var timerStyle: AnyShapeStyle {
-    if let solidColor { return AnyShapeStyle(solidColor) }
-    if gradient { return AnyShapeStyle(timerGradient) }
-    return AnyShapeStyle(phase.accent)
-  }
-
-  private var timerGradient: LinearGradient {
-    LinearGradient(
-      colors: [.white, phase.glow],
-      startPoint: .leading,
-      endPoint: .trailing
-    )
+    .foregroundColor(color)
+    .lineLimit(1)
+    .minimumScaleFactor(0.7)
   }
 }
 
-/// Ícone com halo — assinatura visual compacta (estilo apps nativos).
-private struct BrandGlyph: View {
-  let phase: CheckInPhase
-  var diameter: CGFloat = 28
+private struct LiveIcon: View {
+  let phase: Phase
+  var size: CGFloat = 20
 
   var body: some View {
-    ZStack {
-      Circle()
-        .fill(
-          RadialGradient(
-            colors: [phase.glow.opacity(0.55), phase.accent.opacity(0.08)],
-            center: .center,
-            startRadius: 0,
-            endRadius: diameter * 0.55
-          )
-        )
-        .frame(width: diameter, height: diameter)
-
-      Circle()
-        .strokeBorder(
-          LinearGradient(
-            colors: [phase.glow.opacity(0.9), phase.accent.opacity(0.35)],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-          ),
-          lineWidth: 1.5
-        )
-        .frame(width: diameter, height: diameter)
-
-      Image(systemName: phase.symbol)
-        .font(.system(size: diameter * 0.38, weight: .semibold))
-        .foregroundStyle(
-          LinearGradient(
-            colors: [.white, phase.glow],
-            startPoint: .top,
-            endPoint: .bottom
-          )
-        )
-        .symbolRenderingMode(.hierarchical)
-    }
+    Image(systemName: phase.symbol)
+      .font(.system(size: size, weight: .semibold))
+      .foregroundColor(phase.color)
+      .shadow(color: phase.color.opacity(0.45), radius: 3, x: 0, y: 0)
   }
 }
 
-/// Anel de progresso (restante do check-in).
-private struct RemainingRing: View {
-  let ratio: Double
-  let phase: CheckInPhase
-  var lineWidth: CGFloat = 3.5
-  var size: CGFloat = 40
+// MARK: - Dynamic Island
+
+private struct IslandExpandedContent: View {
+  let snap: Snap
 
   var body: some View {
-    ZStack {
-      Circle()
-        .stroke(CK.islandTertiary, lineWidth: lineWidth)
-      Circle()
-        .trim(from: 0, to: ratio)
-        .stroke(
-          AngularGradient(
-            colors: [phase.accent, phase.glow, phase.accent],
-            center: .center
-          ),
-          style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
-        )
-        .rotationEffect(.degrees(-90))
-      Text("\(Int(ratio * 100))")
-        .font(.system(size: 9, weight: .bold, design: .rounded))
-        .monospacedDigit()
-        .foregroundStyle(CK.islandSecondary)
-    }
-    .frame(width: size, height: size)
-  }
-}
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(alignment: .center, spacing: 10) {
+        LiveIcon(phase: snap.phase, size: 22)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(snap.phase.label)
+            .font(.system(size: 13, weight: .bold))
+            .foregroundColor(.white)
+          Text(snap.name)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundColor(.white.opacity(0.75))
+            .lineLimit(1)
+        }
+        Spacer(minLength: 4)
+        VStack(alignment: .trailing, spacing: 0) {
+          LiveTimer(end: snap.expires, color: snap.phase.color, size: 22)
+          Text("restante")
+            .font(.system(size: 9, weight: .medium))
+            .foregroundColor(.white.opacity(0.45))
+        }
+      }
 
-private struct SlimProgress: View {
-  let progress: Double
-  let phase: CheckInPhase
-
-  var body: some View {
-    GeometryReader { geo in
-      ZStack(alignment: .leading) {
-        Capsule()
-          .fill(CK.islandTertiary)
-        Capsule()
-          .fill(
-            LinearGradient(
-              colors: [phase.accent, phase.glow],
-              startPoint: .leading,
-              endPoint: .trailing
-            )
-          )
-          .frame(width: max(6, geo.size.width * progress))
+      if !snap.hasRealData {
+        Text("Abra o app para sincronizar os dados do check-in.")
+          .font(.system(size: 10, weight: .medium))
+          .foregroundColor(.white.opacity(0.55))
       }
     }
-    .frame(height: 4)
+    .padding(.horizontal, 6)
+    .padding(.bottom, 4)
   }
 }
 
-// MARK: - Dynamic Island regions
+// MARK: - Lock screen
 
-private struct IslandExpandedLeading: View {
-  let snap: CheckInSnapshot
-
-  var body: some View {
-    VStack(spacing: 6) {
-      BrandGlyph(phase: snap.phase, diameter: 36)
-      Text(snap.phase.shortTitle)
-        .font(.system(size: 9, weight: .bold, design: .rounded))
-        .foregroundStyle(snap.phase.accent)
-        .textCase(.uppercase)
-        .tracking(0.4)
-    }
-    .frame(maxHeight: .infinity, alignment: .center)
-  }
-}
-
-private struct IslandExpandedCenter: View {
-  let snap: CheckInSnapshot
+private struct LockContent: View {
+  let snap: Snap
 
   var body: some View {
-    VStack(spacing: 4) {
-      Text(snap.phase.title)
-        .font(.system(size: 13, weight: .semibold, design: .rounded))
-        .foregroundStyle(CK.islandPrimary)
-        .lineLimit(1)
-
-      IslandTimer(
-        expires: snap.expires,
-        phase: snap.phase,
-        font: .system(size: 32, weight: .bold, design: .rounded),
-        gradient: true
-      )
-
-      Text(snap.userName)
-        .font(.system(size: 11, weight: .medium, design: .rounded))
-        .foregroundStyle(CK.islandSecondary)
-        .lineLimit(1)
-    }
-    .frame(maxWidth: .infinity)
-    .multilineTextAlignment(.center)
-  }
-}
-
-private struct IslandExpandedTrailing: View {
-  let snap: CheckInSnapshot
-
-  var body: some View {
-    VStack(spacing: 5) {
-      RemainingRing(ratio: snap.remainingRatio, phase: snap.phase, size: 44)
-      Text("restante")
-        .font(.system(size: 8, weight: .medium, design: .rounded))
-        .foregroundStyle(CK.islandTertiary)
-        .textCase(.uppercase)
-        .tracking(0.3)
-    }
-    .frame(maxHeight: .infinity, alignment: .center)
-  }
-}
-
-private struct IslandExpandedBottom: View {
-  let snap: CheckInSnapshot
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      SlimProgress(progress: snap.remainingRatio, phase: snap.phase)
-
-      HStack(alignment: .firstTextBaseline) {
-        Label {
-          Text("Entrada \(snap.entryTime)")
-            .font(.system(size: 10, weight: .medium, design: .rounded))
-            .foregroundStyle(CK.islandSecondary)
-        } icon: {
-          Image(systemName: "arrow.right.circle.fill")
-            .font(.system(size: 10))
-            .foregroundStyle(snap.phase.accent)
-        }
-
-        Spacer(minLength: 8)
-
-        Text("até \(snap.expiryLabel)")
-          .font(.system(size: 10, weight: .semibold, design: .rounded))
-          .foregroundStyle(CK.islandTertiary)
-
-        Text("·")
-          .foregroundStyle(CK.islandTertiary)
-
-        Text("Intellisys")
-          .font(.system(size: 9, weight: .bold, design: .rounded))
-          .foregroundStyle(CK.violet.opacity(0.85))
-      }
-    }
-    .padding(.horizontal, 2)
-    .padding(.top, 2)
-  }
-}
-
-private struct IslandCompactLeading: View {
-  let snap: CheckInSnapshot
-
-  var body: some View {
-    BrandGlyph(phase: snap.phase, diameter: 22)
-  }
-}
-
-private struct IslandCompactTrailing: View {
-  let snap: CheckInSnapshot
-
-  var body: some View {
-    IslandTimer(
-      expires: snap.expires,
-      phase: snap.phase,
-      font: .system(size: 13, weight: .bold, design: .rounded)
-    )
-      .padding(.horizontal, 8)
-      .padding(.vertical, 4)
-      .background(
-        Capsule()
-          .fill(snap.phase.accent.opacity(0.18))
-          .overlay(
-            Capsule()
-              .strokeBorder(snap.phase.accent.opacity(0.35), lineWidth: 0.5)
-          )
-      )
-  }
-}
-
-private struct IslandMinimal: View {
-  let snap: CheckInSnapshot
-
-  var body: some View {
-    ZStack {
-      Circle()
-        .fill(snap.phase.accent)
-        .frame(width: 18, height: 18)
-      Image(systemName: "checkmark")
-        .font(.system(size: 9, weight: .black))
-        .foregroundStyle(.white)
-    }
-  }
-}
-
-// MARK: - Lock Screen (banner premium)
-
-private struct LockScreenBanner: View {
-  let snap: CheckInSnapshot
-
-  var body: some View {
-    HStack(alignment: .center, spacing: 14) {
-      BrandGlyph(phase: snap.phase, diameter: 48)
-
-      VStack(alignment: .leading, spacing: 4) {
-        HStack(spacing: 6) {
-          Text(snap.phase.title.uppercased())
-            .font(.system(size: 10, weight: .heavy, design: .rounded))
-            .tracking(0.8)
-            .foregroundStyle(snap.phase.glow)
-
-          Circle()
-            .fill(snap.phase.accent)
-            .frame(width: 5, height: 5)
-        }
-
-        Text(snap.userName)
-          .font(.system(.headline, design: .rounded))
-          .fontWeight(.bold)
-          .foregroundStyle(.white)
-          .lineLimit(1)
-
-        Text("Entrada às \(snap.entryTime) · válido até \(snap.expiryLabel)")
-          .font(.system(size: 12, weight: .medium, design: .rounded))
-          .foregroundStyle(.white.opacity(0.65))
+    HStack(spacing: 12) {
+      LiveIcon(phase: snap.phase, size: 24)
+      VStack(alignment: .leading, spacing: 3) {
+        Text(snap.phase.label)
+          .font(.system(size: 11, weight: .heavy))
+          .foregroundColor(snap.phase.color)
+        Text(snap.name)
+          .font(.system(size: 15, weight: .bold))
+          .foregroundColor(.white)
           .lineLimit(1)
       }
-
-      Spacer(minLength: 0)
-
-      VStack(alignment: .trailing, spacing: 2) {
-        IslandTimer(
-          expires: snap.expires,
-          phase: snap.phase,
-          font: .system(size: 22, weight: .heavy, design: .rounded),
-          solidColor: .white
-        )
-
-        Text("restante")
-          .font(.system(size: 10, weight: .medium, design: .rounded))
-          .foregroundStyle(.white.opacity(0.5))
-      }
+      Spacer()
+      LiveTimer(end: snap.expires, color: .white, size: 18)
     }
-    .padding(.horizontal, 18)
-    .padding(.vertical, 14)
+    .padding(.horizontal, 16)
+    .padding(.vertical, 12)
   }
 }
 
@@ -481,35 +281,40 @@ private struct LockScreenBanner: View {
 struct CheckInLiveActivity: Widget {
   var body: some WidgetConfiguration {
     ActivityConfiguration(for: LiveActivitiesAppAttributes.self) { context in
-      let snap = CheckInSnapshot(context: context)
-
-      LockScreenBanner(snap: snap)
-        .activityBackgroundTint(snap.phase.accent.opacity(0.38))
+      let snap = Snap(context)
+      LockContent(snap: snap)
+        .activityBackgroundTint(snap.phase.color.opacity(0.35))
         .activitySystemActionForegroundColor(.white)
     } dynamicIsland: { context in
-      let snap = CheckInSnapshot(context: context)
+      let snap = Snap(context)
 
       return DynamicIsland {
         DynamicIslandExpandedRegion(.leading) {
-          IslandExpandedLeading(snap: snap)
-        }
-        DynamicIslandExpandedRegion(.center) {
-          IslandExpandedCenter(snap: snap)
+          LiveIcon(phase: snap.phase, size: 24)
+            .padding(.leading, 4)
         }
         DynamicIslandExpandedRegion(.trailing) {
-          IslandExpandedTrailing(snap: snap)
+          LiveTimer(end: snap.expires, color: snap.phase.color, size: 16)
+            .padding(.trailing, 4)
+        }
+        DynamicIslandExpandedRegion(.center) {
+          Text(snap.phase.label)
+            .font(.system(size: 12, weight: .bold))
+            .foregroundColor(.white)
+            .lineLimit(1)
         }
         DynamicIslandExpandedRegion(.bottom) {
-          IslandExpandedBottom(snap: snap)
+          IslandExpandedContent(snap: snap)
         }
       } compactLeading: {
-        IslandCompactLeading(snap: snap)
+        LiveIcon(phase: snap.phase, size: 16)
       } compactTrailing: {
-        IslandCompactTrailing(snap: snap)
+        LiveTimer(end: snap.expires, color: snap.phase.color, size: 11)
+          .frame(minWidth: 38)
       } minimal: {
-        IslandMinimal(snap: snap)
+        LiveIcon(phase: snap.phase, size: 14)
       }
-      .keylineTint(snap.phase.glow)
+      .keylineTint(snap.phase.color)
     }
   }
 }

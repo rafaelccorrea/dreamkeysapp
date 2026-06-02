@@ -40,7 +40,11 @@ class _CheckInPageState extends State<CheckInPage> {
     super.initState();
     _bootstrap();
     _ticker = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (mounted) setState(() {});
+      if (!mounted) return;
+      setState(() {});
+      if (_active != null && _active!.isActive) {
+        LiveActivityService.instance.syncCheckIn(_active);
+      }
     });
   }
 

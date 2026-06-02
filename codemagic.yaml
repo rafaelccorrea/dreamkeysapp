@@ -74,7 +74,8 @@ workflows:
         # App Group `group.com.dreamkeys.corretor` e habilitar a capability
         # "App Groups" nos bundle ids `com.dreamkeys.corretor` e
         # `com.dreamkeys.corretor.CheckInWidget` no portal Apple.
-        ENABLE_LIVE_ACTIVITY: "false"
+        # Apple + App Group já configurados — extension entra no IPA da App Store.
+        ENABLE_LIVE_ACTIVITY: "true"
         # APP_STORE_CONNECT_PRIVATE_KEY -> definir no Codemagic UI como SECRET
         # (conteúdo do arquivo .p8 baixado, incluindo "-----BEGIN PRIVATE KEY-----")
 

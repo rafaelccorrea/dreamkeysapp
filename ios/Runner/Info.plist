@@ -74,5 +74,14 @@
 	     anteriores; a atividade só é criada quando a feature está ativa. -->
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>dreamkeys</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

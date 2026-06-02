@@ -4,6 +4,7 @@ import '../../core/push/app_push_service.dart';
 import '../utils/avatar_url_resolver.dart';
 import 'api_service.dart';
 import 'module_access_service.dart';
+import 'live_activity_service.dart';
 import 'secure_storage_service.dart';
 
 Uri _apiUri(String path, [Map<String, String>? query]) {
@@ -440,6 +441,7 @@ class AuthService {
       _apiService.clearToken();
       await SecureStorageService.instance.clearAuthSessionKeepCredentials();
       ModuleAccessService.instance.clear();
+      await LiveActivityService.instance.endCheckIn();
       debugPrint('✅ [AUTH_SERVICE] Logout concluído — sessão limpa, credenciais biométricas preservadas');
 
       return response;
@@ -452,6 +454,7 @@ class AuthService {
         _apiService.clearToken();
         await SecureStorageService.instance.clearAuthSessionKeepCredentials();
         ModuleAccessService.instance.clear();
+        await LiveActivityService.instance.endCheckIn();
       } catch (clearError) {
         debugPrint('❌ [AUTH_SERVICE] Erro ao limpar dados: $clearError');
       }

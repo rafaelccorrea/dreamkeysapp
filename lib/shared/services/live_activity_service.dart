@@ -1,35 +1,65 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:live_activities/live_activities.dart';
+import 'package:live_activities/models/url_scheme_data.dart';
 
+import '../../core/navigation/app_navigator.dart';
+import '../../core/routes/app_routes.dart';
 import 'check_in_service.dart';
 
 /// Gerencia a Live Activity / Ilha Dinâmica do **check-in** no iOS 16.1+.
 ///
 /// Tudo aqui é **defensivo**: em Android, iOS antigo, sem App Group
 /// configurado ou se o plugin falhar, os métodos viram no-op silencioso e
-/// NUNCA lançam exceção para o chamador. Assim, ligar/desligar a feature não
-/// afeta o fluxo de check-in normal do app.
-///
-/// O App Group precisa bater EXATAMENTE com o configurado na Widget Extension
-/// (`group.com.dreamkeys.corretor`).
-class LiveActivityService {
+/// NUNCA lançam exceção para o chamador.
+class LiveActivityService with WidgetsBindingObserver {
   LiveActivityService._();
   static final LiveActivityService instance = LiveActivityService._();
 
-  /// Mesmo identificador usado em `ios/CheckInWidget/CheckInWidget.entitlements`
-  /// e em `Runner.entitlements`.
   static const String _appGroupId = 'group.com.dreamkeys.corretor';
-
-  /// Só existe uma Live Activity de check-in por vez, então usamos um id fixo
-  /// (o plugin 2.4.x recebe o id do chamador e o reaproveita em update/end).
   static const String _activityId = 'checkin';
+  static const String _urlScheme = 'dreamkeys';
 
   final LiveActivities _plugin = LiveActivities();
 
   bool _initialized = false;
   bool _available = false;
+  bool _bootstrapped = false;
+  StreamSubscription<UrlSchemeData>? _urlSub;
+
+  /// Registra listener de deep link e resume (chamar uma vez no [main]).
+  Future<void> bootstrap() async {
+    if (_bootstrapped) return;
+    _bootstrapped = true;
+
+    if (!Platform.isIOS) return;
+
+    WidgetsBinding.instance.addObserver(this);
+    await _ensureInit();
+    if (!_available) return;
+
+    _urlSub ??= _plugin.urlSchemeStream().listen(_onUrlScheme);
+    await _syncFromApi();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_syncFromApi());
+    }
+  }
+
+  void _onUrlScheme(UrlSchemeData data) {
+    if (data.scheme != _urlScheme) return;
+    final nav = appNavigatorKey.currentState;
+    if (nav == null) return;
+    final current = ModalRoute.of(nav.context)?.settings.name;
+    if (current == AppRoutes.checkIn) return;
+    nav.pushNamed(AppRoutes.checkIn);
+  }
 
   Future<void> _ensureInit() async {
     if (_initialized) return;
@@ -40,7 +70,10 @@ class LiveActivityService {
       return;
     }
     try {
-      await _plugin.init(appGroupId: _appGroupId);
+      await _plugin.init(
+        appGroupId: _appGroupId,
+        urlScheme: _urlScheme,
+      );
       final supported = await _plugin.areActivitiesSupported();
       _available = supported && await _plugin.areActivitiesEnabled();
     } catch (e) {
@@ -49,8 +82,20 @@ class LiveActivityService {
     }
   }
 
+  Future<void> _syncFromApi() async {
+    await _ensureInit();
+    if (!_available) return;
+    try {
+      final res = await CheckInService.instance.getActiveCheckIn();
+      if (res.success) {
+        await syncCheckIn(res.data);
+      }
+    } catch (e) {
+      debugPrint('[LiveActivity] syncFromApi: $e');
+    }
+  }
+
   /// Reflete o estado atual do check-in na Ilha Dinâmica.
-  /// Cria/atualiza a atividade quando há check-in vigente; encerra caso não haja.
   Future<void> syncCheckIn(CheckIn? active) async {
     await _ensureInit();
     if (!_available) return;
@@ -59,7 +104,6 @@ class LiveActivityService {
       if (active != null && active.isActive) {
         final now = DateTime.now();
         final remaining = active.expiresAt.difference(now);
-        // Fase visual para a Ilha / lock screen (paridade com web).
         final String statusPhase;
         if (remaining.inSeconds <= 0) {
           statusPhase = 'expired';
@@ -71,16 +115,29 @@ class LiveActivityService {
           statusPhase = 'active';
         }
 
-        // Epoch em double evita overflow Int32 no UserDefaults do iOS.
+        final name = (active.user?.name ?? '').trim();
         final data = <String, dynamic>{
           'status': 'active',
           'statusPhase': statusPhase,
-          'userName': active.user?.name ?? '',
+          'userName': name.isEmpty ? 'Corretor' : name,
           'checkedInAtEpoch':
-              active.checkedInAt.millisecondsSinceEpoch.toDouble(),
-          'expiresAtEpoch': active.expiresAt.millisecondsSinceEpoch.toDouble(),
+              '${active.checkedInAt.millisecondsSinceEpoch}',
+          'expiresAtEpoch': '${active.expiresAt.millisecondsSinceEpoch}',
         };
-        await _plugin.createOrUpdateActivity(_activityId, data);
+
+        final staleIn = remaining.inMinutes >= 1 ? remaining : null;
+
+        await _plugin.createOrUpdateActivity(
+          _activityId,
+          data,
+          staleIn: staleIn,
+        );
+        if (kDebugMode) {
+          debugPrint(
+            '[LiveActivity] sync até ${active.expiresAt.toIso8601String()} '
+            '(fase $statusPhase)',
+          );
+        }
       } else {
         await endCheckIn();
       }

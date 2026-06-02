@@ -2,11 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- $(APS_ENVIRONMENT) é definido em build settings:
-	      Debug/Profile = development (sandbox APNs)
-	      Release        = production (gateway APNs real, usado em TestFlight + App Store)
-	      Não comprometa Distribution colocando "development" no IPA — Apple rejeita. -->
 	<key>aps-environment</key>
 	<string>$(APS_ENVIRONMENT)</string>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.dreamkeys.corretor</string>
+	</array>
 </dict>
 </plist>

@@ -15,6 +15,7 @@ import 'features/notifications/controllers/notification_controller.dart';
 import 'features/appointments/controllers/appointment_controller.dart';
 import 'features/kanban/controllers/kanban_controller.dart';
 import 'features/chat/controllers/chat_unread_controller.dart';
+import 'shared/services/live_activity_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,6 +48,7 @@ class _MyAppState extends State<MyApp> {
     ThemeService.instance.addListener(_onThemeChanged);
     SchedulerBinding.instance.addPostFrameCallback((_) {
       unawaited(AppPushService.instance.initListenersAndLocalNotifications());
+      unawaited(LiveActivityService.instance.bootstrap());
     });
   }
 
