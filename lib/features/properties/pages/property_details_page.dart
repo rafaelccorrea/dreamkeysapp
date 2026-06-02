@@ -27,6 +27,8 @@ import '../../../../shared/services/module_access_service.dart';
 import '../../../../core/constants/app_permissions.dart';
 import '../utils/property_edit_permissions.dart';
 import '../utils/property_status_visual.dart';
+import '../utils/compute_property_score.dart';
+import '../widgets/property_score_panel.dart';
 
 // Formatter de moeda
 final _currencyFormatter = NumberFormat.currency(
@@ -117,6 +119,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   // Chaves
   List<key_models.Key> _keys = [];
   bool _isLoadingKeys = false;
+
+  // Condomínio vinculado (só quando `condominiumId` existe — paridade web).
+  NamedEntityWithAddress? _linkedCondominium;
+  bool _loadingCondominium = false;
 
   /// Aba interna ativa: Visão geral, Comercial ou Gestão.
   _DetailsTab _activeTab = _DetailsTab.details;
@@ -446,6 +452,34 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     }
   }
 
+  Future<void> _loadLinkedCondominium(String id) async {
+    setState(() => _loadingCondominium = true);
+    try {
+      final response = await _propertyService.getCondominiumById(id);
+      if (mounted) {
+        setState(() {
+          _loadingCondominium = false;
+          _linkedCondominium =
+              response.success ? response.data : null;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ [PROPERTY_DETAILS] condomínio: $e');
+      if (mounted) {
+        setState(() {
+          _loadingCondominium = false;
+          _linkedCondominium = null;
+        });
+      }
+    }
+  }
+
+  Color _salePriceColor(bool isDark) =>
+      isDark ? const Color(0xFF4FC77D) : const Color(0xFF16A34A);
+
+  Color _rentPriceColor(bool isDark) =>
+      isDark ? const Color(0xFFE6B84C) : const Color(0xFFD97706);
+
   Future<void> _loadKeys() async {
     if (widget.propertyId.isEmpty) return;
 
@@ -520,6 +554,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           setState(() {
             _property = property;
             _isLoading = false;
+            _linkedCondominium = null;
           });
           _debugLogPropertyImageDiagnostics(
             property,
@@ -530,6 +565,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           _loadChecklists();
           _loadExpenses();
           _loadKeys();
+          final condoId = property.condominiumId?.trim();
+          if (condoId != null && condoId.isNotEmpty) {
+            _loadLinkedCondominium(condoId);
+          }
         } else {
           setState(() {
             // Se já existe algum snapshot local da propriedade, mantém a tela
@@ -1044,17 +1083,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   Positioned.fill(
                     child: _buildPropertyDetails(context, theme, property),
                   ),
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: _buildBottomActionBar(context, theme, property),
-                  ),
                   AnimatedPositioned(
                     duration: const Duration(milliseconds: 220),
                     curve: Curves.easeOut,
                     right: 16,
-                    bottom: _showScrollTopFab ? 92 : -64,
+                    bottom: _showScrollTopFab ? 20 : -64,
                     child: AnimatedOpacity(
                       duration: const Duration(milliseconds: 220),
                       opacity: _showScrollTopFab ? 1 : 0,
@@ -1200,42 +1233,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         SliverToBoxAdapter(
           child: _buildDetailsHero(context, theme, property),
         ),
-        // 2. IDENTIDADE — sem caixa, só tipografia
+        // 2. Hero textual: código + preço + título + pills (paridade web)
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
             child: _buildIdentityCard(context, theme, property, muted, isDark),
-          ),
-        ),
-        // 3. STATS strip
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-            child: _buildQuickStatsStrip(context, theme, property),
-          ),
-        ),
-        // Divisor sutil antes do preço — separa "identidade" de "valor"
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
-            child: Container(
-              height: 1,
-              color: ThemeHelpers.borderLightColor(context)
-                  .withValues(alpha: 0.55),
-            ),
-          ),
-        ),
-        // 4. PREÇO em destaque tipográfico
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-            child: _buildPriceShowcase(context, theme, property, isDark),
-          ),
-        ),
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.only(top: 14),
-            child: _buildQuickActionsStrip(context, theme, property),
           ),
         ),
         SliverToBoxAdapter(
@@ -1246,7 +1248,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ),
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
             child: _buildActiveTabContent(context, theme, property),
           ),
         ),
@@ -1403,14 +1405,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               ),
             ),
 
-          // Título + endereço sobrepostos no rodapé
-          Positioned(
-            left: 20,
-            right: 20,
-            bottom: images.length > 1 ? 28 : 20,
-            child: _buildHeroOverlay(theme, property),
-          ),
-
           // Dots no fim (apenas quando há mais de uma imagem)
           if (images.length > 1)
             Positioned(
@@ -1423,100 +1417,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             ),
         ],
       ),
-    );
-  }
-
-  /// Overlay de título no rodapé da hero — substitui o que era "linha de
-  /// chips de tipo + título grande" do antigo `_buildIdentityCard` (que
-  /// vinha em CIMA de outro container abaixo da foto).
-  ///
-  /// Branco-sobre-foto-com-gradiente é o padrão de Airbnb/Booking pra
-  /// "fichas" de imóvel — a foto é a protagonista, o nome dela aparece
-  /// como manchete sobreposta.
-  Widget _buildHeroOverlay(ThemeData theme, Property property) {
-    final fullAddress = property.neighborhood.isNotEmpty
-        ? '${property.neighborhood} · ${property.city}/${property.state}'
-        : '${property.city}/${property.state}';
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Tipo do imóvel como eyebrow accent claro
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.18),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.32),
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                _typeIcon(property.type),
-                size: 11,
-                color: Colors.white,
-              ),
-              const SizedBox(width: 5),
-              Text(
-                property.type.label.toUpperCase(),
-                style: const TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 1.3,
-                  color: Colors.white,
-                  height: 1,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 10),
-        Text(
-          property.title,
-          style: theme.textTheme.headlineSmall?.copyWith(
-            fontWeight: FontWeight.w900,
-            letterSpacing: -0.5,
-            height: 1.1,
-            color: Colors.white,
-            shadows: [
-              Shadow(
-                offset: const Offset(0, 1),
-                blurRadius: 4,
-                color: Colors.black.withValues(alpha: 0.4),
-              ),
-            ],
-          ),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        const SizedBox(height: 4),
-        Row(
-          children: [
-            Icon(
-              Icons.place_rounded,
-              size: 14,
-              color: Colors.white.withValues(alpha: 0.85),
-            ),
-            const SizedBox(width: 4),
-            Flexible(
-              child: Text(
-                fullAddress,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.92),
-                  fontWeight: FontWeight.w600,
-                  height: 1.25,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-      ],
     );
   }
 
@@ -1774,42 +1674,41 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                     ),
                   );
                 },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: muted.withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: muted.withValues(alpha: 0.22),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.tag, size: 12, color: muted),
-                      const SizedBox(width: 4),
-                      Text(
-                        property.code!,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          color: muted,
-                          letterSpacing: 0.3,
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                        ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '#',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: _salePriceColor(isDark).withValues(alpha: 0.55),
                       ),
-                    ],
-                  ),
+                    ),
+                    Text(
+                      property.code!,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.04,
+                        color: _salePriceColor(isDark),
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(
+                      Icons.content_copy_rounded,
+                      size: 13,
+                      color: _salePriceColor(isDark).withValues(alpha: 0.65),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(width: 10),
             ],
             Expanded(
               child: Align(
-                alignment: Alignment.centerLeft,
+                alignment: Alignment.centerRight,
                 child: MatchesBadge(
                   propertyId: widget.propertyId,
                   onClick: () => Navigator.pushNamed(
@@ -1823,7 +1722,53 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           ],
         ),
 
-        // 2) STATUS DO IMÓVEL + SITUAÇÃO — primeira coisa que o corretor
+        // 2) Preço — primeira informação comercial (paridade web, após código)
+        const SizedBox(height: 10),
+        _buildPriceShowcase(context, theme, property, isDark),
+
+        // 3) Eyebrow: inativo, site, destaque, atualizado
+        const SizedBox(height: 10),
+        _buildHeroEyebrowChips(context, theme, property, isDark),
+
+        // 4) Título + endereço
+        const SizedBox(height: 12),
+        Text(
+          property.title,
+          style: theme.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.025,
+            height: 1.28,
+            color: ThemeHelpers.textColor(context),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              Icons.location_on_outlined,
+              size: 16,
+              color: ThemeHelpers.textSecondaryColor(context),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                _formatPropertyHeroAddress(property),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: ThemeHelpers.textSecondaryColor(context),
+                  height: 1.4,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+
+        // 5) Meta em pills discretas (tipo, bairro, quartos, área…)
+        const SizedBox(height: 10),
+        _buildHeroMetaPillsRow(context, property, isDark),
+
+        // 6) STATUS DO IMÓVEL + SITUAÇÃO
         // precisa ver. Acompanha a paridade com a versão web (badge roxa
         // "Aguardando autorização do proprietário" + badge verde "Ativo").
         const SizedBox(height: 12),
@@ -1909,7 +1854,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ],
 
         // 5) Footer (responsável, datas)
-        if (hasFooter) ...[
+        if (hasFooter && _formatHeroUpdatedLabel(property.updatedAt) == null) ...[
           const SizedBox(height: 14),
           Container(
             height: 1,
@@ -1966,12 +1911,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final accent = isDark
         ? AppColors.primary.primaryDarkMode
         : AppColors.primary.primary;
-    final cardBg = isDark
-        ? Colors.white.withValues(alpha: 0.035)
-        : Colors.white;
-    final borderColor = isDark
-        ? Colors.white.withValues(alpha: 0.08)
-        : Colors.black.withValues(alpha: 0.06);
 
     // Bloco flat (sem moldura externa) — segue a identidade do hero da
     // PropertiesPage: eyebrow accent + contador + lista de captadores.
@@ -2023,9 +1962,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               _CaptorTile(
                 captor: captors[i],
                 accent: accent,
-                cardBg: cardBg,
-                borderColor: borderColor,
-                isDark: isDark,
                 muted: muted,
               ),
             ],
@@ -2196,143 +2132,216 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     }
   }
 
-  // ────────────────────────────── QUICK STATS ──────────────────────────────
+  String _formatPropertyHeroAddress(Property property) {
+    final streetLine = [
+      property.street.trim(),
+      if (property.number.trim().isNotEmpty) property.number.trim(),
+    ].where((s) => s.isNotEmpty).join(', ');
+    final cityLine = '${property.city.trim()}/${property.state.trim()}';
+    if (streetLine.isEmpty) return cityLine;
+    return '$streetLine, $cityLine';
+  }
 
-  Widget _buildQuickStatsStrip(
+  /// Pills discretas do hero — paridade `PropertyHeroMetaChip` (web).
+  Widget _buildHeroMetaPillsRow(
     BuildContext context,
-    ThemeData theme,
     Property property,
+    bool isDark,
   ) {
-    final stats = <({IconData icon, String value, String label})>[];
-    if (property.bedrooms != null && property.bedrooms! > 0) {
-      stats.add((icon: Icons.king_bed_outlined, value: '${property.bedrooms}', label: 'Quartos'));
+    final chips = <Widget>[];
+    final typeLabel = property.type.label;
+    if (typeLabel.isNotEmpty) {
+      chips.add(_heroMetaChip(
+        context,
+        isDark: isDark,
+        icon: _typeIcon(property.type),
+        label: typeLabel,
+      ));
     }
-    if (property.bathrooms != null && property.bathrooms! > 0) {
-      stats.add((icon: Icons.bathtub_outlined, value: '${property.bathrooms}', label: 'Banheiros'));
+    final neighborhood = property.neighborhood.trim();
+    if (neighborhood.isNotEmpty) {
+      chips.add(_heroMetaChip(
+        context,
+        isDark: isDark,
+        icon: Icons.location_on_outlined,
+        label: neighborhood,
+      ));
     }
-    if (property.parkingSpaces != null && property.parkingSpaces! > 0) {
-      stats.add((
+    final bedrooms = property.bedrooms;
+    if (bedrooms != null && bedrooms > 0) {
+      chips.add(_heroMetaChip(
+        context,
+        isDark: isDark,
+        icon: Icons.bed_outlined,
+        label: '$bedrooms quarto${bedrooms == 1 ? '' : 's'}',
+      ));
+    }
+    final suites = property.suites;
+    if (suites != null && suites > 0) {
+      chips.add(_heroMetaChip(
+        context,
+        isDark: isDark,
+        icon: Icons.king_bed_outlined,
+        label: '$suites suíte${suites == 1 ? '' : 's'}',
+      ));
+    }
+    final bathrooms = property.bathrooms;
+    if (bathrooms != null && bathrooms > 0) {
+      chips.add(_heroMetaChip(
+        context,
+        isDark: isDark,
+        icon: Icons.bathtub_outlined,
+        label: '$bathrooms banheiro${bathrooms == 1 ? '' : 's'}',
+      ));
+    }
+    final parking = property.parkingSpaces;
+    if (parking != null && parking > 0) {
+      chips.add(_heroMetaChip(
+        context,
+        isDark: isDark,
         icon: Icons.directions_car_filled_outlined,
-        value: '${property.parkingSpaces}',
-        label: 'Vagas',
+        label: '$parking vaga${parking == 1 ? '' : 's'}',
       ));
     }
-    if (property.totalArea > 0) {
-      stats.add((
-        icon: Icons.square_foot_rounded,
-        value: '${property.totalArea.toInt()}',
-        label: 'm² total',
-      ));
-    }
+    String? areaLabel;
     if (property.builtArea != null && property.builtArea! > 0) {
-      stats.add((
-        icon: Icons.crop_free_rounded,
-        value: '${property.builtArea!.toInt()}',
-        label: 'm² const.',
+      areaLabel = '${_formatAreaHero(property.builtArea!)} m²';
+    } else if (property.totalArea > 0) {
+      areaLabel = '${_formatAreaHero(property.totalArea)} m²';
+    }
+    if (areaLabel != null) {
+      chips.add(_heroMetaChip(
+        context,
+        isDark: isDark,
+        icon: Icons.straighten_rounded,
+        label: areaLabel,
       ));
     }
-    if (stats.isEmpty) return const SizedBox.shrink();
+    final photos = property.imageCount ?? property.images?.length ?? 0;
+    if (photos > 0) {
+      chips.add(_heroMetaChip(
+        context,
+        isDark: isDark,
+        icon: Icons.photo_library_outlined,
+        label: '$photos foto${photos == 1 ? '' : 's'}',
+      ));
+    }
 
-    final muted = ThemeHelpers.textSecondaryColor(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final cardBg = isDark
-        ? AppColors.background.cardBackgroundDarkMode
-        : AppColors.background.cardBackground;
-    final borderColor = isDark
-        ? AppColors.border.borderDarkMode
-        : AppColors.border.border;
-    final accent = isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    if (chips.isEmpty) return const SizedBox.shrink();
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: chips,
+    );
+  }
 
-    return DecoratedBox(
+  String _formatAreaHero(double value) {
+    if (value == value.roundToDouble()) {
+      return value.toInt().toString();
+    }
+    return value.toStringAsFixed(2).replaceAll('.', ',');
+  }
+
+  Widget _heroMetaChip(
+    BuildContext context, {
+    required bool isDark,
+    required IconData icon,
+    required String label,
+    Color? tint,
+  }) {
+    final muted = tint ?? ThemeHelpers.textSecondaryColor(context);
+    final border = ThemeHelpers.borderColor(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: accent.withValues(alpha: isDark ? 0.22 : 0.16),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.05),
-            blurRadius: 14,
-            offset: const Offset(0, 6),
-            spreadRadius: -4,
+        borderRadius: BorderRadius.circular(999),
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.05)
+            : const Color(0xFF0F172A).withValues(alpha: 0.035),
+        border: Border.all(color: border.withValues(alpha: 0.53)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: muted.withValues(alpha: 0.85)),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: muted,
+              height: 1.2,
+            ),
           ),
         ],
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(17),
-        child: ColoredBox(
-          color: cardBg,
-          child: SizedBox(
-            height: 94,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-              itemCount: stats.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
-              itemBuilder: (_, i) {
-                final s = stats[i];
-                return Container(
-                  width: 88,
-                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
-                  decoration: BoxDecoration(
-                    color: (isDark
-                            ? AppColors.background.backgroundSecondaryDarkMode
-                            : AppColors.background.backgroundSecondary)
-                        .withValues(alpha: isDark ? 0.72 : 0.88),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: borderColor.withValues(alpha: isDark ? 0.5 : 0.65),
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    mainAxisSize: MainAxisSize.max,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: accent.withValues(alpha: isDark ? 0.18 : 0.12),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(s.icon, size: 13, color: accent),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        s.value,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          height: 1.05,
-                          letterSpacing: -0.35,
-                          color: ThemeHelpers.textColor(context),
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        s.label,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: muted,
-                          fontSize: 9,
-                          height: 1.2,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.2,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
-      ),
     );
+  }
+
+  Widget _buildHeroEyebrowChips(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+    bool isDark,
+  ) {
+    final chips = <Widget>[];
+    if (!property.isActive) {
+      chips.add(_heroMetaChip(
+        context,
+        isDark: isDark,
+        icon: Icons.block_rounded,
+        label: 'Inativo no sistema',
+        tint: AppColors.status.error,
+      ));
+    }
+    final onSite = property.isAvailableForSite == true;
+    chips.add(_heroMetaChip(
+      context,
+      isDark: isDark,
+      icon: Icons.public_rounded,
+      label: onSite ? 'No site' : 'Fora do site',
+      tint: onSite ? _salePriceColor(isDark) : mutedFrom(context),
+    ));
+    if (property.isFeatured) {
+      chips.add(_heroMetaChip(
+        context,
+        isDark: isDark,
+        icon: Icons.star_rounded,
+        label: 'Destaque',
+        tint: const Color(0xFFD97706),
+      ));
+    }
+    final updatedLabel = _formatHeroUpdatedLabel(property.updatedAt);
+    if (updatedLabel != null) {
+      chips.add(_heroMetaChip(
+        context,
+        isDark: isDark,
+        icon: Icons.schedule_rounded,
+        label: updatedLabel,
+      ));
+    }
+    if (chips.isEmpty) return const SizedBox.shrink();
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: chips,
+    );
+  }
+
+  Color mutedFrom(BuildContext context) =>
+      ThemeHelpers.textSecondaryColor(context);
+
+  String? _formatHeroUpdatedLabel(String iso) {
+    final rel = _humanRelativeTime(iso);
+    if (rel == null) return null;
+    try {
+      final dt = DateTime.parse(iso).toLocal();
+      final formatted = DateFormat('dd/MM/yyyy, HH:mm').format(dt);
+      return 'Atualizado em $formatted';
+    } catch (_) {
+      return 'Atualizado $rel';
+    }
   }
 
   // ────────────────────────────── PRICE SHOWCASE ──────────────────────────────
@@ -2349,11 +2358,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       return _buildPriceUnavailableCard(context, theme, isDark);
     }
 
-    final accent = isDark
-        ? AppColors.primary.primaryDarkMode
-        : AppColors.primary.primary;
-
-    // Bloco de preço editorial — **sem caixa**.
+    // Bloco de preço editorial — **sem caixa** (cores paridade web).
     //
     // O preço é a informação mais importante depois da foto: ele é a
     // razão de o imóvel existir na vitrine. Antes ficava encapsulado
@@ -2362,9 +2367,74 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     // Agora é só um padding inline sobre o background da página, com a
     // hierarquia tipográfica fazendo o trabalho: eyebrow accent fino +
     // valor grande em peso 900 + chips de meta abaixo.
-    return hasSale && hasRent
-        ? _buildPriceDualLayout(theme, property, accent, isDark)
-        : _buildPriceSingleLayout(theme, property, hasSale, accent, isDark);
+    final priceBlock = hasSale && hasRent
+        ? _buildPriceDualLayout(theme, property, isDark)
+        : _buildPriceSingleLayout(theme, property, hasSale, isDark);
+    final extras = _buildPriceExtrasLine(theme, property, isDark);
+    if (extras == null) return priceBlock;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        priceBlock,
+        extras,
+      ],
+    );
+  }
+
+  /// Condomínio e IPTU abaixo dos preços principais (paridade `PriceExtrasLine`).
+  Widget? _buildPriceExtrasLine(
+    ThemeData theme,
+    Property property,
+    bool isDark,
+  ) {
+    final hasCondo = property.condominiumFee != null &&
+        property.condominiumFee! > 0;
+    final hasIptu = property.iptu != null && property.iptu! > 0;
+    if (!hasCondo && !hasIptu) return null;
+
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final neutral = ThemeHelpers.textColor(context);
+
+    Widget extra(String label, double value) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label.toUpperCase(),
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: muted,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.5,
+              fontSize: 9.5,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            _currencyFormatter.format(value),
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: neutral,
+              fontWeight: FontWeight.w800,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Wrap(
+        spacing: 16,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          if (hasCondo) extra('Condomínio', property.condominiumFee!),
+          if (hasCondo && hasIptu)
+            Text('·', style: TextStyle(color: muted, fontWeight: FontWeight.w700)),
+          if (hasIptu) extra('IPTU', property.iptu!),
+        ],
+      ),
+    );
   }
 
   Widget _buildPriceUnavailableCard(BuildContext context, ThemeData theme, bool isDark) {
@@ -2416,65 +2486,35 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     ThemeData theme,
     Property property,
     bool isSale,
-    Color accent,
     bool isDark,
   ) {
     final value = isSale ? property.salePrice! : property.rentPrice!;
-    final label = isSale ? 'VENDA' : 'LOCAÇÃO';
-    final icon = isSale ? Icons.sell_outlined : Icons.vpn_key_outlined;
+    final label = isSale ? 'Venda' : 'Aluguel';
+    final valueColor =
+        isSale ? _salePriceColor(isDark) : _rentPriceColor(isDark);
+    final muted = ThemeHelpers.textSecondaryColor(context);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildPriceLabelRow(label, icon, accent),
-        const SizedBox(height: 12),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                'R\$',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: accent,
-                  fontSize: 20,
-                ),
-              ),
-            ),
-            const SizedBox(width: 6),
-            Flexible(
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  _currencyFormatter
-                      .format(value)
-                      .replaceAll('R\$', '')
-                      .trim(),
-                  style: theme.textTheme.headlineLarge?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    color: ThemeHelpers.textColor(context),
-                    fontSize: 38,
-                    height: 1.05,
-                    letterSpacing: -1.4,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                ),
-              ),
-            ),
-            if (!isSale)
-              Padding(
-                padding: const EdgeInsets.only(top: 14, left: 4),
-                child: Text(
-                  '/mês',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: ThemeHelpers.textSecondaryColor(context),
-                  ),
-                ),
-              ),
-          ],
+        Text(
+          label.toUpperCase(),
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: muted,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.1,
+            fontSize: 11,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          _currencyFormatter.format(value),
+          style: theme.textTheme.headlineMedium?.copyWith(
+            fontWeight: FontWeight.w800,
+            color: valueColor,
+            letterSpacing: -0.02,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
         ),
         if (property.acceptsNegotiation == true) ...[
           const SizedBox(height: 12),
@@ -2487,46 +2527,27 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   Widget _buildPriceDualLayout(
     ThemeData theme,
     Property property,
-    Color accent,
     bool isDark,
   ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildPriceLabelRow('VENDA · LOCAÇÃO', Icons.compare_arrows_rounded, accent),
-        const SizedBox(height: 14),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        Wrap(
+          spacing: 28,
+          runSpacing: 10,
+          crossAxisAlignment: WrapCrossAlignment.end,
           children: [
-            Expanded(
-              child: _buildPriceColumn(
-                theme,
-                'Venda',
-                _currencyFormatter
-                    .format(property.salePrice)
-                    .replaceAll('R\$', '')
-                    .trim(),
-                Icons.sell_outlined,
-                accent,
-              ),
+            _buildPriceColumn(
+              theme,
+              'Venda',
+              _currencyFormatter.format(property.salePrice),
+              _salePriceColor(isDark),
             ),
-            Container(
-              width: 1,
-              height: 56,
-              margin: const EdgeInsets.symmetric(horizontal: 12),
-              color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
-            ),
-            Expanded(
-              child: _buildPriceColumn(
-                theme,
-                'Aluguel/mês',
-                _currencyFormatter
-                    .format(property.rentPrice)
-                    .replaceAll('R\$', '')
-                    .trim(),
-                Icons.vpn_key_outlined,
-                accent,
-              ),
+            _buildPriceColumn(
+              theme,
+              'Aluguel',
+              _currencyFormatter.format(property.rentPrice),
+              _rentPriceColor(isDark),
             ),
           ],
         ),
@@ -2541,79 +2562,31 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   Widget _buildPriceColumn(
     ThemeData theme,
     String label,
-    String value,
-    IconData icon,
-    Color accent,
+    String formattedValue,
+    Color valueColor,
   ) {
     final muted = ThemeHelpers.textSecondaryColor(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          children: [
-            Icon(icon, size: 11, color: muted),
-            const SizedBox(width: 4),
-            Text(
-              label.toUpperCase(),
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: muted,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.6,
-                fontSize: 9.5,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 3),
-              child: Text(
-                'R\$',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: accent,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-            const SizedBox(width: 3),
-            Flexible(
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  value,
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    color: ThemeHelpers.textColor(context),
-                    height: 1.05,
-                    letterSpacing: -0.6,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildPriceLabelRow(String label, IconData icon, Color accent) {
-    return Row(
-      children: [
-        Icon(icon, size: 14, color: accent),
-        const SizedBox(width: 6),
         Text(
-          label,
-          style: TextStyle(
-            color: accent,
-            fontWeight: FontWeight.w900,
+          label.toUpperCase(),
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: muted,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.1,
             fontSize: 11,
-            letterSpacing: 1.4,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          formattedValue,
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w800,
+            color: valueColor,
+            letterSpacing: -0.02,
+            fontFeatures: const [FontFeature.tabularFigures()],
           ),
         ),
       ],
@@ -2645,117 +2618,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           ),
         ],
       ),
-    );
-  }
-
-  // ────────────────────────────── QUICK ACTIONS ──────────────────────────────
-
-  Widget _buildQuickActionsStrip(
-    BuildContext context,
-    ThemeData theme,
-    Property property,
-  ) {
-    final actions = <({IconData icon, String label, VoidCallback onTap, Color? color})>[
-      (
-        icon: Icons.location_on_outlined,
-        label: 'Mapa',
-        onTap: () => _scrollToBottom(context),
-        color: null,
-      ),
-      (
-        icon: Icons.share_outlined,
-        label: 'Compartilhar',
-        onTap: () {
-          final url = property.code != null && property.code!.isNotEmpty
-              ? 'imovel/${property.code}'
-              : 'imovel/${property.id}';
-          Clipboard.setData(ClipboardData(text: url));
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Link copiado'),
-              duration: Duration(seconds: 2),
-            ),
-          );
-        },
-        color: null,
-      ),
-      if (property.totalOffersCount != null && property.totalOffersCount! > 0)
-        (
-          icon: Icons.request_quote_outlined,
-          label: 'Ofertas',
-          onTap: () => Navigator.of(context).pushNamed(
-            '/properties/offers',
-            arguments: {'propertyId': widget.propertyId},
-          ),
-          color: AppColors.status.warning,
-        ),
-      // Botão "Editar" só aparece se o usuário tem direito de alterar a ficha
-      // (gestão, aprovador ou vínculo). Espelha exatamente o backend.
-      if (_canEditProperty)
-        (
-          icon: Icons.edit_outlined,
-          label: 'Editar',
-          onTap: () => Navigator.of(context).pushNamed(
-            '/properties/${widget.propertyId}/edit',
-          ),
-          color: null,
-        ),
-    ];
-
-    final muted = ThemeHelpers.textSecondaryColor(context);
-    final accent = AppColors.primary.primary;
-
-    return SizedBox(
-      height: 56,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        itemCount: actions.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (_, i) {
-          final a = actions[i];
-          final c = a.color ?? accent;
-          return Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(14),
-              onTap: a.onTap,
-              child: Ink(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                decoration: BoxDecoration(
-                  color: c.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: c.withValues(alpha: 0.28)),
-                ),
-                child: Row(
-                  children: [
-                    Icon(a.icon, size: 16, color: c),
-                    const SizedBox(width: 7),
-                    Text(
-                      a.label,
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: a.color != null ? c : muted,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.1,
-                        fontSize: 12.5,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  void _scrollToBottom(BuildContext context) {
-    Scrollable.ensureVisible(
-      context,
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeOut,
     );
   }
 
@@ -2862,138 +2724,145 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     ThemeData theme,
     Property property,
   ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildOverviewTab(context, theme, property),
-        const SizedBox(height: 22),
-        _buildCommercialTab(context, theme, property),
-        const SizedBox(height: 22),
-        _buildManagementTab(context, theme, property),
-      ],
-    );
-  }
-
-  Widget _buildOverviewTab(
-    BuildContext context,
-    ThemeData theme,
-    Property property,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSectionHeader(theme, 'Descrição', Icons.notes_outlined,
-            accentOverride: const Color(0xFF6366F1)),
-        const SizedBox(height: 10),
-        _buildDescriptionCard(context, theme, property),
-        const SizedBox(height: 22),
-        _buildSectionHeader(theme, 'Características', Icons.tune_rounded,
-            accentOverride: const Color(0xFF6366F1)),
-        const SizedBox(height: 10),
-        _buildCharacteristicsCard(context, theme, property),
-        if (property.condominiumFee != null || property.iptu != null) ...[
-          const SizedBox(height: 22),
-          _buildSectionHeader(theme, 'Valores adicionais',
-              Icons.account_balance_wallet_outlined,
-              accentOverride: const Color(0xFF059669)),
-          const SizedBox(height: 10),
-          _buildAdditionalValuesCard(context, theme, property),
-        ],
-        if (property.features.isNotEmpty) ...[
-          const SizedBox(height: 22),
-          _buildSectionHeader(theme, 'Recursos e comodidades',
-              Icons.auto_awesome_outlined,
-              accentOverride: const Color(0xFF8B5CF6)),
-          const SizedBox(height: 10),
-          _buildFeaturesSection(context, theme, property.features),
-        ],
-        const SizedBox(height: 22),
-        _buildSectionHeader(theme, 'Localização', Icons.map_outlined,
-            accentOverride: const Color(0xFFEF4444)),
-        const SizedBox(height: 10),
-        _buildMapSection(context, theme, property),
-      ],
-    );
-  }
-
-  Widget _buildCommercialTab(
-    BuildContext context,
-    ThemeData theme,
-    Property property,
-  ) {
     final hasOffers = property.hasPendingOffers == true ||
         (property.totalOffersCount != null && property.totalOffersCount! > 0);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSectionHeader(theme, 'Status da chave', Icons.vpn_key_outlined,
-            accentOverride: const Color(0xFFF59E0B)),
-        const SizedBox(height: 10),
-        _buildKeyStatusSection(context, theme, property),
-        const SizedBox(height: 22),
-        _buildSectionHeader(
-            theme, 'Clientes vinculados', Icons.people_alt_outlined,
-            accentOverride: const Color(0xFF0EA5E9)),
-        const SizedBox(height: 10),
-        _buildClientsSection(context, theme, property),
-        if (hasOffers) ...[
-          const SizedBox(height: 22),
-          _buildSectionHeader(theme, 'Ofertas', Icons.request_quote_outlined,
-              accentOverride: const Color(0xFF059669)),
-          const SizedBox(height: 10),
-          _buildOffersSection(context, theme, property),
-        ],
-      ],
-    );
-  }
+    final hasClients = (property.clients ?? []).isNotEmpty;
+    final hasDocuments = !_isLoadingDocuments && _documents.isNotEmpty;
+    final hasChecklists = !_isLoadingChecklists && _checklists.isNotEmpty;
+    final hasExpenses = !_isLoadingExpenses && _expenses.isNotEmpty;
+    final condoId = property.condominiumId?.trim() ?? '';
 
-  Widget _buildManagementTab(
-    BuildContext context,
-    ThemeData theme,
-    Property property,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSectionHeader(theme, 'Despesas', Icons.payments_outlined,
-            accentOverride: const Color(0xFF64748B)),
-        const SizedBox(height: 10),
-        _buildExpensesSection(context, theme, property),
-        const SizedBox(height: 22),
-        _buildSectionHeader(theme, 'Checklists', Icons.checklist_rtl_rounded,
-            accentOverride: const Color(0xFF0891B2)),
-        const SizedBox(height: 10),
-        _buildChecklistsSection(context, theme, property),
-        const SizedBox(height: 22),
-        _buildSectionHeader(theme, 'Documentos', Icons.folder_open_outlined,
-            accentOverride: const Color(0xFF0284C7)),
-        const SizedBox(height: 10),
-        _buildDocumentsSection(context, theme, property),
-        const SizedBox(height: 22),
-        _buildSectionHeader(theme, 'Publicação no site', Icons.public_outlined,
-            accentOverride: const Color(0xFF059669)),
-        const SizedBox(height: 10),
-        PropertyPublicToggle(
-          propertyId: property.id,
-          initialValue: property.isAvailableForSite ?? false,
-          propertyStatus: property.status,
-          isActive: property.isActive,
-          imageCount: property.imageCount ?? property.images?.length ?? 0,
-          onSuccess: () => _loadProperty(),
-          onError: (error) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(error),
-                backgroundColor: AppColors.status.error,
-              ),
-            );
-          },
+    final sections = <Widget>[
+      if (property.description.trim().isNotEmpty)
+        _buildFlushSection(
+          theme: theme,
+          title: 'Descrição',
+          icon: Icons.notes_outlined,
+          tone: const Color(0xFF6366F1),
+          child: _buildDescriptionCard(context, theme, property),
         ),
-        if (_canRepublishOnSite) ...[
-          const SizedBox(height: 12),
-          _buildRepublishButton(context, theme),
-        ],
-      ],
+      _buildFlushSection(
+        theme: theme,
+        title: 'Características',
+        icon: Icons.view_module_outlined,
+        tone: const Color(0xFF6366F1),
+        child: _buildCharacteristicsGrid(context, theme, property),
+      ),
+      if (condoId.isNotEmpty)
+        _buildFlushSection(
+          theme: theme,
+          title: 'Condomínio',
+          icon: Icons.apartment_rounded,
+          tone: const Color(0xFF059669),
+          child: _buildCondominiumSection(context, theme, property),
+        ),
+      if (property.features.isNotEmpty)
+        _buildFlushSection(
+          theme: theme,
+          title: 'Recursos e comodidades',
+          icon: Icons.auto_awesome_outlined,
+          tone: const Color(0xFF8B5CF6),
+          child: _buildFeaturesSection(context, theme, property.features),
+        ),
+      _buildFlushSection(
+        theme: theme,
+        title: 'Localização',
+        icon: Icons.map_outlined,
+        tone: const Color(0xFFEF4444),
+        child: _buildMapSection(context, theme, property),
+      ),
+      _buildFlushSection(
+        theme: theme,
+        title: 'Status da chave',
+        icon: Icons.vpn_key_outlined,
+        tone: const Color(0xFFF59E0B),
+        child: _buildKeyStatusSection(context, theme, property),
+      ),
+      if (hasClients)
+        _buildFlushSection(
+          theme: theme,
+          title: 'Clientes vinculados',
+          icon: Icons.people_alt_outlined,
+          tone: const Color(0xFF0EA5E9),
+          child: _buildClientsSection(context, theme, property),
+        ),
+      if (hasOffers)
+        _buildFlushSection(
+          theme: theme,
+          title: 'Ofertas',
+          icon: Icons.request_quote_outlined,
+          tone: const Color(0xFF059669),
+          child: _buildOffersSection(context, theme, property),
+        ),
+      if (hasExpenses)
+        _buildFlushSection(
+          theme: theme,
+          title: 'Despesas',
+          icon: Icons.payments_outlined,
+          tone: const Color(0xFF64748B),
+          child: _buildExpensesSection(context, theme, property),
+        ),
+      if (hasChecklists)
+        _buildFlushSection(
+          theme: theme,
+          title: 'Checklists',
+          icon: Icons.checklist_rtl_rounded,
+          tone: const Color(0xFF0891B2),
+          child: _buildChecklistsSection(context, theme, property),
+        ),
+      if (hasDocuments)
+        _buildFlushSection(
+          theme: theme,
+          title: 'Documentos',
+          icon: Icons.folder_open_outlined,
+          tone: const Color(0xFF0284C7),
+          child: _buildDocumentsSection(context, theme, property),
+        ),
+      _buildFlushSection(
+        theme: theme,
+        title: 'Publicação no site',
+        icon: Icons.public_outlined,
+        tone: const Color(0xFF059669),
+        isLast: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            PropertyPublicToggle(
+              propertyId: property.id,
+              initialValue: property.isAvailableForSite ?? false,
+              propertyStatus: property.status,
+              isActive: property.isActive,
+              imageCount: property.imageCount ?? property.images?.length ?? 0,
+              onSuccess: () => _loadProperty(),
+              onError: (error) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(error),
+                    backgroundColor: AppColors.status.error,
+                  ),
+                );
+              },
+            ),
+            if (_canRepublishOnSite) ...[
+              const SizedBox(height: 12),
+              _buildRepublishButton(context, theme),
+            ],
+          ],
+        ),
+      ),
+      _buildFlushSection(
+        theme: theme,
+        title: 'Compartilhar',
+        icon: Icons.link_rounded,
+        tone: const Color(0xFF64748B),
+        isLast: true,
+        child: _buildShareLinkFooter(context, theme, property),
+      ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: sections,
     );
   }
 
@@ -3048,29 +2917,48 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   ) {
     const accent = Color(0xFFD97706);
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _buildSectionHeader(theme, 'Atualizações', Icons.campaign_outlined,
-            accentOverride: accent),
-        const SizedBox(height: 10),
-        _buildUpdateComposer(context, theme, accent),
-        const SizedBox(height: 14),
-        if (_loadingUpdates && !_updatesLoaded)
-          _buildInlineLoader(context, accent)
-        else if (_updates.data.isEmpty)
-          _buildActivityEmpty(context, theme, 'Nenhuma atualização ainda.')
-        else
-          ..._updates.data.map((u) => _buildUpdateTile(context, theme, u)),
-        const SizedBox(height: 26),
-        _buildSectionHeader(theme, 'Histórico', Icons.history_rounded,
-            accentOverride: const Color(0xFF475569)),
-        const SizedBox(height: 10),
-        if (_loadingHistory && !_historyLoaded)
-          _buildInlineLoader(context, accent)
-        else if (_history.isEmpty)
-          _buildActivityEmpty(context, theme, 'Sem histórico registrado.')
-        else
-          ..._history.map((h) => _buildHistoryTile(context, theme, h)),
+        _buildFlushSection(
+          theme: theme,
+          title: 'Atualizações',
+          icon: Icons.campaign_outlined,
+          tone: accent,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildUpdateComposer(context, theme, accent),
+              const SizedBox(height: 14),
+              if (_loadingUpdates && !_updatesLoaded)
+                _buildInlineLoader(context, accent)
+              else if (_updates.data.isEmpty)
+                _buildActivityEmpty(
+                    context, theme, 'Nenhuma atualização ainda.')
+              else
+                ..._updates.data
+                    .map((u) => _buildUpdateTile(context, theme, u)),
+            ],
+          ),
+        ),
+        _buildFlushSection(
+          theme: theme,
+          title: 'Histórico',
+          icon: Icons.history_rounded,
+          tone: const Color(0xFF475569),
+          isLast: true,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_loadingHistory && !_historyLoaded)
+                _buildInlineLoader(context, accent)
+              else if (_history.isEmpty)
+                _buildActivityEmpty(
+                    context, theme, 'Sem histórico registrado.')
+              else
+                ..._history.map((h) => _buildHistoryTile(context, theme, h)),
+            ],
+          ),
+        ),
       ],
     );
   }
@@ -3283,32 +3171,51 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   ) {
     const accent = Color(0xFF059669);
     final published = property.isAvailableForSite == true;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSectionHeader(theme, 'Engajamento no site', Icons.insights_rounded,
-            accentOverride: accent),
-        const SizedBox(height: 10),
-        if (!published)
-          _buildActivityEmpty(
+    final engagementChild = !published
+        ? _buildActivityEmpty(
             context,
             theme,
             'Imóvel fora do site — sem métricas de engajamento.',
           )
-        else if (_loadingEngagement && !_engagementLoaded)
-          _buildInlineLoader(context, accent)
-        else ...[
-          _buildEngagementMetrics(context, theme),
-          if (_engagementByChannel.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            _buildEngagementByChannel(context, theme),
-          ],
-        ],
-        const SizedBox(height: 26),
-        _buildSectionHeader(theme, 'Observações internas', Icons.lock_outline,
-            accentOverride: const Color(0xFFA855F7)),
-        const SizedBox(height: 10),
-        _buildInternalNotes(context, theme, property),
+        : (_loadingEngagement && !_engagementLoaded)
+            ? _buildInlineLoader(context, accent)
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildEngagementMetrics(context, theme),
+                  if (_engagementByChannel.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    _buildEngagementByChannel(context, theme),
+                  ],
+                ],
+              );
+    final scoreResult = computePropertyScore(property);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildFlushSection(
+          theme: theme,
+          title: 'Nota de qualidade',
+          icon: Icons.grade_rounded,
+          tone: const Color(0xFF059669),
+          child: PropertyScorePanel(result: scoreResult),
+        ),
+        _buildFlushSection(
+          theme: theme,
+          title: 'Engajamento no site',
+          icon: Icons.insights_rounded,
+          tone: accent,
+          child: engagementChild,
+        ),
+        _buildFlushSection(
+          theme: theme,
+          title: 'Observações internas',
+          icon: Icons.lock_outline,
+          tone: const Color(0xFFA855F7),
+          isLast: true,
+          child: _buildInternalNotes(context, theme, property),
+        ),
       ],
     );
   }
@@ -3512,6 +3419,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
+  /// Header flush (paridade web `PropertyDetailSectionTitle`): apenas uma
+  /// régua vertical fina na cor da seção + título bold + ícone discreto à
+  /// direita. Sem chip com background, sem moldura — nada que reforce a
+  /// ideia de "card dentro de card".
   Widget _buildSectionHeader(
     ThemeData theme,
     String title,
@@ -3522,15 +3433,15 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final accent = accentOverride ??
         (isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary);
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Container(
-          padding: const EdgeInsets.all(8),
+          width: 3,
+          height: 16,
           decoration: BoxDecoration(
-            color: accent.withValues(alpha: isDark ? 0.16 : 0.1),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: accent.withValues(alpha: 0.24)),
+            color: accent,
+            borderRadius: BorderRadius.circular(2),
           ),
-          child: Icon(icon, size: 18, color: accent),
         ),
         const SizedBox(width: 10),
         Expanded(
@@ -3538,12 +3449,49 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             title,
             style: theme.textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w800,
-              letterSpacing: -0.25,
+              letterSpacing: -0.3,
+              height: 1.2,
               color: ThemeHelpers.textColor(context),
             ),
           ),
         ),
+        Icon(
+          icon,
+          size: 18,
+          color: ThemeHelpers.textSecondaryColor(context)
+              .withValues(alpha: 0.7),
+        ),
       ],
+    );
+  }
+
+  /// Wrapper flush de seção (paridade web `PropertyDetailSection`): padding
+  /// vertical, divisor inferior fininho, sem moldura/borda/cartão. Caller
+  /// passa o conteúdo direto, sem `Container` decorado por fora.
+  Widget _buildFlushSection({
+    required ThemeData theme,
+    required String title,
+    required IconData icon,
+    required Color tone,
+    required Widget child,
+    bool isLast = false,
+  }) {
+    final divider = ThemeHelpers.borderColor(context).withValues(alpha: 0.33);
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 18),
+      decoration: BoxDecoration(
+        border: isLast
+            ? null
+            : Border(bottom: BorderSide(color: divider, width: 1)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildSectionHeader(theme, title, icon, accentOverride: tone),
+          const SizedBox(height: 14),
+          child,
+        ],
+      ),
     );
   }
 
@@ -3566,38 +3514,44 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return _ExpandableDescription(text: property.description);
   }
 
-  Widget _buildCharacteristicsCard(
+  /// Grade flat de características — paridade `PropertyDetailsCharacteristicsSection`.
+  Widget _buildCharacteristicsGrid(
     BuildContext context,
     ThemeData theme,
     Property property,
   ) {
-    final isDark = theme.brightness == Brightness.dark;
-    final cardBg = isDark
-        ? AppColors.background.cardBackgroundDarkMode
-        : AppColors.background.cardBackground;
-    final borderColor = isDark
-        ? AppColors.border.borderDarkMode
-        : AppColors.border.border;
+    String formatArea(double value) {
+      final n = value;
+      final text = n == n.roundToDouble()
+          ? n.toInt().toString()
+          : n.toStringAsFixed(2).replaceAll('.', ',');
+      return '$text m²';
+    }
 
     final items = <({IconData icon, String label, String value})>[
-      (icon: _typeIcon(property.type), label: 'Tipo', value: property.type.label),
       if (property.totalArea > 0)
         (
-          icon: Icons.square_foot_rounded,
+          icon: Icons.straighten_rounded,
           label: 'Área total',
-          value: '${property.totalArea.toInt()} m²',
+          value: formatArea(property.totalArea),
         ),
       if (property.builtArea != null && property.builtArea! > 0)
         (
-          icon: Icons.crop_free_rounded,
+          icon: Icons.home_outlined,
           label: 'Área construída',
-          value: '${property.builtArea!.toInt()} m²',
+          value: formatArea(property.builtArea!),
         ),
       if (property.bedrooms != null && property.bedrooms! > 0)
         (
-          icon: Icons.king_bed_outlined,
+          icon: Icons.bed_outlined,
           label: 'Quartos',
           value: '${property.bedrooms}',
+        ),
+      if (property.suites != null && property.suites! > 0)
+        (
+          icon: Icons.king_bed_outlined,
+          label: 'Suítes',
+          value: '${property.suites}',
         ),
       if (property.bathrooms != null && property.bathrooms! > 0)
         (
@@ -3613,191 +3567,240 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ),
     ];
 
-    final muted = ThemeHelpers.textSecondaryColor(context);
-    final accent = isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    if (items.isEmpty) {
+      return Text(
+        'Nenhuma característica cadastrada.',
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: ThemeHelpers.textSecondaryColor(context),
+        ),
+      );
+    }
 
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: accent.withValues(alpha: isDark ? 0.28 : 0.2),
-        ),
-      ),
-      child: GridView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        itemCount: items.length,
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          mainAxisExtent: 78,
-        ),
-        itemBuilder: (_, i) {
-          final it = items[i];
-          return Container(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-            decoration: BoxDecoration(
-              color: (isDark
-                      ? AppColors.background.backgroundSecondaryDarkMode
-                      : AppColors.background.backgroundSecondary)
-                  .withValues(alpha: isDark ? 0.55 : 0.55),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: borderColor.withValues(alpha: isDark ? 0.45 : 0.55),
-              ),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: isDark ? 0.18 : 0.12),
-                    borderRadius: BorderRadius.circular(11),
-                  ),
-                  child: Icon(it.icon, size: 18, color: accent),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    mainAxisSize: MainAxisSize.min,
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final borderTint = ThemeHelpers.borderColor(context).withValues(alpha: 0.27);
+    final cols = MediaQuery.sizeOf(context).width > 520 ? 3 : 2;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tileWidth = (constraints.maxWidth - (cols - 1) * 16) / cols;
+        return Wrap(
+          spacing: 16,
+          runSpacing: 4,
+          children: [
+            for (var i = 0; i < items.length; i++)
+              SizedBox(
+                width: tileWidth,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  decoration: i % cols != cols - 1
+                      ? BoxDecoration(
+                          border: Border(
+                            right: BorderSide(color: borderTint, width: 1),
+                          ),
+                        )
+                      : null,
+                  child: Row(
                     children: [
-                      Text(
-                        it.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: muted,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.4,
-                        ),
+                      Icon(
+                        items[i].icon,
+                        size: 17,
+                        color: muted.withValues(alpha: 0.72),
                       ),
-                      const SizedBox(height: 3),
-                      Text(
-                        it.value,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          color: ThemeHelpers.textColor(context),
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.2,
-                          fontFeatures: const [FontFeature.tabularFigures()],
+                      const SizedBox(width: 9),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              items[i].value,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyLarge?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.02,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              items[i].label.toUpperCase(),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: muted,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 10,
+                                letterSpacing: 0.05,
+                                height: 1.3,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
                 ),
-              ],
-            ),
-          );
-        },
-      ),
+              ),
+          ],
+        );
+      },
     );
   }
 
-  Widget _buildAdditionalValuesCard(
+  Widget _buildCondominiumSection(
     BuildContext context,
     ThemeData theme,
     Property property,
   ) {
-    final items = <({IconData icon, String label, double value, Color color})>[
-      if (property.condominiumFee != null)
-        (
-          icon: Icons.apartment_rounded,
-          label: 'Condomínio',
-          value: property.condominiumFee!,
-          color: AppColors.status.info,
-        ),
-      if (property.iptu != null)
-        (
-          icon: Icons.receipt_long_outlined,
-          label: 'IPTU anual',
-          value: property.iptu!,
-          color: AppColors.status.warning,
-        ),
-    ];
-    if (items.isEmpty) return const SizedBox.shrink();
-
-    final isDark = theme.brightness == Brightness.dark;
-    final cardBg = isDark
-        ? AppColors.background.cardBackgroundDarkMode
-        : AppColors.background.cardBackground;
-    final borderColor = isDark
-        ? AppColors.border.borderDarkMode
-        : AppColors.border.border;
     final muted = ThemeHelpers.textSecondaryColor(context);
+    final name = _linkedCondominium?.name.trim().isNotEmpty == true
+        ? _linkedCondominium!.name.trim()
+        : 'Condomínio vinculado';
 
-    return Row(
+    if (_loadingCondominium) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: LinearProgressIndicator(minHeight: 2),
+      );
+    }
+
+    final c = _linkedCondominium;
+    final addressParts = <String>[
+      if (c != null) ...[
+        if ((c.street ?? '').isNotEmpty) c.street!,
+        if ((c.number ?? '').isNotEmpty) c.number!,
+      ],
+      if (c != null && (c.neighborhood ?? '').isNotEmpty) c.neighborhood!,
+      if (c != null &&
+          (c.city ?? '').isNotEmpty &&
+          (c.state ?? '').isNotEmpty)
+        '${c.city}/${c.state}',
+    ];
+    final address = addressParts.where((s) => s.trim().isNotEmpty).join(', ');
+
+    final fee = property.condominiumFee;
+    final hasFee = fee != null && fee > 0;
+
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (var i = 0; i < items.length; i++) ...[
+        Text(
+          name,
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w800,
+            color: _salePriceColor(theme.brightness == Brightness.dark),
+          ),
+        ),
+        if (address.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          _buildCondominiumInfoRow(
+            theme,
+            Icons.location_on_outlined,
+            'Endereço',
+            address,
+            muted,
+          ),
+        ],
+        if (hasFee)
+          _buildCondominiumInfoRow(
+            theme,
+            Icons.payments_outlined,
+            'Taxa informada no imóvel',
+            _currencyFormatter.format(fee),
+            muted,
+          ),
+      ],
+    );
+  }
+
+  Widget _buildCondominiumInfoRow(
+    ThemeData theme,
+    IconData icon,
+    String label,
+    String value,
+    Color muted,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: muted.withValues(alpha: 0.85)),
+          const SizedBox(width: 8),
           Expanded(
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-              decoration: BoxDecoration(
-                color: cardBg,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: borderColor.withValues(alpha: isDark ? 0.55 : 0.78),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: muted,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(7),
-                        decoration: BoxDecoration(
-                          color: items[i].color.withValues(alpha: isDark ? 0.18 : 0.12),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Icon(items[i].icon, size: 14, color: items[i].color),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          items[i].label.toUpperCase(),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: muted,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.6,
-                            fontSize: 9.5,
-                          ),
-                        ),
-                      ),
-                    ],
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
                   ),
-                  const SizedBox(height: 12),
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      _currencyFormatter.format(items[i].value),
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        color: ThemeHelpers.textColor(context),
-                        fontWeight: FontWeight.w900,
-                        height: 1.05,
-                        letterSpacing: -0.4,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
-          if (i < items.length - 1) const SizedBox(width: 10),
         ],
+      ),
+    );
+  }
+
+  Widget _buildShareLinkFooter(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final path = property.code != null && property.code!.isNotEmpty
+        ? 'imovel/${property.code}'
+        : 'imovel/${property.id}';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Copie o link público deste imóvel para enviar ao cliente.',
+          style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.45),
+        ),
+        const SizedBox(height: 12),
+        SelectableText(
+          path,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.1,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: path));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Link copiado'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            },
+            icon: const Icon(Icons.content_copy_rounded, size: 18),
+            label: const Text('Copiar link'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(0, 40),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -3807,58 +3810,33 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     ThemeData theme,
     Property property,
   ) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Ofertas Recebidas',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: () {
-                    Navigator.of(context).pushNamed(
-                      '/properties/offers',
-                      arguments: {'propertyId': property.id},
-                    );
-                  },
-                  icon: const Icon(Icons.arrow_forward),
-                  label: const Text('Ver Todas'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            if (property.totalOffersCount != null) ...[
-              _buildInfoRow(theme, 'Total', '${property.totalOffersCount}'),
-              if (property.pendingOffersCount != null)
-                _buildInfoRow(
-                  theme,
-                  'Pendentes',
-                  '${property.pendingOffersCount}',
-                ),
-              if (property.acceptedOffersCount != null)
-                _buildInfoRow(
-                  theme,
-                  'Aceitas',
-                  '${property.acceptedOffersCount}',
-                ),
-              if (property.rejectedOffersCount != null)
-                _buildInfoRow(
-                  theme,
-                  'Rejeitadas',
-                  '${property.rejectedOffersCount}',
-                ),
-            ],
-          ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            onPressed: () {
+              Navigator.of(context).pushNamed(
+                '/properties/offers',
+                arguments: {'propertyId': property.id},
+              );
+            },
+            icon: const Icon(Icons.arrow_forward, size: 16),
+            label: const Text('Ver todas'),
+          ),
         ),
-      ),
+        if (property.totalOffersCount != null) ...[
+          _buildInfoRow(theme, 'Total', '${property.totalOffersCount}'),
+          if (property.pendingOffersCount != null)
+            _buildInfoRow(theme, 'Pendentes', '${property.pendingOffersCount}'),
+          if (property.acceptedOffersCount != null)
+            _buildInfoRow(theme, 'Aceitas', '${property.acceptedOffersCount}'),
+          if (property.rejectedOffersCount != null)
+            _buildInfoRow(
+                theme, 'Rejeitadas', '${property.rejectedOffersCount}'),
+        ],
+      ],
     );
   }
 
@@ -3891,241 +3869,74 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     ThemeData theme,
     Property property,
   ) {
-    final isDark = theme.brightness == Brightness.dark;
+    final hasKeys = _keys.isNotEmpty;
 
-    return Card(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: isDark
-              ? AppColors.border.borderDarkMode
-              : AppColors.border.border,
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.vpn_key, color: AppColors.primary.primary, size: 24),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Status da Chave',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Visualize e gerencie chaves vinculadas a esta propriedade',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            if (_isLoadingKeys)
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(16),
-                  child: CircularProgressIndicator(),
-                ),
-              )
-            else if (_keys.isEmpty)
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: [
-                      Icon(
-                        Icons.vpn_key_outlined,
-                        size: 48,
-                        color: ThemeHelpers.textSecondaryColor(context),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Nenhuma chave cadastrada',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 16),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: () {
-                            _showCreateKeyModal(context, property);
-                          },
-                          icon: const Icon(Icons.add, size: 18),
-                          label: const Text('Criar Chave'),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            else
-              Column(
-                children: [
-                  ...(_keys.map((key) {
-                    final statusColor =
-                        key.status == key_models.KeyStatus.available
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_isLoadingKeys)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: LinearProgressIndicator(minHeight: 2),
+          )
+        else ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: (hasKeys
+                      ? AppColors.status.success
+                      : ThemeHelpers.textSecondaryColor(context))
+                  .withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: (hasKeys
                         ? AppColors.status.success
-                        : key.status == key_models.KeyStatus.inUse
-                        ? AppColors.status.warning
-                        : AppColors.status.error;
-
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? AppColors.background.backgroundSecondaryDarkMode
-                            : AppColors.background.backgroundSecondary,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: ThemeHelpers.borderLightColor(context),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.vpn_key, color: statusColor, size: 24),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  key.name,
-                                  style: theme.textTheme.bodyLarge?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                if (key.location != null &&
-                                    key.location!.isNotEmpty) ...[
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'Localização: ${key.location}',
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: ThemeHelpers.textSecondaryColor(
-                                        context,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                                ...[
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'Tipo: ${key.type.label}',
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: ThemeHelpers.textSecondaryColor(
-                                        context,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: statusColor.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              key.status.label,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: statusColor,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 11,
-                              ),
-                            ),
-                          ),
-                          PopupMenuButton<String>(
-                            icon: const Icon(Icons.more_vert),
-                            onSelected: (value) {
-                              if (value == 'edit') {
-                                _showEditKeyModal(context, property, key);
-                              } else if (value == 'delete') {
-                                _deleteKey(
-                                  context,
-                                  property.id,
-                                  key.id,
-                                  key.name,
-                                );
-                              }
-                            },
-                            itemBuilder: (context) => [
-                              const PopupMenuItem(
-                                value: 'edit',
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.edit, size: 18),
-                                    SizedBox(width: 8),
-                                    Text('Editar'),
-                                  ],
-                                ),
-                              ),
-                              const PopupMenuItem(
-                                value: 'delete',
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.delete,
-                                      size: 18,
-                                      color: Colors.red,
-                                    ),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      'Excluir',
-                                      style: TextStyle(color: Colors.red),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    );
-                  })),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        _showCreateKeyModal(context, property);
-                      },
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Criar Chave'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
-                    ),
-                  ),
-                ],
+                        : ThemeHelpers.textSecondaryColor(context))
+                    .withValues(alpha: 0.35),
               ),
+            ),
+            child: Text(
+              hasKeys ? 'Chave disponível' : 'Sem chave',
+              style: theme.textTheme.labelSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: hasKeys
+                    ? AppColors.status.success
+                    : ThemeHelpers.textSecondaryColor(context),
+              ),
+            ),
+          ),
+          if (hasKeys) ...[
+            const SizedBox(height: 10),
+            Text(
+              _keys.first.name,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ],
-        ),
-      ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton(
+              onPressed: () {
+                if (hasKeys) {
+                  Navigator.of(context).pushNamed(
+                    '/keys',
+                    arguments: {'propertyId': property.id},
+                  );
+                } else {
+                  _showCreateKeyModal(context, property);
+                }
+              },
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(0, 40),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+              ),
+              child: Text(hasKeys ? 'Gerenciar chaves' : 'Cadastrar chave'),
+            ),
+          ),
+        ],
+      ],
     );
   }
 
@@ -4137,101 +3948,57 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final clients = property.clients ?? [];
     final isDark = theme.brightness == Brightness.dark;
 
-    return Card(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: isDark
-              ? AppColors.border.borderDarkMode
-              : AppColors.border.border,
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.people,
-                        color: AppColors.primary.primary,
-                        size: 24,
-                      ),
-                      const SizedBox(width: 12),
-                      Flexible(
-                        child: Text(
-                          'Clientes Vinculados',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (clients.isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.primary.primary.withValues(
-                              alpha: 0.1,
-                            ),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            '${clients.length}',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: AppColors.primary.primary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
+            Expanded(
+              child: Text(
+                clients.isEmpty
+                    ? 'Vincule clientes interessados a este imóvel.'
+                    : '${clients.length} cliente(s) vinculado(s)',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: ThemeHelpers.textSecondaryColor(context),
                 ),
-                const SizedBox(width: 8),
-                TextButton.icon(
-                  onPressed: () {
-                    _showLinkClientModal(context, property);
-                  },
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Adicionar'),
-                ),
-              ],
+              ),
             ),
-            const SizedBox(height: 16),
-            if (clients.isEmpty)
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    children: [
-                      Icon(
-                        Icons.people_outline,
-                        size: 48,
-                        color: ThemeHelpers.textSecondaryColor(context),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Nenhum cliente vinculado',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                        ),
-                      ),
-                    ],
+            const SizedBox(width: 8),
+            TextButton.icon(
+              onPressed: () {
+                _showLinkClientModal(context, property);
+              },
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Adicionar'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (clients.isEmpty)
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.people_outline,
+                    size: 44,
+                    color: ThemeHelpers.textSecondaryColor(context),
                   ),
-                ),
-              )
-            else
-              ...clients.map((client) {
+                  const SizedBox(height: 10),
+                  Text(
+                    'Nenhum cliente vinculado',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: ThemeHelpers.textSecondaryColor(context),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          )
+        else
+          ...clients.map((client) {
                 return Container(
                   margin: const EdgeInsets.only(bottom: 12),
                   padding: const EdgeInsets.all(12),
@@ -4331,9 +4098,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   ),
                 );
               }),
-          ],
-        ),
-      ),
+      ],
     );
   }
 
@@ -4344,55 +4109,20 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   ) {
     final isDark = theme.brightness == Brightness.dark;
 
-    return Card(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: isDark
-              ? AppColors.border.borderDarkMode
-              : AppColors.border.border,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            onPressed: () {
+              _showCreateExpenseModal(context, property);
+            },
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('Adicionar'),
+          ),
         ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.account_balance_wallet,
-                        color: AppColors.primary.primary,
-                        size: 24,
-                      ),
-                      const SizedBox(width: 12),
-                      Flexible(
-                        child: Text(
-                          'Despesas do Imóvel',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                TextButton.icon(
-                  onPressed: () {
-                    _showCreateExpenseModal(context, property);
-                  },
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Adicionar'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
+        const SizedBox(height: 4),
             if (_isLoadingExpenses)
               const Center(
                 child: Padding(
@@ -4695,10 +4425,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   ),
                 );
               })),
-            ],
-          ],
-        ),
-      ),
+        ],
+      ],
     );
   }
 
@@ -4709,55 +4437,20 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   ) {
     final isDark = theme.brightness == Brightness.dark;
 
-    return Card(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: isDark
-              ? AppColors.border.borderDarkMode
-              : AppColors.border.border,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            onPressed: () {
+              _showCreateChecklistModal(context, property);
+            },
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('Criar Checklist'),
+          ),
         ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.checklist,
-                        color: AppColors.primary.primary,
-                        size: 24,
-                      ),
-                      const SizedBox(width: 12),
-                      Flexible(
-                        child: Text(
-                          'Checklists',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                TextButton.icon(
-                  onPressed: () {
-                    _showCreateChecklistModal(context, property);
-                  },
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Criar Checklist'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
+        const SizedBox(height: 4),
             if (_isLoadingChecklists)
               const Center(
                 child: Padding(
@@ -4922,9 +4615,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   ),
                 );
               })),
-          ],
-        ),
-      ),
+      ],
     );
   }
 
@@ -4935,39 +4626,28 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   ) {
     final isDark = theme.brightness == Brightness.dark;
 
-    return Card(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: isDark
-              ? AppColors.border.borderDarkMode
-              : AppColors.border.border,
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.description,
-                        color: AppColors.primary.primary,
-                        size: 24,
+            Expanded(
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.description,
+                    color: AppColors.primary.primary,
+                    size: 24,
+                  ),
+                  const SizedBox(width: 12),
+                  Flexible(
+                    child: Text(
+                      'Documentos',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
                       ),
-                      const SizedBox(width: 12),
-                      Flexible(
-                        child: Text(
-                          'Documentos',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                          overflow: TextOverflow.ellipsis,
+                      overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
@@ -5132,9 +4812,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                       ],
                     ],
                   ),
-          ],
-        ),
-      ),
+      ],
     );
   }
 
@@ -5148,89 +4826,66 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ? property.address
         : '${property.street}, ${property.number} - ${property.neighborhood}, ${property.city} - ${property.state}';
 
-    return Card(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: isDark
-              ? AppColors.border.borderDarkMode
-              : AppColors.border.border,
-        ),
-      ),
-      child: Column(
-        children: [
-          Container(
-            height: 200,
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: isDark
-                  ? AppColors.background.backgroundSecondaryDarkMode
-                  : AppColors.background.backgroundSecondary,
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(12),
-                topRight: Radius.circular(12),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          height: 180,
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: isDark
+                ? AppColors.background.backgroundSecondaryDarkMode
+                : AppColors.background.backgroundSecondary,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.map_outlined,
+                size: 44,
+                color: ThemeHelpers.textSecondaryColor(context),
               ),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.map_outlined,
-                  size: 48,
+              const SizedBox(height: 8),
+              Text(
+                'Mapa de Localização',
+                style: theme.textTheme.bodyMedium?.copyWith(
                   color: ThemeHelpers.textSecondaryColor(context),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  'Mapa de Localização',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'TODO: Integrar Google Maps ou OpenStreetMap',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.location_on,
-                  size: 20,
-                  color: AppColors.primary.primary,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    address,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: ThemeHelpers.textColor(context),
-                    ),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () {
-                    // TODO: Abrir no Google Maps ou aplicativo de mapas
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Abrir no mapa será implementado'),
-                      ),
-                    );
-                  },
-                  child: const Text('Abrir no Mapa'),
-                ),
-              ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Icon(
+              Icons.location_on,
+              size: 18,
+              color: AppColors.primary.primary,
             ),
-          ),
-        ],
-      ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                address,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: ThemeHelpers.textColor(context),
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Abrir no mapa será implementado'),
+                  ),
+                );
+              },
+              child: const Text('Abrir no Mapa'),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -6718,225 +6373,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     }
   }
 
-  // ────────────────────────────── BOTTOM BAR & FAB ──────────────────────────────
-
-  Widget _buildBottomActionBar(
-    BuildContext context,
-    ThemeData theme,
-    Property property,
-  ) {
-    final isDark = theme.brightness == Brightness.dark;
-    final cardBg = isDark
-        ? AppColors.background.cardBackgroundDarkMode
-        : AppColors.background.cardBackground;
-    final borderColor = isDark
-        ? AppColors.border.borderDarkMode
-        : AppColors.border.border;
-    final muted = ThemeHelpers.textSecondaryColor(context);
-    final accent = AppColors.primary.primary;
-    final hasOffers = property.totalOffersCount != null &&
-        property.totalOffersCount! > 0;
-    final pendingOffers = property.pendingOffersCount ?? 0;
-
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-          decoration: BoxDecoration(
-            color: cardBg.withValues(alpha: isDark ? 0.94 : 0.96),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: borderColor.withValues(alpha: isDark ? 0.62 : 0.85)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.5 : 0.12),
-                blurRadius: 28,
-                offset: const Offset(0, 12),
-                spreadRadius: -8,
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              // Para usuários comuns sem vínculo, o backend rejeita a edição —
-              // então em vez do botão primário "Editar imóvel" exibimos
-              // "Compartilhar link" como ação principal (visualização-pura).
-              Expanded(
-                child: _canEditProperty
-                    ? _bottomActionPrimary(
-                        context: context,
-                        theme: theme,
-                        icon: Icons.edit_rounded,
-                        label: 'Editar imóvel',
-                        accent: accent,
-                        onTap: () => Navigator.of(context).pushNamed(
-                          '/properties/${property.id}/edit',
-                        ),
-                      )
-                    : _bottomActionPrimary(
-                        context: context,
-                        theme: theme,
-                        icon: Icons.share_outlined,
-                        label: 'Compartilhar link',
-                        accent: accent,
-                        onTap: () {
-                          final url = property.code != null &&
-                                  property.code!.isNotEmpty
-                              ? 'imovel/${property.code}'
-                              : 'imovel/${property.id}';
-                          Clipboard.setData(ClipboardData(text: url));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Link copiado'),
-                              duration: Duration(seconds: 2),
-                            ),
-                          );
-                        },
-                      ),
-              ),
-              if (_canEditProperty) ...[
-                const SizedBox(width: 8),
-                _bottomActionGhost(
-                  theme: theme,
-                  muted: muted,
-                  icon: Icons.share_outlined,
-                  tooltip: 'Compartilhar link',
-                  onTap: () {
-                    final url = property.code != null && property.code!.isNotEmpty
-                        ? 'imovel/${property.code}'
-                        : 'imovel/${property.id}';
-                    Clipboard.setData(ClipboardData(text: url));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Link copiado'),
-                        duration: Duration(seconds: 2),
-                      ),
-                    );
-                  },
-                ),
-              ],
-              const SizedBox(width: 8),
-              _bottomActionGhost(
-                theme: theme,
-                muted: muted,
-                icon: Icons.request_quote_outlined,
-                tooltip: hasOffers ? 'Ofertas' : 'Sem ofertas',
-                badge: pendingOffers > 0 ? pendingOffers : null,
-                badgeColor: AppColors.status.warning,
-                disabled: !hasOffers,
-                onTap: hasOffers
-                    ? () => Navigator.of(context).pushNamed(
-                          '/properties/offers',
-                          arguments: {'propertyId': widget.propertyId},
-                        )
-                    : null,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _bottomActionPrimary({
-    required BuildContext context,
-    required ThemeData theme,
-    required IconData icon,
-    required String label,
-    required Color accent,
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: accent,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 14),
-          alignment: Alignment.center,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 17, color: Colors.white),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.2,
-                  fontSize: 13.5,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _bottomActionGhost({
-    required ThemeData theme,
-    required Color muted,
-    required IconData icon,
-    required String tooltip,
-    int? badge,
-    Color? badgeColor,
-    bool disabled = false,
-    VoidCallback? onTap,
-  }) {
-    final c = disabled ? muted.withValues(alpha: 0.4) : muted;
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: onTap,
-          child: Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: muted.withValues(alpha: disabled ? 0.04 : 0.08),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Icon(icon, color: c, size: 19),
-                if (badge != null && badge > 0)
-                  Positioned(
-                    top: 6,
-                    right: 6,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                      decoration: BoxDecoration(
-                        color: badgeColor ?? AppColors.status.error,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.white, width: 1.2),
-                      ),
-                      constraints: const BoxConstraints(minWidth: 14, minHeight: 14),
-                      child: Text(
-                        '$badge',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w900,
-                          height: 1,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  // ────────────────────────────── FAB ──────────────────────────────
 
   Widget _buildScrollTopButton(BuildContext context, ThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
@@ -7913,17 +7350,11 @@ class _CaptorTile extends StatelessWidget {
   const _CaptorTile({
     required this.captor,
     required this.accent,
-    required this.cardBg,
-    required this.borderColor,
-    required this.isDark,
     required this.muted,
   });
 
   final PropertyCaptor captor;
   final Color accent;
-  final Color cardBg;
-  final Color borderColor;
-  final bool isDark;
   final Color muted;
 
   /// Iniciais para o avatar quando não há foto. Pega a primeira letra do
@@ -7981,19 +7412,14 @@ class _CaptorTile extends StatelessWidget {
     final hasPhone = phone.isNotEmpty;
     final hasAvatar = (captor.avatar ?? '').isNotEmpty;
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(10, 9, 8, 9),
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: borderColor),
-      ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Container(
-            width: 38,
-            height: 38,
+            width: 36,
+            height: 36,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               gradient: hasAvatar
@@ -8042,7 +7468,7 @@ class _CaptorTile extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 13.5,
                     fontWeight: FontWeight.w800,
-                    color: isDark ? Colors.white : Colors.black87,
+                    color: ThemeHelpers.textColor(context),
                     letterSpacing: -0.1,
                   ),
                 ),

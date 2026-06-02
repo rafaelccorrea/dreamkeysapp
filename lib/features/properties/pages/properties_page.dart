@@ -112,14 +112,18 @@ class _PropertiesPageState extends State<PropertiesPage> {
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
   Timer? _searchDebounce;
+  /// Paridade web: listagem só refaz busca ~3s após parar de digitar.
+  static const Duration _listSearchDebounce = Duration(milliseconds: 3000);
+  static const Duration _suggestionDebounceDuration =
+      Duration(milliseconds: 450);
+  /// Spinner da busca — atualizado sem `setState` no pai (evita rebuild do scroll).
+  final ValueNotifier<bool> _searchRefreshingNotifier = ValueNotifier(false);
+  /// Após a primeira carga bem-sucedida, buscas/filtros não trocam o body
+  /// inteiro (skeleton / empty separado) — só atualizam a lista no scroll.
+  bool _hasLoadedOnce = false;
   final ScrollController _scrollController = ScrollController();
 
-  // Autocomplete de localização (paridade com web): dropdown de sugestões.
   final FocusNode _searchFocusNode = FocusNode();
-  Timer? _suggestionDebounce;
-  List<PropertyLocationSuggestion> _locationSuggestions = const [];
-  bool _loadingSuggestions = false;
-  bool _showSuggestions = false;
 
   int _localDraftCount = 0;
 
@@ -140,7 +144,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
   void dispose() {
     _persistState();
     _searchDebounce?.cancel();
-    _suggestionDebounce?.cancel();
+    _searchRefreshingNotifier.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
     _scrollController.removeListener(_onScroll);
@@ -185,7 +189,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
     await _refreshLocalDraftCount();
     if (!mounted || result == null) return;
 
-    await _loadProperties(refresh: true);
+    await _reloadList();
     if (result is PropertyWizardPopResult) {
       final r = result;
       if (r.showApprovalShortcut &&
@@ -312,18 +316,28 @@ class _PropertiesPageState extends State<PropertiesPage> {
         f.includeInactive != true;
   }
 
-  Future<void> _loadProperties({bool refresh = false}) async {
+  Future<void> _loadProperties({
+    bool refresh = false,
+    bool silent = false,
+    bool refreshStats = true,
+  }) async {
+    final useSilent = silent || _hasLoadedOnce;
+
     if (refresh) {
-      setState(() {
-        _currentPage = 1;
-        _properties.clear();
-      });
+      _currentPage = 1;
+      if (!useSilent) {
+        setState(() => _properties.clear());
+      }
     }
 
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+    if (useSilent) {
+      _searchRefreshingNotifier.value = true;
+    } else {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
 
     try {
       final filters = _buildRequestFilters();
@@ -337,40 +351,77 @@ class _PropertiesPageState extends State<PropertiesPage> {
       if (mounted) {
         if (response.success && response.data != null) {
           PropertyStats? gs;
-          try {
-            final statsRes = await _propertyService.getPropertyStats();
-            if (mounted && statsRes.success && statsRes.data != null) {
-              gs = statsRes.data!;
-            }
-          } catch (_) {}
+          if (refreshStats) {
+            try {
+              final statsRes = await _propertyService.getPropertyStats();
+              if (mounted && statsRes.success && statsRes.data != null) {
+                gs = statsRes.data!;
+              }
+            } catch (_) {}
+          }
 
           if (mounted) {
-            setState(() {
+            _searchRefreshingNotifier.value = false;
+            _applyPropertiesListState(() {
               _properties = response.data!.data;
               _totalPages = response.data!.totalPages;
               _total = response.data!.total;
-              _globalStats = gs;
+              if (gs != null) {
+                _globalStats = gs;
+              }
+              _errorMessage = null;
               _isLoading = false;
-            });
+              _hasLoadedOnce = true;
+            }, defer: useSilent);
           }
         } else {
-          setState(() {
-            _errorMessage = response.message ?? 'Erro ao carregar propriedades';
-            _globalStats = null;
+          _searchRefreshingNotifier.value = false;
+          _applyPropertiesListState(() {
+            _errorMessage =
+                response.message ?? 'Erro ao carregar propriedades';
+            if (!useSilent) {
+              _globalStats = null;
+            }
             _isLoading = false;
-          });
+          }, defer: useSilent);
         }
       }
     } catch (e) {
       debugPrint('❌ [PROPERTIES_PAGE] Erro: $e');
       if (mounted) {
-        setState(() {
+        _searchRefreshingNotifier.value = false;
+        _applyPropertiesListState(() {
           _errorMessage = 'Erro ao conectar com o servidor';
-          _globalStats = null;
+          if (!useSilent) {
+            _globalStats = null;
+          }
           _isLoading = false;
-        });
+        }, defer: useSilent);
       }
     }
+  }
+
+  /// Atualiza lista/KPIs; em busca silenciosa adia o `setState` para o próximo
+  /// frame para não invalidar semantics do `CustomScrollView` durante digitação.
+  void _applyPropertiesListState(VoidCallback apply, {required bool defer}) {
+    if (!mounted) return;
+    if (defer) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(apply);
+      });
+      return;
+    }
+    setState(apply);
+  }
+
+  /// Recarrega a listagem mantendo header/hero quando já houve carga inicial.
+  Future<void> _reloadList({bool refreshStats = true}) {
+    return _loadProperties(
+      refresh: true,
+      silent: _hasLoadedOnce,
+      refreshStats: refreshStats,
+    );
   }
 
   Future<void> _loadMoreProperties() async {
@@ -513,7 +564,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
           builder: (context) => const ExportImportDialog(),
         ).then((success) {
           if (success == true) {
-            _loadProperties(refresh: true);
+            _reloadList();
           }
         });
         break;
@@ -529,24 +580,14 @@ class _PropertiesPageState extends State<PropertiesPage> {
       actions: [
         _buildPropertiesScreenOverflowMenu(context),
       ],
-      body: _isLoading
-          // Esqueleto de tela inteira: enquanto a chamada de listagem +
-          // estatísticas não termina, mostramos placeholders inclusive na
-          // área do hero. Antes o hero era renderizado "pronto" e só o grid
-          // ficava em skeleton — passava a impressão de que a tela carregou
-          // pela metade.
+      body: !_hasLoadedOnce && _isLoading
           ? _buildFullPageSkeleton(context)
-          : _errorMessage != null
+          : !_hasLoadedOnce && _errorMessage != null
               ? _buildHeaderWithFillingChild(
                   context,
                   child: _buildErrorState(context),
                 )
-              : _properties.isEmpty
-                  ? _buildHeaderWithFillingChild(
-                      context,
-                      child: _buildEmptyPropertiesState(context, Theme.of(context)),
-                    )
-                  : _buildScrollablePropertiesViewport(context),
+              : _buildScrollablePropertiesViewport(context),
     );
   }
 
@@ -714,7 +755,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
       );
     });
     _persistState();
-    _loadProperties(refresh: true);
+    _reloadList();
   }
 
   void _toggleOnlyInactive() {
@@ -730,7 +771,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
       );
     });
     _persistState();
-    _loadProperties(refresh: true);
+    _reloadList();
   }
 
   void _toggleOnlyMyProperties() {
@@ -743,7 +784,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
       );
     });
     _persistState();
-    _loadProperties(refresh: true);
+    _reloadList();
   }
 
   /// Painel unificado de atalhos do corretor — substitui o antigo bloco
@@ -944,7 +985,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
               onFiltersChanged: (filters) {
                 setState(() => _filters = filters);
                 _persistState();
-                _loadProperties(refresh: true);
+                _reloadList();
               },
             ),
           );
@@ -1205,7 +1246,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
                                 _searchController.clear();
                                 setState(() => _searchQuery = '');
                                 _persistState();
-                                _loadProperties(refresh: true);
+                                _reloadList(refreshStats: false);
                               },
                             ),
                           if (hasFilters)
@@ -1216,7 +1257,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
                               onClear: () {
                                 setState(() => _filters = null);
                                 _persistState();
-                                _loadProperties(refresh: true);
+                                _reloadList();
                               },
                             ),
                         ],
@@ -2187,6 +2228,37 @@ class _PropertiesPageState extends State<PropertiesPage> {
     );
   }
 
+  Widget _buildInlineListError(BuildContext context) {
+    final theme = Theme.of(context);
+    final err = AppColors.status.error;
+    return Material(
+      color: err.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Icon(Icons.error_outline_rounded, size: 18, color: err),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                _errorMessage ?? 'Erro ao atualizar a listagem.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: ThemeHelpers.textColor(context),
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () => _reloadList(),
+              child: const Text('Tentar'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildErrorState(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
@@ -2343,304 +2415,282 @@ class _PropertiesPageState extends State<PropertiesPage> {
           setState(() => _searchQuery = '');
           _persistState();
           Navigator.of(sheetCtx).pop();
-          _loadProperties(refresh: true);
+          _reloadList(refreshStats: false);
         },
       ),
     );
   }
 
   void _performSearch(String query) {
-    setState(() {
-      _searchQuery = query;
-    });
+    final trimmed = query.trim();
+    if (trimmed == _searchQuery) return;
+    _searchQuery = trimmed;
     _persistState();
-    _loadProperties(refresh: true);
+    if (_hasLoadedOnce) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+    } else {
+      setState(() {});
+    }
+    _loadProperties(
+      refresh: true,
+      silent: _hasLoadedOnce,
+      refreshStats: false,
+    );
   }
 
   void _onSearchChanged(String value) {
     _searchDebounce?.cancel();
-    _searchDebounce = Timer(const Duration(milliseconds: 400), () {
-      if (!mounted) return;
-      final trimmed = value.trim();
-      if (trimmed == _searchQuery.trim()) return;
-      _performSearch(trimmed);
-    });
-    _onSuggestionInputChanged(value);
-  }
+    final trimmed = value.trim();
 
-  void _onSearchSubmitted(String value) {
-    _searchDebounce?.cancel();
-    _hideSuggestions();
-    _performSearch(value.trim());
+    // Campo vazio: refaz listagem na hora (paridade web).
+    if (trimmed.isEmpty) {
+      if (_searchQuery.trim().isNotEmpty) {
+        _performSearch('');
+      }
+      return;
+    }
+
+    _searchDebounce = Timer(_listSearchDebounce, () {
+      if (!mounted) return;
+      final q = _searchController.text.trim();
+      if (q == _searchQuery.trim()) return;
+      _performSearch(q);
+    });
   }
 
   void _clearHeaderSearch() {
     _searchDebounce?.cancel();
     _searchController.clear();
-    _hideSuggestions();
     if (_searchQuery.isEmpty) return;
     setState(() => _searchQuery = '');
     _persistState();
-    _loadProperties(refresh: true);
+    _reloadList(refreshStats: false);
   }
 
-  // ─── Autocomplete de localização ────────────────────────────────────────
-
-  void _onSuggestionInputChanged(String value) {
-    _suggestionDebounce?.cancel();
-    final q = value.trim();
-    if (q.length < 2) {
-      _hideSuggestions();
-      return;
-    }
-    _suggestionDebounce = Timer(const Duration(milliseconds: 300), () {
-      _fetchSuggestions(q);
-    });
-  }
-
-  Future<void> _fetchSuggestions(String query) async {
-    if (!mounted) return;
-    setState(() {
-      _loadingSuggestions = true;
-      _showSuggestions = true;
-    });
-    final results = await _propertyService.getLocationSuggestions(query);
-    if (!mounted) return;
-    // Ignora resposta atrasada se o texto já mudou para algo curto/vazio.
-    if (_searchController.text.trim().length < 2) {
-      _hideSuggestions();
-      return;
-    }
-    setState(() {
-      _locationSuggestions = results;
-      _loadingSuggestions = false;
-      _showSuggestions = results.isNotEmpty;
-    });
-  }
-
-  void _hideSuggestions() {
-    _suggestionDebounce?.cancel();
-    if (!_showSuggestions && _locationSuggestions.isEmpty) return;
-    setState(() {
-      _showSuggestions = false;
-      _locationSuggestions = const [];
-      _loadingSuggestions = false;
-    });
-  }
-
-  void _applyLocationSuggestion(PropertyLocationSuggestion suggestion) {
-    final label = suggestion.label.trim();
-    _searchDebounce?.cancel();
-    _searchController.text = label;
-    _searchController.selection = TextSelection.fromPosition(
-      TextPosition(offset: label.length),
-    );
-    _searchFocusNode.unfocus();
-    _hideSuggestions();
-    _performSearch(label);
-  }
-
-  /// Campo de busca livre no header — paridade com web `PropertiesPage`.
-  /// Busca endereço, bairro, condomínio, empreendimento, lote, código etc.
+  /// Campo de busca + sugestões em [Overlay] via [RawAutocomplete] (não altera
+  /// altura do `CustomScrollView` — evita `semantics.parentDataDirty`).
   Widget _buildHeaderSearchField(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final accent = _portfolioAccentColor(context);
-    final hasText = _searchController.text.trim().isNotEmpty;
 
-    final field = Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: hasText
-            ? Color.alphaBlend(
-                accent.withValues(alpha: isDark ? 0.10 : 0.05),
-                ThemeHelpers.cardBackgroundColor(context),
-              )
-            : ThemeHelpers.cardBackgroundColor(context),
-        border: Border.all(
-          color: hasText
-              ? accent.withValues(alpha: isDark ? 0.55 : 0.38)
-              : ThemeHelpers.borderColor(context),
-          width: hasText ? 1.35 : 1,
-        ),
-      ),
-      child: Row(
-        children: [
-          const SizedBox(width: 12),
-          Icon(
-            Icons.search_rounded,
-            size: 20,
-            color: hasText
-                ? accent
-                : ThemeHelpers.textSecondaryColor(context),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: TextField(
-              controller: _searchController,
-              focusNode: _searchFocusNode,
-              textInputAction: TextInputAction.search,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-                height: 1.2,
-              ),
-              decoration: InputDecoration(
-                hintText:
-                    'Buscar por endereço, bairro, condomínio, lote, código…',
-                hintStyle: theme.textTheme.bodySmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                  fontWeight: FontWeight.w500,
-                ),
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 13),
-              ),
-              onChanged: (value) {
-                setState(() {});
-                _onSearchChanged(value);
-              },
-              onSubmitted: _onSearchSubmitted,
-            ),
-          ),
-          if (hasText)
-            IconButton(
-              icon: Icon(
-                Icons.clear_rounded,
-                size: 18,
-                color: ThemeHelpers.textSecondaryColor(context),
-              ),
-              visualDensity: VisualDensity.compact,
-              tooltip: 'Limpar busca',
-              onPressed: _clearHeaderSearch,
-            )
-          else
-            const SizedBox(width: 4),
-        ],
-      ),
-    );
-
-    if (!_showSuggestions) return field;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        field,
-        const SizedBox(height: 6),
-        _buildSuggestionsPanel(context),
-      ],
-    );
-  }
-
-  Widget _buildSuggestionsPanel(BuildContext context) {
-    final theme = Theme.of(context);
-    final accent = _portfolioAccentColor(context);
-
-    if (_loadingSuggestions && _locationSuggestions.isEmpty) {
-      return Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          color: ThemeHelpers.cardBackgroundColor(context),
-          border: Border.all(color: ThemeHelpers.borderColor(context)),
-        ),
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                valueColor: AlwaysStoppedAnimation<Color>(accent),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              'Buscando sugestões…',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: ThemeHelpers.textSecondaryColor(context),
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    if (_locationSuggestions.isEmpty) return const SizedBox.shrink();
-
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: ThemeHelpers.cardBackgroundColor(context),
-        border: Border.all(color: ThemeHelpers.borderColor(context)),
-      ),
-      clipBehavior: Clip.antiAlias,
-      constraints: const BoxConstraints(maxHeight: 300),
-      child: ListView.separated(
-        shrinkWrap: true,
-        padding: EdgeInsets.zero,
-        itemCount: _locationSuggestions.length,
-        separatorBuilder: (_, __) => Divider(
-          height: 1,
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
-        ),
-        itemBuilder: (context, index) {
-          final s = _locationSuggestions[index];
-          return InkWell(
-            onTap: () => _applyLocationSuggestion(s),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 11,
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    _suggestionIcon(s.kind),
-                    size: 18,
-                    color: accent,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          s.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        if ((s.subtitle ?? '').trim().isNotEmpty)
-                          Text(
-                            s.subtitle!.trim(),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: ThemeHelpers.textSecondaryColor(context),
-                            ),
-                          ),
-                      ],
+    return RawAutocomplete<PropertyLocationSuggestion>(
+      textEditingController: _searchController,
+      focusNode: _searchFocusNode,
+      displayStringForOption: (option) => option.label,
+      optionsBuilder: (TextEditingValue textEditingValue) async {
+        final q = textEditingValue.text.trim();
+        if (q.length < 2) {
+          return const Iterable<PropertyLocationSuggestion>.empty();
+        }
+        await Future<void>.delayed(_suggestionDebounceDuration);
+        if (!mounted || _searchController.text.trim() != q) {
+          return const Iterable<PropertyLocationSuggestion>.empty();
+        }
+        final results = await _propertyService.getLocationSuggestions(q);
+        if (!mounted || _searchController.text.trim() != q) {
+          return const Iterable<PropertyLocationSuggestion>.empty();
+        }
+        return results;
+      },
+      onSelected: (PropertyLocationSuggestion suggestion) {
+        _searchDebounce?.cancel();
+        final label = suggestion.label.trim();
+        _searchController.text = label;
+        _searchController.selection = TextSelection.collapsed(
+          offset: label.length,
+        );
+        _searchFocusNode.unfocus();
+        _performSearch(label);
+      },
+      fieldViewBuilder: (context, textController, focusNode, onFieldSubmitted) {
+        return ValueListenableBuilder<TextEditingValue>(
+          valueListenable: _searchController,
+          builder: (context, value, _) {
+            return ValueListenableBuilder<bool>(
+              valueListenable: _searchRefreshingNotifier,
+              builder: (context, refreshing, _) {
+                final hasText = value.text.trim().isNotEmpty;
+                return Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    color: hasText
+                        ? Color.alphaBlend(
+                            accent.withValues(alpha: isDark ? 0.10 : 0.05),
+                            ThemeHelpers.cardBackgroundColor(context),
+                          )
+                        : ThemeHelpers.cardBackgroundColor(context),
+                    border: Border.all(
+                      color: hasText
+                          ? accent.withValues(alpha: isDark ? 0.55 : 0.38)
+                          : ThemeHelpers.borderColor(context),
+                      width: hasText ? 1.35 : 1,
                     ),
                   ),
-                  Icon(
-                    Icons.north_west_rounded,
-                    size: 14,
-                    color: ThemeHelpers.textSecondaryColor(context),
+                  child: Row(
+                    children: [
+                      const SizedBox(width: 12),
+                      if (refreshing)
+                        SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: accent,
+                          ),
+                        )
+                      else
+                        Icon(
+                          Icons.search_rounded,
+                          size: 20,
+                          color: hasText
+                              ? accent
+                              : ThemeHelpers.textSecondaryColor(context),
+                        ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: textController,
+                          focusNode: focusNode,
+                          textInputAction: TextInputAction.search,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            height: 1.2,
+                          ),
+                          decoration: InputDecoration(
+                            hintText:
+                                'Buscar por endereço, bairro, condomínio, lote, código…',
+                            hintStyle: theme.textTheme.bodySmall?.copyWith(
+                              color: ThemeHelpers.textSecondaryColor(context),
+                              fontWeight: FontWeight.w500,
+                            ),
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            isDense: true,
+                            contentPadding:
+                                const EdgeInsets.symmetric(vertical: 13),
+                          ),
+                          onChanged: _onSearchChanged,
+                          onSubmitted: (v) {
+                            _searchDebounce?.cancel();
+                            onFieldSubmitted();
+                            _performSearch(v);
+                          },
+                        ),
+                      ),
+                      if (hasText)
+                        IconButton(
+                          icon: Icon(
+                            Icons.clear_rounded,
+                            size: 18,
+                            color: ThemeHelpers.textSecondaryColor(context),
+                          ),
+                          visualDensity: VisualDensity.compact,
+                          tooltip: 'Limpar busca',
+                          onPressed: _clearHeaderSearch,
+                        )
+                      else
+                        const SizedBox(width: 4),
+                    ],
                   ),
-                ],
+                );
+              },
+            );
+          },
+        );
+      },
+      optionsViewBuilder: (context, onSelected, options) {
+        final items = options.toList();
+        if (items.isEmpty) return const SizedBox.shrink();
+
+        final theme = Theme.of(context);
+        final accent = _portfolioAccentColor(context);
+        final borderCol = ThemeHelpers.borderColor(context);
+
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            elevation: 6,
+            shadowColor: Colors.black.withValues(alpha: isDark ? 0.45 : 0.12),
+            color: ThemeHelpers.cardBackgroundColor(context),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: BorderSide(color: borderCol),
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: 280,
+                maxWidth: MediaQuery.sizeOf(context).width - 40,
+              ),
+              child: ListView.separated(
+                padding: EdgeInsets.zero,
+                shrinkWrap: true,
+                itemCount: items.length,
+                separatorBuilder: (_, _) => Divider(
+                  height: 1,
+                  color: borderCol.withValues(alpha: 0.5),
+                ),
+                itemBuilder: (context, index) {
+                  final s = items[index];
+                  return InkWell(
+                    onTap: () => onSelected(s),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 11,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _suggestionIcon(s.kind),
+                            size: 18,
+                            color: accent,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  s.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                if ((s.subtitle ?? '').trim().isNotEmpty)
+                                  Text(
+                                    s.subtitle!.trim(),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: ThemeHelpers
+                                          .textSecondaryColor(context),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          Icon(
+                            Icons.north_west_rounded,
+                            size: 14,
+                            color: ThemeHelpers.textSecondaryColor(context),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -2666,8 +2716,10 @@ class _PropertiesPageState extends State<PropertiesPage> {
     final horizontal = w < 360 ? 10.0 : 14.0;
     final all = _properties;
 
+    final showEmpty = all.isEmpty;
+
     return RefreshIndicator(
-      onRefresh: () => _loadProperties(refresh: true),
+      onRefresh: () => _reloadList(),
       color: AppColors.primary.primary,
       child: CustomScrollView(
         controller: _scrollController,
@@ -2676,22 +2728,42 @@ class _PropertiesPageState extends State<PropertiesPage> {
         ),
         slivers: [
           SliverToBoxAdapter(child: _buildPortfolioHeader(context)),
+          if (_errorMessage != null && _hasLoadedOnce)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(horizontal, 8, horizontal, 0),
+                child: _buildInlineListError(context),
+              ),
+            ),
           SliverToBoxAdapter(
             child: Padding(
               padding: EdgeInsets.fromLTRB(horizontal, 16, horizontal, 10),
-              child: _buildPropertiesListHeader(context, theme, all.length),
+              child: _buildPropertiesListHeader(
+                context,
+                theme,
+                showEmpty ? 0 : all.length,
+              ),
             ),
           ),
-          SliverPadding(
-            padding: EdgeInsets.fromLTRB(horizontal, 0, horizontal, 8),
-            sliver: SliverList.separated(
-              itemCount: all.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 10),
-              itemBuilder: (context, index) {
-                return _buildPropertyBrokerRow(context, theme, all[index]);
-              },
+          if (showEmpty)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(horizontal, 0, horizontal, 24),
+                child: _buildEmptyPropertiesState(context, theme),
+              ),
+            )
+          else
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(horizontal, 0, horizontal, 8),
+              sliver: SliverList.separated(
+                itemCount: all.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 10),
+                itemBuilder: (context, index) {
+                  return _buildPropertyBrokerRow(context, theme, all[index]);
+                },
+              ),
             ),
-          ),
           if (_isLoadingMore)
             SliverToBoxAdapter(
               child: Padding(
@@ -3116,7 +3188,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
         _filters = null;
       });
       _persistState();
-      _loadProperties(refresh: true);
+      _reloadList();
     }
 
     final eyebrow = obstructed ? 'Resultados' : 'Portfólio';
@@ -3604,7 +3676,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
         messenger.showSnackBar(
           const SnackBar(content: Text('Propriedade excluída com sucesso')),
         );
-        _loadProperties(refresh: true);
+        _reloadList();
       } else {
         messenger.showSnackBar(
           SnackBar(

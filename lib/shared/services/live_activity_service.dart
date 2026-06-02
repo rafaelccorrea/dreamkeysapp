@@ -57,12 +57,28 @@ class LiveActivityService {
 
     try {
       if (active != null && active.isActive) {
-        // Apenas tipos compatíveis com UserDefaults (String / num).
+        final now = DateTime.now();
+        final remaining = active.expiresAt.difference(now);
+        // Fase visual para a Ilha / lock screen (paridade com web).
+        final String statusPhase;
+        if (remaining.inSeconds <= 0) {
+          statusPhase = 'expired';
+        } else if (remaining.inMinutes < 5) {
+          statusPhase = 'critical';
+        } else if (remaining.inMinutes < 15) {
+          statusPhase = 'expiring';
+        } else {
+          statusPhase = 'active';
+        }
+
+        // Epoch em double evita overflow Int32 no UserDefaults do iOS.
         final data = <String, dynamic>{
           'status': 'active',
+          'statusPhase': statusPhase,
           'userName': active.user?.name ?? '',
-          'checkedInAtEpoch': active.checkedInAt.millisecondsSinceEpoch,
-          'expiresAtEpoch': active.expiresAt.millisecondsSinceEpoch,
+          'checkedInAtEpoch':
+              active.checkedInAt.millisecondsSinceEpoch.toDouble(),
+          'expiresAtEpoch': active.expiresAt.millisecondsSinceEpoch.toDouble(),
         };
         await _plugin.createOrUpdateActivity(_activityId, data);
       } else {
