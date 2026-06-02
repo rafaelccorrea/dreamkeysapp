@@ -10,6 +10,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/api_service.dart';
 import '../../../shared/services/check_in_service.dart';
+import '../../../shared/services/live_activity_service.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 
@@ -72,6 +73,10 @@ class _CheckInPageState extends State<CheckInPage> {
         _settings = settingsRes.data;
       }
     });
+
+    // Espelha o estado do check-in na Ilha Dinâmica (iOS 16.1+). No-op nas
+    // demais plataformas.
+    LiveActivityService.instance.syncCheckIn(_active);
   }
 
   Future<void> _refresh() async => _bootstrap();
@@ -132,6 +137,7 @@ class _CheckInPageState extends State<CheckInPage> {
         return;
       }
       setState(() => _active = res.data);
+      LiveActivityService.instance.syncCheckIn(res.data);
       final expires = res.data?.expiresAt;
       _snack(
         expires != null
@@ -158,6 +164,7 @@ class _CheckInPageState extends State<CheckInPage> {
       return;
     }
     setState(() => _active = null);
+    LiveActivityService.instance.endCheckIn();
     _snack('Check-out registrado');
   }
 

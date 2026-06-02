@@ -6,10 +6,11 @@ import '../../core/theme/theme_helpers.dart';
 import '../../features/chat/widgets/chat_floating_button.dart';
 import 'app_bottom_navigation.dart';
 import 'app_drawer.dart';
+import 'app_update_dialog.dart';
 import 'minimal_body_chrome.dart';
 
 /// Scaffold com cabeçalho minimalista no corpo (sem AppBar), drawer e bottom nav.
-class AppScaffold extends StatelessWidget {
+class AppScaffold extends StatefulWidget {
   final String title;
   final Widget body;
   final int currentBottomNavIndex;
@@ -32,6 +33,21 @@ class AppScaffold extends StatelessWidget {
     this.showBottomNavigation = true,
     this.showDrawer = true,
   });
+
+  @override
+  State<AppScaffold> createState() => _AppScaffoldState();
+}
+
+class _AppScaffoldState extends State<AppScaffold> {
+  @override
+  void initState() {
+    super.initState();
+    if (widget.showBottomNavigation) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) maybePromptAppUpdate(context);
+      });
+    }
+  }
 
   static bool _isMainScreen(String? routeName) {
     if (routeName == null) return false;
@@ -70,12 +86,13 @@ class AppScaffold extends StatelessWidget {
       },
       child: Scaffold(
         backgroundColor: Colors.transparent,
-        drawerEnableOpenDragGesture: !(disableDrawerEdgeDrag && showDrawer),
-        drawer: showDrawer
+        drawerEnableOpenDragGesture:
+            !(disableDrawerEdgeDrag && widget.showDrawer),
+        drawer: widget.showDrawer
             ? AppDrawer(
-                userName: userName,
-                userEmail: userEmail,
-                userAvatar: userAvatar,
+                userName: widget.userName,
+                userEmail: widget.userEmail,
+                userAvatar: widget.userAvatar,
                 currentRoute: currentRoute,
               )
             : null,
@@ -91,16 +108,18 @@ class AppScaffold extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 MinimalBodyChrome(
-                  title: title,
-                  showDrawer: showDrawer,
-                  onBack: showDrawer ? null : () => Navigator.of(context).pop(),
-                  actions: actions,
+                  title: widget.title,
+                  showDrawer: widget.showDrawer,
+                  onBack: widget.showDrawer
+                      ? null
+                      : () => Navigator.of(context).pop(),
+                  actions: widget.actions,
                 ),
                 Expanded(
                   child: Stack(
                     clipBehavior: Clip.none,
                     children: [
-                      Positioned.fill(child: body),
+                      Positioned.fill(child: widget.body),
                       if (currentRoute != AppRoutes.chat &&
                           currentRoute != null &&
                           !currentRoute.startsWith('/chat'))
@@ -112,7 +131,7 @@ class AppScaffold extends StatelessWidget {
             ),
           ],
         ),
-        bottomNavigationBar: showBottomNavigation
+        bottomNavigationBar: widget.showBottomNavigation
             ? AppBottomNavigation(
                 currentIndex: navIndex,
                 onTap: (index) {

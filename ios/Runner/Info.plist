@@ -70,5 +70,9 @@
 		<string>remote-notification</string>
 		<string>fetch</string>
 	</array>
+	<!-- Live Activities / Ilha Dinâmica (iOS 16.1+). Inofensivo em versões
+	     anteriores; a atividade só é criada quando a feature está ativa. -->
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 </dict>
 </plist>

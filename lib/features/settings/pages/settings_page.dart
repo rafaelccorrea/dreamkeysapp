@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../../../core/routes/app_routes.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -8,6 +9,8 @@ import '../../../../shared/services/profile_service.dart';
 import '../../../../shared/services/settings_service.dart';
 import '../../../../shared/services/theme_service.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
+import '../../../../shared/services/app_update_service.dart';
+import '../../../../shared/widgets/app_update_dialog.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
 
 /// Tela de Configurações — layout editorial aberto.
@@ -29,10 +32,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Profile? _profile;
   String? _errorMessage;
 
-  /// Versão exibida no rodapé. Mantida como constante local — alinhar com
-  /// `pubspec.yaml` quando subir versão. Evita criar dependência nova só pra
-  /// puxar via `PackageInfo`.
-  static const String _appVersion = '1.0.6';
+  String _appVersionLabel = '…';
 
   // ── Paleta editorial por seção ────────────────────────────────────────
   // Coerente, sem arco-íris. Cada seção tem 1 cor de identidade que tinge
@@ -41,11 +41,43 @@ class _SettingsPageState extends State<SettingsPage> {
   static const Color _toneEvents = Color(0xFFF59E0B); // âmbar
   static const Color _toneAppearance = Color(0xFF8B5CF6); // violeta
   static const Color _toneAccount = Color(0xFFDC2626); // vermelho marca
+  static const Color _toneApp = Color(0xFF059669); // verde — atualização
 
   @override
   void initState() {
     super.initState();
+    _loadPackageInfo();
     _loadData();
+  }
+
+  Future<void> _loadPackageInfo() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(() {
+        _appVersionLabel = '${info.version}+${info.buildNumber}';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _appVersionLabel = '—');
+    }
+  }
+
+  Future<void> _checkForAppUpdate() async {
+    final info =
+        await AppUpdateService.instance.checkForUpdate(force: true);
+    if (!mounted) return;
+    if (info != null) {
+      await showAppUpdateDialog(context, info);
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Você já está na versão mais recente disponível.'),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
   }
 
   Color _brand(BuildContext context) =>
@@ -198,6 +230,10 @@ class _SettingsPageState extends State<SettingsPage> {
                         _sectionSeparator(context),
                         const SizedBox(height: 22),
                         _buildAccountSection(context, theme, brand),
+                        const SizedBox(height: 28),
+                        _sectionSeparator(context),
+                        const SizedBox(height: 22),
+                        _buildAppUpdateSection(context, theme),
                         const SizedBox(height: 32),
                         _buildFooterSignature(context, theme, brand),
                       ],
@@ -872,6 +908,56 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  Widget _buildAppUpdateSection(BuildContext context, ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _SectionHeader(
+          eyebrow: 'APLICATIVO',
+          title: 'Atualização (TestFlight)',
+          subtitle:
+              'Versão instalada e atalho para instalar o build mais recente no TestFlight.',
+          tone: _toneApp,
+        ),
+        const SizedBox(height: 16),
+        _NavigationRow(
+          tone: _toneApp,
+          icon: Icons.info_outline_rounded,
+          title: 'Versão instalada',
+          subtitle: 'Build atual neste dispositivo.',
+          trailing: _ValueChip(label: _appVersionLabel, tone: _toneApp),
+          onTap: null,
+        ),
+        _rowDivider(context),
+        _NavigationRow(
+          tone: _toneApp,
+          icon: Icons.system_update_alt_rounded,
+          title: 'Verificar atualização',
+          subtitle: 'Compara com a versão publicada no servidor.',
+          trailing: Icon(
+            Icons.chevron_right_rounded,
+            size: 22,
+            color: ThemeHelpers.textSecondaryColor(context),
+          ),
+          onTap: _checkForAppUpdate,
+        ),
+        _rowDivider(context),
+        _NavigationRow(
+          tone: _toneApp,
+          icon: Icons.flight_takeoff_rounded,
+          title: 'Abrir TestFlight',
+          subtitle: 'Instala ou atualiza o app beta direto na loja de testes.',
+          trailing: Icon(
+            Icons.open_in_new_rounded,
+            size: 18,
+            color: ThemeHelpers.textSecondaryColor(context),
+          ),
+          onTap: () => openTestFlightUpdateUrl(),
+        ),
+      ],
+    );
+  }
+
   // ──────────────────────────────────────────────────────────────────────
   // FOOTER — assinatura editorial
   // ──────────────────────────────────────────────────────────────────────
@@ -937,7 +1023,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(width: 12),
               Text(
-                'v$_appVersion',
+                'v$_appVersionLabel',
                 style: theme.textTheme.labelMedium?.copyWith(
                   color: brand,
                   fontWeight: FontWeight.w900,

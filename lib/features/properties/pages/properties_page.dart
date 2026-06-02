@@ -114,6 +114,13 @@ class _PropertiesPageState extends State<PropertiesPage> {
   Timer? _searchDebounce;
   final ScrollController _scrollController = ScrollController();
 
+  // Autocomplete de localização (paridade com web): dropdown de sugestões.
+  final FocusNode _searchFocusNode = FocusNode();
+  Timer? _suggestionDebounce;
+  List<PropertyLocationSuggestion> _locationSuggestions = const [];
+  bool _loadingSuggestions = false;
+  bool _showSuggestions = false;
+
   int _localDraftCount = 0;
 
   /// Chave usada para guardar/restaurar estado desta tela quando o usuário
@@ -133,7 +140,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
   void dispose() {
     _persistState();
     _searchDebounce?.cancel();
+    _suggestionDebounce?.cancel();
     _searchController.dispose();
+    _searchFocusNode.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
@@ -2356,20 +2365,79 @@ class _PropertiesPageState extends State<PropertiesPage> {
       if (trimmed == _searchQuery.trim()) return;
       _performSearch(trimmed);
     });
+    _onSuggestionInputChanged(value);
   }
 
   void _onSearchSubmitted(String value) {
     _searchDebounce?.cancel();
+    _hideSuggestions();
     _performSearch(value.trim());
   }
 
   void _clearHeaderSearch() {
     _searchDebounce?.cancel();
     _searchController.clear();
+    _hideSuggestions();
     if (_searchQuery.isEmpty) return;
     setState(() => _searchQuery = '');
     _persistState();
     _loadProperties(refresh: true);
+  }
+
+  // ─── Autocomplete de localização ────────────────────────────────────────
+
+  void _onSuggestionInputChanged(String value) {
+    _suggestionDebounce?.cancel();
+    final q = value.trim();
+    if (q.length < 2) {
+      _hideSuggestions();
+      return;
+    }
+    _suggestionDebounce = Timer(const Duration(milliseconds: 300), () {
+      _fetchSuggestions(q);
+    });
+  }
+
+  Future<void> _fetchSuggestions(String query) async {
+    if (!mounted) return;
+    setState(() {
+      _loadingSuggestions = true;
+      _showSuggestions = true;
+    });
+    final results = await _propertyService.getLocationSuggestions(query);
+    if (!mounted) return;
+    // Ignora resposta atrasada se o texto já mudou para algo curto/vazio.
+    if (_searchController.text.trim().length < 2) {
+      _hideSuggestions();
+      return;
+    }
+    setState(() {
+      _locationSuggestions = results;
+      _loadingSuggestions = false;
+      _showSuggestions = results.isNotEmpty;
+    });
+  }
+
+  void _hideSuggestions() {
+    _suggestionDebounce?.cancel();
+    if (!_showSuggestions && _locationSuggestions.isEmpty) return;
+    setState(() {
+      _showSuggestions = false;
+      _locationSuggestions = const [];
+      _loadingSuggestions = false;
+    });
+  }
+
+  void _applyLocationSuggestion(PropertyLocationSuggestion suggestion) {
+    final label = suggestion.label.trim();
+    _searchDebounce?.cancel();
+    _searchController.text = label;
+    _searchController.selection = TextSelection.fromPosition(
+      TextPosition(offset: label.length),
+    );
+    _searchFocusNode.unfocus();
+    _hideSuggestions();
+    _performSearch(label);
   }
 
   /// Campo de busca livre no header — paridade com web `PropertiesPage`.
@@ -2380,7 +2448,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
     final accent = _portfolioAccentColor(context);
     final hasText = _searchController.text.trim().isNotEmpty;
 
-    return Container(
+    final field = Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
         color: hasText
@@ -2410,6 +2478,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
           Expanded(
             child: TextField(
               controller: _searchController,
+              focusNode: _searchFocusNode,
               textInputAction: TextInputAction.search,
               style: theme.textTheme.bodyMedium?.copyWith(
                 fontWeight: FontWeight.w700,
@@ -2451,6 +2520,143 @@ class _PropertiesPageState extends State<PropertiesPage> {
         ],
       ),
     );
+
+    if (!_showSuggestions) return field;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        field,
+        const SizedBox(height: 6),
+        _buildSuggestionsPanel(context),
+      ],
+    );
+  }
+
+  Widget _buildSuggestionsPanel(BuildContext context) {
+    final theme = Theme.of(context);
+    final accent = _portfolioAccentColor(context);
+
+    if (_loadingSuggestions && _locationSuggestions.isEmpty) {
+      return Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: ThemeHelpers.cardBackgroundColor(context),
+          border: Border.all(color: ThemeHelpers.borderColor(context)),
+        ),
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(accent),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              'Buscando sugestões…',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: ThemeHelpers.textSecondaryColor(context),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_locationSuggestions.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: ThemeHelpers.cardBackgroundColor(context),
+        border: Border.all(color: ThemeHelpers.borderColor(context)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      constraints: const BoxConstraints(maxHeight: 300),
+      child: ListView.separated(
+        shrinkWrap: true,
+        padding: EdgeInsets.zero,
+        itemCount: _locationSuggestions.length,
+        separatorBuilder: (_, __) => Divider(
+          height: 1,
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+        ),
+        itemBuilder: (context, index) {
+          final s = _locationSuggestions[index];
+          return InkWell(
+            onTap: () => _applyLocationSuggestion(s),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 11,
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _suggestionIcon(s.kind),
+                    size: 18,
+                    color: accent,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          s.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        if ((s.subtitle ?? '').trim().isNotEmpty)
+                          Text(
+                            s.subtitle!.trim(),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: ThemeHelpers.textSecondaryColor(context),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    Icons.north_west_rounded,
+                    size: 14,
+                    color: ThemeHelpers.textSecondaryColor(context),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  IconData _suggestionIcon(PropertyLocationSuggestionKind kind) {
+    switch (kind) {
+      case PropertyLocationSuggestionKind.condominium:
+        return Icons.apartment_rounded;
+      case PropertyLocationSuggestionKind.street:
+        return Icons.signpost_outlined;
+      case PropertyLocationSuggestionKind.neighborhood:
+        return Icons.location_city_rounded;
+      case PropertyLocationSuggestionKind.empreendimento:
+        return Icons.business_rounded;
+      case PropertyLocationSuggestionKind.generic:
+        return Icons.search_rounded;
+    }
   }
 
   /// situação, título, endereço, specs e preço — tudo visível de relance.

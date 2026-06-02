@@ -946,6 +946,65 @@ class PropertiesListResponse {
   }
 }
 
+/// Tipo de sugestão de localização (espelha o web).
+enum PropertyLocationSuggestionKind {
+  condominium,
+  street,
+  neighborhood,
+  empreendimento,
+  generic;
+
+  static PropertyLocationSuggestionKind fromString(String? value) {
+    switch (value) {
+      case 'condominium':
+        return PropertyLocationSuggestionKind.condominium;
+      case 'street':
+        return PropertyLocationSuggestionKind.street;
+      case 'neighborhood':
+        return PropertyLocationSuggestionKind.neighborhood;
+      case 'empreendimento':
+        return PropertyLocationSuggestionKind.empreendimento;
+      default:
+        return PropertyLocationSuggestionKind.generic;
+    }
+  }
+}
+
+/// Sugestão de localização retornada pelo backend para o autocomplete.
+class PropertyLocationSuggestion {
+  final PropertyLocationSuggestionKind kind;
+  final String label;
+  final String? subtitle;
+  final String? condominiumId;
+  final String? street;
+  final String? neighborhood;
+  final String? empreendimentoId;
+
+  const PropertyLocationSuggestion({
+    required this.kind,
+    required this.label,
+    this.subtitle,
+    this.condominiumId,
+    this.street,
+    this.neighborhood,
+    this.empreendimentoId,
+  });
+
+  factory PropertyLocationSuggestion.fromJson(Map<String, dynamic> json) {
+    return PropertyLocationSuggestion(
+      kind: PropertyLocationSuggestionKind.fromString(
+        json['kind']?.toString(),
+      ),
+      label: json['label']?.toString() ?? '',
+      subtitle: json['subtitle']?.toString(),
+      condominiumId: json['condominiumId']?.toString(),
+      street: json['street']?.toString(),
+      neighborhood: json['neighborhood']?.toString(),
+      empreendimentoId: json['empreendimentoId']?.toString(),
+    );
+  }
+}
+
 /// Filtros de propriedades
 /// Escopo "carteira" do corretor — paridade com web `portfolioScope`.
 /// O backend aceita este parâmetro para filtrar imóveis por uma combinação
@@ -1764,6 +1823,78 @@ class PropertyService {
         message: 'Erro de conexão: ${e.toString()}',
         statusCode: 0,
       );
+    }
+  }
+
+  /// Republica no site um imóvel que já passou pela publicação e saiu por
+  /// algum motivo (manutenção, voltou a rascunho, etc.). Volta para
+  /// `AVAILABLE` + ativo + visível no site. As validações finais ficam no
+  /// backend (mesma regra do web: `POST /properties/:id/republish`).
+  Future<ApiResponse<Property>> republishOnSite(String id) async {
+    debugPrint('🏠 [PROPERTY_SERVICE] Republicando no site: $id');
+    try {
+      final response = await _apiService.post<Map<String, dynamic>>(
+        '/properties/$id/republish',
+      );
+
+      if (response.success && response.data != null) {
+        try {
+          final property = Property.fromJson(response.data!);
+          debugPrint('✅ [PROPERTY_SERVICE] Imóvel republicado no site: $id');
+          return ApiResponse.success(
+            data: property,
+            statusCode: response.statusCode,
+          );
+        } catch (e) {
+          return ApiResponse.error(
+            message: 'Erro ao processar dados: ${e.toString()}',
+            statusCode: response.statusCode,
+            data: response.error,
+          );
+        }
+      }
+
+      return ApiResponse.error(
+        message: response.message ?? 'Não foi possível republicar o imóvel.',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [PROPERTY_SERVICE] Erro ao republicar: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Sugestões de localização para o autocomplete da busca — paridade com o
+  /// web (`GET /properties/search/location-suggestions`). Retorna lista vazia
+  /// silenciosamente em qualquer falha (autocomplete nunca quebra a tela).
+  Future<List<PropertyLocationSuggestion>> getLocationSuggestions(
+    String query, {
+    int limit = 8,
+  }) async {
+    final q = query.trim();
+    if (q.length < 2) return const [];
+    try {
+      final response = await _apiService.get<Map<String, dynamic>>(
+        '/properties/search/location-suggestions',
+        queryParameters: {'q': q, 'limit': '$limit'},
+      );
+      if (response.success && response.data != null) {
+        final raw = response.data!['suggestions'];
+        if (raw is List) {
+          return raw
+              .whereType<Map<String, dynamic>>()
+              .map(PropertyLocationSuggestion.fromJson)
+              .toList();
+        }
+      }
+      return const [];
+    } catch (e) {
+      debugPrint('❌ [PROPERTY_SERVICE] Erro ao buscar sugestões: $e');
+      return const [];
     }
   }
 

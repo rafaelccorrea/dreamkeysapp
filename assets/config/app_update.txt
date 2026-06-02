@@ -1,0 +1,7 @@
+# Versão mínima recomendada para iOS (TestFlight). Atualize ao publicar novo build.
+# Linha 1: versão marketing (ex. 1.0.6)
+# Linha 2: build number CFBundleVersion (ex. 21) — deve ser > do instalado para avisar
+# Linha 3: URL pública do TestFlight (opcional; vazio = link padrão no código)
+1.0.6
+21
+https://testflight.apple.com/join/V5dUfzYF

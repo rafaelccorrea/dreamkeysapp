@@ -10,6 +10,8 @@ import '../../../../shared/widgets/shimmer_image.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../widgets/property_public_toggle.dart';
+import '../models/property_activity_models.dart';
+import '../services/property_activity_service.dart';
 import '../../matches/widgets/matches_badge.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../../documents/services/document_service.dart';
@@ -34,28 +36,40 @@ final _currencyFormatter = NumberFormat.currency(
 );
 
 /// Aba interna da ficha de imóvel.
-enum _DetailsTab { overview, commercial, management }
+enum _DetailsTab { details, activity, performance }
 
 extension on _DetailsTab {
   String get label {
     switch (this) {
-      case _DetailsTab.overview:
-        return 'Visão geral';
-      case _DetailsTab.commercial:
-        return 'Comercial';
-      case _DetailsTab.management:
-        return 'Gestão';
+      case _DetailsTab.details:
+        return 'Detalhes';
+      case _DetailsTab.activity:
+        return 'Atividades';
+      case _DetailsTab.performance:
+        return 'Desempenho';
     }
   }
 
   IconData get icon {
     switch (this) {
-      case _DetailsTab.overview:
-        return Icons.storefront_outlined;
-      case _DetailsTab.commercial:
-        return Icons.handshake_outlined;
-      case _DetailsTab.management:
-        return Icons.fact_check_outlined;
+      case _DetailsTab.details:
+        return Icons.description_outlined;
+      case _DetailsTab.activity:
+        return Icons.history_rounded;
+      case _DetailsTab.performance:
+        return Icons.insights_rounded;
+    }
+  }
+
+  /// Acento da aba — mesmas cores do web (`propertySplitTabs.ts`).
+  Color get tone {
+    switch (this) {
+      case _DetailsTab.details:
+        return const Color(0xFF6366F1);
+      case _DetailsTab.activity:
+        return const Color(0xFFD97706);
+      case _DetailsTab.performance:
+        return const Color(0xFF059669);
     }
   }
 }
@@ -105,7 +119,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   bool _isLoadingKeys = false;
 
   /// Aba interna ativa: Visão geral, Comercial ou Gestão.
-  _DetailsTab _activeTab = _DetailsTab.overview;
+  _DetailsTab _activeTab = _DetailsTab.details;
 
   /// Controlador da rolagem — controla FAB "voltar ao topo".
   final ScrollController _detailsScrollController = ScrollController();
@@ -267,7 +281,41 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return _property?.status == PropertyStatus.sold;
   }
 
+  /// Perfis elevados (master/admin/manager) podem republicar no site — mesma
+  /// regra do web (`canChangePropertyStatusElevated`).
+  bool get _canChangePropertyStatusElevated {
+    final role = ModuleAccessService.instance.userRole?.toLowerCase() ?? '';
+    return role == 'master' || role == 'admin' || role == 'manager';
+  }
+
+  /// Mostra o botão "Republicar no site" — espelha o web:
+  /// `canChangePropertyStatusElevated && !canUndoSold`.
+  bool get _canRepublishOnSite =>
+      _canChangePropertyStatusElevated && !_canUndoSold;
+
   bool _undoSoldLoading = false;
+  bool _republishLoading = false;
+
+  // ─── Aba Atividades (histórico + atualizações) ──────────────────────────
+  final PropertyActivityService _activityService =
+      PropertyActivityService.instance;
+  List<PropertyHistoryEntry> _history = const [];
+  bool _loadingHistory = false;
+  bool _historyLoaded = false;
+  PropertyUpdatesResponse _updates = PropertyUpdatesResponse.empty;
+  bool _loadingUpdates = false;
+  bool _updatesLoaded = false;
+  final TextEditingController _updateComposer = TextEditingController();
+  bool _submittingUpdate = false;
+
+  // ─── Aba Desempenho (engajamento + observações) ─────────────────────────
+  PropertyEngagementStats? _engagement;
+  List<PropertyEngagementByChannel> _engagementByChannel = const [];
+  bool _loadingEngagement = false;
+  bool _engagementLoaded = false;
+  bool _editingNotes = false;
+  final TextEditingController _notesController = TextEditingController();
+  bool _savingNotes = false;
 
   @override
   void initState() {
@@ -432,6 +480,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   @override
   void dispose() {
     _imagePageController.dispose();
+    _updateComposer.dispose();
+    _notesController.dispose();
     _detailsScrollController
       ..removeListener(_handleDetailsScroll)
       ..dispose();
@@ -574,6 +624,162 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         setState(() => _undoSoldLoading = false);
       }
     }
+  }
+
+  Future<void> _republishOnSite() async {
+    if (!_canRepublishOnSite || _republishLoading) return;
+    final property = _property;
+    if (property == null || property.id.trim().isEmpty) return;
+
+    setState(() => _republishLoading = true);
+    try {
+      final response = await _propertyService.republishOnSite(property.id);
+      if (!mounted) return;
+
+      if (response.success && response.data != null) {
+        setState(() => _property = response.data);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Imóvel republicado no site.'),
+            backgroundColor: AppColors.status.success,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              response.message ?? 'Não foi possível republicar o imóvel.',
+            ),
+            backgroundColor: AppColors.status.error,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro: ${e.toString()}'),
+            backgroundColor: AppColors.status.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _republishLoading = false);
+      }
+    }
+  }
+
+  void _onTabSelected(_DetailsTab tab) {
+    setState(() => _activeTab = tab);
+    if (tab == _DetailsTab.activity) _ensureActivityLoaded();
+    if (tab == _DetailsTab.performance) _ensurePerformanceLoaded();
+  }
+
+  Future<void> _ensureActivityLoaded() async {
+    final id = _property?.id ?? widget.propertyId;
+    if (id.trim().isEmpty) return;
+
+    if (!_historyLoaded && !_loadingHistory) {
+      setState(() => _loadingHistory = true);
+      final h = await _activityService.getHistory(id);
+      if (mounted) {
+        setState(() {
+          _history = h;
+          _loadingHistory = false;
+          _historyLoaded = true;
+        });
+      }
+    }
+    if (!_updatesLoaded && !_loadingUpdates) {
+      setState(() => _loadingUpdates = true);
+      final u = await _activityService.getUpdates(id);
+      if (mounted) {
+        setState(() {
+          _updates = u;
+          _loadingUpdates = false;
+          _updatesLoaded = true;
+        });
+      }
+    }
+  }
+
+  Future<void> _ensurePerformanceLoaded() async {
+    if (_engagementLoaded || _loadingEngagement) return;
+    final id = _property?.id ?? widget.propertyId;
+    if (id.trim().isEmpty) return;
+    setState(() => _loadingEngagement = true);
+    final stats = await _activityService.getEngagement(id);
+    final byChannel = await _activityService.getEngagementByChannel(id);
+    if (mounted) {
+      setState(() {
+        _engagement = stats;
+        _engagementByChannel = byChannel;
+        _loadingEngagement = false;
+        _engagementLoaded = true;
+      });
+    }
+  }
+
+  Future<void> _submitPropertyUpdate() async {
+    final content = _updateComposer.text.trim();
+    if (content.isEmpty || _submittingUpdate) return;
+    final id = _property?.id ?? widget.propertyId;
+    if (id.trim().isEmpty) return;
+
+    setState(() => _submittingUpdate = true);
+    final created = await _activityService.createUpdate(id, content);
+    if (!mounted) return;
+    setState(() {
+      _submittingUpdate = false;
+      if (created != null) {
+        _updateComposer.clear();
+        _updates = PropertyUpdatesResponse(
+          data: [created, ..._updates.data],
+          total: _updates.total + 1,
+          page: _updates.page,
+          limit: _updates.limit,
+        );
+      }
+    });
+    if (created == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Não foi possível registrar a atualização.'),
+          backgroundColor: AppColors.status.error,
+        ),
+      );
+    }
+  }
+
+  Future<void> _saveInternalNotes() async {
+    final id = _property?.id ?? widget.propertyId;
+    if (id.trim().isEmpty || _savingNotes) return;
+    setState(() => _savingNotes = true);
+    final text = _notesController.text.trim();
+    final response = await _propertyService.updateProperty(
+      id,
+      {'internalNotes': text.isEmpty ? null : text},
+    );
+    if (!mounted) return;
+    setState(() {
+      _savingNotes = false;
+      if (response.success) {
+        _editingNotes = false;
+        if (response.data != null) _property = response.data;
+      }
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          response.success
+              ? 'Observações salvas.'
+              : (response.message ?? 'Não foi possível salvar.'),
+        ),
+        backgroundColor:
+            response.success ? AppColors.status.success : AppColors.status.error,
+      ),
+    );
   }
 
   void _debugLogPropertyImageDiagnostics(
@@ -2564,7 +2770,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ? AppColors.border.borderDarkMode
         : AppColors.border.border;
     final muted = ThemeHelpers.textSecondaryColor(context);
-    final accent = isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
@@ -2578,22 +2783,23 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         child: Row(
           children: _DetailsTab.values.map((tab) {
             final active = tab == _activeTab;
+            final tabAccent = tab.tone;
             return Expanded(
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(
                   borderRadius: BorderRadius.circular(12),
-                  onTap: () => setState(() => _activeTab = tab),
+                  onTap: () => _onTabSelected(tab),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 180),
                     padding: const EdgeInsets.symmetric(vertical: 10),
                     decoration: BoxDecoration(
-                      color: active ? accent : null,
+                      color: active ? tabAccent : null,
                       borderRadius: BorderRadius.circular(12),
                       boxShadow: active
                           ? [
                               BoxShadow(
-                                color: accent.withValues(alpha: 0.35),
+                                color: tabAccent.withValues(alpha: 0.35),
                                 blurRadius: 10,
                                 offset: const Offset(0, 3),
                               ),
@@ -2640,13 +2846,32 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     Property property,
   ) {
     switch (_activeTab) {
-      case _DetailsTab.overview:
-        return _buildOverviewTab(context, theme, property);
-      case _DetailsTab.commercial:
-        return _buildCommercialTab(context, theme, property);
-      case _DetailsTab.management:
-        return _buildManagementTab(context, theme, property);
+      case _DetailsTab.details:
+        return _buildDetailsTab(context, theme, property);
+      case _DetailsTab.activity:
+        return _buildActivityTab(context, theme, property);
+      case _DetailsTab.performance:
+        return _buildPerformanceTab(context, theme, property);
     }
+  }
+
+  /// Aba **Detalhes** — reúne cadastro, comercial e gestão (paridade com o web,
+  /// onde "Detalhes" concentra tudo do imóvel). Reusa os blocos existentes.
+  Widget _buildDetailsTab(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildOverviewTab(context, theme, property),
+        const SizedBox(height: 22),
+        _buildCommercialTab(context, theme, property),
+        const SizedBox(height: 22),
+        _buildManagementTab(context, theme, property),
+      ],
+    );
   }
 
   Widget _buildOverviewTab(
@@ -2657,27 +2882,34 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildSectionHeader(theme, 'Descrição', Icons.notes_outlined),
+        _buildSectionHeader(theme, 'Descrição', Icons.notes_outlined,
+            accentOverride: const Color(0xFF6366F1)),
         const SizedBox(height: 10),
         _buildDescriptionCard(context, theme, property),
         const SizedBox(height: 22),
-        _buildSectionHeader(theme, 'Características', Icons.tune_rounded),
+        _buildSectionHeader(theme, 'Características', Icons.tune_rounded,
+            accentOverride: const Color(0xFF6366F1)),
         const SizedBox(height: 10),
         _buildCharacteristicsCard(context, theme, property),
         if (property.condominiumFee != null || property.iptu != null) ...[
           const SizedBox(height: 22),
-          _buildSectionHeader(theme, 'Valores adicionais', Icons.account_balance_wallet_outlined),
+          _buildSectionHeader(theme, 'Valores adicionais',
+              Icons.account_balance_wallet_outlined,
+              accentOverride: const Color(0xFF059669)),
           const SizedBox(height: 10),
           _buildAdditionalValuesCard(context, theme, property),
         ],
         if (property.features.isNotEmpty) ...[
           const SizedBox(height: 22),
-          _buildSectionHeader(theme, 'Recursos e comodidades', Icons.auto_awesome_outlined),
+          _buildSectionHeader(theme, 'Recursos e comodidades',
+              Icons.auto_awesome_outlined,
+              accentOverride: const Color(0xFF8B5CF6)),
           const SizedBox(height: 10),
           _buildFeaturesSection(context, theme, property.features),
         ],
         const SizedBox(height: 22),
-        _buildSectionHeader(theme, 'Localização', Icons.map_outlined),
+        _buildSectionHeader(theme, 'Localização', Icons.map_outlined,
+            accentOverride: const Color(0xFFEF4444)),
         const SizedBox(height: 10),
         _buildMapSection(context, theme, property),
       ],
@@ -2694,16 +2926,20 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildSectionHeader(theme, 'Status da chave', Icons.vpn_key_outlined),
+        _buildSectionHeader(theme, 'Status da chave', Icons.vpn_key_outlined,
+            accentOverride: const Color(0xFFF59E0B)),
         const SizedBox(height: 10),
         _buildKeyStatusSection(context, theme, property),
         const SizedBox(height: 22),
-        _buildSectionHeader(theme, 'Clientes vinculados', Icons.people_alt_outlined),
+        _buildSectionHeader(
+            theme, 'Clientes vinculados', Icons.people_alt_outlined,
+            accentOverride: const Color(0xFF0EA5E9)),
         const SizedBox(height: 10),
         _buildClientsSection(context, theme, property),
         if (hasOffers) ...[
           const SizedBox(height: 22),
-          _buildSectionHeader(theme, 'Ofertas', Icons.request_quote_outlined),
+          _buildSectionHeader(theme, 'Ofertas', Icons.request_quote_outlined,
+              accentOverride: const Color(0xFF059669)),
           const SizedBox(height: 10),
           _buildOffersSection(context, theme, property),
         ],
@@ -2719,19 +2955,23 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildSectionHeader(theme, 'Despesas', Icons.payments_outlined),
+        _buildSectionHeader(theme, 'Despesas', Icons.payments_outlined,
+            accentOverride: const Color(0xFF64748B)),
         const SizedBox(height: 10),
         _buildExpensesSection(context, theme, property),
         const SizedBox(height: 22),
-        _buildSectionHeader(theme, 'Checklists', Icons.checklist_rtl_rounded),
+        _buildSectionHeader(theme, 'Checklists', Icons.checklist_rtl_rounded,
+            accentOverride: const Color(0xFF0891B2)),
         const SizedBox(height: 10),
         _buildChecklistsSection(context, theme, property),
         const SizedBox(height: 22),
-        _buildSectionHeader(theme, 'Documentos', Icons.folder_open_outlined),
+        _buildSectionHeader(theme, 'Documentos', Icons.folder_open_outlined,
+            accentOverride: const Color(0xFF0284C7)),
         const SizedBox(height: 10),
         _buildDocumentsSection(context, theme, property),
         const SizedBox(height: 22),
-        _buildSectionHeader(theme, 'Publicação no site', Icons.public_outlined),
+        _buildSectionHeader(theme, 'Publicação no site', Icons.public_outlined,
+            accentOverride: const Color(0xFF059669)),
         const SizedBox(height: 10),
         PropertyPublicToggle(
           propertyId: property.id,
@@ -2749,13 +2989,538 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             );
           },
         ),
+        if (_canRepublishOnSite) ...[
+          const SizedBox(height: 12),
+          _buildRepublishButton(context, theme),
+        ],
       ],
     );
   }
 
-  Widget _buildSectionHeader(ThemeData theme, String title, IconData icon) {
+  /// Botão "Republicar no site" — perfis elevados (master/admin/manager).
+  /// Volta o imóvel para Disponível, ativo e visível no site (backend valida).
+  Widget _buildRepublishButton(BuildContext context, ThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
-    final accent = isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    final accent =
+        isDark ? AppColors.status.successDarkMode : AppColors.status.success;
+
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: _republishLoading ? null : _republishOnSite,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: accent,
+          side: BorderSide(color: accent.withValues(alpha: 0.5)),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+        icon: _republishLoading
+            ? SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(accent),
+                ),
+              )
+            : const Icon(Icons.published_with_changes_rounded, size: 20),
+        label: Text(
+          _republishLoading ? 'Republicando...' : 'Republicar no site',
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+      ),
+    );
+  }
+
+  String _formatActivityDateTime(DateTime dt) {
+    final d = dt.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(d.day)}/${two(d.month)}/${d.year} ${two(d.hour)}:${two(d.minute)}';
+  }
+
+  // ─── Aba ATIVIDADES (histórico + atualizações) ──────────────────────────
+  Widget _buildActivityTab(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    const accent = Color(0xFFD97706);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader(theme, 'Atualizações', Icons.campaign_outlined,
+            accentOverride: accent),
+        const SizedBox(height: 10),
+        _buildUpdateComposer(context, theme, accent),
+        const SizedBox(height: 14),
+        if (_loadingUpdates && !_updatesLoaded)
+          _buildInlineLoader(context, accent)
+        else if (_updates.data.isEmpty)
+          _buildActivityEmpty(context, theme, 'Nenhuma atualização ainda.')
+        else
+          ..._updates.data.map((u) => _buildUpdateTile(context, theme, u)),
+        const SizedBox(height: 26),
+        _buildSectionHeader(theme, 'Histórico', Icons.history_rounded,
+            accentOverride: const Color(0xFF475569)),
+        const SizedBox(height: 10),
+        if (_loadingHistory && !_historyLoaded)
+          _buildInlineLoader(context, accent)
+        else if (_history.isEmpty)
+          _buildActivityEmpty(context, theme, 'Sem histórico registrado.')
+        else
+          ..._history.map((h) => _buildHistoryTile(context, theme, h)),
+      ],
+    );
+  }
+
+  Widget _buildInlineLoader(BuildContext context, Color accent) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 18),
+      child: Center(
+        child: SizedBox(
+          width: 22,
+          height: 22,
+          child: CircularProgressIndicator(
+            strokeWidth: 2.4,
+            valueColor: AlwaysStoppedAnimation<Color>(accent),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActivityEmpty(
+    BuildContext context,
+    ThemeData theme,
+    String message,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      child: Text(
+        message,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: ThemeHelpers.textSecondaryColor(context),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUpdateComposer(
+    BuildContext context,
+    ThemeData theme,
+    Color accent,
+  ) {
+    return Container(
+      decoration: BoxDecoration(
+        color: ThemeHelpers.cardBackgroundColor(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: ThemeHelpers.borderColor(context)),
+      ),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          TextField(
+            controller: _updateComposer,
+            maxLines: 3,
+            minLines: 1,
+            maxLength: 2000,
+            decoration: InputDecoration(
+              hintText: 'Escreva uma atualização sobre o imóvel…',
+              border: InputBorder.none,
+              counterText: '',
+              isDense: true,
+            ),
+          ),
+          const SizedBox(height: 6),
+          FilledButton.icon(
+            onPressed: _submittingUpdate ? null : _submitPropertyUpdate,
+            style: FilledButton.styleFrom(
+              backgroundColor: accent,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+            ),
+            icon: _submittingUpdate
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : const Icon(Icons.send_rounded, size: 16),
+            label: const Text('Publicar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUpdateTile(
+    BuildContext context,
+    ThemeData theme,
+    PropertyUpdateEntry update,
+  ) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: ThemeHelpers.cardBackgroundColor(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: ThemeHelpers.borderColor(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${update.user?.name ?? 'Sistema'} · ${_formatActivityDateTime(update.createdAt)}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: muted,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: muted.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  update.isSystem ? 'Automático' : 'Manual',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: muted,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(update.content, style: theme.textTheme.bodyMedium),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHistoryTile(
+    BuildContext context,
+    ThemeData theme,
+    PropertyHistoryEntry entry,
+  ) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    const accent = Color(0xFF475569);
+    final title = propertyHistoryEventLabel(entry.event);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Column(
+            children: [
+              Container(
+                width: 10,
+                height: 10,
+                margin: const EdgeInsets.only(top: 4),
+                decoration: BoxDecoration(
+                  color: accent,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              Container(
+                width: 2,
+                height: 26,
+                color: ThemeHelpers.borderColor(context),
+              ),
+            ],
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if ((entry.description ?? '').trim().isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      entry.description!.trim(),
+                      style: theme.textTheme.bodySmall?.copyWith(color: muted),
+                    ),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Text(
+                    '${entry.user?.name != null ? '${entry.user!.name} · ' : ''}${_formatActivityDateTime(entry.createdAt)}',
+                    style: theme.textTheme.labelSmall?.copyWith(color: muted),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Aba DESEMPENHO (engajamento + observações) ─────────────────────────
+  Widget _buildPerformanceTab(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    const accent = Color(0xFF059669);
+    final published = property.isAvailableForSite == true;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader(theme, 'Engajamento no site', Icons.insights_rounded,
+            accentOverride: accent),
+        const SizedBox(height: 10),
+        if (!published)
+          _buildActivityEmpty(
+            context,
+            theme,
+            'Imóvel fora do site — sem métricas de engajamento.',
+          )
+        else if (_loadingEngagement && !_engagementLoaded)
+          _buildInlineLoader(context, accent)
+        else ...[
+          _buildEngagementMetrics(context, theme),
+          if (_engagementByChannel.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            _buildEngagementByChannel(context, theme),
+          ],
+        ],
+        const SizedBox(height: 26),
+        _buildSectionHeader(theme, 'Observações internas', Icons.lock_outline,
+            accentOverride: const Color(0xFFA855F7)),
+        const SizedBox(height: 10),
+        _buildInternalNotes(context, theme, property),
+      ],
+    );
+  }
+
+  Widget _buildEngagementMetrics(BuildContext context, ThemeData theme) {
+    final stats = _engagement;
+    final items = <(String, int, IconData)>[
+      ('Visualizações', stats?.views ?? 0, Icons.visibility_outlined),
+      ('WhatsApp', stats?.whatsappClicks ?? 0, Icons.chat_outlined),
+      ('Telefone', stats?.phoneClicks ?? 0, Icons.call_outlined),
+      ('Impressões', stats?.prints ?? 0, Icons.bar_chart_rounded),
+    ];
+    return GridView.count(
+      crossAxisCount: 2,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      crossAxisSpacing: 10,
+      mainAxisSpacing: 10,
+      childAspectRatio: 2.4,
+      children: items.map((it) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: ThemeHelpers.cardBackgroundColor(context),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: ThemeHelpers.borderColor(context)),
+          ),
+          child: Row(
+            children: [
+              Icon(it.$3, size: 20, color: const Color(0xFF059669)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      '${it.$2}',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    Text(
+                      it.$1,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: ThemeHelpers.textSecondaryColor(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildEngagementByChannel(BuildContext context, ThemeData theme) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Por origem — últimos 30 dias',
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: muted,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        ..._engagementByChannel.map((ch) {
+          final parts = <String>[
+            '${ch.views} visualizações',
+            if (ch.whatsappClicks > 0) '${ch.whatsappClicks} WA',
+            if (ch.phoneClicks > 0) '${ch.phoneClicks} tel',
+            if (ch.emailClicks > 0) '${ch.emailClicks} e-mail',
+            if (ch.favorites > 0) '${ch.favorites} fav',
+          ];
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.public, size: 16, color: Color(0xFF059669)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        ch.label,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        parts.join(' · '),
+                        style:
+                            theme.textTheme.bodySmall?.copyWith(color: muted),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  Widget _buildInternalNotes(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final notes = (property.internalNotes ?? '').trim();
+
+    if (_editingNotes) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          TextField(
+            controller: _notesController,
+            maxLines: 6,
+            minLines: 3,
+            maxLength: 10000,
+            decoration: InputDecoration(
+              hintText: 'Anotações internas (não aparecem no site)…',
+              counterText: '',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: _savingNotes
+                    ? null
+                    : () => setState(() => _editingNotes = false),
+                child: const Text('Cancelar'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: _savingNotes ? null : _saveInternalNotes,
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFA855F7),
+                ),
+                child: Text(_savingNotes ? 'Salvando…' : 'Salvar'),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: ThemeHelpers.cardBackgroundColor(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: ThemeHelpers.borderColor(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            notes.isEmpty ? 'Nenhuma observação interna.' : notes,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: notes.isEmpty ? muted : null,
+              height: 1.5,
+            ),
+          ),
+          if (_canEditProperty) ...[
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () {
+                  _notesController.text = notes;
+                  setState(() => _editingNotes = true);
+                },
+                icon: const Icon(Icons.edit_outlined, size: 16),
+                label: Text(notes.isEmpty ? 'Adicionar' : 'Editar'),
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFFA855F7),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(
+    ThemeData theme,
+    String title,
+    IconData icon, {
+    Color? accentOverride,
+  }) {
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = accentOverride ??
+        (isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary);
     return Row(
       children: [
         Container(

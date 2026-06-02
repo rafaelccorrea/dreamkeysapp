@@ -6,7 +6,7 @@ publish_to: 'none'
 # Tem de ser SEMPRE maior que qualquer build já enviado para esta app.
 # Erro típico: "bundle version must be higher than … previousBundleVersion = N"
 # → subir só o +N (ex. +14 → +15 → +16), commit, novo pipeline.
-version: 1.0.6+20
+version: 1.0.6+21
 
 environment:
   sdk: ^3.9.2
@@ -48,6 +48,12 @@ dependencies:
   permission_handler: ^12.0.1
   flutter_animate: ^4.5.2
   geolocator: ^14.0.0
+  # Live Activities / Ilha Dinâmica (iOS 16.1+). Em iOS < 16.1 / Android o
+  # plugin simplesmente não faz nada — o LiveActivityService trata tudo com
+  # guarda de plataforma e try/catch, então adicionar a dependência não muda
+  # o comportamento atual do app nem o build.
+  live_activities: ^2.4.9
+  package_info_plus: ^10.1.0
 
 dev_dependencies:
   flutter_test:
@@ -76,3 +82,4 @@ flutter:
     - assets/images/
     - assets/config/dev_lan_host.txt
     - assets/config/api_target.txt
+    - assets/config/app_update.txt

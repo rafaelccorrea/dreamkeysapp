@@ -7,6 +7,10 @@ workflows:
       xcode: latest
       vars:
         BUNDLE_ID: "com.dreamkeys.corretor"
+        # Live Activity / Ilha Dinâmica: defina "true" no Codemagic UI quando o
+        # App Group `group.com.dreamkeys.corretor` e a capability "App Groups"
+        # estiverem habilitados no portal Apple. Vazio/ausente = build atual.
+        ENABLE_LIVE_ACTIVITY: ""
 
     triggering:
       events:
@@ -32,6 +36,10 @@ workflows:
         script: |
           sudo gem install cocoapods
           ruby fix_podfile.rb
+          # Cria a Widget Extension da Live Activity DEPOIS do fix_podfile
+          # (que força os targets para iOS 15.0). No-op se ENABLE_LIVE_ACTIVITY
+          # não estiver definido; nunca aborta o build.
+          ruby setup_live_activity.rb
           cd ios
           pod install --repo-update
           cd ..
@@ -62,6 +70,11 @@ workflows:
         BUNDLE_ID: "com.dreamkeys.corretor"
         APP_STORE_CONNECT_ISSUER_ID: "16c95c07-bdde-48cf-8f2c-0815a11ebbd1"
         APP_STORE_CONNECT_KEY_IDENTIFIER: "95D6586993"
+        # Live Activity / Ilha Dinâmica. Só ligue ("true") depois de criar o
+        # App Group `group.com.dreamkeys.corretor` e habilitar a capability
+        # "App Groups" nos bundle ids `com.dreamkeys.corretor` e
+        # `com.dreamkeys.corretor.CheckInWidget` no portal Apple.
+        ENABLE_LIVE_ACTIVITY: ""
         # APP_STORE_CONNECT_PRIVATE_KEY -> definir no Codemagic UI como SECRET
         # (conteúdo do arquivo .p8 baixado, incluindo "-----BEGIN PRIVATE KEY-----")
 
@@ -83,6 +96,8 @@ workflows:
         script: |
           sudo gem install cocoapods
           ruby fix_podfile.rb
+          # Widget Extension da Live Activity (no-op sem ENABLE_LIVE_ACTIVITY).
+          ruby setup_live_activity.rb
           cd ios
           pod install --repo-update
           cd ..
@@ -139,6 +154,21 @@ workflows:
             --type IOS_APP_STORE \
             --certificate-key=@file:/tmp/distribution_key.pem \
             --create
+
+          # Perfil do bundle id da Widget Extension (Live Activity).
+          # Só busca quando a feature está ligada — caso contrário a extension
+          # nem existe no projeto. O App Group precisa estar habilitado nesse
+          # bundle id no portal Apple, senão a Apple não inclui a capability
+          # no perfil e o export falha.
+          if [ "$ENABLE_LIVE_ACTIVITY" = "true" ]; then
+            echo "Fetching signing files for widget bundle: ${BUNDLE_ID}.CheckInWidget"
+            app-store-connect fetch-signing-files \
+              "${BUNDLE_ID}.CheckInWidget" \
+              --platform IOS \
+              --type IOS_APP_STORE \
+              --certificate-key=@file:/tmp/distribution_key.pem \
+              --create
+          fi
 
           keychain add-certificates
           xcode-project use-profiles
