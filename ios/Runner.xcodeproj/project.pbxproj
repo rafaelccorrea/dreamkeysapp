@@ -19,6 +19,9 @@
 		LA0000010000000000000001 /* CheckInLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = LA0000110000000000000011 /* CheckInLiveActivity.swift */; };
 		LA0000020000000000000002 /* CheckInWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = LA0000120000000000000012 /* CheckInWidgetBundle.swift */; };
 		LA0000030000000000000003 /* CheckInWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = LA0000130000000000000013 /* CheckInWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		LA0000160000000000000016 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = LA0000170000000000000017 /* WidgetKit.framework */; };
+		LA0000180000000000000018 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = LA0000190000000000000019 /* SwiftUI.framework */; };
+		LA00001A000000000000001A /* ActivityKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = LA00001B000000000000001B /* ActivityKit.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -86,6 +89,9 @@
 		LA0000130000000000000013 /* CheckInWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CheckInWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		LA0000140000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		LA0000150000000000000015 /* CheckInWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CheckInWidget.entitlements; sourceTree = "<group>"; };
+		LA0000170000000000000017 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		LA0000190000000000000019 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		LA00001B000000000000001B /* ActivityKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ActivityKit.framework; path = System/Library/Frameworks/ActivityKit.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -100,6 +106,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				LA0000160000000000000016 /* WidgetKit.framework in Frameworks */,
+				LA0000180000000000000018 /* SwiftUI.framework in Frameworks */,
+				LA00001A000000000000001A /* ActivityKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

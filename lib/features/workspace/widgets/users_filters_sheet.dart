@@ -17,7 +17,7 @@ class UsersFilters {
   const UsersFilters({
     this.role,
     this.active,
-    this.includeInactiveCompanyUsers = false,
+    this.includeInactiveCompanyUsers = true,
     this.hasAvatar,
     this.dateRange,
     this.neverLoggedIn = false,

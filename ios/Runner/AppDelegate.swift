@@ -28,7 +28,47 @@ import FirebaseCore
     }
 
     GeneratedPluginRegistrant.register(with: self)
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    let ok = super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    registerLiveActivityCacheChannel()
+    return ok
+  }
+
+  private func registerLiveActivityCacheChannel() {
+    guard let controller = window?.rootViewController as? FlutterViewController else {
+      return
+    }
+    let channel = FlutterMethodChannel(
+      name: "com.dreamkeys.corretor/live_activity",
+      binaryMessenger: controller.binaryMessenger
+    )
+    channel.setMethodCallHandler { call, result in
+      guard let ud = UserDefaults(suiteName: "group.com.dreamkeys.corretor") else {
+        result(false)
+        return
+      }
+      switch call.method {
+      case "cacheIslandPayload":
+        guard let args = call.arguments as? [String: Any] else {
+          result(false)
+          return
+        }
+        for (key, value) in args {
+          if let s = value as? String {
+            ud.set(s, forKey: "island_\(key)")
+          }
+        }
+        ud.synchronize()
+        result(true)
+      case "clearIslandPayload":
+        for key in ["userName", "statusPhase", "expiresAtEpoch", "checkedInAtEpoch", "status"] {
+          ud.removeObject(forKey: "island_\(key)")
+        }
+        ud.synchronize()
+        result(true)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
   }
 
   /// Inicializa o Firebase só quando há `GoogleService-Info.plist` no bundle

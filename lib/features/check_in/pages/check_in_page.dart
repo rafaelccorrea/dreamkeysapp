@@ -39,7 +39,7 @@ class _CheckInPageState extends State<CheckInPage> {
   void initState() {
     super.initState();
     _bootstrap();
-    _ticker = Timer.periodic(const Duration(seconds: 30), (_) {
+    _ticker = Timer.periodic(const Duration(seconds: 15), (_) {
       if (!mounted) return;
       setState(() {});
       if (_active != null && _active!.isActive) {
@@ -141,7 +141,11 @@ class _CheckInPageState extends State<CheckInPage> {
         return;
       }
       setState(() => _active = res.data);
-      LiveActivityService.instance.syncCheckIn(res.data);
+      await LiveActivityService.instance.syncCheckIn(res.data);
+      final hint = LiveActivityService.instance.unavailableHint;
+      if (hint != null) {
+        _snack(hint, error: false);
+      }
       final expires = res.data?.expiresAt;
       _snack(
         expires != null

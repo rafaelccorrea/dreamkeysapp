@@ -49,7 +49,8 @@ class AdminUsersService {
       if (active != null) {
         params['active'] = active.toString();
       }
-      if (includeInactiveCompanyUsers == true) {
+      // Lista de colaboradores: desativados aparecem exceto filtro "só ativos"
+      if (active != true) {
         params['includeInactiveCompanyUsers'] = 'true';
       }
       if (hasAvatar != null) {

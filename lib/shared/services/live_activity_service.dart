@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:live_activities/live_activities.dart';
 import 'package:live_activities/models/url_scheme_data.dart';
@@ -23,12 +24,19 @@ class LiveActivityService with WidgetsBindingObserver {
   static const String _activityId = 'checkin';
   static const String _urlScheme = 'dreamkeys';
 
+  static const MethodChannel _islandCache = MethodChannel(
+    'com.dreamkeys.corretor/live_activity',
+  );
+
   final LiveActivities _plugin = LiveActivities();
 
   bool _initialized = false;
   bool _available = false;
   bool _bootstrapped = false;
   StreamSubscription<UrlSchemeData>? _urlSub;
+
+  /// iOS 16.1+, Live Activities ligadas nas configurações e App Group ok.
+  bool get isAvailable => _available;
 
   /// Registra listener de deep link e resume (chamar uma vez no [main]).
   Future<void> bootstrap() async {
@@ -75,11 +83,24 @@ class LiveActivityService with WidgetsBindingObserver {
         urlScheme: _urlScheme,
       );
       final supported = await _plugin.areActivitiesSupported();
-      _available = supported && await _plugin.areActivitiesEnabled();
+      final enabled = await _plugin.areActivitiesEnabled();
+      _available = supported && enabled;
+      if (kDebugMode) {
+        debugPrint(
+          '[LiveActivity] supported=$supported enabled=$enabled '
+          'available=$_available',
+        );
+      }
     } catch (e) {
       _available = false;
       debugPrint('[LiveActivity] init indisponível: $e');
     }
+  }
+
+  /// Mensagem curta quando a ilha não pode ser usada (só iOS).
+  String? get unavailableHint {
+    if (!Platform.isIOS || _available) return null;
+    return 'Ative Live Activities em Ajustes → Intellisys para ver o check-in na Ilha Dinâmica.';
   }
 
   Future<void> _syncFromApi() async {
@@ -132,6 +153,7 @@ class LiveActivityService with WidgetsBindingObserver {
           data,
           staleIn: staleIn,
         );
+        await _cacheIslandPayload(data);
         if (kDebugMode) {
           debugPrint(
             '[LiveActivity] sync até ${active.expiresAt.toIso8601String()} '
@@ -146,12 +168,31 @@ class LiveActivityService with WidgetsBindingObserver {
     }
   }
 
+  /// Grava cópia em chaves fixas no App Group (a widget lê `island_*`).
+  Future<void> _cacheIslandPayload(Map<String, dynamic> data) async {
+    if (!Platform.isIOS) return;
+    try {
+      final cache = <String, String>{
+        for (final e in data.entries)
+          if (e.value != null) e.key: e.value.toString(),
+      };
+      await _islandCache.invokeMethod<bool>('cacheIslandPayload', cache);
+    } catch (e) {
+      debugPrint('[LiveActivity] cacheIslandPayload: $e');
+    }
+  }
+
   /// Encerra a Live Activity de check-in (check-out, expiração ou logout).
   Future<void> endCheckIn() async {
     await _ensureInit();
     if (!_available) return;
 
     try {
+      if (Platform.isIOS) {
+        try {
+          await _islandCache.invokeMethod<void>('clearIslandPayload');
+        } catch (_) {}
+      }
       await _plugin.endActivity(_activityId);
     } catch (e) {
       debugPrint('[LiveActivity] endActivity falhou, tentando endAll: $e');
