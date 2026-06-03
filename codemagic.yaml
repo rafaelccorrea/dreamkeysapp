@@ -203,7 +203,33 @@ workflows:
           # (criado antes de ligar App Groups) — a Apple não atualiza perfil sozinha.
           if [ "$ENABLE_LIVE_ACTIVITY" = "true" ]; then
             WIDGET_BUNDLE="${BUNDLE_ID}.CheckInWidget"
+            export WIDGET_BUNDLE
             echo "Fetching signing files for widget: $WIDGET_BUNDLE"
+
+            # Apaga perfis App Store da widget no portal Apple (snapshot antigo sem App Groups).
+            WIDGET_BID_RESOURCE=$(app-store-connect bundle-ids list --json 2>/dev/null | python3 -c "
+import json, os, sys
+bid = os.environ.get('WIDGET_BUNDLE', '')
+raw = json.load(sys.stdin)
+for item in raw.get('data', []):
+    ident = item.get('attributes', {}).get('identifier', '')
+    if ident == bid:
+        print(item.get('id', ''))
+        break
+" || true)
+            if [ -n "$WIDGET_BID_RESOURCE" ]; then
+              echo "Perfis Apple ligados ao bundle ${WIDGET_BUNDLE} (${WIDGET_BID_RESOURCE}):"
+              app-store-connect bundle-ids profiles "$WIDGET_BID_RESOURCE" --json 2>/dev/null | python3 -c "
+import json, subprocess, sys
+raw = json.load(sys.stdin)
+for item in raw.get('data', []):
+    pid = item.get('id', '')
+    name = item.get('attributes', {}).get('name', pid)
+    if pid:
+        print(f'  Deletando perfil: {name}')
+        subprocess.run(['app-store-connect', 'profiles', 'delete', pid], check=False)
+" || true
+            fi
 
             # Remove TODOS os perfis locais da widget para não reutilizar cache inválido.
             for prov_dir in \
@@ -227,43 +253,33 @@ workflows:
               --platform IOS \
               --type IOS_APP_STORE \
               --certificate-key=@file:/tmp/distribution_key.pem \
+              --strict-match-identifier \
               --create \
               --verbose
 
-            echo "Verificando App Groups no perfil da CheckInWidget..."
-            WIDGET_OK=0
-            for prov_dir in \
-              "$HOME/Library/MobileDevice/Provisioning Profiles" \
-              "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
-              [ -d "$prov_dir" ] || continue
-              for prov in "$prov_dir"/*.mobileprovision; do
-                [ -f "$prov" ] || continue
-                if security cms -D -i "$prov" 2>/dev/null | grep -q "$WIDGET_BUNDLE"; then
-                  if security cms -D -i "$prov" 2>/dev/null | grep -q "group.com.dreamkeys.corretor"; then
-                    echo "OK: $(basename "$prov") contém App Group"
-                    WIDGET_OK=1
-                    break 2
-                  fi
-                fi
-              done
-            done
-            if [ "$WIDGET_OK" != "1" ]; then
+            ruby ios/scripts/widget_app_store_signing.rb verify || {
               echo ""
               echo "=================================================================="
-              echo "  ERRO: Perfil ${WIDGET_BUNDLE} ainda sem App Groups no .mobileprovision."
-              echo "  Seu Identifier está OK — falta REGENERAR o perfil de provisionamento:"
-              echo "    developer.apple.com → Profiles"
-              echo "    → apague TODOS os perfis 'App Store' da 'Intellisys CheckIn Widget'"
-              echo "    → (opcional) faça o mesmo para 'Dreamkeys Corretor' se o app principal"
-              echo "       também usa App Groups"
-              echo "    → rode o build Codemagic de novo (ele cria perfil novo com --create)"
+              echo "  ERRO: Perfil ${WIDGET_BUNDLE} sem App Groups no .mobileprovision."
+              echo "  Identifier OK no portal — confira App Groups no bundle da widget"
+              echo "  e rode o build de novo (o script apaga perfis antigos via API)."
               echo "=================================================================="
               exit 1
-            fi
+            }
           fi
 
           keychain add-certificates
-          xcode-project use-profiles --project ios/Runner.xcodeproj
+          xcode-project use-profiles \
+            --project ios/Runner.xcodeproj \
+            --archive-method app-store \
+            --code-signing-setup-verbose-logging
+
+          if [ "$ENABLE_LIVE_ACTIVITY" = "true" ]; then
+            ruby ios/scripts/widget_app_store_signing.rb apply
+            echo "=== Signing CheckInWidget (Release) após apply ==="
+            xcodebuild -showBuildSettings -project ios/Runner.xcodeproj -target CheckInWidget -configuration Release 2>/dev/null | \
+              egrep 'PROVISIONING_PROFILE|CODE_SIGN_IDENTITY|DEVELOPMENT_TEAM' || true
+          fi
 
           if [ "$GENERATED_NEW_KEY" = "1" ]; then
             echo ""
@@ -290,7 +306,8 @@ workflows:
       - name: Build signed IPA
         script: |
           set -ex
-          flutter build ipa --release
+          # export_options.plist é gerado por xcode-project use-profiles (inclui a .appex).
+          flutter build ipa --release --export-options-plist="$HOME/export_options.plist"
           echo "=== IPA gerado ==="
           ls -lah build/ios/ipa/
           IPA=$(find build/ios/ipa -maxdepth 1 -name "*.ipa" | head -1)
