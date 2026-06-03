@@ -164,23 +164,72 @@ workflows:
             --certificate-key=@file:/tmp/distribution_key.pem \
             --create
 
-          # Perfil do bundle id da Widget Extension (Live Activity).
-          # Só busca quando a feature está ligada — caso contrário a extension
-          # nem existe no projeto. O App Group precisa estar habilitado nesse
-          # bundle id no portal Apple, senão a Apple não inclui a capability
-          # no perfil e o export falha.
+          # Perfil da Widget Extension (Ilha Dinâmica).
+          # Identifiers/App Groups no portal podem estar OK e o PERFIL ainda ser antigo
+          # (criado antes de ligar App Groups) — a Apple não atualiza perfil sozinha.
           if [ "$ENABLE_LIVE_ACTIVITY" = "true" ]; then
-            echo "Fetching signing files for widget bundle: ${BUNDLE_ID}.CheckInWidget"
+            WIDGET_BUNDLE="${BUNDLE_ID}.CheckInWidget"
+            echo "Fetching signing files for widget: $WIDGET_BUNDLE"
+
+            # Remove TODOS os perfis locais da widget para não reutilizar cache inválido.
+            for prov_dir in \
+              "$HOME/Library/MobileDevice/Provisioning Profiles" \
+              "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" \
+              "$HOME/Library/Caches/codemagic" \
+              "/Users/builder/Library/MobileDevice/Provisioning Profiles"; do
+              [ -d "$prov_dir" ] || continue
+              for prov in "$prov_dir"/*.mobileprovision; do
+                [ -f "$prov" ] || continue
+                if security cms -D -i "$prov" 2>/dev/null | grep -q "$WIDGET_BUNDLE"; then
+                  echo "Removendo perfil local da widget: $(basename "$prov")"
+                  rm -f "$prov"
+                fi
+              done
+            done
+
+            # Recria perfil App Store da extension (exige App Group já no Identifier).
             app-store-connect fetch-signing-files \
-              "${BUNDLE_ID}.CheckInWidget" \
+              "$WIDGET_BUNDLE" \
               --platform IOS \
               --type IOS_APP_STORE \
               --certificate-key=@file:/tmp/distribution_key.pem \
-              --create
+              --create \
+              --verbose
+
+            echo "Verificando App Groups no perfil da CheckInWidget..."
+            WIDGET_OK=0
+            for prov_dir in \
+              "$HOME/Library/MobileDevice/Provisioning Profiles" \
+              "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+              [ -d "$prov_dir" ] || continue
+              for prov in "$prov_dir"/*.mobileprovision; do
+                [ -f "$prov" ] || continue
+                if security cms -D -i "$prov" 2>/dev/null | grep -q "$WIDGET_BUNDLE"; then
+                  if security cms -D -i "$prov" 2>/dev/null | grep -q "group.com.dreamkeys.corretor"; then
+                    echo "OK: $(basename "$prov") contém App Group"
+                    WIDGET_OK=1
+                    break 2
+                  fi
+                fi
+              done
+            done
+            if [ "$WIDGET_OK" != "1" ]; then
+              echo ""
+              echo "=================================================================="
+              echo "  ERRO: Perfil ${WIDGET_BUNDLE} ainda sem App Groups no .mobileprovision."
+              echo "  Seu Identifier está OK — falta REGENERAR o perfil de provisionamento:"
+              echo "    developer.apple.com → Profiles"
+              echo "    → apague TODOS os perfis 'App Store' da 'Intellisys CheckIn Widget'"
+              echo "    → (opcional) faça o mesmo para 'Dreamkeys Corretor' se o app principal"
+              echo "       também usa App Groups"
+              echo "    → rode o build Codemagic de novo (ele cria perfil novo com --create)"
+              echo "=================================================================="
+              exit 1
+            fi
           fi
 
           keychain add-certificates
-          xcode-project use-profiles
+          xcode-project use-profiles --project ios/Runner.xcodeproj
 
           if [ "$GENERATED_NEW_KEY" = "1" ]; then
             echo ""
