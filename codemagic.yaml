@@ -81,6 +81,15 @@ workflows:
         ENABLE_LIVE_ACTIVITY: "true"
         # APP_STORE_CONNECT_PRIVATE_KEY -> definir no Codemagic UI como SECRET
         # (conteúdo do arquivo .p8 baixado, incluindo "-----BEGIN PRIVATE KEY-----")
+        #
+        # IOS_DISTRIBUTION_PRIVATE_KEY (SECRET, grupo app_store_credentials):
+        # PEM RSA do certificado Apple Distribution que o CI usa. Sem isso a Apple
+        # devolve 409 se já existir cert de distribuição na conta.
+        #
+        # Só na 1ª vez sem PEM: ALLOW_BOOTSTRAP_CERT=true, revogue um cert antigo em
+        # developer.apple.com → Certificates, rode UM build, copie o PEM do log,
+        # salve IOS_DISTRIBUTION_PRIVATE_KEY e volte ALLOW_BOOTSTRAP_CERT para false.
+        ALLOW_BOOTSTRAP_CERT: "false"
 
     cache:
       cache_paths:
@@ -116,19 +125,36 @@ workflows:
           set -e
 
           echo "BUNDLE_ID: $BUNDLE_ID"
+
           if [ -z "${IOS_DISTRIBUTION_PRIVATE_KEY:-}" ]; then
+            if [ "${ALLOW_BOOTSTRAP_CERT:-false}" != "true" ]; then
+              echo ""
+              echo "=================================================================="
+              echo "  ERRO: IOS_DISTRIBUTION_PRIVATE_KEY não está no Codemagic."
+              echo "  A Apple já tem certificado(s) de distribuição — criar outro"
+              echo "  sem a chave privada correta gera HTTP 409."
+              echo ""
+              echo "  Opção B (recomendada): Codemagic → dreamkeysapp → Environment"
+              echo "  variables → grupo app_store_credentials → Add variable"
+              echo "    Name:  IOS_DISTRIBUTION_PRIVATE_KEY"
+              echo "    Secure: ON"
+              echo "    Value: PEM completo (-----BEGIN RSA PRIVATE KEY----- ... END-----)"
+              echo "    que corresponde a um cert 'Apple Distribution' da conta."
+              echo "    (exportar do Mac que já assina o app, ou PEM de build antigo)"
+              echo ""
+              echo "  Opção A (só se NÃO tiver o PEM):"
+              echo "    1) developer.apple.com → Certificates"
+              echo "    2) Revogue UM certificado 'Apple Distribution' antigo/não usado"
+              echo "    3) No Codemagic UI, variável ALLOW_BOOTSTRAP_CERT = true"
+              echo "    4) Rode UM build; no log 'Set up code signing' copie o PEM"
+              echo "    5) Salve como IOS_DISTRIBUTION_PRIVATE_KEY; ALLOW_BOOTSTRAP_CERT=false"
+              echo "=================================================================="
+              exit 1
+            fi
             echo ""
             echo "=================================================================="
-            echo "  AVISO: IOS_DISTRIBUTION_PRIVATE_KEY não está definido no Codemagic."
-            echo "  Será gerada uma chave NOVA e pedida à Apple um certificado NOVO."
-            echo "  Se a Apple devolver 409 (certificado de distribuição já existe),"
-            echo "  faça UMA das opções:"
-            echo "  A) Revogar um certificado 'Apple Distribution' antigo em"
-            echo "     developer.apple.com → Certificates (máx. 3 ativos), rodar de novo"
-            echo "     UMA vez e guardar o PEM impresso no fim do log como secret"
-            echo "     IOS_DISTRIBUTION_PRIVATE_KEY no grupo app_store_credentials;"
-            echo "  B) Se já tiver o PEM de um build anterior bem-sucedido, colar esse"
-            echo "     mesmo valor em IOS_DISTRIBUTION_PRIVATE_KEY (reutiliza o cert)."
+            echo "  BOOTSTRAP: gerando chave nova (ALLOW_BOOTSTRAP_CERT=true)."
+            echo "  Revogue antes um cert Distribution antigo se a Apple retornar 409."
             echo "=================================================================="
             echo ""
           fi
@@ -157,12 +183,20 @@ workflows:
           fi
 
           # Cria/usa cert + provisioning profile via API com a private key.
-          app-store-connect fetch-signing-files \
+          if ! app-store-connect fetch-signing-files \
             "$BUNDLE_ID" \
             --platform IOS \
             --type IOS_APP_STORE \
             --certificate-key=@file:/tmp/distribution_key.pem \
-            --create
+            --create; then
+            echo ""
+            echo "=================================================================="
+            echo "  fetch-signing-files falhou (ex.: 409 certificado já existe)."
+            echo "  Defina IOS_DISTRIBUTION_PRIVATE_KEY com o PEM do cert existente"
+            echo "  OU revogue um Apple Distribution em Certificates e use bootstrap."
+            echo "=================================================================="
+            exit 1
+          fi
 
           # Perfil da Widget Extension (Ilha Dinâmica).
           # Identifiers/App Groups no portal podem estar OK e o PERFIL ainda ser antigo
