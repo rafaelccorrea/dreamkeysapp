@@ -1,10 +1,11 @@
 workflows:
   ios-unsigned-ipa:
     name: iOS IPA (no codesign)
-    instance_type: mac_mini_m1
+    instance_type: mac_mini_m2
+    max_build_duration: 90
     environment:
       flutter: stable
-      xcode: latest
+      xcode: 16.4
       vars:
         BUNDLE_ID: "com.dreamkeys.corretor"
         # Live Activity / Ilha Dinâmica: troque para "true" (ou no UI do Codemagic)
@@ -29,7 +30,6 @@ workflows:
     scripts:
       - name: Flutter deps
         script: |
-          flutter clean
           flutter pub get
 
       - name: iOS pods
@@ -41,7 +41,7 @@ workflows:
           # não estiver definido; nunca aborta o build.
           ruby setup_live_activity.rb
           cd ios
-          pod install --repo-update
+          pod install
           cd ..
 
       - name: Build unsigned IPA
@@ -60,10 +60,12 @@ workflows:
 
   ios-appstore-ipa:
     name: iOS IPA (App Store signed)
-    instance_type: mac_mini_m1
+    instance_type: mac_mini_m2
+    max_build_duration: 90
     environment:
       flutter: stable
-      xcode: latest
+      # Fixar Xcode evita re-baixar GBs a cada troca do "latest" (passo Installing SDKs).
+      xcode: 16.4
       groups:
         - app_store_credentials # Codemagic UI → Environment variables → group
       vars:
@@ -79,10 +81,15 @@ workflows:
         # APP_STORE_CONNECT_PRIVATE_KEY -> definir no Codemagic UI como SECRET
         # (conteúdo do arquivo .p8 baixado, incluindo "-----BEGIN PRIVATE KEY-----")
 
+    cache:
+      cache_paths:
+        - ~/.pub-cache
+        - $HOME/Library/Caches/CocoaPods
+        - $HOME/Library/Developer/Xcode/DerivedData/CompilationCache.noindex
+
     scripts:
       - name: Flutter deps
         script: |
-          flutter clean
           flutter pub get
 
       - name: Regenerate icons (iOS sem alpha via flutter_launcher_icons)
@@ -100,7 +107,7 @@ workflows:
           # Widget Extension da Live Activity (no-op sem ENABLE_LIVE_ACTIVITY).
           ruby setup_live_activity.rb
           cd ios
-          pod install --repo-update
+          pod install
           cd ..
 
       - name: Set up code signing
