@@ -5,7 +5,7 @@ workflows:
     max_build_duration: 90
     environment:
       flutter: stable
-      xcode: 16.4
+      xcode: 26.2
       vars:
         BUNDLE_ID: "com.dreamkeys.corretor"
         # Live Activity / Ilha Dinâmica: troque para "true" (ou no UI do Codemagic)
@@ -64,8 +64,9 @@ workflows:
     max_build_duration: 90
     environment:
       flutter: stable
-      # Fixar Xcode evita re-baixar GBs a cada troca do "latest" (passo Installing SDKs).
-      xcode: 16.4
+      # 26.2+ obrigatório: device_info_plus 13.x usa isiOSAppOnVision (SDK iOS 26.1+).
+      # Versão fixa (não "latest") para cache estável no passo Installing SDKs.
+      xcode: 26.2
       groups:
         - app_store_credentials # Codemagic UI → Environment variables → group
       vars:
