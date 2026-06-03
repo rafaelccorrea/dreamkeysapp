@@ -182,15 +182,20 @@ private struct Snap {
       ? Date(timeIntervalSince1970: expiresMs / 1000.0)
       : Date().addingTimeInterval(2 * 3600)
 
-    phase = Phase.from({
+    var resolvedPhase = Phase.from({
       if let p = ud?.string(forKey: IslandKey.statusPhase), !p.isEmpty { return p }
       return str("statusPhase")
     }())
 
     let left = expires.timeIntervalSinceNow
-    if left <= 1 { phase = .expired }
-    else if left < 5 * 60 { phase = .critical }
-    else if left < 15 * 60, phase == .active { phase = .expiring }
+    if left <= 1 {
+      resolvedPhase = .expired
+    } else if left < 5 * 60 {
+      resolvedPhase = .critical
+    } else if left < 15 * 60, resolvedPhase == .active {
+      resolvedPhase = .expiring
+    }
+    phase = resolvedPhase
   }
 
   var timerText: String {
