@@ -206,7 +206,16 @@ workflows:
 
       - name: Build signed IPA
         script: |
+          set -ex
           flutter build ipa --release
+          echo "=== IPA gerado ==="
+          ls -lah build/ios/ipa/
+          IPA=$(find build/ios/ipa -maxdepth 1 -name "*.ipa" | head -1)
+          if [ -z "$IPA" ]; then
+            echo "ERRO: nenhum .ipa em build/ios/ipa — upload TestFlight não vai ocorrer."
+            exit 1
+          fi
+          echo "Arquivo para TestFlight: $IPA"
 
     artifacts:
       - build/ios/ipa/*.ipa
@@ -218,12 +227,15 @@ workflows:
         recipients:
           - es553807@gmail.com
       app_store_connect:
-        # Usa as mesmas credenciais já cadastradas como env vars
-        # (Issuer ID, Key ID e Private Key no grupo app_store_credentials).
+        # Secrets no grupo app_store_credentials (Codemagic UI):
+        #   APP_STORE_CONNECT_PRIVATE_KEY = conteúdo INTEIRO do .p8 (com BEGIN/END)
+        #   APP_STORE_CONNECT_KEY_IDENTIFIER / ISSUER_ID (já em vars acima)
         api_key: $APP_STORE_CONNECT_PRIVATE_KEY
         key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
         issuer_id: $APP_STORE_CONNECT_ISSUER_ID
-        # Sobe direto para o TestFlight (testes internos).
+        # Upload + TestFlight (pós-processamento após build verde — pode levar 10–30 min na Apple).
         submit_to_testflight: true
-        # Para submeter direto à App Store (revisão pública),
-        # troque para `submit_to_app_store: true` quando estiver pronto.
+        beta_groups:
+          - Teste Dev Intellisys
+        # Grupo externo (opcional; exige revisão beta da Apple):
+        # - Teste Intellisys
