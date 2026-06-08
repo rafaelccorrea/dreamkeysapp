@@ -182,12 +182,19 @@ workflows:
             GENERATED_NEW_KEY=1
           fi
 
-          # Cria/usa cert + provisioning profile via API com a private key.
+          # Widget: garante bundle id + App Groups ANTES de gerar perfis.
+          if [ "$ENABLE_LIVE_ACTIVITY" = "true" ]; then
+            export WIDGET_BUNDLE="${BUNDLE_ID}.CheckInWidget"
+            ruby ios/scripts/codemagic_widget_signing_setup.rb /tmp/distribution_key.pem
+          fi
+
+          # Cria/usa cert + provisioning profile do app principal (após App Groups).
           if ! app-store-connect fetch-signing-files \
             "$BUNDLE_ID" \
             --platform IOS \
             --type IOS_APP_STORE \
             --certificate-key=@file:/tmp/distribution_key.pem \
+            --delete-stale-profiles \
             --create; then
             echo ""
             echo "=================================================================="
@@ -198,71 +205,17 @@ workflows:
             exit 1
           fi
 
-          # Perfil da Widget Extension (Ilha Dinâmica).
-          # Identifiers/App Groups no portal podem estar OK e o PERFIL ainda ser antigo
-          # (criado antes de ligar App Groups) — a Apple não atualiza perfil sozinha.
           if [ "$ENABLE_LIVE_ACTIVITY" = "true" ]; then
-            WIDGET_BUNDLE="${BUNDLE_ID}.CheckInWidget"
-            export WIDGET_BUNDLE
-            echo "Fetching signing files for widget: $WIDGET_BUNDLE"
-
-            # Apaga perfis App Store da widget no portal Apple (snapshot antigo sem App Groups).
-            WIDGET_BID_RESOURCE=$(app-store-connect bundle-ids list --json 2>/dev/null | python3 -c "
-import json, os, sys
-bid = os.environ.get('WIDGET_BUNDLE', '')
-raw = json.load(sys.stdin)
-for item in raw.get('data', []):
-    ident = item.get('attributes', {}).get('identifier', '')
-    if ident == bid:
-        print(item.get('id', ''))
-        break
-" || true)
-            if [ -n "$WIDGET_BID_RESOURCE" ]; then
-              echo "Perfis Apple ligados ao bundle ${WIDGET_BUNDLE} (${WIDGET_BID_RESOURCE}):"
-              app-store-connect bundle-ids profiles "$WIDGET_BID_RESOURCE" --json 2>/dev/null | python3 -c "
-import json, subprocess, sys
-raw = json.load(sys.stdin)
-for item in raw.get('data', []):
-    pid = item.get('id', '')
-    name = item.get('attributes', {}).get('name', pid)
-    if pid:
-        print(f'  Deletando perfil: {name}')
-        subprocess.run(['app-store-connect', 'profiles', 'delete', pid], check=False)
-" || true
-            fi
-
-            # Remove TODOS os perfis locais da widget para não reutilizar cache inválido.
-            for prov_dir in \
-              "$HOME/Library/MobileDevice/Provisioning Profiles" \
-              "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" \
-              "$HOME/Library/Caches/codemagic" \
-              "/Users/builder/Library/MobileDevice/Provisioning Profiles"; do
-              [ -d "$prov_dir" ] || continue
-              for prov in "$prov_dir"/*.mobileprovision; do
-                [ -f "$prov" ] || continue
-                if security cms -D -i "$prov" 2>/dev/null | grep -q "$WIDGET_BUNDLE"; then
-                  echo "Removendo perfil local da widget: $(basename "$prov")"
-                  rm -f "$prov"
-                fi
-              done
-            done
-
-            # Recria perfil App Store da extension (exige App Group já no Identifier).
-            app-store-connect fetch-signing-files \
-              "$WIDGET_BUNDLE" \
-              --platform IOS \
-              --type IOS_APP_STORE \
-              --certificate-key=@file:/tmp/distribution_key.pem \
-              --strict-match-identifier \
-              --create \
-              --verbose
-
             ruby ios/scripts/widget_app_store_signing.rb verify || {
               echo ""
               echo "=================================================================="
               echo "  ERRO: Perfil ${WIDGET_BUNDLE} sem App Groups no .mobileprovision."
-              echo "  Identifier OK no portal — confira App Groups no bundle da widget"
-              echo "  e rode o build de novo (o script apaga perfis antigos via API)."
+              echo ""
+              echo "  No portal Apple (developer.apple.com), confira UMA vez:"
+              echo "    1) Identifiers → App Groups → group.com.dreamkeys.corretor"
+              echo "    2) com.dreamkeys.corretor → App Groups → marque o grupo acima"
+              echo "    3) com.dreamkeys.corretor.CheckInWidget → App Groups → mesmo grupo"
+              echo "  Depois rode o build de novo (o CI recria os perfis)."
               echo "=================================================================="
               exit 1
             }
