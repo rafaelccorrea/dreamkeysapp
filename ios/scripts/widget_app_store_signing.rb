@@ -5,6 +5,7 @@
 #   ruby ios/scripts/widget_app_store_signing.rb apply
 
 require 'xcodeproj'
+require 'tmpdir'
 
 WIDGET_BUNDLE = ENV.fetch('WIDGET_BUNDLE', 'com.dreamkeys.corretor.CheckInWidget')
 GROUP_ID = 'group.com.dreamkeys.corretor'

@@ -23,8 +23,10 @@ def run(*args, allow_fail: false)
   [stdout, stderr, status.success?]
 end
 
-def asc_json(*args)
-  out, = run('app-store-connect', *args, '--json')
+def asc_json(*args, allow_fail: false)
+  out, _, ok = run('app-store-connect', *args, '--json', allow_fail: allow_fail)
+  return nil unless ok
+
   # CLI às vezes imprime texto após o JSON; parse só o primeiro bloco JSON.
   json_text = out.lstrip
   if (idx = json_text.index("\nFound "))
@@ -75,7 +77,7 @@ def enable_app_groups(rid, label)
 end
 
 def delete_portal_profiles(rid, label)
-  raw = asc_json('bundle-ids', 'profiles', rid)
+  raw = asc_json('bundle-ids', 'profiles', '--bundle-ids', rid, allow_fail: true)
   return unless raw
 
   asc_resource_list(raw).each do |item|
@@ -84,7 +86,7 @@ def delete_portal_profiles(rid, label)
     next if pid.to_s.empty?
 
     puts "[widget-ci] Deletando perfil #{label}: #{name}"
-    run('app-store-connect', 'profiles', 'delete', pid, allow_fail: true)
+    run('app-store-connect', 'profiles', 'delete', pid, '--ignore-not-found', allow_fail: true)
   end
 end
 
