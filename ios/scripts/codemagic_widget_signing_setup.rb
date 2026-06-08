@@ -25,17 +25,27 @@ end
 
 def asc_json(*args)
   out, = run('app-store-connect', *args, '--json')
-  JSON.parse(out)
+  # CLI às vezes imprime texto após o JSON; parse só o primeiro bloco JSON.
+  json_text = out.lstrip
+  if (idx = json_text.index("\nFound "))
+    json_text = json_text[0...idx]
+  end
+  JSON.parse(json_text)
 rescue JSON::ParserError => e
   warn "[widget-ci] JSON inválido de app-store-connect #{args.first}: #{e.message}"
   nil
 end
 
+def asc_resource_list(raw)
+  return [] if raw.nil?
+  return raw if raw.is_a?(Array)
+
+  raw.fetch('data', [])
+end
+
 def bundle_resource_id(identifier)
   raw = asc_json('bundle-ids', 'list')
-  return nil unless raw
-
-  raw.fetch('data', []).each do |item|
+  asc_resource_list(raw).each do |item|
     return item['id'] if item.dig('attributes', 'identifier') == identifier
   end
   nil
@@ -68,7 +78,7 @@ def delete_portal_profiles(rid, label)
   raw = asc_json('bundle-ids', 'profiles', rid)
   return unless raw
 
-  raw.fetch('data', []).each do |item|
+  asc_resource_list(raw).each do |item|
     pid = item['id']
     name = item.dig('attributes', 'name') || pid
     next if pid.to_s.empty?
