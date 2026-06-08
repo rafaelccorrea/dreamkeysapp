@@ -86,10 +86,10 @@ workflows:
         # PEM RSA do certificado Apple Distribution que o CI usa. Sem isso a Apple
         # devolve 409 se já existir cert de distribuição na conta.
         #
-        # Só na 1ª vez sem PEM: ALLOW_BOOTSTRAP_CERT=true, revogue um cert antigo em
-        # developer.apple.com → Certificates, rode UM build, copie o PEM do log,
-        # salve IOS_DISTRIBUTION_PRIVATE_KEY e volte ALLOW_BOOTSTRAP_CERT para false.
-        ALLOW_BOOTSTRAP_CERT: "false"
+        # Bootstrap (1ª vez sem PEM): defina no Codemagic UI, grupo app_store_credentials:
+        #   ALLOW_BOOTSTRAP_CERT = true  → rode UM build, copie o PEM do log
+        #   IOS_DISTRIBUTION_PRIVATE_KEY = (PEM) → depois ALLOW_BOOTSTRAP_CERT = false
+        # Não fixar aqui no yaml — senão sobrescreve o valor do UI.
 
     cache:
       cache_paths:
