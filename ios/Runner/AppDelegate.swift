@@ -60,7 +60,7 @@ import FirebaseCore
         ud.synchronize()
         result(true)
       case "clearIslandPayload":
-        for key in ["userName", "statusPhase", "expiresAtEpoch", "checkedInAtEpoch", "status"] {
+        for key in ["userName", "companyName", "statusPhase", "expiresAtEpoch", "checkedInAtEpoch", "status"] {
           ud.removeObject(forKey: "island_\(key)")
         }
         ud.synchronize()

@@ -26,10 +26,13 @@ private let sharedDefaults = UserDefaults(suiteName: kAppGroupId)
 
 private enum IslandKey {
   static let userName = "island_userName"
+  static let companyName = "island_companyName"
   static let statusPhase = "island_statusPhase"
   static let expiresAtEpoch = "island_expiresAtEpoch"
   static let checkedInAtEpoch = "island_checkedInAtEpoch"
 }
+
+private let kCheckoutDeepLink = URL(string: "dreamkeys://check-in/checkout")!
 
 // Paleta refinada — verde vivo no ativo, vermelho forte ao expirar.
 private enum Brand {
@@ -79,7 +82,7 @@ private enum Phase: String {
 
   var shortLabel: String {
     switch self {
-    case .active: return "Na imob."
+    case .active: return "Ativo"
     case .expiring: return "Expira"
     case .critical: return "Urgente"
     case .expired: return "Expirou"
@@ -133,6 +136,7 @@ private let kNamespaceDNS = UUID(uuidString: "6ba7b810-9dad-11d1-80b4-00c04fd430
 
 private struct Snap {
   let name: String
+  let companyName: String
   let expires: Date
   let checkedIn: Date?
   let phase: Phase
@@ -144,6 +148,7 @@ private struct Snap {
     func str(_ field: String) -> String? {
       if let ud = ud {
         if field == "userName", let v = ud.string(forKey: IslandKey.userName), !v.isEmpty { return v }
+        if field == "companyName", let v = ud.string(forKey: IslandKey.companyName), !v.isEmpty { return v }
         if field == "statusPhase", let v = ud.string(forKey: IslandKey.statusPhase), !v.isEmpty { return v }
 
         let keys = [
@@ -193,6 +198,11 @@ private struct Snap {
     name = {
       if let u = ud?.string(forKey: IslandKey.userName), !u.isEmpty { return u }
       return str("userName") ?? "Corretor"
+    }()
+
+    companyName = {
+      if let c = ud?.string(forKey: IslandKey.companyName), !c.isEmpty { return c }
+      return str("companyName") ?? ""
     }()
 
     let expiresMs = {
@@ -263,6 +273,21 @@ private struct Snap {
     return String(format: "%d:%02d", m, s)
   }
 
+  var companyDisplayName: String {
+    let trimmed = companyName.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? "Imobiliária" : trimmed
+  }
+
+  /// Legenda compacta: empresa quando check-in ok; alerta nas demais fases.
+  var compactContextLabel: String {
+    switch phase {
+    case .active:
+      return companyDisplayName
+    case .expiring, .critical, .expired:
+      return phase.shortLabel
+    }
+  }
+
   /// Fração do tempo de check-in já consumida (0…1).
   var elapsedFraction: Double {
     guard let checked = checkedIn else { return 0 }
@@ -329,18 +354,68 @@ private struct LiveCountdownText: View {
   let snap: Snap
   var fontSize: CGFloat = 15
   var weight: Font.Weight = .heavy
+  /// Em slots estreitos da Ilha (trailing expandido), evita `timerInterval` em HH:MM:SS.
+  var islandCompact: Bool = false
 
   var body: some View {
     Group {
       if snap.isExpired {
         Text("0:00")
           .monospacedDigit()
+      } else if islandCompact || snap.secondsLeft >= 3600 {
+        TimelineView(.periodic(from: .now, by: 30)) { _ in
+          Text(snap.timerText)
+            .monospacedDigit()
+        }
       } else {
         Text(timerInterval: Date()...snap.expires, countsDown: true)
           .monospacedDigit()
       }
     }
     .font(.system(size: fontSize, weight: weight, design: .rounded))
+    .lineLimit(1)
+    .fixedSize(horizontal: true, vertical: false)
+  }
+}
+
+/// Cronômetro só para o trailing da ilha expandida — sempre horizontal, nunca estica na vertical.
+private struct ExpandedIslandTimer: View {
+  let snap: Snap
+
+  private var fg: Color {
+    snap.isExpired ? .white : (snap.phase == .active ? Color.black.opacity(0.88) : .white)
+  }
+
+  private var bg: LinearGradient {
+    if snap.isExpired {
+      return LinearGradient(
+        colors: [Brand.danger, Brand.dangerDeep],
+        startPoint: .leading,
+        endPoint: .trailing
+      )
+    }
+    if snap.phase == .active {
+      return LinearGradient(
+        colors: [Brand.okGlow, Brand.ok],
+        startPoint: .leading,
+        endPoint: .trailing
+      )
+    }
+    return LinearGradient(
+      colors: [snap.phase.accent, snap.phase.accentDeep],
+      startPoint: .leading,
+      endPoint: .trailing
+    )
+  }
+
+  var body: some View {
+    LiveCountdownText(snap: snap, fontSize: 11, weight: .heavy, islandCompact: true)
+      .foregroundColor(fg)
+      .padding(.horizontal, 9)
+      .padding(.vertical, 5)
+      .background(bg, in: Capsule())
+      .fixedSize(horizontal: true, vertical: false)
+      .frame(maxHeight: 26, alignment: .center)
   }
 }
 
@@ -413,20 +488,50 @@ private struct CompactLeadingRich: View {
   }
 }
 
-/// Trailing recolhido — fase + cronômetro (sem repetir na expansão).
+/// Trailing recolhido — empresa (ou alerta) + cronômetro.
 private struct CompactTrailingRich: View {
   let snap: Snap
 
   var body: some View {
     VStack(alignment: .trailing, spacing: 1) {
-      Text(snap.phase.shortLabel)
+      Text(snap.compactContextLabel)
         .font(.system(size: 7, weight: .heavy))
         .foregroundColor(snap.isExpired ? Brand.danger : snap.phase.accent)
         .lineLimit(1)
-        .minimumScaleFactor(0.8)
+        .minimumScaleFactor(0.65)
       CompactIslandTimer(snap: snap)
     }
     .fixedSize(horizontal: true, vertical: false)
+  }
+}
+
+/// Encerra check-in (deep link → app faz checkout).
+private struct IslandCheckoutButton: View {
+  let snap: Snap
+
+  var body: some View {
+    Link(destination: kCheckoutDeepLink) {
+      HStack(spacing: 4) {
+        Image(systemName: "rectangle.portrait.and.arrow.right")
+          .font(.system(size: 9, weight: .bold))
+        Text("Sair")
+          .font(.system(size: 10, weight: .heavy))
+      }
+      .foregroundColor(.white.opacity(0.92))
+      .padding(.horizontal, 10)
+      .padding(.vertical, 5)
+      .background(
+        Capsule()
+          .fill(snap.isExpired ? Brand.danger.opacity(0.22) : Color.white.opacity(0.1))
+          .overlay(
+            Capsule()
+              .stroke(
+                snap.isExpired ? Brand.danger.opacity(0.55) : Color.white.opacity(0.22),
+                lineWidth: 0.6
+              )
+          )
+      )
+    }
   }
 }
 
@@ -470,6 +575,8 @@ private struct ExpandedBottomStrip: View {
         }
 
         Spacer(minLength: 0)
+
+        IslandCheckoutButton(snap: snap)
       }
 
       if snap.checkedIn != nil && !snap.isExpired {
@@ -546,7 +653,8 @@ private struct TimerCapsule: View {
       LiveCountdownText(
         snap: snap,
         fontSize: compact ? 12 : 15,
-        weight: .heavy
+        weight: .heavy,
+        islandCompact: compact
       )
       .foregroundColor(fg)
 
@@ -556,6 +664,7 @@ private struct TimerCapsule: View {
           .foregroundColor(.white.opacity(0.95))
       }
     }
+    .fixedSize(horizontal: true, vertical: false)
     .padding(.horizontal, compact ? 9 : 12)
     .padding(.vertical, compact ? 5 : 7)
     .background(bg, in: Capsule())
@@ -595,9 +704,10 @@ private struct LockCard: View {
           Capsule()
             .fill(snap.phase.accent.opacity(0.25))
             .frame(width: 4, height: 4)
-          Text(snap.phase.shortLabel)
+          Text(snap.companyDisplayName)
             .font(.system(size: 10, weight: .heavy))
             .foregroundColor(snap.phase.accent)
+            .lineLimit(1)
         }
         Text(snap.name)
           .font(.system(size: 16, weight: .heavy))
@@ -634,23 +744,20 @@ struct CheckInLiveActivity: Widget {
             .padding(.leading, 2)
         }
         DynamicIslandExpandedRegion(.trailing) {
-          TimerCapsule(snap: snap, compact: true)
+          ExpandedIslandTimer(snap: snap)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
             .padding(.trailing, 2)
         }
         DynamicIslandExpandedRegion(.center) {
           VStack(spacing: 2) {
-            HStack(spacing: 4) {
-              Text("Intellisys")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundColor(snap.phase.accent.opacity(0.95))
-              Text(snap.phase.shortLabel.uppercased())
-                .font(.system(size: 8, weight: .heavy))
-                .foregroundColor(.white.opacity(0.42))
-                .tracking(0.4)
-            }
-            Text(snap.name)
-              .font(.system(size: 13, weight: .heavy))
+            Text(snap.companyDisplayName)
+              .font(.system(size: 12, weight: .heavy))
               .foregroundColor(.white)
+              .lineLimit(1)
+              .minimumScaleFactor(0.75)
+            Text(snap.name)
+              .font(.system(size: 10, weight: .semibold))
+              .foregroundColor(.white.opacity(0.62))
               .lineLimit(1)
               .minimumScaleFactor(0.85)
             Text(snap.phase.title)

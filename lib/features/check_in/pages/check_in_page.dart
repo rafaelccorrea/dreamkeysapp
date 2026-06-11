@@ -43,7 +43,10 @@ class _CheckInPageState extends State<CheckInPage> {
       if (!mounted) return;
       setState(() {});
       if (_active != null && _active!.isActive) {
-        LiveActivityService.instance.syncCheckIn(_active);
+        LiveActivityService.instance.syncCheckIn(
+          _active,
+          companyName: _settings?.company?.name,
+        );
       }
     });
   }
@@ -80,7 +83,10 @@ class _CheckInPageState extends State<CheckInPage> {
 
     // Espelha o estado do check-in na Ilha Dinâmica (iOS 16.1+). No-op nas
     // demais plataformas.
-    LiveActivityService.instance.syncCheckIn(_active);
+    LiveActivityService.instance.syncCheckIn(
+      _active,
+      companyName: _settings?.company?.name,
+    );
   }
 
   Future<void> _refresh() async => _bootstrap();
@@ -141,7 +147,10 @@ class _CheckInPageState extends State<CheckInPage> {
         return;
       }
       setState(() => _active = res.data);
-      await LiveActivityService.instance.syncCheckIn(res.data);
+      await LiveActivityService.instance.syncCheckIn(
+        res.data,
+        companyName: _settings?.company?.name,
+      );
       final hint = LiveActivityService.instance.unavailableHint;
       if (hint != null) {
         _snack(hint, error: false);

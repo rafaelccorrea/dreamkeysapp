@@ -62,11 +62,43 @@ class LiveActivityService with WidgetsBindingObserver {
 
   void _onUrlScheme(UrlSchemeData data) {
     if (data.scheme != _urlScheme) return;
+
+    final path = (data.path ?? '').toLowerCase();
+    final url = (data.url ?? '').toLowerCase();
+    final host = (data.host ?? '').toLowerCase();
+    final isCheckout = path.contains('checkout') ||
+        url.contains('checkout') ||
+        host == 'checkout';
+
+    if (isCheckout) {
+      unawaited(_performCheckoutFromIsland());
+      return;
+    }
+
     final nav = appNavigatorKey.currentState;
     if (nav == null) return;
     final current = ModalRoute.of(nav.context)?.settings.name;
     if (current == AppRoutes.checkIn) return;
     nav.pushNamed(AppRoutes.checkIn);
+  }
+
+  /// Encerra check-in ao tocar em "Sair" na Ilha expandida.
+  Future<void> _performCheckoutFromIsland() async {
+    try {
+      final res = await CheckInService.instance.doCheckOut();
+      await endCheckIn();
+      if (kDebugMode) {
+        debugPrint(
+          '[LiveActivity] checkout via ilha: success=${res.success}',
+        );
+      }
+      final nav = appNavigatorKey.currentState;
+      if (nav != null) {
+        nav.pushNamed(AppRoutes.checkIn);
+      }
+    } catch (e) {
+      debugPrint('[LiveActivity] checkout via ilha falhou: $e');
+    }
   }
 
   Future<void> _ensureInit() async {
@@ -107,9 +139,18 @@ class LiveActivityService with WidgetsBindingObserver {
     await _ensureInit();
     if (!_available) return;
     try {
-      final res = await CheckInService.instance.getActiveCheckIn();
-      if (res.success) {
-        await syncCheckIn(res.data);
+      final results = await Future.wait([
+        CheckInService.instance.getActiveCheckIn(),
+        CheckInService.instance.getSettings(),
+      ]);
+      final activeRes = results[0] as ApiResponse<CheckIn?>;
+      final settingsRes = results[1] as ApiResponse<CheckInSettings>;
+      final companyName = settingsRes.data?.company?.name;
+      if (activeRes.success) {
+        await syncCheckIn(
+          activeRes.data,
+          companyName: companyName,
+        );
       }
     } catch (e) {
       debugPrint('[LiveActivity] syncFromApi: $e');
@@ -117,7 +158,10 @@ class LiveActivityService with WidgetsBindingObserver {
   }
 
   /// Reflete o estado atual do check-in na Ilha Dinâmica.
-  Future<void> syncCheckIn(CheckIn? active) async {
+  Future<void> syncCheckIn(
+    CheckIn? active, {
+    String? companyName,
+  }) async {
     await _ensureInit();
     if (!_available) return;
 
@@ -137,10 +181,12 @@ class LiveActivityService with WidgetsBindingObserver {
         }
 
         final name = (active.user?.name ?? '').trim();
+        final company = (companyName ?? '').trim();
         final data = <String, dynamic>{
           'status': 'active',
           'statusPhase': statusPhase,
           'userName': name.isEmpty ? 'Corretor' : name,
+          if (company.isNotEmpty) 'companyName': company,
           'checkedInAtEpoch':
               '${active.checkedInAt.millisecondsSinceEpoch}',
           'expiresAtEpoch': '${active.expiresAt.millisecondsSinceEpoch}',
