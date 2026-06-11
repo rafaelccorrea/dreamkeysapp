@@ -17,7 +17,6 @@ import '../../matches/widgets/matches_badge.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../../../../shared/utils/broker_contact_actions.dart';
 import '../../../../shared/utils/broker_message_templates.dart';
-import '../../../../shared/utils/recent_nav_helper.dart';
 import '../../appointments/pages/create_appointment_page.dart';
 import '../../appointments/models/appointment_model.dart';
 import '../../documents/services/document_service.dart';
@@ -562,12 +561,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             _isLoading = false;
             _linkedCondominium = null;
           });
-          unawaited(
-            RecentNavHelper.trackProperty(
-              property.id,
-              property.title,
-            ),
-          );
           _debugLogPropertyImageDiagnostics(
             property,
             source: 'loadProperty.success',

@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -12,7 +10,6 @@ import '../../../shared/utils/masks.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../../matches/widgets/matches_badge.dart';
-import '../../../shared/utils/recent_nav_helper.dart';
 import '../models/client_model.dart';
 import '../services/client_service.dart';
 import '../widgets/client_interactions_panel.dart';
@@ -64,12 +61,6 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
           _client = response.data;
           _isLoading = false;
         });
-        unawaited(
-          RecentNavHelper.trackClient(
-            response.data!.id,
-            response.data!.name,
-          ),
-        );
       } else {
         setState(() {
           _errorMessage = response.message ?? 'Erro ao carregar cliente';

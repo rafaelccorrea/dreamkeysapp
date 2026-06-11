@@ -262,6 +262,15 @@ private struct Snap {
     }
     return String(format: "%d:%02d", m, s)
   }
+
+  /// Fração do tempo de check-in já consumida (0…1).
+  var elapsedFraction: Double {
+    guard let checked = checkedIn else { return 0 }
+    let total = expires.timeIntervalSince(checked)
+    guard total > 1 else { return isExpired ? 1 : 0 }
+    let elapsed = Date().timeIntervalSince(checked)
+    return min(1, max(0, elapsed / total))
+  }
 }
 
 // MARK: - UI
@@ -357,17 +366,18 @@ private struct CompactIslandTimer: View {
           .monospacedDigit()
       }
     }
-    .font(.system(size: 10, weight: .bold, design: .rounded))
+    .font(.system(size: 10.5, weight: .bold, design: .rounded))
     .foregroundColor(color)
     .lineLimit(1)
-    .minimumScaleFactor(0.85)
+    .minimumScaleFactor(0.8)
     .fixedSize(horizontal: true, vertical: false)
   }
 }
 
-/// Ponto de status — mínimo horizontal (leading recolhido).
+/// Ponto de status — mínimo horizontal.
 private struct CompactIslandDot: View {
   let snap: Snap
+  var size: CGFloat = 7
 
   var body: some View {
     Circle()
@@ -376,14 +386,115 @@ private struct CompactIslandDot: View {
           ? Brand.danger
           : snap.phase.accent
       )
-      .frame(width: 7, height: 7)
+      .frame(width: size, height: size)
       .overlay {
         if snap.isExpired {
           Image(systemName: "xmark")
-            .font(.system(size: 4, weight: .black))
+            .font(.system(size: size * 0.55, weight: .black))
             .foregroundColor(.white)
         }
       }
+  }
+}
+
+/// Leading recolhido — ícone da fase em círculo compacto (mais contexto que só o ponto).
+private struct CompactLeadingRich: View {
+  let snap: Snap
+
+  var body: some View {
+    ZStack {
+      Circle()
+        .fill(snap.phase.accent.opacity(snap.isExpired ? 0.35 : 0.22))
+        .frame(width: 18, height: 18)
+      Image(systemName: snap.phase.compactSymbol)
+        .font(.system(size: 8, weight: .bold))
+        .foregroundColor(snap.isExpired ? Brand.danger : snap.phase.accent)
+    }
+  }
+}
+
+/// Trailing recolhido — fase + cronômetro (sem repetir na expansão).
+private struct CompactTrailingRich: View {
+  let snap: Snap
+
+  var body: some View {
+    VStack(alignment: .trailing, spacing: 1) {
+      Text(snap.phase.shortLabel)
+        .font(.system(size: 7, weight: .heavy))
+        .foregroundColor(snap.isExpired ? Brand.danger : snap.phase.accent)
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+      CompactIslandTimer(snap: snap)
+    }
+    .fixedSize(horizontal: true, vertical: false)
+  }
+}
+
+/// Faixa inferior da ilha expandida — metadados sem cronômetro (timer só no trailing).
+private struct ExpandedBottomStrip: View {
+  let snap: Snap
+
+  var body: some View {
+    VStack(spacing: 5) {
+      HStack(spacing: 6) {
+        if let checked = snap.checkedIn {
+          HStack(spacing: 3) {
+            Image(systemName: "arrow.right.circle.fill")
+              .font(.system(size: 9, weight: .semibold))
+              .foregroundColor(snap.phase.accent.opacity(0.9))
+            Text(checked, style: .time)
+              .font(.system(size: 10, weight: .semibold, design: .rounded))
+              .foregroundColor(.white.opacity(0.72))
+          }
+        }
+
+        if snap.checkedIn != nil {
+          Text("·")
+            .font(.system(size: 10, weight: .bold))
+            .foregroundColor(.white.opacity(0.28))
+        }
+
+        if snap.isExpired {
+          Text("Renove no app")
+            .font(.system(size: 10, weight: .bold))
+            .foregroundColor(Brand.danger)
+        } else {
+          HStack(spacing: 3) {
+            Image(systemName: "hourglass.bottomhalf.filled")
+              .font(.system(size: 8, weight: .semibold))
+              .foregroundColor(.white.opacity(0.45))
+            Text("Até \(snap.expires, style: .time)")
+              .font(.system(size: 10, weight: .semibold, design: .rounded))
+              .foregroundColor(.white.opacity(0.58))
+          }
+        }
+
+        Spacer(minLength: 0)
+      }
+
+      if snap.checkedIn != nil && !snap.isExpired {
+        ZStack(alignment: .leading) {
+          Capsule()
+            .fill(Color.white.opacity(0.12))
+            .frame(height: 3)
+          Capsule()
+            .fill(
+              LinearGradient(
+                colors: [snap.phase.accent, snap.phase.accentDeep],
+                startPoint: .leading,
+                endPoint: .trailing
+              )
+            )
+            .frame(maxWidth: .infinity)
+            .frame(height: 3)
+            .scaleEffect(x: max(0.04, snap.elapsedFraction), y: 1, anchor: .leading)
+        }
+        .frame(height: 3)
+      }
+    }
+    .padding(.horizontal, 10)
+    .padding(.top, 2)
+    .padding(.bottom, 2)
   }
 }
 
@@ -457,110 +568,15 @@ private struct TimerCapsule: View {
   }
 }
 
-/// Ilha recolhida — leading: só um ponto (7pt).
-private struct CompactLeading: View {
-  let snap: Snap
-
-  var body: some View {
-    CompactIslandDot(snap: snap)
-  }
-}
-
-/// Ilha recolhida — trailing: só dígitos do timer.
-private struct CompactTrailing: View {
-  let snap: Snap
-
-  var body: some View {
-    CompactIslandTimer(snap: snap)
-  }
-}
-
-/// Modo minimal — um único ponto colorido (máximo minimalismo).
+/// Modo minimal — ponto + tempo restante (máximo de info no espaço mínimo).
 private struct MinimalIsland: View {
   let snap: Snap
 
   var body: some View {
-    CompactIslandDot(snap: snap)
-  }
-}
-
-private struct IslandExpanded: View {
-  let snap: Snap
-
-  var body: some View {
-    VStack(spacing: 10) {
-      HStack(spacing: 12) {
-        StatusOrb(phase: snap.phase, diameter: 44, showRing: true)
-
-        VStack(alignment: .leading, spacing: 3) {
-          HStack(spacing: 6) {
-            Text("Intellisys")
-              .font(.system(size: 10, weight: .bold))
-              .foregroundColor(snap.phase.accent)
-            Text("·")
-              .foregroundColor(.white.opacity(0.35))
-            Text(snap.phase.shortLabel.uppercased())
-              .font(.system(size: 9, weight: .heavy))
-              .foregroundColor(snap.phase.accent.opacity(0.9))
-              .tracking(0.6)
-          }
-          Text(snap.name)
-            .font(.system(size: 15, weight: .heavy))
-            .foregroundColor(.white)
-            .lineLimit(1)
-          Text(snap.phase.title)
-            .font(.system(size: 12, weight: .medium))
-            .foregroundColor(.white.opacity(0.72))
-        }
-
-        Spacer(minLength: 0)
-
-        TimerCapsule(snap: snap)
-      }
-
-      if let checked = snap.checkedIn {
-        HStack(spacing: 8) {
-          Image(systemName: "clock.arrow.circlepath")
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundColor(snap.phase.accent)
-          Text("Entrada \(checked, style: .time)")
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundColor(.white.opacity(0.65))
-          Spacer()
-          if snap.isExpired {
-            Label("Tempo esgotado", systemImage: "xmark.circle.fill")
-              .font(.system(size: 10, weight: .bold))
-              .foregroundColor(Brand.danger)
-          } else {
-            Text("Restante")
-              .font(.system(size: 10, weight: .semibold))
-              .foregroundColor(.white.opacity(0.45))
-            LiveCountdownText(snap: snap, fontSize: 11, weight: .heavy)
-              .foregroundColor(snap.phase.accent)
-          }
-        }
-        .padding(.horizontal, 4)
-      }
+    HStack(spacing: 3) {
+      CompactIslandDot(snap: snap, size: 6)
+      CompactIslandTimer(snap: snap)
     }
-    .padding(.horizontal, 14)
-    .padding(.vertical, 12)
-    .background(
-      RoundedRectangle(cornerRadius: 20, style: .continuous)
-        .fill(
-          LinearGradient(
-            colors: [
-              Brand.pillBg,
-              snap.phase.accentDeep.opacity(0.28),
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-          )
-        )
-        .overlay(
-          RoundedRectangle(cornerRadius: 20, style: .continuous)
-            .stroke(snap.phase.accent.opacity(0.35), lineWidth: 0.8)
-        )
-    )
   }
 }
 
@@ -614,7 +630,7 @@ struct CheckInLiveActivity: Widget {
 
       return DynamicIsland {
         DynamicIslandExpandedRegion(.leading) {
-          StatusOrb(phase: snap.phase, diameter: 34, showRing: true)
+          StatusOrb(phase: snap.phase, diameter: 30, showRing: true)
             .padding(.leading, 2)
         }
         DynamicIslandExpandedRegion(.trailing) {
@@ -623,24 +639,34 @@ struct CheckInLiveActivity: Widget {
         }
         DynamicIslandExpandedRegion(.center) {
           VStack(spacing: 2) {
-            Text(snap.phase.shortLabel)
-              .font(.system(size: 12, weight: .heavy))
-              .foregroundColor(snap.isExpired ? Brand.danger : snap.phase.accent)
-            if !snap.isExpired {
-              Text(snap.name)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.white.opacity(0.55))
-                .lineLimit(1)
+            HStack(spacing: 4) {
+              Text("Intellisys")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundColor(snap.phase.accent.opacity(0.95))
+              Text(snap.phase.shortLabel.uppercased())
+                .font(.system(size: 8, weight: .heavy))
+                .foregroundColor(.white.opacity(0.42))
+                .tracking(0.4)
             }
+            Text(snap.name)
+              .font(.system(size: 13, weight: .heavy))
+              .foregroundColor(.white)
+              .lineLimit(1)
+              .minimumScaleFactor(0.85)
+            Text(snap.phase.title)
+              .font(.system(size: 10, weight: .medium))
+              .foregroundColor(.white.opacity(0.55))
+              .lineLimit(1)
           }
+          .frame(maxWidth: .infinity)
         }
         DynamicIslandExpandedRegion(.bottom) {
-          IslandExpanded(snap: snap)
+          ExpandedBottomStrip(snap: snap)
         }
       } compactLeading: {
-        CompactLeading(snap: snap)
+        CompactLeadingRich(snap: snap)
       } compactTrailing: {
-        CompactTrailing(snap: snap)
+        CompactTrailingRich(snap: snap)
       } minimal: {
         MinimalIsland(snap: snap)
       }
