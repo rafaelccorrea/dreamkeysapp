@@ -256,7 +256,9 @@ private struct Snap {
     let m = sec / 60
     let s = sec % 60
     if m >= 60 {
-      return String(format: "%dh%02d", m / 60, m % 60)
+      let h = m / 60
+      let rm = m % 60
+      return String(format: "%dh%02d", h, rm)
     }
     return String(format: "%d:%02d", m, s)
   }
@@ -333,7 +335,59 @@ private struct LiveCountdownText: View {
   }
 }
 
-/// Cápsula do cronômetro — cor muda com a fase; expirado = vermelho + 0:00.
+/// Cronômetro ultra-compacto — só dígitos, sem cápsula (ilha recolhida).
+private struct CompactIslandTimer: View {
+  let snap: Snap
+
+  private var color: Color {
+    snap.isExpired ? Brand.danger : snap.phase.accent
+  }
+
+  var body: some View {
+    Group {
+      if snap.isExpired {
+        Text("0:00")
+          .monospacedDigit()
+      } else if snap.secondsLeft >= 3600 {
+        // >1h: "1h05" ocupa menos que "1:05:00"
+        Text(snap.compactTimerText)
+          .monospacedDigit()
+      } else {
+        Text(timerInterval: Date()...snap.expires, countsDown: true)
+          .monospacedDigit()
+      }
+    }
+    .font(.system(size: 10, weight: .bold, design: .rounded))
+    .foregroundColor(color)
+    .lineLimit(1)
+    .minimumScaleFactor(0.85)
+    .fixedSize(horizontal: true, vertical: false)
+  }
+}
+
+/// Ponto de status — mínimo horizontal (leading recolhido).
+private struct CompactIslandDot: View {
+  let snap: Snap
+
+  var body: some View {
+    Circle()
+      .fill(
+        snap.isExpired
+          ? Brand.danger
+          : snap.phase.accent
+      )
+      .frame(width: 7, height: 7)
+      .overlay {
+        if snap.isExpired {
+          Image(systemName: "xmark")
+            .font(.system(size: 4, weight: .black))
+            .foregroundColor(.white)
+        }
+      }
+  }
+}
+
+/// Cápsula do cronômetro — expandido / lock screen (não usar recolhido).
 private struct TimerCapsule: View {
   let snap: Snap
   var compact: Bool = false
@@ -403,52 +457,30 @@ private struct TimerCapsule: View {
   }
 }
 
-/// Ilha recolhida — leading: orb + nome abreviado quando couber.
+/// Ilha recolhida — leading: só um ponto (7pt).
 private struct CompactLeading: View {
   let snap: Snap
 
   var body: some View {
-    HStack(spacing: 5) {
-      StatusOrb(phase: snap.phase, diameter: 22, showRing: true)
-      if snap.isExpired {
-        Text("Expirou")
-          .font(.system(size: 10, weight: .heavy))
-          .foregroundColor(Brand.danger)
-          .lineLimit(1)
-      }
-    }
+    CompactIslandDot(snap: snap)
   }
 }
 
-/// Ilha recolhida — trailing: cronômetro colorido.
+/// Ilha recolhida — trailing: só dígitos do timer.
 private struct CompactTrailing: View {
   let snap: Snap
 
   var body: some View {
-    TimerCapsule(snap: snap, compact: true)
+    CompactIslandTimer(snap: snap)
   }
 }
 
-/// Modo minimal — só o essencial: timer ou 0:00 vermelho.
+/// Modo minimal — um único ponto colorido (máximo minimalismo).
 private struct MinimalIsland: View {
   let snap: Snap
 
   var body: some View {
-    if snap.isExpired {
-      HStack(spacing: 3) {
-        Circle()
-          .fill(Brand.danger)
-          .frame(width: 6, height: 6)
-        Text("0:00")
-          .font(.system(size: 11, weight: .heavy, design: .rounded))
-          .monospacedDigit()
-          .foregroundColor(Brand.danger)
-      }
-    } else {
-      LiveCountdownText(snap: snap, fontSize: 11, weight: .heavy)
-        .foregroundColor(snap.phase.accent)
-        .frame(minWidth: 36)
-    }
+    CompactIslandDot(snap: snap)
   }
 }
 
