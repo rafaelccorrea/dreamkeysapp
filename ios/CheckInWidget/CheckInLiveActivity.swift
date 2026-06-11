@@ -20,12 +20,10 @@ extension LiveActivitiesAppAttributes {
   }
 }
 
-// App Group — leitura direta como no exemplo oficial do plugin.
 private let kAppGroupId = "group.com.dreamkeys.corretor"
 private let kActivityName = "checkin"
 private let sharedDefaults = UserDefaults(suiteName: kAppGroupId)
 
-// Chaves fixas gravadas pelo Runner (MethodChannel) + fallbacks do plugin.
 private enum IslandKey {
   static let userName = "island_userName"
   static let statusPhase = "island_statusPhase"
@@ -33,15 +31,20 @@ private enum IslandKey {
   static let checkedInAtEpoch = "island_checkedInAtEpoch"
 }
 
-// Paleta estilo delivery (iFood): pill colorida + ícone em círculo + timer em destaque.
+// Paleta refinada — verde vivo no ativo, vermelho forte ao expirar.
 private enum Brand {
-  static let active = Color(red: 0.86, green: 0.15, blue: 0.15)       // vermelho marca
-  static let activeAlt = Color(red: 0.98, green: 0.45, blue: 0.09)    // laranja
-  static let ok = Color(red: 0.06, green: 0.73, blue: 0.51)           // check-in ok
-  static let warn = Color(red: 0.96, green: 0.62, blue: 0.04)
-  static let urgent = Color(red: 0.98, green: 0.45, blue: 0.09)
-  static let danger = Color(red: 0.94, green: 0.27, blue: 0.27)
-  static let pillBg = Color(red: 0.12, green: 0.12, blue: 0.14)
+  /// Verde check-in (#22E870)
+  static let ok = Color(red: 0.133, green: 0.910, blue: 0.439)
+  static let okDeep = Color(red: 0.063, green: 0.725, blue: 0.333)
+  static let okGlow = Color(red: 0.298, green: 1.0, blue: 0.573)
+
+  static let warn = Color(red: 1.0, green: 0.784, blue: 0.071)   // #FFC812
+  static let urgent = Color(red: 1.0, green: 0.549, blue: 0.118) // #FF8C1E
+  static let danger = Color(red: 1.0, green: 0.231, blue: 0.188) // #FF3B30
+  static let dangerDeep = Color(red: 0.780, green: 0.118, blue: 0.118)
+
+  static let pillBg = Color(red: 0.11, green: 0.11, blue: 0.13)
+  static let pillBgSoft = Color.white.opacity(0.10)
 }
 
 private enum Phase: String {
@@ -62,6 +65,15 @@ private enum Phase: String {
     case .expiring: return Brand.warn
     case .critical: return Brand.urgent
     case .expired: return Brand.danger
+    }
+  }
+
+  var accentDeep: Color {
+    switch self {
+    case .active: return Brand.okDeep
+    case .expiring: return Color(red: 0.85, green: 0.62, blue: 0.05)
+    case .critical: return Color(red: 0.90, green: 0.42, blue: 0.08)
+    case .expired: return Brand.dangerDeep
     }
   }
 
@@ -91,6 +103,15 @@ private enum Phase: String {
     case .expired: return "xmark.circle.fill"
     }
   }
+
+  var compactSymbol: String {
+    switch self {
+    case .active: return "checkmark"
+    case .expiring: return "clock.fill"
+    case .critical: return "bolt.fill"
+    case .expired: return "xmark"
+    }
+  }
 }
 
 private func uuid5(namespace: UUID, name: String) -> UUID {
@@ -113,6 +134,7 @@ private let kNamespaceDNS = UUID(uuidString: "6ba7b810-9dad-11d1-80b4-00c04fd430
 private struct Snap {
   let name: String
   let expires: Date
+  let checkedIn: Date?
   let phase: Phase
 
   init(_ context: ActivityViewContext<LiveActivitiesAppAttributes>) {
@@ -178,9 +200,18 @@ private struct Snap {
       return epoch("expiresAtEpoch")
     }()
 
+    let checkedMs = {
+      if let s = ud?.string(forKey: IslandKey.checkedInAtEpoch), let d = Double(s), d > 0 { return d }
+      return epoch("checkedInAtEpoch")
+    }()
+
     expires = expiresMs > 0
       ? Date(timeIntervalSince1970: expiresMs / 1000.0)
       : Date().addingTimeInterval(2 * 3600)
+
+    checkedIn = checkedMs > 0
+      ? Date(timeIntervalSince1970: checkedMs / 1000.0)
+      : nil
 
     var resolvedPhase = Phase.from({
       if let p = ud?.string(forKey: IslandKey.statusPhase), !p.isEmpty { return p }
@@ -198,8 +229,17 @@ private struct Snap {
     phase = resolvedPhase
   }
 
+  var isExpired: Bool {
+    expires.timeIntervalSinceNow <= 1 || phase == .expired
+  }
+
+  var secondsLeft: Int {
+    max(0, Int(expires.timeIntervalSinceNow))
+  }
+
   var timerText: String {
-    let sec = max(0, Int(expires.timeIntervalSinceNow))
+    if isExpired { return "0:00" }
+    let sec = secondsLeft
     let m = sec / 60
     let s = sec % 60
     if m >= 60 {
@@ -209,45 +249,206 @@ private struct Snap {
     }
     return String(format: "%d:%02d", m, s)
   }
+
+  var compactTimerText: String {
+    if isExpired { return "0:00" }
+    let sec = secondsLeft
+    let m = sec / 60
+    let s = sec % 60
+    if m >= 60 {
+      return String(format: "%dh%02d", m / 60, m % 60)
+    }
+    return String(format: "%d:%02d", m, s)
+  }
 }
 
-// MARK: - UI (iFood-like: círculo colorido + pill escura + texto branco)
+// MARK: - UI
 
-private struct BrandBadge: View {
+private struct StatusOrb: View {
   let phase: Phase
   var diameter: CGFloat = 28
+  var showRing: Bool = true
 
   var body: some View {
     ZStack {
-      Circle()
-        .fill(phase.accent)
-        .frame(width: diameter, height: diameter)
-      Image(systemName: phase.symbol)
-        .font(.system(size: diameter * 0.42, weight: .bold))
+      if showRing && phase != .expired {
+        Circle()
+          .stroke(
+            LinearGradient(
+              colors: [phase.accent, phase.accentDeep],
+              startPoint: .topLeading,
+              endPoint: .bottomTrailing
+            ),
+            lineWidth: diameter * 0.08
+          )
+          .frame(width: diameter + 4, height: diameter + 4)
+      }
+
+      if phase == .expired {
+        Circle()
+          .fill(
+            LinearGradient(
+              colors: [Brand.danger, Brand.dangerDeep],
+              startPoint: .topLeading,
+              endPoint: .bottomTrailing
+            )
+          )
+          .frame(width: diameter, height: diameter)
+      } else {
+        Circle()
+          .fill(
+            LinearGradient(
+              colors: [phase.accent, phase.accentDeep],
+              startPoint: .topLeading,
+              endPoint: .bottomTrailing
+            )
+          )
+          .frame(width: diameter, height: diameter)
+          .shadow(color: phase.accent.opacity(0.45), radius: diameter * 0.12)
+      }
+
+      Image(systemName: phase.compactSymbol)
+        .font(.system(size: diameter * 0.38, weight: .bold))
         .foregroundColor(.white)
     }
   }
 }
 
-private struct TimerPill: View {
+private struct LiveCountdownText: View {
   let snap: Snap
-  var compact: Bool = false
+  var fontSize: CGFloat = 15
+  var weight: Font.Weight = .heavy
 
   var body: some View {
-    HStack(spacing: 4) {
-      if snap.expires.timeIntervalSinceNow > 1 {
-        Text(timerInterval: Date()...snap.expires, countsDown: true)
+    Group {
+      if snap.isExpired {
+        Text("0:00")
           .monospacedDigit()
       } else {
-        Text(snap.timerText)
+        Text(timerInterval: Date()...snap.expires, countsDown: true)
           .monospacedDigit()
       }
     }
-    .font(.system(size: compact ? 12 : 15, weight: .heavy, design: .rounded))
-    .foregroundColor(.white)
-    .padding(.horizontal, compact ? 8 : 10)
-    .padding(.vertical, compact ? 4 : 6)
-    .background(Brand.pillBg, in: Capsule())
+    .font(.system(size: fontSize, weight: weight, design: .rounded))
+  }
+}
+
+/// Cápsula do cronômetro — cor muda com a fase; expirado = vermelho + 0:00.
+private struct TimerCapsule: View {
+  let snap: Snap
+  var compact: Bool = false
+
+  private var fg: Color {
+    snap.isExpired ? .white : (snap.phase == .active ? Color.black.opacity(0.88) : .white)
+  }
+
+  private var bg: some ShapeStyle {
+    if snap.isExpired {
+      return AnyShapeStyle(
+        LinearGradient(
+          colors: [Brand.danger, Brand.dangerDeep],
+          startPoint: .topLeading,
+          endPoint: .bottomTrailing
+        )
+      )
+    }
+    if snap.phase == .active {
+      return AnyShapeStyle(
+        LinearGradient(
+          colors: [Brand.okGlow, Brand.ok],
+          startPoint: .topLeading,
+          endPoint: .bottomTrailing
+        )
+      )
+    }
+    return AnyShapeStyle(
+      LinearGradient(
+        colors: [snap.phase.accent, snap.phase.accentDeep],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+      )
+    )
+  }
+
+  var body: some View {
+    HStack(spacing: compact ? 4 : 6) {
+      if !snap.isExpired && snap.phase == .active {
+        Circle()
+          .fill(Color.black.opacity(0.22))
+          .frame(width: compact ? 4 : 5, height: compact ? 4 : 5)
+      }
+
+      LiveCountdownText(
+        snap: snap,
+        fontSize: compact ? 12 : 15,
+        weight: .heavy
+      )
+      .foregroundColor(fg)
+
+      if snap.isExpired {
+        Image(systemName: "exclamationmark")
+          .font(.system(size: compact ? 8 : 9, weight: .black))
+          .foregroundColor(.white.opacity(0.95))
+      }
+    }
+    .padding(.horizontal, compact ? 9 : 12)
+    .padding(.vertical, compact ? 5 : 7)
+    .background(bg, in: Capsule())
+    .overlay {
+      if snap.isExpired {
+        Capsule()
+          .stroke(Color.white.opacity(0.22), lineWidth: 0.6)
+      }
+    }
+  }
+}
+
+/// Ilha recolhida — leading: orb + nome abreviado quando couber.
+private struct CompactLeading: View {
+  let snap: Snap
+
+  var body: some View {
+    HStack(spacing: 5) {
+      StatusOrb(phase: snap.phase, diameter: 22, showRing: true)
+      if snap.isExpired {
+        Text("Expirou")
+          .font(.system(size: 10, weight: .heavy))
+          .foregroundColor(Brand.danger)
+          .lineLimit(1)
+      }
+    }
+  }
+}
+
+/// Ilha recolhida — trailing: cronômetro colorido.
+private struct CompactTrailing: View {
+  let snap: Snap
+
+  var body: some View {
+    TimerCapsule(snap: snap, compact: true)
+  }
+}
+
+/// Modo minimal — só o essencial: timer ou 0:00 vermelho.
+private struct MinimalIsland: View {
+  let snap: Snap
+
+  var body: some View {
+    if snap.isExpired {
+      HStack(spacing: 3) {
+        Circle()
+          .fill(Brand.danger)
+          .frame(width: 6, height: 6)
+        Text("0:00")
+          .font(.system(size: 11, weight: .heavy, design: .rounded))
+          .monospacedDigit()
+          .foregroundColor(Brand.danger)
+      }
+    } else {
+      LiveCountdownText(snap: snap, fontSize: 11, weight: .heavy)
+        .foregroundColor(snap.phase.accent)
+        .frame(minWidth: 36)
+    }
   }
 }
 
@@ -255,32 +456,78 @@ private struct IslandExpanded: View {
   let snap: Snap
 
   var body: some View {
-    HStack(spacing: 12) {
-      BrandBadge(phase: snap.phase, diameter: 44)
-      VStack(alignment: .leading, spacing: 4) {
-        Text(snap.phase.title)
-          .font(.system(size: 14, weight: .heavy))
-          .foregroundColor(.white)
-        Text(snap.name)
-          .font(.system(size: 13, weight: .semibold))
-          .foregroundColor(.white.opacity(0.85))
-          .lineLimit(1)
-        Text(snap.phase.shortLabel)
-          .font(.system(size: 11, weight: .bold))
-          .foregroundColor(snap.phase.accent)
+    VStack(spacing: 10) {
+      HStack(spacing: 12) {
+        StatusOrb(phase: snap.phase, diameter: 44, showRing: true)
+
+        VStack(alignment: .leading, spacing: 3) {
+          HStack(spacing: 6) {
+            Text("Intellisys")
+              .font(.system(size: 10, weight: .bold))
+              .foregroundColor(snap.phase.accent)
+            Text("·")
+              .foregroundColor(.white.opacity(0.35))
+            Text(snap.phase.shortLabel.uppercased())
+              .font(.system(size: 9, weight: .heavy))
+              .foregroundColor(snap.phase.accent.opacity(0.9))
+              .tracking(0.6)
+          }
+          Text(snap.name)
+            .font(.system(size: 15, weight: .heavy))
+            .foregroundColor(.white)
+            .lineLimit(1)
+          Text(snap.phase.title)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundColor(.white.opacity(0.72))
+        }
+
+        Spacer(minLength: 0)
+
+        TimerCapsule(snap: snap)
       }
-      Spacer(minLength: 0)
-      TimerPill(snap: snap)
+
+      if let checked = snap.checkedIn {
+        HStack(spacing: 8) {
+          Image(systemName: "clock.arrow.circlepath")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundColor(snap.phase.accent)
+          Text("Entrada \(checked, style: .time)")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundColor(.white.opacity(0.65))
+          Spacer()
+          if snap.isExpired {
+            Label("Tempo esgotado", systemImage: "xmark.circle.fill")
+              .font(.system(size: 10, weight: .bold))
+              .foregroundColor(Brand.danger)
+          } else {
+            Text("Restante")
+              .font(.system(size: 10, weight: .semibold))
+              .foregroundColor(.white.opacity(0.45))
+            LiveCountdownText(snap: snap, fontSize: 11, weight: .heavy)
+              .foregroundColor(snap.phase.accent)
+          }
+        }
+        .padding(.horizontal, 4)
+      }
     }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 10)
+    .padding(.horizontal, 14)
+    .padding(.vertical, 12)
     .background(
-      LinearGradient(
-        colors: [Brand.pillBg, snap.phase.accent.opacity(0.35)],
-        startPoint: .leading,
-        endPoint: .trailing
-      ),
-      in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+      RoundedRectangle(cornerRadius: 20, style: .continuous)
+        .fill(
+          LinearGradient(
+            colors: [
+              Brand.pillBg,
+              snap.phase.accentDeep.opacity(0.28),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+          )
+        )
+        .overlay(
+          RoundedRectangle(cornerRadius: 20, style: .continuous)
+            .stroke(snap.phase.accent.opacity(0.35), lineWidth: 0.8)
+        )
     )
   }
 }
@@ -290,21 +537,32 @@ private struct LockCard: View {
 
   var body: some View {
     HStack(spacing: 14) {
-      BrandBadge(phase: snap.phase, diameter: 40)
-      VStack(alignment: .leading, spacing: 3) {
-        Text("Intellisys · Check-in")
-          .font(.system(size: 10, weight: .bold))
-          .foregroundColor(snap.phase.accent)
+      StatusOrb(phase: snap.phase, diameter: 42, showRing: true)
+
+      VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 6) {
+          Text("Intellisys")
+            .font(.system(size: 10, weight: .bold))
+            .foregroundColor(snap.phase.accent)
+          Capsule()
+            .fill(snap.phase.accent.opacity(0.25))
+            .frame(width: 4, height: 4)
+          Text(snap.phase.shortLabel)
+            .font(.system(size: 10, weight: .heavy))
+            .foregroundColor(snap.phase.accent)
+        }
         Text(snap.name)
           .font(.system(size: 16, weight: .heavy))
           .foregroundColor(.white)
           .lineLimit(1)
         Text(snap.phase.title)
           .font(.system(size: 12, weight: .medium))
-          .foregroundColor(.white.opacity(0.7))
+          .foregroundColor(.white.opacity(0.68))
       }
-      Spacer()
-      TimerPill(snap: snap)
+
+      Spacer(minLength: 8)
+
+      TimerCapsule(snap: snap)
     }
     .padding(16)
   }
@@ -317,34 +575,44 @@ struct CheckInLiveActivity: Widget {
     ActivityConfiguration(for: LiveActivitiesAppAttributes.self) { context in
       let snap = Snap(context)
       LockCard(snap: snap)
-        .activityBackgroundTint(snap.phase.accent.opacity(0.25))
+        .activityBackgroundTint(snap.phase.accentDeep.opacity(0.32))
         .activitySystemActionForegroundColor(.white)
     } dynamicIsland: { context in
       let snap = Snap(context)
 
       return DynamicIsland {
         DynamicIslandExpandedRegion(.leading) {
-          BrandBadge(phase: snap.phase, diameter: 36)
+          StatusOrb(phase: snap.phase, diameter: 34, showRing: true)
+            .padding(.leading, 2)
         }
         DynamicIslandExpandedRegion(.trailing) {
-          TimerPill(snap: snap, compact: true)
+          TimerCapsule(snap: snap, compact: true)
+            .padding(.trailing, 2)
         }
         DynamicIslandExpandedRegion(.center) {
-          Text(snap.phase.shortLabel)
-            .font(.system(size: 13, weight: .heavy))
-            .foregroundColor(.white)
+          VStack(spacing: 2) {
+            Text(snap.phase.shortLabel)
+              .font(.system(size: 12, weight: .heavy))
+              .foregroundColor(snap.isExpired ? Brand.danger : snap.phase.accent)
+            if !snap.isExpired {
+              Text(snap.name)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.white.opacity(0.55))
+                .lineLimit(1)
+            }
+          }
         }
         DynamicIslandExpandedRegion(.bottom) {
           IslandExpanded(snap: snap)
         }
       } compactLeading: {
-        BrandBadge(phase: snap.phase, diameter: 24)
+        CompactLeading(snap: snap)
       } compactTrailing: {
-        TimerPill(snap: snap, compact: true)
+        CompactTrailing(snap: snap)
       } minimal: {
-        BrandBadge(phase: snap.phase, diameter: 22)
+        MinimalIsland(snap: snap)
       }
-      .keylineTint(snap.phase.accent)
+      .keylineTint(snap.isExpired ? Brand.danger : snap.phase.accent)
       .widgetURL(URL(string: "dreamkeys://check-in")!)
     }
   }
