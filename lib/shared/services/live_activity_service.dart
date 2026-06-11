@@ -139,12 +139,8 @@ class LiveActivityService with WidgetsBindingObserver {
     await _ensureInit();
     if (!_available) return;
     try {
-      final results = await Future.wait([
-        CheckInService.instance.getActiveCheckIn(),
-        CheckInService.instance.getSettings(),
-      ]);
-      final activeRes = results[0] as ApiResponse<CheckIn?>;
-      final settingsRes = results[1] as ApiResponse<CheckInSettings>;
+      final activeRes = await CheckInService.instance.getActiveCheckIn();
+      final settingsRes = await CheckInService.instance.getSettings();
       final companyName = settingsRes.data?.company?.name;
       if (activeRes.success) {
         await syncCheckIn(
