@@ -3,10 +3,7 @@ import 'theme_helpers.dart';
 
 /// Estilo de painel elevado (gradiente + sombra) — ramos escuros idênticos ao
 /// dashboard/perfil anteriores; modo claro refinado.
-enum ShellElevatedPanelStyle {
-  dashboard,
-  profile,
-}
+enum ShellElevatedPanelStyle { dashboard, profile }
 
 /// Tokens partilhados para superfícies “glass” / painéis sob o shell.
 /// Mantém valores exatos do tema escuro; ajusta apenas o modo claro.
@@ -62,7 +59,9 @@ class ShellVisualTokens {
   /// Borda de cartões de lista/grid (Imóveis) no claro — contraste sobre o shell.
   static Color propertyListCardBorder(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return ThemeHelpers.borderColor(context).withValues(alpha: isDark ? 0.42 : 0.34);
+    return ThemeHelpers.borderColor(
+      context,
+    ).withValues(alpha: isDark ? 0.42 : 0.34);
   }
 
   static BoxDecoration inlineTileDecoration(
@@ -106,14 +105,14 @@ class ShellVisualTokens {
     ShellElevatedPanelStyle style = ShellElevatedPanelStyle.dashboard,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final borderRadius =
-        style == ShellElevatedPanelStyle.profile ? 22.0 : 24.0;
+    final borderRadius = style == ShellElevatedPanelStyle.profile ? 22.0 : 24.0;
     final accentBlur = style == ShellElevatedPanelStyle.profile ? 24.0 : 28.0;
     final accentDy = style == ShellElevatedPanelStyle.profile ? 12.0 : 14.0;
     final neutralBlur = style == ShellElevatedPanelStyle.profile ? 16.0 : 18.0;
     final neutralDy = style == ShellElevatedPanelStyle.profile ? 6.0 : 8.0;
-    final neutralDarkAlpha =
-        style == ShellElevatedPanelStyle.profile ? 0.32 : 0.35;
+    final neutralDarkAlpha = style == ShellElevatedPanelStyle.profile
+        ? 0.32
+        : 0.35;
 
     if (isDark) {
       return BoxDecoration(
@@ -121,10 +120,7 @@ class ShellVisualTokens {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF16151E),
-            Color(0xFF0E0E14),
-          ],
+          colors: [Color(0xFF16151E), Color(0xFF0E0E14)],
         ),
         border: Border.all(color: accent.withValues(alpha: 0.16)),
         boxShadow: [
@@ -148,15 +144,10 @@ class ShellVisualTokens {
       gradient: const LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [
-          Color(0xFFFFFCFB),
-          Color(0xFFE9EEF5),
-        ],
+        colors: [Color(0xFFFFFCFB), Color(0xFFE9EEF5)],
         stops: [0.0, 1.0],
       ),
-      border: Border.all(
-        color: edge.withValues(alpha: 0.48),
-      ),
+      border: Border.all(color: edge.withValues(alpha: 0.48)),
       boxShadow: [
         BoxShadow(
           color: const Color(0xFF475569).withValues(alpha: 0.07),

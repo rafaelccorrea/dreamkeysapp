@@ -33,6 +33,6 @@ class ApiConnectionMessage {
           'Windows a permitir a porta. Detalhe: $s';
     }
 
-    return 'Erro de conexão: $s';
+    return '======= Erro de conexão: $s =========';
   }
 }
