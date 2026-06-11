@@ -48,7 +48,6 @@ import '../../features/notes/pages/create_note_page.dart';
 import '../../features/notes/pages/notes_page.dart';
 import '../../features/proposals/pages/create_proposal_page.dart';
 import '../../features/proposals/pages/proposals_page.dart';
-import '../../features/checklists/pages/checklists_page.dart';
 import '../../features/workspace/pages/workspace_page.dart';
 import '../../features/workspace/pages/users_page.dart';
 import '../../features/workspace/pages/teams_page.dart';
@@ -134,7 +133,6 @@ class AppRoutes {
 
   static const String notes = '/notes';
   static const String notesCreate = '/notes/create';
-  static const String checklists = '/checklists';
   static const String workspace = '/workspace';
 
   // Colaboradores → sub-rotas
@@ -213,7 +211,16 @@ class AppRoutes {
     } else if (routeName == AppRoutes.calendar) {
       return _buildRoute(const CalendarPage(), settings);
     } else if (routeName == AppRoutes.calendarCreate) {
-      return _buildRoute(const CreateAppointmentPage(), settings);
+      final args = settings.arguments as Map<String, dynamic>?;
+      return _buildRoute(
+        CreateAppointmentPage(
+          initialTitle: args?['title'] as String?,
+          initialLocation: args?['location'] as String?,
+          propertyId: args?['propertyId'] as String?,
+          clientId: args?['clientId'] as String?,
+        ),
+        settings,
+      );
     } else if (routeName == AppRoutes.clients) {
       return _buildRoute(const ClientsPage(), settings);
     } else if (routeName == AppRoutes.clientCreate) {
@@ -399,8 +406,6 @@ class AppRoutes {
           return _buildRoute(CreateProposalPage(proposalId: id), settings);
         }
       }
-    } else if (routeName == AppRoutes.checklists) {
-      return _buildRoute(const ChecklistsPage(), settings);
     } else if (routeName == AppRoutes.workspace) {
       return _buildRoute(const WorkspacePage(), settings);
     } else if (routeName == AppRoutes.users) {

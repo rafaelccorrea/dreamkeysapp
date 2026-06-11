@@ -1,9 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/widgets/app_scaffold.dart';
+import '../../../shared/utils/recent_nav_helper.dart';
 import '../models/kanban_models.dart';
 import '../services/kanban_service.dart';
 import '../widgets/task_details_modal.dart';
@@ -49,6 +51,9 @@ class _KanbanTaskDetailsPageState extends State<KanbanTaskDetailsPage> {
       _loading = false;
       if (res.success && res.data != null) {
         _task = res.data;
+        unawaited(
+          RecentNavHelper.trackKanbanTask(_task!.id, _task!.title),
+        );
       } else {
         _error = res.message ?? 'Não foi possível abrir esta negociação.';
       }

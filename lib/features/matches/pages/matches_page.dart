@@ -3,6 +3,8 @@ import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../core/routes/app_routes.dart';
+import '../../../shared/utils/broker_contact_actions.dart';
+import '../../../shared/utils/broker_message_templates.dart';
 import '../services/match_service.dart';
 import '../models/match_model.dart';
 import '../widgets/match_card.dart';
@@ -222,6 +224,29 @@ class _MatchesPageState extends State<MatchesPage> {
     }
   }
 
+  Future<void> _shareTopMatchesViaWhatsApp() async {
+    if (_matches.isEmpty) return;
+    final top = _matches.take(3).toList();
+    final clientName = top.first.client.name;
+    final lines = top
+        .map((m) {
+          final p = m.property;
+          final parts = <String>[p.title];
+          if (p.code != null && p.code!.trim().isNotEmpty) {
+            parts.add('Cód. ${p.code}');
+          }
+          if (p.city != null && p.city!.trim().isNotEmpty) parts.add(p.city!);
+          return parts.join(' · ');
+        })
+        .toList();
+    final msg = BrokerMessageTemplates.matchesShare(
+      clientName: clientName,
+      propertyLines: lines,
+    );
+    final phone = top.first.client.phone;
+    await BrokerContactActions.openWhatsApp(context, phone, message: msg);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -233,6 +258,12 @@ class _MatchesPageState extends State<MatchesPage> {
       currentBottomNavIndex: 0,
       showBottomNavigation: widget.propertyId == null && widget.clientId == null,
       actions: [
+        if (_matches.isNotEmpty)
+          IconButton(
+            icon: const Icon(Icons.share_rounded),
+            tooltip: 'Enviar imóveis por WhatsApp',
+            onPressed: _shareTopMatchesViaWhatsApp,
+          ),
         IconButton(
           icon: Stack(
             children: [

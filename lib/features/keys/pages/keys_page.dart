@@ -27,8 +27,6 @@ class _KeysPageState extends State<KeysPage>
   // Estado geral
   String? _errorMessage;
   key_models.KeyFilters? _filters;
-  final String _searchQuery = '';
-  final TextEditingController _searchController = TextEditingController();
 
   // Tab 0: Todas as Chaves
   List<key_models.Key> _keys = [];
@@ -58,7 +56,6 @@ class _KeysPageState extends State<KeysPage>
   void dispose() {
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
-    _searchController.dispose();
     super.dispose();
   }
 
@@ -99,13 +96,7 @@ class _KeysPageState extends State<KeysPage>
     });
 
     try {
-      final filters =
-          _filters?.copyWith(
-            search: _searchQuery.trim().isEmpty ? null : _searchQuery.trim(),
-          ) ??
-          key_models.KeyFilters(
-            search: _searchQuery.trim().isEmpty ? null : _searchQuery.trim(),
-          );
+      final filters = _filters ?? key_models.KeyFilters();
 
       final response = await _keyService.getKeys(filters: filters);
 

@@ -260,12 +260,12 @@ class LoginFlowService {
         if (!accessInfo.hasAccess) {
           if (accessInfo.status == 'none') {
             return LoginFlowResult.redirect(
-              route: '/subscription-plans', // TODO: Criar rota
-              message: 'Nenhuma assinatura encontrada',
+              route: AppRoutes.settings,
+              message: 'Nenhuma assinatura encontrada — configure no painel web',
             );
           } else {
             return LoginFlowResult.redirect(
-              route: '/subscription-management', // TODO: Criar rota
+              route: AppRoutes.settings,
               message: 'Assinatura expirada ou suspensa',
             );
           }
@@ -290,8 +290,8 @@ class LoginFlowService {
           // Se é master/admin, redirecionar para criar empresa
           if (isMasterOrAdmin) {
             return LoginFlowResult.redirect(
-              route: '/create-first-company', // TODO: Criar rota
-              message: 'Nenhuma empresa encontrada',
+              route: AppRoutes.home,
+              message: 'Nenhuma empresa encontrada — crie uma no painel web',
             );
           }
         } else {

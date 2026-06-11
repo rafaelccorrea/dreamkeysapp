@@ -6,10 +6,10 @@ import '../../../core/theme/theme_helpers.dart';
 import '../controllers/kanban_controller.dart';
 import '../models/kanban_models.dart';
 
-/// Widget de filtros do Kanban — busca + prioridade.
+/// Widget de filtros do Kanban — prioridade.
 ///
 /// Layout:
-/// - Wide (≥ 540): linha horizontal com busca expandida + botão de prioridade premium.
+/// - Wide (≥ 540): linha horizontal com botão de prioridade premium.
 /// - Narrow: empilhado.
 class KanbanFilters extends StatefulWidget {
   /// Quando [true], omite o cartão externo (uso dentro do painel agrupado na [KanbanPage]).
@@ -27,41 +27,11 @@ class KanbanFilters extends StatefulWidget {
 class _KanbanFiltersState extends State<KanbanFilters> {
   static const double _kWideBreak = 540;
 
-  final _searchController = TextEditingController();
-  final FocusNode _searchFocus = FocusNode();
   KanbanPriority? _selectedPriority;
-  String? _selectedAssigneeId;
-
-  @override
-  void initState() {
-    super.initState();
-    _searchFocus.addListener(() => setState(() {}));
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    _searchFocus.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<KanbanController>();
-
-    Widget search = _PremiumSearchField(
-      controller: _searchController,
-      focusNode: _searchFocus,
-      onChanged: (_) {
-        setState(() {});
-        _applyFilters(controller);
-      },
-      onClear: () {
-        _searchController.clear();
-        _applyFilters(controller);
-        setState(() {});
-      },
-    );
 
     Widget priority = _PriorityTrigger(
       value: _selectedPriority,
@@ -78,9 +48,7 @@ class _KanbanFiltersState extends State<KanbanFilters> {
         return Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Expanded(child: search),
-            const SizedBox(width: 10),
-            priority,
+            Expanded(child: priority),
             if (clearAll != null) ...[
               const SizedBox(width: 8),
               clearAll,
@@ -88,20 +56,13 @@ class _KanbanFiltersState extends State<KanbanFilters> {
           ],
         );
       }
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      return Row(
         children: [
-          search,
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(child: priority),
-              if (clearAll != null) ...[
-                const SizedBox(width: 8),
-                clearAll,
-              ],
-            ],
-          ),
+          Expanded(child: priority),
+          if (clearAll != null) ...[
+            const SizedBox(width: 8),
+            clearAll,
+          ],
         ],
       );
     }
@@ -140,222 +101,15 @@ class _KanbanFiltersState extends State<KanbanFilters> {
     _applyFilters(controller);
   }
 
-  bool _hasActiveFilters() {
-    return _searchController.text.isNotEmpty ||
-        _selectedPriority != null ||
-        _selectedAssigneeId != null;
-  }
+  bool _hasActiveFilters() => _selectedPriority != null;
 
   void _applyFilters(KanbanController controller) {
-    controller.applyFilters(
-      searchQuery: _searchController.text.trim().isEmpty
-          ? null
-          : _searchController.text.trim(),
-      priority: _selectedPriority,
-      assigneeId: _selectedAssigneeId,
-    );
+    controller.applyFilters(priority: _selectedPriority);
   }
 
   void _clearFilters(KanbanController controller) {
-    setState(() {
-      _searchController.clear();
-      _selectedPriority = null;
-      _selectedAssigneeId = null;
-    });
+    setState(() => _selectedPriority = null);
     controller.clearFilters();
-  }
-}
-
-// ============================================================================
-// SEARCH PREMIUM
-// ============================================================================
-
-class _PremiumSearchField extends StatelessWidget {
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final ValueChanged<String> onChanged;
-  final VoidCallback onClear;
-
-  const _PremiumSearchField({
-    required this.controller,
-    required this.focusNode,
-    required this.onChanged,
-    required this.onClear,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final accent = _kanbanAccent(context);
-    const cool = Color(0xFF0891B2);
-    final hasText = controller.text.isNotEmpty;
-    final focused = focusNode.hasFocus;
-    final highlighted = focused || hasText;
-
-    // Refino minimalista premium:
-    // - Card sólido em idle (sem aspecto "apagado")
-    // - Tint accent muito sutil ao focar
-    // - Sombra com cor accent quando ativo (eleva o componente)
-    // - Stripe degradê fininho no rodapé do campo quando ativo (detalhe premium)
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOutCubic,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: highlighted
-            ? Color.alphaBlend(
-                accent.withValues(alpha: isDark ? 0.10 : 0.05),
-                ThemeHelpers.cardBackgroundColor(context),
-              )
-            : ThemeHelpers.cardBackgroundColor(context),
-        border: Border.all(
-          color: highlighted
-              ? accent.withValues(alpha: isDark ? 0.6 : 0.42)
-              : ThemeHelpers.borderColor(context),
-          width: highlighted ? 1.4 : 1,
-        ),
-        boxShadow: highlighted
-            ? [
-                BoxShadow(
-                  color: accent.withValues(alpha: isDark ? 0.18 : 0.08),
-                  blurRadius: 14,
-                  spreadRadius: -3,
-                  offset: const Offset(0, 5),
-                ),
-              ]
-            : [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: isDark ? 0.18 : 0.025),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-      ),
-      child: Stack(
-        children: [
-          // Stripe inferior degradê (detalhe premium minimalista) — só ao focar.
-          // Indica visualmente o estado ativo sem precisar pintar o fundo todo.
-          if (highlighted)
-            Positioned(
-              left: 12,
-              right: 12,
-              bottom: 0,
-              child: Container(
-                height: 1.5,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(2),
-                  gradient: LinearGradient(
-                    colors: [
-                      accent.withValues(alpha: 0.0),
-                      accent.withValues(alpha: 0.55),
-                      cool.withValues(alpha: 0.45),
-                      accent.withValues(alpha: 0.0),
-                    ],
-                    stops: const [0.0, 0.32, 0.68, 1.0],
-                  ),
-                ),
-              ),
-            ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: Row(
-              children: [
-                // Caixinha do ícone — monocromática (não duo-tone como antes),
-                // mas com leve gradient interno quando ativa para dar profundidade.
-                Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(10),
-                      gradient: highlighted
-                          ? LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [
-                                accent.withValues(alpha: isDark ? 0.28 : 0.16),
-                                accent.withValues(alpha: isDark ? 0.14 : 0.08),
-                              ],
-                            )
-                          : null,
-                      color: highlighted
-                          ? null
-                          : ThemeHelpers.borderColor(context)
-                              .withValues(alpha: isDark ? 0.22 : 0.18),
-                      border: Border.all(
-                        color: highlighted
-                            ? accent.withValues(alpha: isDark ? 0.42 : 0.32)
-                            : ThemeHelpers.borderColor(context)
-                                .withValues(alpha: 0.5),
-                        width: 0.9,
-                      ),
-                    ),
-                    child: Icon(
-                      Icons.search_rounded,
-                      size: 18,
-                      color: highlighted
-                          ? accent
-                          : ThemeHelpers.textSecondaryColor(context),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: TextField(
-                    controller: controller,
-                    focusNode: focusNode,
-                    textInputAction: TextInputAction.search,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      height: 1.2,
-                      color: ThemeHelpers.textColor(context),
-                    ),
-                    decoration: InputDecoration(
-                      hintText: 'Buscar lead, título ou descrição…',
-                      hintStyle: theme.textTheme.bodyMedium?.copyWith(
-                        color: ThemeHelpers.textSecondaryColor(context),
-                        fontWeight: FontWeight.w500,
-                      ),
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      errorBorder: InputBorder.none,
-                      disabledBorder: InputBorder.none,
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 4,
-                        vertical: 14,
-                      ),
-                    ),
-                    onChanged: onChanged,
-                  ),
-                ),
-                if (hasText)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 4),
-                    child: IconButton(
-                      icon: Icon(
-                        Icons.clear_rounded,
-                        size: 18,
-                        color: ThemeHelpers.textSecondaryColor(context),
-                      ),
-                      onPressed: onClear,
-                      tooltip: 'Limpar busca',
-                      visualDensity: VisualDensity.compact,
-                      padding: EdgeInsets.zero,
-                      constraints:
-                          const BoxConstraints(minWidth: 36, minHeight: 36),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }
 

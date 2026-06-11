@@ -32,9 +32,7 @@ class KanbanController extends ChangeNotifier {
   List<KanbanTeam> _kanbanTeams = [];
 
   // Filtros
-  String? _searchQuery;
   KanbanPriority? _filterPriority;
-  String? _filterAssigneeId;
   int _filterClearGeneration = 0;
 
   // Seleção em massa / exclusão em lote — paridade `useCanBulkDeleteCards` + KanbanBoard web.
@@ -139,14 +137,9 @@ class KanbanController extends ChangeNotifier {
   }
 
   /// Estado de filtros (espelho do que vai para `getBoard`) — uso no hero / UI.
-  String? get searchQuery => _searchQuery;
   KanbanPriority? get filterPriority => _filterPriority;
-  String? get filterAssigneeId => _filterAssigneeId;
 
-  bool get hasActiveBoardFilters =>
-      (_searchQuery != null && _searchQuery!.trim().isNotEmpty) ||
-      _filterPriority != null ||
-      (_filterAssigneeId != null && _filterAssigneeId!.trim().isNotEmpty);
+  bool get hasActiveBoardFilters => _filterPriority != null;
 
   /// Incrementado em [clearFilters]; permite reset estável dos campos locais em [KanbanFilters].
   int get filterClearGeneration => _filterClearGeneration;
@@ -448,15 +441,12 @@ class KanbanController extends ChangeNotifier {
       );
       debugPrint('📋 [KANBAN_CTRL] - teamId: $_teamId');
       debugPrint('📋 [KANBAN_CTRL] - projectId: $_projectId');
-      debugPrint('📋 [KANBAN_CTRL] - search: $_searchQuery');
       debugPrint('📋 [KANBAN_CTRL] - priority: $_filterPriority');
 
       final response = await _kanbanService.getBoard(
         _teamId!,
         projectId: _projectId,
-        search: _searchQuery,
         priority: _filterPriority,
-        assignedToId: _filterAssigneeId,
       );
 
       debugPrint('📋 [KANBAN_CTRL] ========== RESPOSTA getBoard ==========');
@@ -540,9 +530,7 @@ class KanbanController extends ChangeNotifier {
             final personalBoardResponse = await _kanbanService.getBoard(
               personalTeamId,
               projectId: _projectId,
-              search: _searchQuery,
               priority: _filterPriority,
-              assignedToId: _filterAssigneeId,
             );
             if (personalBoardResponse.success &&
                 personalBoardResponse.data != null) {
@@ -1096,22 +1084,12 @@ class KanbanController extends ChangeNotifier {
   }
 
   /// Filtros reenviados à API (`KanbanBoardFiltersDto`) como no Intellisys.
-  void applyFilters({
-    String? searchQuery,
-    KanbanPriority? priority,
-    String? assigneeId,
-  }) {
-    final trimmed = searchQuery?.trim();
-    _searchQuery = trimmed == null || trimmed.isEmpty ? null : trimmed;
+  void applyFilters({KanbanPriority? priority}) {
     _filterPriority = priority;
-    _filterAssigneeId =
-        assigneeId != null && assigneeId.isEmpty ? null : assigneeId;
     notifyListeners();
 
     _boardFilterDebounce?.cancel();
-    final delayMs =
-        (_searchQuery != null && _searchQuery!.trim().isNotEmpty) ? 420 : 0;
-    _boardFilterDebounce = Timer(Duration(milliseconds: delayMs), () {
+    _boardFilterDebounce = Timer(Duration.zero, () {
       if (_teamId == null) return;
       loadBoard(teamId: _teamId, projectId: _projectId);
     });
@@ -1119,9 +1097,7 @@ class KanbanController extends ChangeNotifier {
 
   void clearFilters() {
     _boardFilterDebounce?.cancel();
-    _searchQuery = null;
     _filterPriority = null;
-    _filterAssigneeId = null;
     _filterClearGeneration++;
     notifyListeners();
     if (_teamId != null) {

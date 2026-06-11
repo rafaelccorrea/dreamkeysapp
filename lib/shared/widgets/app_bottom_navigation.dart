@@ -71,12 +71,19 @@ class AppBottomNavigation extends StatelessWidget {
     label: 'Agenda',
     route: AppRoutes.calendar,
   );
+  static const _NavItemSpec _tasksItem = _NavItemSpec(
+    icon: LucideIcons.listChecks,
+    activeIcon: LucideIcons.listChecks,
+    label: 'Tarefas',
+    route: AppRoutes.kanbanSubtasks,
+  );
 
   /// Resolve o item que ocupa o slot 3 com base nas permissões atuais.
   static _NavItemSpec _resolveSlot3() {
     final canSeeApprovals = ModuleAccessService.instance
         .hasAnyPermission(AppPermissions.approvalQueueMenu);
-    return canSeeApprovals ? _approvalsItem : _calendarItem;
+    if (canSeeApprovals) return _approvalsItem;
+    return _tasksItem;
   }
 
   static List<_NavItemSpec> _resolveItems() => [
@@ -274,6 +281,8 @@ class AppBottomNavigation extends StatelessWidget {
     // IMPORTANTE: Aprovações precisa ser detectada ANTES de /properties porque
     // a rota é '/properties/pending-approvals'.
     if (routeName == AppRoutes.propertyApprovals) return 3;
+
+    if (routeName == AppRoutes.kanbanSubtasks) return 3;
 
     if (routeName == AppRoutes.properties ||
         routeName.startsWith('/properties')) {

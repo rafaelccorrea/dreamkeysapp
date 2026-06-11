@@ -16,11 +16,21 @@ import '../widgets/appointment_helpers.dart';
 class CreateAppointmentPage extends StatefulWidget {
   final DateTime? initialStartDate;
   final DateTime? initialEndDate;
+  final String? initialTitle;
+  final String? initialLocation;
+  final String? propertyId;
+  final String? clientId;
+  final AppointmentType? initialType;
 
   const CreateAppointmentPage({
     super.key,
     this.initialStartDate,
     this.initialEndDate,
+    this.initialTitle,
+    this.initialLocation,
+    this.propertyId,
+    this.clientId,
+    this.initialType,
   });
 
   @override
@@ -49,6 +59,16 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
     _start = widget.initialStartDate ??
         DateTime(now.year, now.month, now.day, now.hour + 1, 0);
     _end = widget.initialEndDate ?? _start.add(const Duration(hours: 1));
+    if (widget.initialTitle != null && widget.initialTitle!.trim().isNotEmpty) {
+      _titleController.text = widget.initialTitle!.trim();
+    }
+    if (widget.initialLocation != null &&
+        widget.initialLocation!.trim().isNotEmpty) {
+      _locationController.text = widget.initialLocation!.trim();
+    }
+    if (widget.initialType != null) {
+      _type = widget.initialType!;
+    }
     _titleController.addListener(() => setState(() {}));
   }
 
@@ -230,6 +250,8 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
             ? null
             : _notesController.text.trim(),
         color: _color,
+        propertyId: widget.propertyId,
+        clientId: widget.clientId,
       ),
     );
 

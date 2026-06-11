@@ -21,6 +21,7 @@ import '../widgets/kanban_filters.dart';
 import '../widgets/project_selector.dart';
 import '../widgets/kanban_skeleton.dart';
 import '../widgets/task_details_modal.dart';
+import '../widgets/kanban_task_quick_actions_sheet.dart';
 
 final _compactIntFormatter = NumberFormat.decimalPattern('pt_BR');
 
@@ -827,56 +828,6 @@ class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
-  // ignore: unused_element
-  Widget _kanbanActiveContextChip(
-    BuildContext context,
-    IconData icon,
-    String label, {
-    VoidCallback? onClear,
-  }) {
-    final accent = _kanbanAccentColor(context);
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        color: accent.withValues(alpha: isDark ? 0.16 : 0.10),
-        border: Border.all(color: accent.withValues(alpha: 0.32)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 15, color: accent),
-          const SizedBox(width: 6),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 220),
-            child: Text(
-              label,
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w800,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          if (onClear != null) ...[
-            const SizedBox(width: 4),
-            InkWell(
-              onTap: onClear,
-              borderRadius: BorderRadius.circular(999),
-              child: Padding(
-                padding: const EdgeInsets.all(2),
-                child: Icon(Icons.close_rounded, size: 14, color: accent),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
   /// Header da seção "Refinar quadro" — pequeno banner com gradient stripe e descrição.
   Widget _kanbanToolsHeader(BuildContext context) {
     final theme = Theme.of(context);
@@ -920,7 +871,7 @@ class _KanbanPageState extends State<KanbanPage> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Trocar de funil, buscar leads e cortar por prioridade.',
+                    'Trocar de funil e filtrar por prioridade.',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: ThemeHelpers.textSecondaryColor(context),
                       fontWeight: FontWeight.w600,
@@ -1182,14 +1133,9 @@ class _KanbanPageState extends State<KanbanPage> {
   }) {
     final theme = Theme.of(context);
 
-    final hasSearch = controller.searchQuery != null &&
-        controller.searchQuery!.trim().isNotEmpty;
-    final hasFilters = controller.filterPriority != null ||
-        (controller.filterAssigneeId != null &&
-            controller.filterAssigneeId!.trim().isNotEmpty);
+    final hasFilters = controller.hasActiveBoardFilters;
 
-    final q = controller.searchQuery?.trim() ?? '';
-    final headline = hasSearch ? 'Radar de leads' : 'Pipeline de leads';
+    const headline = 'Pipeline de leads';
 
     final mainTitles = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1206,59 +1152,24 @@ class _KanbanPageState extends State<KanbanPage> {
             color: ThemeHelpers.textColor(context),
           ),
         ),
-      ],
-    );
-
-    // Linha de contexto reescrita: time + última atualização (em chip leve,
-    // sem repetir contagem de etapas/cards — isso vai aparecer na navegação
-    // por etapas logo abaixo, evitando a redundância antiga).
-    final updatedAtLabel = DateFormat("HH:mm · d MMM", 'pt_BR')
-        .format(DateTime.now());
-
-    final contextStrip = Wrap(
-      spacing: 6,
-      runSpacing: 6,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        _kanbanMicroChip(
-          context,
-          icon: Icons.update_rounded,
-          label: 'Atualização $updatedAtLabel',
-          tone: ThemeHelpers.textSecondaryColor(context),
-        ),
-        if (hasSearch)
-          _kanbanMicroChip(
-            context,
-            icon: Icons.search_rounded,
-            label: q.length > 28 ? '${q.substring(0, 28)}…' : 'busca: $q',
-            tone: _kanbanAccentColor(context),
-          )
-        else if (hasFilters)
+        if (hasFilters) ...[
+          const SizedBox(height: 6),
           _kanbanMicroChip(
             context,
             icon: Icons.tune_rounded,
-            label: 'Filtros aplicados',
+            label: 'Filtros ativos',
             tone: _kanbanAccentColor(context),
           ),
+        ],
       ],
     );
 
     final Widget heroTop = Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         _kanbanHeroLeadingIcon(context),
         const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              mainTitles,
-              const SizedBox(height: 10),
-              contextStrip,
-            ],
-          ),
-        ),
+        Expanded(child: mainTitles),
       ],
     );
 
@@ -2713,62 +2624,11 @@ class _KanbanPageState extends State<KanbanPage> {
 
 
   void _showTaskActions(BuildContext context, KanbanTask task) {
-    final pageContext = context;
-    final controller = context.read<KanbanController>();
-    final perms = controller.permissions;
-    showModalBottomSheet<void>(
-      context: context,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.info_outline),
-              title: const Text('Ver detalhes'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                showModalBottomSheet<void>(
-                  context: pageContext,
-                  isScrollControlled: true,
-                  backgroundColor: Colors.transparent,
-                  barrierColor: Colors.black54,
-                  builder: (ctx) => TaskDetailsModal(task: task),
-                );
-              },
-            ),
-            if (perms?.canEditTasks ?? true)
-              ListTile(
-                leading: const Icon(Icons.edit),
-                title: const Text('Editar'),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  showModalBottomSheet<void>(
-                    context: pageContext,
-                    isScrollControlled: true,
-                    backgroundColor: Colors.transparent,
-                    builder: (ctx) => Padding(
-                      padding: EdgeInsets.only(
-                        bottom: MediaQuery.of(ctx).viewInsets.bottom,
-                      ),
-                      child: EditTaskModal(task: task),
-                    ),
-                  );
-                },
-              ),
-            if (perms?.canDeleteTasks ?? true)
-              ListTile(
-                leading: const Icon(Icons.delete, color: Colors.red),
-                title: const Text(
-                  'Deletar',
-                  style: TextStyle(color: Colors.red),
-                ),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  _confirmDeleteTask(pageContext, controller, task);
-                },
-              ),
-          ],
-        ),
+    unawaited(
+      showKanbanTaskQuickActions(
+        context,
+        task,
+        controller: context.read<KanbanController>(),
       ),
     );
   }

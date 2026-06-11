@@ -1,5 +1,7 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-// import 'package:file_picker/file_picker.dart'; // TODO: Adicionar ao pubspec.yaml
 import '../../../../shared/services/property_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
@@ -15,7 +17,7 @@ class ExportImportDialog extends StatefulWidget {
 class _ExportImportDialogState extends State<ExportImportDialog> {
   final PropertyService _propertyService = PropertyService.instance;
   bool _isExporting = false;
-  final bool _isImporting = false;
+  bool _isImporting = false;
   String? _importResult;
 
   Future<void> _exportProperties(String format) async {
@@ -63,79 +65,66 @@ class _ExportImportDialogState extends State<ExportImportDialog> {
   }
 
   Future<void> _importProperties() async {
-    // TODO: Implementar quando file_picker for adicionado ao pubspec.yaml
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Seleção de arquivo será implementada. Adicione file_picker ao pubspec.yaml'),
-      ),
-    );
-    
-    // Código comentado - será implementado quando file_picker estiver disponível
-    // try {
-    //   final result = await FilePicker.platform.pickFiles(
-    //     type: FileType.custom,
-    //     allowedExtensions: ['xlsx', 'xls', 'csv'],
-    //   );
-    //   if (result == null || result.files.single.path == null) return;
-    //   setState(() {
-    //     _isImporting = true;
-    //     _importResult = null;
-    //   });
-    //   final file = File(result.files.single.path!);
-    //   final fileBytes = await file.readAsBytes();
-    //   final response = await _propertyService.importProperties(
-    //     fileBytes: fileBytes,
-    //     fileName: result.files.single.name,
-    //   );
-    //   if (mounted) {
-    //     if (response.success && response.data != null) {
-    //       final importData = response.data!;
-    //       setState(() {
-    //         _importResult = 'Importação concluída!\n'
-    //             'Total: ${importData.total}\n'
-    //             'Sucesso: ${importData.success}\n'
-    //             'Falhas: ${importData.failed}';
-    //       });
-    //       if (importData.errors.isNotEmpty) {
-    //         ScaffoldMessenger.of(context).showSnackBar(
-    //           SnackBar(
-    //             content: Text('${importData.errors.length} propriedades com erro'),
-    //             backgroundColor: AppColors.status.warning,
-    //             duration: const Duration(seconds: 5),
-    //           ),
-    //         );
-    //       } else {
-    //         ScaffoldMessenger.of(context).showSnackBar(
-    //           SnackBar(
-    //             content: Text('${importData.success} propriedades importadas com sucesso!'),
-    //             backgroundColor: AppColors.status.success,
-    //           ),
-    //         );
-    //         Navigator.pop(context, true);
-    //       }
-    //     } else {
-    //       ScaffoldMessenger.of(context).showSnackBar(
-    //         SnackBar(
-    //           content: Text(response.message ?? 'Erro ao importar'),
-    //           backgroundColor: AppColors.status.error,
-    //         ),
-    //       );
-    //     }
-    //   }
-    // } catch (e) {
-    //   debugPrint('Erro ao importar: $e');
-    //   if (mounted) {
-    //     ScaffoldMessenger.of(context).showSnackBar(
-    //       const SnackBar(content: Text('Erro ao importar propriedades')),
-    //     );
-    //   }
-    // } finally {
-    //   if (mounted) {
-    //     setState(() {
-    //       _isImporting = false;
-    //     });
-    //   }
-    // }
+    try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['xlsx', 'xls', 'csv'],
+      );
+      if (result == null || result.files.single.path == null) return;
+
+      setState(() {
+        _isImporting = true;
+        _importResult = null;
+      });
+
+      final file = File(result.files.single.path!);
+      final fileBytes = await file.readAsBytes();
+      final response = await _propertyService.importProperties(
+        fileBytes: fileBytes,
+        fileName: result.files.single.name,
+      );
+
+      if (!mounted) return;
+
+      if (response.success && response.data != null) {
+        final importData = response.data!;
+        setState(() {
+          _importResult = 'Importação concluída!\n'
+              'Total: ${importData.total}\n'
+              'Sucesso: ${importData.success}\n'
+              'Falhas: ${importData.failed}';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${importData.success} propriedade(s) importada(s)',
+            ),
+            backgroundColor: AppColors.status.success,
+          ),
+        );
+        Navigator.pop(context, true);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(response.message ?? 'Erro ao importar'),
+            backgroundColor: AppColors.status.error,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Erro ao importar: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Erro ao importar propriedades')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isImporting = false;
+        });
+      }
+    }
   }
 
   @override

@@ -14,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../constants/api_constants.dart';
 import '../navigation/app_navigator.dart';
 import '../routes/app_routes.dart';
+import '../../shared/utils/app_deep_link.dart';
 import '../../firebase_options.dart';
 import '../../features/notifications/controllers/notification_controller.dart';
 import '../../shared/services/api_service.dart';
@@ -464,8 +465,14 @@ class AppPushService {
 
   void _handleNotificationTapPayload(Map<String, dynamic> data) {
     unawaited(NotificationController.instance.refreshUnreadCount());
-    if (appNavigatorKey.currentState != null) {
-      appNavigatorKey.currentState!.pushNamed(AppRoutes.notifications);
+    final nav = appNavigatorKey.currentState;
+    if (nav == null) return;
+
+    final route = AppDeepLink.fromPushData(data);
+    if (route != null && route.isNotEmpty) {
+      nav.pushNamed(route);
+      return;
     }
+    nav.pushNamed(AppRoutes.notifications);
   }
 }

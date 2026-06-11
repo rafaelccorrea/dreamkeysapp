@@ -358,6 +358,7 @@ class KanbanTask {
   final KanbanUser? createdBy;
   final KanbanProject? project;
   final int? commentsCount;
+  final List<KanbanTaskContactInput>? contacts;
 
   KanbanTask({
     required this.id,
@@ -383,6 +384,7 @@ class KanbanTask {
     this.createdBy,
     this.project,
     this.commentsCount,
+    this.contacts,
   });
 
   /// Resultado normalizado para regras de UI (igual ao web).
@@ -443,6 +445,16 @@ class KanbanTask {
           ? KanbanProject.fromJson(json['project'] as Map<String, dynamic>)
           : null,
       commentsCount: json['commentsCount'] as int?,
+      contacts: json['contacts'] is List
+          ? (json['contacts'] as List)
+              .whereType<Map>()
+              .map(
+                (e) => KanbanTaskContactInput.fromJson(
+                  Map<String, dynamic>.from(e),
+                ),
+              )
+              .toList()
+          : null,
     );
   }
 
@@ -494,6 +506,7 @@ class KanbanTask {
     KanbanUser? createdBy,
     KanbanProject? project,
     int? commentsCount,
+    List<KanbanTaskContactInput>? contacts,
   }) {
     return KanbanTask(
       id: id ?? this.id,
@@ -519,6 +532,7 @@ class KanbanTask {
       createdBy: createdBy ?? this.createdBy,
       project: project ?? this.project,
       commentsCount: commentsCount ?? this.commentsCount,
+      contacts: contacts ?? this.contacts,
     );
   }
 
@@ -944,6 +958,16 @@ class KanbanTaskContactInput {
     this.jobTitle,
     this.birthDate,
   });
+
+  factory KanbanTaskContactInput.fromJson(Map<String, dynamic> json) {
+    return KanbanTaskContactInput(
+      name: json['name']?.toString(),
+      phone: json['phone']?.toString(),
+      email: json['email']?.toString(),
+      jobTitle: json['jobTitle']?.toString() ?? json['role']?.toString(),
+      birthDate: json['birthDate']?.toString(),
+    );
+  }
 
   Map<String, dynamic> toJson() {
     final m = <String, dynamic>{};

@@ -14,6 +14,8 @@ import '../../../../shared/widgets/minimal_body_chrome.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
 import '../../notifications/widgets/notification_center.dart';
 import '../widgets/dashboard_filters_drawer.dart';
+import '../widgets/broker_dashboard_hub.dart';
+import '../../../core/notifications/subtask_reminder_service.dart';
 
 // Formatters globais
 final _currencyFormatter = NumberFormat.currency(
@@ -51,6 +53,7 @@ class _DashboardPageState extends State<DashboardPage> {
   void initState() {
     super.initState();
     _loadDashboardData();
+    unawaited(SubtaskReminderService.instance.syncFromServer());
   }
 
   Future<void> _loadDashboardData() async {
@@ -143,6 +146,8 @@ class _DashboardPageState extends State<DashboardPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _buildGreeting(context, theme),
+                      SizedBox(height: _kSectionGap + 2),
+                      const BrokerDashboardHub(),
                       SizedBox(height: _kSectionGap + 2),
                       _buildStatsCards(context, theme),
                       if (_dashboardData != null) ...[
