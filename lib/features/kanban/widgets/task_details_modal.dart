@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
@@ -56,6 +57,10 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
 
   String? _currentUserId;
 
+  /// Campos completos do card (inclui cliente com telefone) carregados via
+  /// `GET /kanban/tasks/:id/fields`. A listagem das colunas não traz telefone.
+  KanbanTask? _detailedTask;
+
   @override
   void initState() {
     super.initState();
@@ -67,6 +72,21 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
     _commentFocus.addListener(() => setState(() {}));
     _loadCurrentUserId();
     _loadComments();
+    _loadTaskFields();
+  }
+
+  /// Recarrega o card completo para obter o cliente/lead com telefone,
+  /// WhatsApp etc. (a listagem do board omite esses campos).
+  Future<void> _loadTaskFields() async {
+    try {
+      final r = await _kanbanService.getTaskById(widget.task.id);
+      if (!mounted) return;
+      if (r.success && r.data != null) {
+        setState(() => _detailedTask = r.data);
+      }
+    } catch (e) {
+      debugPrint('⚠️ [TASK_DETAILS] Erro ao carregar campos do card: $e');
+    }
   }
 
   void _onTabChanged() {
@@ -332,13 +352,25 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
   /// Card atualizado após marcar resultado / mover no board (paridade com detalhe web).
   KanbanTask _mergedTask(KanbanController c) {
     final id = widget.task.id;
+    KanbanTask base = widget.task;
     final board = c.board;
     if (board != null) {
       for (final t in board.tasks) {
-        if (t.id == id) return t;
+        if (t.id == id) {
+          base = t;
+          break;
+        }
       }
     }
-    return widget.task;
+    // A listagem do board não traz o cliente completo (sem telefone);
+    // sobrepõe os campos completos quando já carregados.
+    if (_detailedTask != null) {
+      base = base.copyWith(
+        clientId: _detailedTask!.clientId,
+        client: _detailedTask!.client,
+      );
+    }
+    return base;
   }
 
   void _openMarkResultSheet(
@@ -555,6 +587,17 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
           // 2. BENTO GRID — info chave em 2×2 com cores próprias
           _BentoInfoGrid(task: task, state: state),
           const SizedBox(height: 26),
+
+          // 2.5 LEAD / CONTATO — número do lead estilizado (paridade com o web)
+          if (task.client != null) ...[
+            _SectionHeader(
+              overline: 'Lead',
+              title: 'Contato',
+            ),
+            const SizedBox(height: 10),
+            _LeadContactCard(client: task.client!),
+            const SizedBox(height: 26),
+          ],
 
           // 3. EQUIPE
           _SectionHeader(
@@ -1723,6 +1766,321 @@ class _SectionHeader extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+// =============================================================================
+// LEAD / CONTATO — número do lead estilizado (paridade com ClientInfoCard web)
+// =============================================================================
+
+/// Card do lead vinculado à negociação: nome + badges de tipo/status e os
+/// dados de contato (telefone, WhatsApp, e-mail, CPF, cidade). Telefone e
+/// WhatsApp são acionáveis (discar / abrir conversa). Espelha o
+/// `ClientInfoCard` do front web.
+class _LeadContactCard extends StatelessWidget {
+  final KanbanTaskClient client;
+
+  const _LeadContactCard({required this.client});
+
+  static const Map<String, Color> _typeColors = {
+    'buyer': Color(0xFF3B82F6),
+    'seller': Color(0xFFEF4444),
+    'renter': Color(0xFF10B981),
+    'tenant': Color(0xFF10B981),
+    'lessor': Color(0xFFF59E0B),
+    'landlord': Color(0xFFF59E0B),
+    'investor': Color(0xFF8B5CF6),
+  };
+
+  static const Map<String, String> _typeLabels = {
+    'buyer': 'Comprador',
+    'seller': 'Vendedor',
+    'renter': 'Inquilino',
+    'tenant': 'Inquilino',
+    'lessor': 'Proprietário',
+    'landlord': 'Proprietário',
+    'investor': 'Investidor',
+  };
+
+  static const Map<String, String> _statusLabels = {
+    'active': 'Ativo',
+    'inactive': 'Inativo',
+    'contacted': 'Contatado',
+    'interested': 'Interessado',
+    'closed': 'Fechado',
+  };
+
+  static Future<void> _launch(String uri) async {
+    final u = Uri.parse(uri);
+    if (await canLaunchUrl(u)) {
+      await launchUrl(u, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  static String _telDigits(String s) => s.replaceAll(RegExp(r'[^0-9+]'), '');
+  static String _waDigits(String s) => s.replaceAll(RegExp(r'\D'), '');
+  static String _titleCase(String s) =>
+      s.isEmpty ? s : s[0].toUpperCase() + s.substring(1).toLowerCase();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final textColor = ThemeHelpers.textColor(context);
+    final border = ThemeHelpers.borderColor(context);
+
+    final typeKey = client.type?.toLowerCase();
+    final typeColor = typeKey != null ? _typeColors[typeKey] : null;
+    final typeLabel = (client.type != null && client.type!.trim().isNotEmpty)
+        ? (_typeLabels[typeKey] ?? _titleCase(client.type!))
+        : null;
+    final statusKey = client.status?.toLowerCase();
+    final statusLabel =
+        (client.status != null && client.status!.trim().isNotEmpty)
+            ? (_statusLabels[statusKey] ?? _titleCase(client.status!))
+            : null;
+
+    final phone = client.phone?.trim();
+    final whatsapp = client.whatsapp?.trim();
+    final showWhatsapp =
+        whatsapp != null && whatsapp.isNotEmpty && whatsapp != phone;
+    final email = client.email?.trim();
+    final cpf = client.cpf?.trim();
+    final city = client.city?.trim();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: ThemeHelpers.cardBackgroundColor(context),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: border.withValues(alpha: 0.6)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Cabeçalho: nome + badge de tipo
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Text(
+                  client.name.isNotEmpty ? client.name : 'Lead sem nome',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: textColor,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+              if (typeLabel != null) ...[
+                const SizedBox(width: 8),
+                _LeadBadge(label: typeLabel, color: typeColor),
+              ],
+            ],
+          ),
+          if (statusLabel != null) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: _LeadBadge(label: statusLabel, color: null),
+            ),
+          ],
+          const SizedBox(height: 14),
+          Container(height: 1, color: border.withValues(alpha: 0.6)),
+          const SizedBox(height: 14),
+
+          // Telefone (número do lead) em destaque, acionável
+          if (phone != null && phone.isNotEmpty)
+            _LeadContactRow(
+              icon: Icons.phone_rounded,
+              label: 'Telefone',
+              value: phone,
+              actions: [
+                _LeadContactAction(
+                  icon: Icons.call_rounded,
+                  tooltip: 'Ligar',
+                  onTap: () => _launch('tel:${_telDigits(phone)}'),
+                ),
+                _LeadContactAction(
+                  icon: Icons.chat_rounded,
+                  tooltip: 'WhatsApp',
+                  onTap: () => _launch('https://wa.me/${_waDigits(phone)}'),
+                ),
+              ],
+            ),
+          if (showWhatsapp)
+            _LeadContactRow(
+              icon: Icons.chat_rounded,
+              label: 'WhatsApp',
+              value: whatsapp,
+              actions: [
+                _LeadContactAction(
+                  icon: Icons.chat_rounded,
+                  tooltip: 'Abrir WhatsApp',
+                  onTap: () => _launch('https://wa.me/${_waDigits(whatsapp)}'),
+                ),
+              ],
+            ),
+          if (email != null && email.isNotEmpty)
+            _LeadContactRow(
+              icon: Icons.mail_outline_rounded,
+              label: 'E-mail',
+              value: email,
+              actions: [
+                _LeadContactAction(
+                  icon: Icons.send_rounded,
+                  tooltip: 'Enviar e-mail',
+                  onTap: () => _launch('mailto:$email'),
+                ),
+              ],
+            ),
+          if (cpf != null && cpf.isNotEmpty)
+            _LeadContactRow(
+              icon: Icons.badge_outlined,
+              label: 'CPF',
+              value: cpf,
+            ),
+          if (city != null && city.isNotEmpty)
+            _LeadContactRow(
+              icon: Icons.location_on_outlined,
+              label: 'Cidade',
+              value: city,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Pílula de categoria/status do lead (estilo badge do web).
+class _LeadBadge extends StatelessWidget {
+  final String label;
+  final Color? color;
+
+  const _LeadBadge({required this.label, this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = color ?? const Color(0xFF6B7280);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        label.toUpperCase(),
+        style: TextStyle(
+          color: c,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
+  }
+}
+
+/// Linha de um dado de contato: label (ícone + texto) + valor, com ações
+/// opcionais à direita (ligar / WhatsApp / e-mail).
+class _LeadContactRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final List<Widget> actions;
+
+  const _LeadContactRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.actions = const [],
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(icon, size: 14, color: secondary),
+                    const SizedBox(width: 6),
+                    Text(
+                      label.toUpperCase(),
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.5,
+                        color: secondary,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: textColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          for (final a in actions) ...[
+            const SizedBox(width: 8),
+            a,
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Botão de ação rápida (ligar / WhatsApp / e-mail) no card do lead.
+class _LeadContactAction extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const _LeadContactAction({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = _kanbanAccent(context);
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, size: 18, color: accent),
+          ),
+        ),
+      ),
     );
   }
 }

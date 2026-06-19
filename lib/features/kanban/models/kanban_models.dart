@@ -360,6 +360,12 @@ class KanbanTask {
   final int? commentsCount;
   final List<KanbanTaskContactInput>? contacts;
 
+  /// Cliente/lead vinculado à negociação (populado em
+  /// `GET /kanban/tasks/:id/fields`). A listagem das colunas não traz o
+  /// telefone, por isso o detalhe recarrega os campos completos.
+  final String? clientId;
+  final KanbanTaskClient? client;
+
   KanbanTask({
     required this.id,
     required this.title,
@@ -385,6 +391,8 @@ class KanbanTask {
     this.project,
     this.commentsCount,
     this.contacts,
+    this.clientId,
+    this.client,
   });
 
   /// Resultado normalizado para regras de UI (igual ao web).
@@ -445,6 +453,12 @@ class KanbanTask {
           ? KanbanProject.fromJson(json['project'] as Map<String, dynamic>)
           : null,
       commentsCount: json['commentsCount'] as int?,
+      clientId: json['clientId']?.toString(),
+      client: json['client'] is Map
+          ? KanbanTaskClient.fromJson(
+              Map<String, dynamic>.from(json['client'] as Map),
+            )
+          : null,
       contacts: json['contacts'] is List
           ? (json['contacts'] as List)
               .whereType<Map>()
@@ -507,6 +521,8 @@ class KanbanTask {
     KanbanProject? project,
     int? commentsCount,
     List<KanbanTaskContactInput>? contacts,
+    String? clientId,
+    KanbanTaskClient? client,
   }) {
     return KanbanTask(
       id: id ?? this.id,
@@ -533,6 +549,8 @@ class KanbanTask {
       project: project ?? this.project,
       commentsCount: commentsCount ?? this.commentsCount,
       contacts: contacts ?? this.contacts,
+      clientId: clientId ?? this.clientId,
+      client: client ?? this.client,
     );
   }
 
@@ -548,6 +566,61 @@ class KanbanTask {
       default:
         return KanbanPriority.low;
     }
+  }
+}
+
+/// Cliente/lead vinculado à negociação, populado em
+/// `GET /kanban/tasks/:id/fields`. Espelha `KanbanTaskClient` do front web.
+class KanbanTaskClient {
+  final String id;
+  final String name;
+  final String? email;
+  final String? phone;
+  final String? whatsapp;
+  final String? secondaryPhone;
+  final String? cpf;
+
+  /// `buyer` | `seller` | `tenant`/`renter` | `landlord`/`lessor` | `investor` | ...
+  final String? type;
+
+  /// `active` | `inactive` | `contacted` | `interested` | `closed` | ...
+  final String? status;
+  final String? city;
+
+  const KanbanTaskClient({
+    required this.id,
+    required this.name,
+    this.email,
+    this.phone,
+    this.whatsapp,
+    this.secondaryPhone,
+    this.cpf,
+    this.type,
+    this.status,
+    this.city,
+  });
+
+  factory KanbanTaskClient.fromJson(Map<String, dynamic> json) {
+    return KanbanTaskClient(
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      email: json['email']?.toString(),
+      phone: json['phone']?.toString(),
+      whatsapp: json['whatsapp']?.toString(),
+      secondaryPhone: json['secondaryPhone']?.toString(),
+      cpf: json['cpf']?.toString(),
+      type: json['type']?.toString(),
+      status: json['status']?.toString(),
+      city: json['city']?.toString(),
+    );
+  }
+
+  /// Primeiro número de contato disponível (telefone → whatsapp → secundário).
+  String? get primaryPhone {
+    for (final p in [phone, whatsapp, secondaryPhone]) {
+      if (p != null && p.trim().isNotEmpty) return p.trim();
+    }
+    return null;
   }
 }
 
