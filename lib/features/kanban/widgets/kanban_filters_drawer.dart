@@ -123,17 +123,27 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    // Acento da marca/Kanban (igual ao botão "Filtros" e ao board).
+    // Acento da marca/Kanban (header, contadores, botão Aplicar).
     final accent =
         isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    // Cada seção ganha uma cor semântica própria — dá vida e leitura rápida.
+    final cBusca =
+        isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
+    final cResp =
+        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
+    final cTags = isDark ? const Color(0xFFF472B6) : const Color(0xFFDB2777);
+    final cResult =
+        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
+    final cPeriodo =
+        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
     final mq = MediaQuery.of(context);
     final activeCount = _activeCount;
 
     return DraggableScrollableSheet(
       expand: false,
-      initialChildSize: 0.92,
-      minChildSize: 0.55,
-      maxChildSize: 0.96,
+      initialChildSize: 0.86,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
       builder: (context, scrollController) {
         return Container(
           decoration: BoxDecoration(
@@ -168,7 +178,7 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
                     _buildSection(
                       context,
                       icon: Icons.search_rounded,
-                      accent: accent,
+                      accent: cBusca,
                       title: 'Busca',
                       description: 'Nome, telefone, cliente ou título do lead.',
                       child: CustomTextField(
@@ -181,7 +191,7 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
                     _buildSection(
                       context,
                       icon: Icons.person_outline_rounded,
-                      accent: accent,
+                      accent: cResp,
                       title: 'Responsável',
                       description: 'Filtre por um ou mais corretores.',
                       child: Wrap(
@@ -192,7 +202,7 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
                             label: 'Sem responsável',
                             icon: Icons.person_off_outlined,
                             selected: _unassigned,
-                            accent: accent,
+                            accent: cResp,
                             onTap: () => setState(() {
                               _unassigned = !_unassigned;
                               if (_unassigned) _assignedToIds.clear();
@@ -202,7 +212,7 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
                             _ChipChoice(
                               label: _firstName(u.name),
                               selected: _assignedToIds.contains(u.id),
-                              accent: accent,
+                              accent: cResp,
                               onTap: () => setState(() {
                                 if (!_assignedToIds.remove(u.id)) {
                                   _assignedToIds.add(u.id);
@@ -220,7 +230,7 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
                     _buildSection(
                       context,
                       icon: Icons.sell_outlined,
-                      accent: accent,
+                      accent: cTags,
                       title: 'Tags',
                       description: 'Filtre por etiquetas do CRM.',
                       child: Wrap(
@@ -231,7 +241,7 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
                             _ChipChoice(
                               label: t.name,
                               selected: _tagIds.contains(t.id),
-                              accent: _hex(t.color) ?? accent,
+                              accent: _hex(t.color) ?? cTags,
                               onTap: () => setState(() {
                                 if (!_tagIds.remove(t.id)) _tagIds.add(t.id);
                               }),
@@ -246,7 +256,7 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
                     _buildSection(
                       context,
                       icon: Icons.flag_outlined,
-                      accent: accent,
+                      accent: cResult,
                       title: 'Resultado',
                       description: 'Estágio do negócio.',
                       child: Wrap(
@@ -256,14 +266,14 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
                           _ChipChoice(
                             label: 'Todos',
                             selected: _result == null,
-                            accent: accent,
+                            accent: cResult,
                             onTap: () => setState(() => _result = null),
                           ),
                           for (final r in KanbanResultFilter.values)
                             _ChipChoice(
                               label: r.label,
                               selected: _result == r,
-                              accent: accent,
+                              accent: cResult,
                               onTap: () => setState(() => _result = r),
                             ),
                         ],
@@ -273,7 +283,7 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
                     _buildSection(
                       context,
                       icon: Icons.event_outlined,
-                      accent: accent,
+                      accent: cPeriodo,
                       title: 'Período de criação',
                       description: 'Leads criados entre as datas.',
                       child: Row(
@@ -283,7 +293,7 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
                               context,
                               controller: _createdFromController,
                               label: 'De',
-                              accent: accent,
+                              accent: cPeriodo,
                               onTap: () => _pickDate(isStart: true),
                               onClear: () => setState(() {
                                 _createdAfter = null;
@@ -297,7 +307,7 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
                               context,
                               controller: _createdToController,
                               label: 'Até',
-                              accent: accent,
+                              accent: cPeriodo,
                               onTap: () => _pickDate(isStart: false),
                               onClear: () => setState(() {
                                 _createdBefore = null;
@@ -393,21 +403,23 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
     final isDark = theme.brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
+        // Leve tint na cor da seção sobre a superfície — dá vida sem pesar.
+        color: Color.alphaBlend(
+          accent.withValues(alpha: isDark ? 0.06 : 0.035),
+          ThemeHelpers.cardBackgroundColor(context),
+        ),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.42),
+          color: accent.withValues(alpha: isDark ? 0.28 : 0.20),
         ),
-        boxShadow: isDark
-            ? null
-            : [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 14,
-                  offset: const Offset(0, 4),
-                  spreadRadius: -3,
-                ),
-              ],
+        boxShadow: [
+          BoxShadow(
+            color: accent.withValues(alpha: isDark ? 0.12 : 0.08),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+            spreadRadius: -6,
+          ),
+        ],
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
@@ -417,14 +429,29 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
             Row(
               children: [
                 Container(
-                  width: 36,
-                  height: 36,
+                  width: 38,
+                  height: 38,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(12),
-                    color: accent.withValues(alpha: isDark ? 0.16 : 0.10),
-                    border: Border.all(color: accent.withValues(alpha: 0.22)),
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        accent.withValues(alpha: isDark ? 0.32 : 0.18),
+                        accent.withValues(alpha: isDark ? 0.16 : 0.08),
+                      ],
+                    ),
+                    border: Border.all(color: accent.withValues(alpha: 0.30)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: accent.withValues(alpha: 0.22),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                        spreadRadius: -2,
+                      ),
+                    ],
                   ),
-                  child: Icon(icon, color: accent, size: 19),
+                  child: Icon(icon, color: accent, size: 20),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -517,12 +544,17 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
       child: Row(
         children: [
           Expanded(
+            flex: 3,
             child: OutlinedButton.icon(
               onPressed: activeCount == 0 ? null : _clear,
               icon: const Icon(Icons.filter_alt_off_outlined, size: 18),
-              label: const Text('Limpar tudo'),
+              label: const Text(
+                'Limpar',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
               style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 14),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
                 ),
@@ -531,7 +563,7 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
           ),
           const SizedBox(width: 12),
           Expanded(
-            flex: 2,
+            flex: 4,
             child: FilledButton.icon(
               onPressed: _apply,
               icon: const Icon(Icons.check_rounded, size: 18),

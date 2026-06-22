@@ -313,33 +313,12 @@ class _KanbanPageState extends State<KanbanPage> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(8),
-                    border:
-                        Border.all(color: accent.withValues(alpha: 0.28)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.view_kanban_rounded, color: accent, size: 14),
-                      const SizedBox(width: 6),
-                      Text(
-                        'QUADRO',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.6,
-                          color: accent,
-                          fontSize: 10.5,
-                        ),
-                      ),
-                    ],
-                  ),
+                Icon(
+                  Icons.view_kanban_rounded,
+                  color: accent.withValues(alpha: 0.9),
+                  size: 16,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 7),
                 Text(
                   '${cols.length}',
                   style: theme.textTheme.titleSmall?.copyWith(
@@ -545,7 +524,6 @@ class _KanbanPageState extends State<KanbanPage> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           _kanbanBoardChromeHeader(context, controller),
-                          _assigneeQuickFilterBar(context, controller),
                           SizedBox(
                             height: boardViewportH,
                             child: ClipRect(
@@ -848,86 +826,6 @@ class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
-  /// Header da seção "Refinar quadro" — pequeno banner com gradient stripe e descrição.
-  Widget _kanbanToolsHeader(BuildContext context) {
-    final theme = Theme.of(context);
-    final accent = _kanbanAccentColor(context);
-    const cool = Color(0xFF0891B2);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Container(
-              width: 4,
-              height: 26,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(2),
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    accent.withValues(alpha: 0.95),
-                    cool.withValues(alpha: 0.85),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Funil e filtros',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.35,
-                      height: 1.1,
-                      color: ThemeHelpers.textColor(context),
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Escolha o funil e filtre seus leads.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
-                      fontWeight: FontWeight.w600,
-                      height: 1.3,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        LayoutBuilder(
-          builder: (context, c) {
-            return Container(
-              width: c.maxWidth,
-              height: 2,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(2),
-                gradient: LinearGradient(
-                  colors: [
-                    Colors.transparent,
-                    accent.withValues(alpha: 0.42),
-                    cool.withValues(alpha: 0.38),
-                    Colors.transparent,
-                  ],
-                  stops: const [0.0, 0.28, 0.62, 1.0],
-                ),
-              ),
-            );
-          },
-        ),
-      ],
-    );
-  }
-
   Widget _kanbanToolsContinuation(
     BuildContext context,
     KanbanController controller,
@@ -941,29 +839,19 @@ class _KanbanPageState extends State<KanbanPage> {
           embedded: true,
         );
 
-        final Widget mainBlock = Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Expanded(child: projectSelector),
-            const SizedBox(width: 10),
-            _kanbanFilterButton(context, controller),
-          ],
-        );
-
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _kanbanToolsHeader(context),
-            const SizedBox(height: 14),
-            mainBlock,
-            // Linha de ações utilitárias do CRM — sempre exibe "Tarefas"
-            // (lista global de subtarefas), e o "Modo seleção" só aparece
-            // quando o controller habilita (regra antiga preservada).
+            // Seletor de funil em largura total.
+            projectSelector,
             const SizedBox(height: 12),
+            // Ações do CRM como chips premium na mesma linguagem visual:
+            // Filtros, Tarefas e (quando habilitado) Modo seleção.
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
+                _kanbanFilterButton(context, controller),
                 _kanbanTasksButton(context),
                 if (controller.showBulkSelectionEntry &&
                     (controller.board?.columns.isNotEmpty ?? false))
@@ -1994,6 +1882,9 @@ class _KanbanPageState extends State<KanbanPage> {
   }
 
   /// Botão de filtros do board com badge de filtros ativos.
+  /// Chip de Filtros — mesma linguagem premium do botão "Tarefas". Ganha um
+  /// gradiente/realce mais forte e um badge com a contagem quando há filtros
+  /// ativos, para virar um elemento vivo que compõe a barra de ações.
   Widget _kanbanFilterButton(
     BuildContext context,
     KanbanController controller,
@@ -2002,10 +1893,9 @@ class _KanbanPageState extends State<KanbanPage> {
     final isDark = theme.brightness == Brightness.dark;
     final count = controller.activeBoardFilterCount;
     final active = count > 0;
-    final accent = isDark
+    final color = isDark
         ? AppColors.primary.primaryDarkMode
         : AppColors.primary.primary;
-    final color = active ? accent : ThemeHelpers.textSecondaryColor(context);
 
     return Material(
       color: Colors.transparent,
@@ -2015,39 +1905,71 @@ class _KanbanPageState extends State<KanbanPage> {
         child: Ink(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
-            color: active
-                ? accent.withValues(alpha: isDark ? 0.16 : 0.08)
-                : ThemeHelpers.cardBackgroundColor(context),
-            border: Border.all(
-              color: active
-                  ? accent.withValues(alpha: isDark ? 0.55 : 0.4)
-                  : ThemeHelpers.borderColor(context),
-              width: active ? 1.4 : 1,
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: active
+                  ? [
+                      color.withValues(alpha: isDark ? 0.34 : 0.20),
+                      color.withValues(alpha: isDark ? 0.16 : 0.10),
+                    ]
+                  : [
+                      color.withValues(alpha: isDark ? 0.22 : 0.13),
+                      color.withValues(alpha: isDark ? 0.10 : 0.06),
+                    ],
             ),
+            border: Border.all(
+              color: color.withValues(alpha: isDark ? 0.55 : 0.42),
+              width: active ? 1.5 : 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: color.withValues(
+                  alpha: active ? (isDark ? 0.30 : 0.18) : (isDark ? 0.18 : 0.10),
+                ),
+                blurRadius: active ? 14 : 10,
+                offset: const Offset(0, 4),
+                spreadRadius: -3,
+              ),
+            ],
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+            padding: const EdgeInsets.fromLTRB(11, 8, 11, 8),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.tune_rounded, size: 18, color: color),
-                const SizedBox(width: 8),
+                Icon(Icons.tune_rounded, size: 17, color: color),
+                const SizedBox(width: 7),
                 Text(
                   'Filtros',
-                  style: theme.textTheme.labelLarge?.copyWith(
+                  style: theme.textTheme.labelMedium?.copyWith(
                     fontWeight: FontWeight.w800,
-                    color: ThemeHelpers.textColor(context),
-                    letterSpacing: -0.1,
+                    color: color,
+                    letterSpacing: 0.1,
                   ),
                 ),
                 if (active) ...[
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 7),
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    constraints: const BoxConstraints(minWidth: 18),
+                    height: 18,
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
                     decoration: BoxDecoration(
-                      color: accent,
+                      gradient: LinearGradient(
+                        colors: [
+                          color,
+                          color.withValues(alpha: 0.82),
+                        ],
+                      ),
                       borderRadius: BorderRadius.circular(999),
+                      boxShadow: [
+                        BoxShadow(
+                          color: color.withValues(alpha: 0.4),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
                     ),
                     child: Text(
                       '$count',
@@ -2055,7 +1977,7 @@ class _KanbanPageState extends State<KanbanPage> {
                         color: Colors.white,
                         fontSize: 11,
                         fontWeight: FontWeight.w900,
-                        height: 1.1,
+                        height: 1,
                       ),
                     ),
                   ),
@@ -2063,45 +1985,6 @@ class _KanbanPageState extends State<KanbanPage> {
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-
-  /// Carrossel rápido de responsáveis — toca num avatar para filtrar o board
-  /// por aquele corretor (toggle). Espelha o AssigneeFilter da web.
-  Widget _assigneeQuickFilterBar(
-    BuildContext context,
-    KanbanController controller,
-  ) {
-    final assignees = controller.availableAssignees;
-    if (assignees.length < 2) return const SizedBox.shrink();
-
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final accent = isDark
-        ? AppColors.primary.primaryDarkMode
-        : AppColors.primary.primary;
-    final selected = controller.boardFilters.assignedToIds;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: SizedBox(
-        height: 64,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          itemCount: assignees.length,
-          separatorBuilder: (_, _) => const SizedBox(width: 10),
-          itemBuilder: (context, i) {
-            final u = assignees[i];
-            final isSel = selected.contains(u.id);
-            return _AssigneeFilterAvatar(
-              user: u,
-              selected: isSel,
-              accent: accent,
-              onTap: () => controller.toggleAssigneeFilter(u.id),
-            );
-          },
         ),
       ),
     );
@@ -3528,101 +3411,5 @@ class _KanbanTaskDeadline {
       case _KanbanDeadlineStatus.none:
         return null;
     }
-  }
-}
-
-
-/// Avatar de responsável no carrossel de filtro rápido do board.
-class _AssigneeFilterAvatar extends StatelessWidget {
-  const _AssigneeFilterAvatar({
-    required this.user,
-    required this.selected,
-    required this.accent,
-    required this.onTap,
-  });
-
-  final KanbanUser user;
-  final bool selected;
-  final Color accent;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final hasAvatar = user.avatar != null && user.avatar!.isNotEmpty;
-    final first = user.name.trim().isEmpty
-        ? '?'
-        : user.name.trim()[0].toUpperCase();
-    final firstName = () {
-      final t = user.name.trim();
-      if (t.isEmpty) return '—';
-      final i = t.indexOf(' ');
-      return i == -1 ? t : t.substring(0, i);
-    }();
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: SizedBox(
-        width: 56,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(2),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: selected
-                      ? accent
-                      : ThemeHelpers.borderColor(context)
-                          .withValues(alpha: 0.6),
-                  width: selected ? 2 : 1,
-                ),
-                boxShadow: selected
-                    ? [
-                        BoxShadow(
-                          color: accent.withValues(alpha: 0.35),
-                          blurRadius: 10,
-                          spreadRadius: -2,
-                          offset: const Offset(0, 3),
-                        ),
-                      ]
-                    : null,
-              ),
-              child: CircleAvatar(
-                radius: 18,
-                backgroundColor: accent.withValues(alpha: 0.12),
-                backgroundImage: hasAvatar ? NetworkImage(user.avatar!) : null,
-                child: hasAvatar
-                    ? null
-                    : Text(
-                        first,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                          color: accent,
-                        ),
-                      ),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              firstName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.labelSmall?.copyWith(
-                fontSize: 10,
-                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                color: selected
-                    ? accent
-                    : ThemeHelpers.textSecondaryColor(context),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
