@@ -206,6 +206,7 @@ class KanbanService {
     String? search,
     KanbanPriority? priority,
     String? assignedToId,
+    KanbanBoardFilters? filters,
   }) async {
     try {
       debugPrint('🔍 [KANBAN_SERVICE] Iniciando busca do quadro Kanban');
@@ -232,6 +233,12 @@ class KanbanService {
       }
       if (assignedToId != null && assignedToId.isNotEmpty) {
         params['assignedToId'] = assignedToId;
+      }
+      // Filtros do board (responsável, tags, resultado, período, busca).
+      // Mesclados por último para que sejam a fonte de verdade quando
+      // presentes (ex.: search do filtro sobrescreve o legado).
+      if (filters != null) {
+        params.addAll(filters.toQueryParams());
       }
 
       final url = ApiConstants.kanbanBoard(teamId);
@@ -304,6 +311,7 @@ class KanbanService {
     int page = 1,
     int limit = 12,
     String? search,
+    KanbanBoardFilters? filters,
   }) async {
     try {
       final params = <String, String>{
@@ -316,6 +324,10 @@ class KanbanService {
       }
       if (search != null && search.trim().isNotEmpty) {
         params['search'] = search.trim();
+      }
+      // Mesmos filtros do board, para o "Carregar mais" não furar o filtro.
+      if (filters != null) {
+        params.addAll(filters.toQueryParams());
       }
 
       final response = await _apiService.get<Map<String, dynamic>>(
@@ -491,6 +503,100 @@ class KanbanService {
       debugPrint('❌ [KANBAN_SERVICE] Exceção ao deletar coluna: $e');
       return ApiResponse.error(
         message: 'Erro ao deletar coluna: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Config de cadência WhatsApp de uma coluna (`GET /kanban/columns/:id/cadence`).
+  Future<ApiResponse<KanbanColumnCadenceConfig>> getColumnCadence(
+    String columnId,
+  ) async {
+    try {
+      final response = await _apiService.get<Map<String, dynamic>>(
+        ApiConstants.kanbanColumnCadence(columnId),
+      );
+      if (response.success && response.data != null) {
+        return ApiResponse.success(
+          data: KanbanColumnCadenceConfig.fromJson(response.data!),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao buscar cadência',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [KANBAN_SERVICE] Exceção ao buscar cadência: $e');
+      return ApiResponse.error(
+        message: 'Erro ao buscar cadência: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Salva a config de cadência da coluna (`PUT /kanban/columns/:id/cadence`).
+  Future<ApiResponse<KanbanColumnCadenceConfig>> updateColumnCadence(
+    String columnId,
+    KanbanColumnCadenceConfig config,
+  ) async {
+    try {
+      final response = await _apiService.put<Map<String, dynamic>>(
+        ApiConstants.kanbanColumnCadence(columnId),
+        body: config.toJson(),
+      );
+      if (response.success && response.data != null) {
+        return ApiResponse.success(
+          data: KanbanColumnCadenceConfig.fromJson(response.data!),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao salvar cadência',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [KANBAN_SERVICE] Exceção ao salvar cadência: $e');
+      return ApiResponse.error(
+        message: 'Erro ao salvar cadência: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Templates aprovados do WhatsApp oficial (`GET /whatsapp/templates`).
+  /// Aceita resposta como lista crua ou `{ data: [...] }`.
+  Future<ApiResponse<List<WhatsappTemplate>>> listWhatsappTemplates() async {
+    try {
+      final response = await _apiService.get<dynamic>(
+        ApiConstants.whatsappTemplates,
+      );
+      if (response.success && response.data != null) {
+        final raw = response.data;
+        final list = raw is List
+            ? raw
+            : (raw is Map && raw['data'] is List
+                ? raw['data'] as List
+                : const []);
+        final templates = list
+            .whereType<Map>()
+            .map((e) =>
+                WhatsappTemplate.fromJson(Map<String, dynamic>.from(e)))
+            .where((t) => t.name.isNotEmpty)
+            .toList();
+        return ApiResponse.success(
+          data: templates,
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao buscar templates',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [KANBAN_SERVICE] Exceção ao buscar templates: $e');
+      return ApiResponse.error(
+        message: 'Erro ao buscar templates: ${e.toString()}',
         statusCode: 0,
       );
     }

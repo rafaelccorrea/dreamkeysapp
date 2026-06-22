@@ -329,6 +329,329 @@ abstract final class KanbanUiTagFilter {
   }
 }
 
+/// Resultado normalizado de uma negociação para filtro/UI.
+enum KanbanResultFilter {
+  open('open', 'Em aberto'),
+  won('won', 'Ganhos'),
+  lost('lost', 'Perdidos'),
+  cancelled('cancelled', 'Cancelados');
+
+  const KanbanResultFilter(this.apiValue, this.label);
+  final String apiValue;
+  final String label;
+}
+
+/// Conjunto de filtros do board do Kanban (espelha `KanbanBoardFiltersDto` do
+/// backend). Imutável; gera os query params exatos que o board aceita.
+class KanbanBoardFilters {
+  /// Responsáveis (OR) — query `assignedToIds` (CSV de UUIDs).
+  final Set<String> assignedToIds;
+
+  /// Somente leads sem responsável — query `unassigned=true`.
+  final bool unassigned;
+
+  /// Tags (OR) — query `tagIds` (CSV de UUIDs).
+  final Set<String> tagIds;
+
+  /// Resultado da negociação — query `result`.
+  final KanbanResultFilter? result;
+
+  /// Busca textual (título, cliente, telefone…) — query `search`.
+  final String? search;
+
+  /// Período de criação — queries `createdAtAfter` / `createdAtBefore`.
+  final DateTime? createdAfter;
+  final DateTime? createdBefore;
+
+  const KanbanBoardFilters({
+    this.assignedToIds = const {},
+    this.unassigned = false,
+    this.tagIds = const {},
+    this.result,
+    this.search,
+    this.createdAfter,
+    this.createdBefore,
+  });
+
+  static const empty = KanbanBoardFilters();
+
+  bool get isEmpty =>
+      assignedToIds.isEmpty &&
+      !unassigned &&
+      tagIds.isEmpty &&
+      result == null &&
+      (search == null || search!.trim().isEmpty) &&
+      createdAfter == null &&
+      createdBefore == null;
+
+  bool get isNotEmpty => !isEmpty;
+
+  /// Quantidade de filtros ativos (para badges/contadores na UI).
+  int get activeCount {
+    var n = 0;
+    if (assignedToIds.isNotEmpty) n++;
+    if (unassigned) n++;
+    if (tagIds.isNotEmpty) n++;
+    if (result != null) n++;
+    if (search != null && search!.trim().isNotEmpty) n++;
+    if (createdAfter != null) n++;
+    if (createdBefore != null) n++;
+    return n;
+  }
+
+  KanbanBoardFilters copyWith({
+    Set<String>? assignedToIds,
+    bool? unassigned,
+    Set<String>? tagIds,
+    KanbanResultFilter? result,
+    bool clearResult = false,
+    String? search,
+    bool clearSearch = false,
+    DateTime? createdAfter,
+    bool clearCreatedAfter = false,
+    DateTime? createdBefore,
+    bool clearCreatedBefore = false,
+  }) {
+    return KanbanBoardFilters(
+      assignedToIds: assignedToIds ?? this.assignedToIds,
+      unassigned: unassigned ?? this.unassigned,
+      tagIds: tagIds ?? this.tagIds,
+      result: clearResult ? null : (result ?? this.result),
+      search: clearSearch ? null : (search ?? this.search),
+      createdAfter: clearCreatedAfter ? null : (createdAfter ?? this.createdAfter),
+      createdBefore:
+          clearCreatedBefore ? null : (createdBefore ?? this.createdBefore),
+    );
+  }
+
+  /// Query params canônicos aceitos por `GET /kanban/board/:teamId`.
+  Map<String, String> toQueryParams() {
+    final p = <String, String>{};
+    if (assignedToIds.isNotEmpty) {
+      p['assignedToIds'] = assignedToIds.join(',');
+    }
+    if (unassigned) p['unassigned'] = 'true';
+    if (tagIds.isNotEmpty) p['tagIds'] = tagIds.join(',');
+    if (result != null) p['result'] = result!.apiValue;
+    final s = search?.trim();
+    if (s != null && s.isNotEmpty) p['search'] = s;
+    if (createdAfter != null) p['createdAtAfter'] = _ymd(createdAfter!);
+    if (createdBefore != null) p['createdAtBefore'] = _ymd(createdBefore!);
+    return p;
+  }
+
+  static String _ymd(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+}
+
+/// Configuração de cadência WhatsApp de uma coluna (espelha
+/// `ColumnCadenceConfig` / `UpdateColumnCadenceDto` do backend). Persistida em
+/// `kanban_columns.cadenceConfig` e exposta via `GET/PUT /kanban/columns/:id/cadence`.
+class KanbanColumnCadenceConfig {
+  final bool enabled;
+
+  /// Minutos na coluna antes do 1º envio automático.
+  final int sendAfterMinutes;
+
+  /// `official` (template aprovado) | `unofficial` (mensagem livre).
+  final String channel;
+
+  /// Mensagem livre — obrigatória quando `channel == unofficial`.
+  final String? messageText;
+
+  /// Nome do template — obrigatório quando `channel == official`.
+  final String? templateName;
+  final String? templateLanguage;
+  final List<String> templateBodyParameters;
+  final List<String> templateHeaderParameters;
+
+  /// Máximo de envios por ciclo (1 = envia só uma vez).
+  final int maxAttempts;
+
+  /// Minutos entre reenvios (quando maxAttempts > 1).
+  final int resendIntervalMinutes;
+
+  /// Minutos aguardando resposta após o último envio.
+  final int waitReplyMinutes;
+
+  /// `move_column` | `none`.
+  final String onNoReplyAction;
+  final String? noReplyTargetColumnId;
+
+  /// `stop` | `move_column`.
+  final String onReplyAction;
+  final String? replyTargetColumnId;
+
+  /// Coluna a que pertence (presente na resposta do GET).
+  final String? columnId;
+
+  const KanbanColumnCadenceConfig({
+    this.enabled = false,
+    this.sendAfterMinutes = 120,
+    this.channel = 'official',
+    this.messageText = '',
+    this.templateName = '',
+    this.templateLanguage = 'pt_BR',
+    this.templateBodyParameters = const [],
+    this.templateHeaderParameters = const [],
+    this.maxAttempts = 1,
+    this.resendIntervalMinutes = 1440,
+    this.waitReplyMinutes = 1440,
+    this.onNoReplyAction = 'move_column',
+    this.noReplyTargetColumnId,
+    this.onReplyAction = 'stop',
+    this.replyTargetColumnId,
+    this.columnId,
+  });
+
+  bool get isOfficial => channel == 'official';
+
+  factory KanbanColumnCadenceConfig.fromJson(Map<String, dynamic> json) {
+    List<String> strList(dynamic v) =>
+        v is List ? v.map((e) => e.toString()).toList() : const <String>[];
+    int asInt(dynamic v, int fallback) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      return int.tryParse(v?.toString() ?? '') ?? fallback;
+    }
+
+    return KanbanColumnCadenceConfig(
+      enabled: json['enabled'] as bool? ?? false,
+      sendAfterMinutes: asInt(json['sendAfterMinutes'], 120),
+      channel: json['channel']?.toString() ?? 'official',
+      messageText: json['messageText']?.toString() ?? '',
+      templateName: json['templateName']?.toString() ?? '',
+      templateLanguage: json['templateLanguage']?.toString() ?? 'pt_BR',
+      templateBodyParameters: strList(json['templateBodyParameters']),
+      templateHeaderParameters: strList(json['templateHeaderParameters']),
+      maxAttempts: asInt(json['maxAttempts'], 1),
+      resendIntervalMinutes: asInt(json['resendIntervalMinutes'], 1440),
+      waitReplyMinutes: asInt(json['waitReplyMinutes'], 1440),
+      onNoReplyAction: json['onNoReplyAction']?.toString() ?? 'move_column',
+      noReplyTargetColumnId: json['noReplyTargetColumnId']?.toString(),
+      onReplyAction: json['onReplyAction']?.toString() ?? 'stop',
+      replyTargetColumnId: json['replyTargetColumnId']?.toString(),
+      columnId: json['columnId']?.toString(),
+    );
+  }
+
+  /// Payload para o PUT (`UpdateColumnCadenceDto`).
+  Map<String, dynamic> toJson() {
+    return {
+      'enabled': enabled,
+      'sendAfterMinutes': sendAfterMinutes,
+      'channel': channel,
+      'messageText': messageText ?? '',
+      'templateName': templateName ?? '',
+      'templateLanguage': templateLanguage ?? 'pt_BR',
+      'templateBodyParameters': templateBodyParameters,
+      'templateHeaderParameters': templateHeaderParameters,
+      'maxAttempts': maxAttempts,
+      'resendIntervalMinutes': resendIntervalMinutes,
+      'waitReplyMinutes': waitReplyMinutes,
+      'onNoReplyAction': onNoReplyAction,
+      'noReplyTargetColumnId': noReplyTargetColumnId,
+      'onReplyAction': onReplyAction,
+      'replyTargetColumnId': replyTargetColumnId,
+    };
+  }
+
+  KanbanColumnCadenceConfig copyWith({
+    bool? enabled,
+    int? sendAfterMinutes,
+    String? channel,
+    String? messageText,
+    String? templateName,
+    String? templateLanguage,
+    List<String>? templateBodyParameters,
+    List<String>? templateHeaderParameters,
+    int? maxAttempts,
+    int? resendIntervalMinutes,
+    int? waitReplyMinutes,
+    String? onNoReplyAction,
+    String? noReplyTargetColumnId,
+    bool clearNoReplyTarget = false,
+    String? onReplyAction,
+    String? replyTargetColumnId,
+    bool clearReplyTarget = false,
+  }) {
+    return KanbanColumnCadenceConfig(
+      enabled: enabled ?? this.enabled,
+      sendAfterMinutes: sendAfterMinutes ?? this.sendAfterMinutes,
+      channel: channel ?? this.channel,
+      messageText: messageText ?? this.messageText,
+      templateName: templateName ?? this.templateName,
+      templateLanguage: templateLanguage ?? this.templateLanguage,
+      templateBodyParameters:
+          templateBodyParameters ?? this.templateBodyParameters,
+      templateHeaderParameters:
+          templateHeaderParameters ?? this.templateHeaderParameters,
+      maxAttempts: maxAttempts ?? this.maxAttempts,
+      resendIntervalMinutes:
+          resendIntervalMinutes ?? this.resendIntervalMinutes,
+      waitReplyMinutes: waitReplyMinutes ?? this.waitReplyMinutes,
+      onNoReplyAction: onNoReplyAction ?? this.onNoReplyAction,
+      noReplyTargetColumnId: clearNoReplyTarget
+          ? null
+          : (noReplyTargetColumnId ?? this.noReplyTargetColumnId),
+      onReplyAction: onReplyAction ?? this.onReplyAction,
+      replyTargetColumnId: clearReplyTarget
+          ? null
+          : (replyTargetColumnId ?? this.replyTargetColumnId),
+      columnId: columnId,
+    );
+  }
+}
+
+/// Template aprovado do WhatsApp oficial (`GET /whatsapp/templates`).
+class WhatsappTemplate {
+  final String name;
+  final String? language;
+  final String? category;
+  final String? status;
+
+  const WhatsappTemplate({
+    required this.name,
+    this.language,
+    this.category,
+    this.status,
+  });
+
+  factory WhatsappTemplate.fromJson(Map<String, dynamic> json) {
+    return WhatsappTemplate(
+      name: json['name']?.toString() ?? '',
+      language: (json['language'] ?? json['languageCode'])?.toString(),
+      category: json['category']?.toString(),
+      status: json['status']?.toString(),
+    );
+  }
+}
+
+/// Detalhe de uma tag da negociação (espelha `tagDetails` do backend) — traz a
+/// cor real configurada na empresa, permitindo colorir o chip igual à web.
+class KanbanTagDetail {
+  final String id;
+  final String name;
+  final String? color;
+  final String? handle;
+
+  const KanbanTagDetail({
+    required this.id,
+    required this.name,
+    this.color,
+    this.handle,
+  });
+
+  factory KanbanTagDetail.fromJson(Map<String, dynamic> json) {
+    return KanbanTagDetail(
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      color: json['color']?.toString(),
+      handle: json['handle']?.toString(),
+    );
+  }
+}
+
 /// Tarefa do Kanban
 class KanbanTask {
   final String id;
@@ -343,8 +666,38 @@ class KanbanTask {
   final DateTime? dueDate;
   final String? projectId;
   final List<String>? tags;
+
+  /// Tags com cor/handle (preferidas sobre [tags] para renderizar chips).
+  final List<KanbanTagDetail>? tagDetails;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  /// Valor total da negociação (R$). Vem no payload do board.
+  final double? totalValue;
+
+  /// Cor calculada pelas regras de cor do backend (por tempo no card).
+  final String? color;
+
+  /// Cor manual definida no card — tem prioridade sobre [color] e regras.
+  final String? cardColor;
+
+  /// Quantas vezes o lead já foi marcado como perdido (recuperação).
+  final int? lossMarkCount;
+
+  /// Lead está no pool de recuperação de perdidos.
+  final bool? inRecoveryPool;
+
+  /// Cadência WhatsApp ativa na coluna atual do card.
+  final bool? cadenceEnabled;
+
+  /// Tentativas de cadência já enviadas no ciclo atual da coluna.
+  final int? cadenceAttemptCount;
+
+  /// Máximo de tentativas configurado na coluna (quando a cadência está ativa).
+  final int? cadenceMaxAttempts;
+
+  /// Cadência aguardando resposta do lead após o último envio.
+  final bool? cadenceAwaitingReply;
 
   /// `open` | `won` | `lost` | `cancelled` — ausente ou vazio equivale a em aberto.
   final String? result;
@@ -379,8 +732,18 @@ class KanbanTask {
     this.dueDate,
     this.projectId,
     this.tags,
+    this.tagDetails,
     required this.createdAt,
     required this.updatedAt,
+    this.totalValue,
+    this.color,
+    this.cardColor,
+    this.lossMarkCount,
+    this.inRecoveryPool,
+    this.cadenceEnabled,
+    this.cadenceAttemptCount,
+    this.cadenceMaxAttempts,
+    this.cadenceAwaitingReply,
     this.result,
     this.lossReason,
     this.resultNotes,
@@ -414,6 +777,41 @@ class KanbanTask {
     return list;
   }
 
+  /// Tags com cor para os chips do card (sem as ocultas). Prefira sobre
+  /// [displayTags] quando o backend enviar `tagDetails`.
+  List<KanbanTagDetail>? get displayTagDetails {
+    final src = tagDetails;
+    if (src == null || src.isEmpty) return null;
+    final list =
+        src.where((t) => !KanbanUiTagFilter.isHidden(t.name)).toList();
+    if (list.isEmpty) return null;
+    return list;
+  }
+
+  /// Melhor telefone para contato rápido do lead: WhatsApp do cliente,
+  /// senão telefone do cliente, senão o 1º contato com telefone.
+  String? get contactWhatsapp {
+    final w = client?.whatsapp?.trim();
+    if (w != null && w.isNotEmpty) return w;
+    return contactPhone;
+  }
+
+  String? get contactPhone {
+    final p = client?.phone?.trim();
+    if (p != null && p.isNotEmpty) return p;
+    final fromContacts = contacts
+        ?.map((c) => c.phone?.trim())
+        .firstWhere((p) => p != null && p.isNotEmpty, orElse: () => null);
+    return fromContacts;
+  }
+
+  /// Está em recuperação de lead perdido?
+  bool get isInRecovery =>
+      (inRecoveryPool ?? false) || ((lossMarkCount ?? 0) > 0);
+
+  /// Há cadência ativa para exibir indicador no card?
+  bool get hasCadence => cadenceEnabled == true;
+
   factory KanbanTask.fromJson(Map<String, dynamic> json) {
     return KanbanTask(
       id: json['id']?.toString() ?? '',
@@ -434,8 +832,29 @@ class KanbanTask {
       tags: json['tags'] != null
           ? List<String>.from(json['tags'] as List)
           : null,
+      tagDetails: json['tagDetails'] is List
+          ? (json['tagDetails'] as List)
+              .whereType<Map>()
+              .map(
+                (e) => KanbanTagDetail.fromJson(
+                  Map<String, dynamic>.from(e),
+                ),
+              )
+              .toList()
+          : null,
       createdAt: DateTime.parse(json['createdAt'].toString()),
       updatedAt: DateTime.parse(json['updatedAt'].toString()),
+      totalValue: json['totalValue'] != null
+          ? (json['totalValue'] as num).toDouble()
+          : null,
+      color: json['color']?.toString(),
+      cardColor: json['cardColor']?.toString(),
+      lossMarkCount: json['lossMarkCount'] as int?,
+      inRecoveryPool: json['inRecoveryPool'] as bool?,
+      cadenceEnabled: json['cadenceEnabled'] as bool?,
+      cadenceAttemptCount: json['cadenceAttemptCount'] as int?,
+      cadenceMaxAttempts: json['cadenceMaxAttempts'] as int?,
+      cadenceAwaitingReply: json['cadenceAwaitingReply'] as bool?,
       result: json['result']?.toString(),
       lossReason: json['lossReason']?.toString(),
       resultNotes: json['resultNotes']?.toString(),
@@ -509,8 +928,18 @@ class KanbanTask {
     DateTime? dueDate,
     String? projectId,
     List<String>? tags,
+    List<KanbanTagDetail>? tagDetails,
     DateTime? createdAt,
     DateTime? updatedAt,
+    double? totalValue,
+    String? color,
+    String? cardColor,
+    int? lossMarkCount,
+    bool? inRecoveryPool,
+    bool? cadenceEnabled,
+    int? cadenceAttemptCount,
+    int? cadenceMaxAttempts,
+    bool? cadenceAwaitingReply,
     String? result,
     String? lossReason,
     String? resultNotes,
@@ -537,8 +966,18 @@ class KanbanTask {
       dueDate: dueDate ?? this.dueDate,
       projectId: projectId ?? this.projectId,
       tags: tags ?? this.tags,
+      tagDetails: tagDetails ?? this.tagDetails,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      totalValue: totalValue ?? this.totalValue,
+      color: color ?? this.color,
+      cardColor: cardColor ?? this.cardColor,
+      lossMarkCount: lossMarkCount ?? this.lossMarkCount,
+      inRecoveryPool: inRecoveryPool ?? this.inRecoveryPool,
+      cadenceEnabled: cadenceEnabled ?? this.cadenceEnabled,
+      cadenceAttemptCount: cadenceAttemptCount ?? this.cadenceAttemptCount,
+      cadenceMaxAttempts: cadenceMaxAttempts ?? this.cadenceMaxAttempts,
+      cadenceAwaitingReply: cadenceAwaitingReply ?? this.cadenceAwaitingReply,
       result: result ?? this.result,
       lossReason: lossReason ?? this.lossReason,
       resultNotes: resultNotes ?? this.resultNotes,

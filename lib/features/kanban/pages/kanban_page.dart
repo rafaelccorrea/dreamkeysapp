@@ -11,19 +11,38 @@ import '../../../core/navigation/adaptive_page_route.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/utils/broker_contact_actions.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../models/kanban_models.dart';
 import '../controllers/kanban_controller.dart';
 import '../widgets/create_task_modal.dart';
 import '../widgets/edit_task_modal.dart';
+import '../widgets/cadence_config_modal.dart';
 import '../widgets/edit_column_modal.dart';
-import '../widgets/kanban_filters.dart';
+import '../widgets/kanban_filters_drawer.dart';
 import '../widgets/project_selector.dart';
 import '../widgets/kanban_skeleton.dart';
 import '../widgets/task_details_modal.dart';
 import '../widgets/kanban_task_quick_actions_sheet.dart';
 
 final _compactIntFormatter = NumberFormat.decimalPattern('pt_BR');
+
+/// Valor monetário compacto para o card (ex.: "R$ 250 mil", "R$ 1,2 mi").
+final _compactCurrencyFormatter =
+    NumberFormat.compactCurrency(locale: 'pt_BR', symbol: r'R$ ');
+
+/// Converte uma cor hex `#RRGGBB`/`#AARRGGBB` em [Color]. Retorna `null` quando
+/// vazia ou inválida, para que o card caia no fallback de cor.
+Color? _parseHexColor(String? hex) {
+  final raw = hex?.trim();
+  if (raw == null || raw.isEmpty) return null;
+  var h = raw.replaceFirst('#', '').toUpperCase();
+  if (h.length == 6) h = 'FF$h';
+  if (h.length != 8) return null;
+  final value = int.tryParse(h, radix: 16);
+  if (value == null) return null;
+  return Color(value);
+}
 
 // ScrollBehavior customizado para ocultar barras de rolagem
 class NoScrollbarScrollBehavior extends ScrollBehavior {
@@ -526,6 +545,7 @@ class _KanbanPageState extends State<KanbanPage> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           _kanbanBoardChromeHeader(context, controller),
+                          _assigneeQuickFilterBar(context, controller),
                           SizedBox(
                             height: boardViewportH,
                             child: ClipRect(
@@ -861,7 +881,7 @@ class _KanbanPageState extends State<KanbanPage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    'Refinar pipeline',
+                    'Funil e filtros',
                     style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w900,
                       letterSpacing: -0.35,
@@ -871,7 +891,7 @@ class _KanbanPageState extends State<KanbanPage> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Trocar de funil e filtrar por prioridade.',
+                    'Escolha o funil e filtre seus leads.',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: ThemeHelpers.textSecondaryColor(context),
                       fontWeight: FontWeight.w600,
@@ -914,38 +934,21 @@ class _KanbanPageState extends State<KanbanPage> {
   ) {
     return LayoutBuilder(
       builder: (context, c) {
-        final wide = c.maxWidth >= 720;
-
+        // Seletor de funil + botão de filtros do CRM (responsável, tags,
+        // resultado, período, busca).
         final projectSelector = ProjectSelector(
           key: ValueKey(controller.team?.id ?? 't'),
           embedded: true,
         );
 
-        final filters = KanbanFilters(
-          key: ValueKey(controller.filterClearGeneration),
-          embedded: true,
+        final Widget mainBlock = Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(child: projectSelector),
+            const SizedBox(width: 10),
+            _kanbanFilterButton(context, controller),
+          ],
         );
-
-        Widget mainBlock;
-        if (wide) {
-          mainBlock = Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(flex: 5, child: projectSelector),
-              const SizedBox(width: 14),
-              Expanded(flex: 7, child: filters),
-            ],
-          );
-        } else {
-          mainBlock = Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              projectSelector,
-              const SizedBox(height: 12),
-              filters,
-            ],
-          );
-        }
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1474,6 +1477,20 @@ class _KanbanPageState extends State<KanbanPage> {
                                             ),
                                           ),
                                         if (controller.permissions
+                                                ?.canEditColumns ??
+                                            true)
+                                          const PopupMenuItem(
+                                            value: 'cadence',
+                                            child: Row(
+                                              children: [
+                                                Icon(Icons.schedule_send_outlined,
+                                                    size: 18),
+                                                SizedBox(width: 8),
+                                                Text('Cadência WhatsApp'),
+                                              ],
+                                            ),
+                                          ),
+                                        if (controller.permissions
                                                 ?.canDeleteColumns ??
                                             true)
                                           const PopupMenuItem(
@@ -1504,6 +1521,12 @@ class _KanbanPageState extends State<KanbanPage> {
                                             backgroundColor: Colors.transparent,
                                             builder: (context) =>
                                                 EditColumnModal(column: column),
+                                          );
+                                        } else if (value == 'cadence') {
+                                          _openCadenceConfig(
+                                            context,
+                                            controller,
+                                            column,
                                           );
                                         } else if (value == 'delete') {
                                           _confirmDeleteColumn(
@@ -1970,6 +1993,167 @@ class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
+  /// Botão de filtros do board com badge de filtros ativos.
+  Widget _kanbanFilterButton(
+    BuildContext context,
+    KanbanController controller,
+  ) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final count = controller.activeBoardFilterCount;
+    final active = count > 0;
+    final accent = isDark
+        ? AppColors.primary.primaryDarkMode
+        : AppColors.primary.primary;
+    final color = active ? accent : ThemeHelpers.textSecondaryColor(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _openKanbanFilters(context, controller),
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: active
+                ? accent.withValues(alpha: isDark ? 0.16 : 0.08)
+                : ThemeHelpers.cardBackgroundColor(context),
+            border: Border.all(
+              color: active
+                  ? accent.withValues(alpha: isDark ? 0.55 : 0.4)
+                  : ThemeHelpers.borderColor(context),
+              width: active ? 1.4 : 1,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.tune_rounded, size: 18, color: color),
+                const SizedBox(width: 8),
+                Text(
+                  'Filtros',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: ThemeHelpers.textColor(context),
+                    letterSpacing: -0.1,
+                  ),
+                ),
+                if (active) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: accent,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '$count',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                        height: 1.1,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Carrossel rápido de responsáveis — toca num avatar para filtrar o board
+  /// por aquele corretor (toggle). Espelha o AssigneeFilter da web.
+  Widget _assigneeQuickFilterBar(
+    BuildContext context,
+    KanbanController controller,
+  ) {
+    final assignees = controller.availableAssignees;
+    if (assignees.length < 2) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = isDark
+        ? AppColors.primary.primaryDarkMode
+        : AppColors.primary.primary;
+    final selected = controller.boardFilters.assignedToIds;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: SizedBox(
+        height: 64,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: assignees.length,
+          separatorBuilder: (_, _) => const SizedBox(width: 10),
+          itemBuilder: (context, i) {
+            final u = assignees[i];
+            final isSel = selected.contains(u.id);
+            return _AssigneeFilterAvatar(
+              user: u,
+              selected: isSel,
+              accent: accent,
+              onTap: () => controller.toggleAssigneeFilter(u.id),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  void _openCadenceConfig(
+    BuildContext context,
+    KanbanController controller,
+    KanbanColumn column,
+  ) {
+    final siblings = (controller.board?.columns ?? const <KanbanColumn>[])
+        .where((c) => c.id != column.id)
+        .toList();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54,
+      builder: (_) => CadenceConfigModal(
+        column: column,
+        siblingColumns: siblings,
+        onSaved: () {
+          if (controller.teamId != null) {
+            controller.loadBoard(
+              teamId: controller.teamId,
+              projectId: controller.projectId,
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  void _openKanbanFilters(
+    BuildContext context,
+    KanbanController controller,
+  ) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54,
+      builder: (_) => KanbanFiltersDrawer(
+        initialFilters: controller.boardFilters,
+        assignees: controller.availableAssignees,
+        tags: controller.availableTags,
+        onApply: controller.applyBoardFilters,
+        onClear: controller.clearFilters,
+      ),
+    );
+  }
+
   Widget _buildTaskCard(
     KanbanTask task, {
     bool bulkMode = false,
@@ -1981,27 +2165,41 @@ class _KanbanPageState extends State<KanbanPage> {
         ? Color(int.parse(task.priority!.color.replaceFirst('#', '0xFF')))
         : null;
 
+    // Cor por regra do backend, igual à web: cor manual (cardColor) tem
+    // prioridade sobre a cor calculada por tempo (color). Cai para a cor de
+    // prioridade quando não há regra.
+    final ruleColor =
+        _parseHexColor(task.cardColor) ?? _parseHexColor(task.color);
+    final baseColor = ruleColor ?? priorityColor;
+
     final deadline = _KanbanTaskDeadline.fromDueDate(task.dueDate);
     final cardSurface = ThemeHelpers.cardBackgroundColor(context);
     final secondaryText = ThemeHelpers.textSecondaryColor(context);
 
+    // O accent de prazo (vencido/vence hoje) continua sobrepondo a cor base.
     final accent = deadline.accentColor(context);
     final tintedSurface = accent == null
         ? cardSurface
         : Color.alphaBlend(accent.withValues(alpha: isDark ? 0.07 : 0.05), cardSurface);
     final borderColor = accent != null
         ? accent.withValues(alpha: isDark ? 0.45 : 0.32)
-        : (priorityColor?.withValues(alpha: 0.28) ??
+        : (baseColor?.withValues(alpha: 0.28) ??
             ThemeHelpers.borderColor(context));
-    final borderWidth = accent != null || priorityColor != null ? 1.2 : 1.0;
-    final leftStripe = accent ?? priorityColor;
+    final borderWidth = accent != null || baseColor != null ? 1.2 : 1.0;
+    final leftStripe = accent ?? baseColor;
 
     final tags = task.displayTags;
-    final hasTags = tags != null && tags.isNotEmpty;
+    final tagDetails = task.displayTagDetails;
+    final hasTags = (tagDetails != null && tagDetails.isNotEmpty) ||
+        (tags != null && tags.isNotEmpty);
 
-    // Cor primária do card: usa o accent do prazo > prioridade > primary
-    final cardAccent = accent ?? priorityColor ?? theme.colorScheme.primary;
+    // Cor primária do card: accent do prazo > regra/prioridade > primary
+    final cardAccent = accent ?? baseColor ?? theme.colorScheme.primary;
     final assigned = task.assignedTo;
+    final contactPhone = task.contactWhatsapp;
+    final hasContact = contactPhone != null && contactPhone.trim().isNotEmpty;
+    final cardValue = task.totalValue;
+    final hasValue = cardValue != null && cardValue > 0;
     final descriptionText = task.description?.trim() ?? '';
     final hasDescription = descriptionText.isNotEmpty;
 
@@ -2114,11 +2312,11 @@ class _KanbanPageState extends State<KanbanPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // ─── HEADER: avatar grande à esquerda + título à direita
+                    // ─── HEADER: título à esquerda (sem avatar de responsável)
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (bulkMode)
+                        if (bulkMode) ...[
                           Padding(
                             padding:
                                 const EdgeInsets.only(right: 10, top: 2),
@@ -2129,13 +2327,8 @@ class _KanbanPageState extends State<KanbanPage> {
                               size: 22,
                               color: theme.colorScheme.primary,
                             ),
-                          )
-                        else
-                          _taskCardLeadAvatar(
-                            assigned: assigned,
-                            accent: cardAccent,
                           ),
-                        const SizedBox(width: 10),
+                        ],
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -2225,24 +2418,43 @@ class _KanbanPageState extends State<KanbanPage> {
                       ),
                     ],
 
-                    // ─── PILLS de contexto (prioridade, prazo, resultado, tags)
-                    if (task.priority != null ||
+                    // ─── PILLS de contexto (valor, prioridade, prazo,
+                    // resultado, recuperação, tags)
+                    if (hasValue ||
+                        task.priority != null ||
                         deadline.isVisible ||
                         hasTags ||
+                        task.isInRecovery ||
+                        task.hasCadence ||
                         task.hasClosedResult) ...[
                       const SizedBox(height: 10),
                       Wrap(
                         spacing: 6,
                         runSpacing: 6,
                         children: [
+                          if (hasValue) _valueChip(cardValue),
                           if (task.priority != null)
                             _priorityChip(task.priority!, priorityColor!),
                           if (deadline.isVisible) _deadlineChip(deadline),
                           if (task.hasClosedResult) _taskResultChip(task),
+                          if (task.isInRecovery && !task.hasClosedResult)
+                            _recoveryChip(),
+                          if (task.hasCadence && !task.hasClosedResult)
+                            _cadenceChip(task),
                           if (hasTags)
-                            ..._buildTaskTagChips(tags, theme),
+                            ..._buildTaskTagChips(
+                              tagDetails: tagDetails,
+                              tags: tags,
+                              theme: theme,
+                            ),
                         ],
                       ),
+                    ],
+
+                    // ─── CONTATO: telefone do lead + ações rápidas
+                    if (hasContact) ...[
+                      const SizedBox(height: 10),
+                      _taskCardContactRow(contactPhone, task),
                     ],
 
                     // ─── FOOTER: data + comentários (à esquerda), separados
@@ -2319,59 +2531,6 @@ class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
-  /// Avatar do responsável no canto superior esquerdo do card — quando
-  /// não há responsável, mostra um "ghost" tintado pra manter o ritmo
-  /// visual sem brigar com o título.
-  Widget _taskCardLeadAvatar({
-    required dynamic assigned,
-    required Color accent,
-  }) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    if (assigned == null) {
-      return Container(
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: accent.withValues(alpha: isDark ? 0.12 : 0.08),
-          border: Border.all(
-            color: accent.withValues(alpha: 0.30),
-            style: BorderStyle.solid,
-          ),
-        ),
-        child: Icon(
-          Icons.person_outline_rounded,
-          size: 18,
-          color: accent.withValues(alpha: 0.65),
-        ),
-      );
-    }
-    return SizedBox(
-      width: 36,
-      height: 36,
-      child: Stack(
-        children: [
-          Positioned.fill(child: _assigneeAvatar(assigned)),
-          // anel da cor do card em volta do avatar
-          Positioned.fill(
-            child: IgnorePointer(
-              child: Container(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: accent.withValues(alpha: 0.55),
-                    width: 1.5,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _taskCardMetric({
     required IconData icon,
     required String label,
@@ -2395,17 +2554,185 @@ class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
-  /// Constrói até 3 chips de tag para o card. Tags adicionais aparecem como
-  /// um chip "+N" no final, mantendo a densidade horizontal mesmo com várias
-  /// tags configuradas.
-  List<Widget> _buildTaskTagChips(List<String> tags, ThemeData theme) {
+  /// Constrói até 3 chips de tag para o card. Prefere [tagDetails] (com a cor
+  /// real da tag, igual à web); cai para [tags] (texto) quando o backend não
+  /// enviar os detalhes. Tags adicionais viram um chip "+N".
+  List<Widget> _buildTaskTagChips({
+    required ThemeData theme,
+    List<KanbanTagDetail>? tagDetails,
+    List<String>? tags,
+  }) {
     const maxVisible = 3;
-    final visible = tags.length <= maxVisible ? tags : tags.take(maxVisible).toList();
-    final extra = tags.length - visible.length;
+    if (tagDetails != null && tagDetails.isNotEmpty) {
+      final visible = tagDetails.length <= maxVisible
+          ? tagDetails
+          : tagDetails.take(maxVisible).toList();
+      final extra = tagDetails.length - visible.length;
+      return [
+        for (final t in visible)
+          _firstTagChip(t.name, theme, color: _parseHexColor(t.color)),
+        if (extra > 0) _moreTagsChip(extra, theme),
+      ];
+    }
+    final list = tags ?? const <String>[];
+    final visible =
+        list.length <= maxVisible ? list : list.take(maxVisible).toList();
+    final extra = list.length - visible.length;
     return [
       for (final t in visible) _firstTagChip(t, theme),
       if (extra > 0) _moreTagsChip(extra, theme),
     ];
+  }
+
+  /// Chip base de contexto do card — tint + borda na cor semântica, no mesmo
+  /// ritmo visual de `_priorityChip`/`_deadlineChip` (raio 4, alpha 0.12/0.28).
+  Widget _contextChip({
+    required IconData icon,
+    required String label,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withValues(alpha: 0.28), width: 0.7),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 11, color: color),
+          const SizedBox(width: 3),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+              height: 1.1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Chip de valor da negociação (R$) — destaca negócios com valor informado.
+  Widget _valueChip(double value) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return _contextChip(
+      icon: Icons.payments_outlined,
+      label: _compactCurrencyFormatter.format(value),
+      color: isDark ? AppColors.status.greenDarkMode : AppColors.status.green,
+    );
+  }
+
+  /// Chip discreto para leads em recuperação (marcados como perdidos).
+  Widget _recoveryChip() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return _contextChip(
+      icon: Icons.history_rounded,
+      label: 'Recuperação',
+      color: isDark
+          ? AppColors.message.warningTextDarkMode
+          : AppColors.message.warningText,
+    );
+  }
+
+  /// Chip de cadência WhatsApp: tentativa X/N ou "aguardando resposta".
+  Widget _cadenceChip(KanbanTask task) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final attempts = task.cadenceAttemptCount ?? 0;
+    final max = task.cadenceMaxAttempts ?? 0;
+    final awaiting = task.cadenceAwaitingReply == true;
+    return _contextChip(
+      icon: awaiting
+          ? Icons.hourglass_bottom_rounded
+          : Icons.schedule_send_rounded,
+      label: awaiting
+          ? 'Aguardando'
+          : (max > 0 ? 'Cadência $attempts/$max' : 'Cadência'),
+      // Verde WhatsApp — mais claro no dark para manter contraste sobre o card.
+      color: isDark ? const Color(0xFF25D366) : const Color(0xFF0F8B7E),
+    );
+  }
+
+  /// Linha de contato rápido do lead: telefone + botões Ligar e WhatsApp.
+  /// As ações usam cores semânticas estáveis (azul = ligar, verde = WhatsApp),
+  /// independentes do realce de prazo/prioridade do card, para leitura clara.
+  Widget _taskCardContactRow(String phone, KanbanTask task) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final secondaryText = ThemeHelpers.textSecondaryColor(context);
+    final callColor = isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
+    final whatsappColor =
+        isDark ? const Color(0xFF25D366) : const Color(0xFF0F8B7E);
+    return Row(
+      children: [
+        Icon(Icons.phone_outlined, size: 13, color: secondaryText),
+        const SizedBox(width: 5),
+        Expanded(
+          child: Text(
+            BrokerContactActions.formatBrazilPhone(phone),
+            style: TextStyle(
+              fontSize: 12,
+              color: secondaryText,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.1,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: 6),
+        _contactActionButton(
+          icon: Icons.call_rounded,
+          color: callColor,
+          tooltip: 'Ligar',
+          onTap: () => BrokerContactActions.callPhone(context, phone),
+        ),
+        const SizedBox(width: 6),
+        _contactActionButton(
+          icon: Icons.chat_rounded,
+          color: whatsappColor,
+          tooltip: 'WhatsApp',
+          onTap: () => BrokerContactActions.openWhatsApp(
+            context,
+            task.contactWhatsapp ?? phone,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _contactActionButton({
+    required IconData icon,
+    required Color color,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Material(
+      color: color.withValues(alpha: isDark ? 0.16 : 0.10),
+      borderRadius: BorderRadius.circular(9),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(9),
+        onTap: onTap,
+        child: Tooltip(
+          message: tooltip,
+          child: Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(9),
+              border: Border.all(
+                color: color.withValues(alpha: isDark ? 0.45 : 0.30),
+                width: 0.8,
+              ),
+            ),
+            child: Icon(icon, size: 16, color: color),
+          ),
+        ),
+      ),
+    );
   }
 
   /// Hora relativa curta para o rodapé do card (ex.: "agora", "5 min", "3 h",
@@ -2560,20 +2887,21 @@ class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
-  Widget _firstTagChip(String tag, ThemeData theme) {
-    final c = theme.colorScheme.primary;
+  Widget _firstTagChip(String tag, ThemeData theme, {Color? color}) {
+    final c = color ?? theme.colorScheme.primary;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
       decoration: BoxDecoration(
-        color: c.withValues(alpha: 0.1),
+        color: c.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: c.withValues(alpha: 0.25), width: 0.7),
       ),
       child: Text(
         tag,
         style: TextStyle(
           fontSize: 10,
           color: c,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w700,
           height: 1.1,
         ),
         maxLines: 1,
@@ -2600,28 +2928,6 @@ class _KanbanPageState extends State<KanbanPage> {
       ),
     );
   }
-
-  Widget _assigneeAvatar(KanbanUser user) {
-    final theme = Theme.of(context);
-    return CircleAvatar(
-      radius: 11,
-      backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.12),
-      backgroundImage: user.avatar != null && user.avatar!.isNotEmpty
-          ? NetworkImage(user.avatar!)
-          : null,
-      child: user.avatar == null || user.avatar!.isEmpty
-          ? Text(
-              user.name.isNotEmpty ? user.name[0].toUpperCase() : '?',
-              style: TextStyle(
-                fontSize: 10,
-                color: theme.colorScheme.primary,
-                fontWeight: FontWeight.w700,
-              ),
-            )
-          : null,
-    );
-  }
-
 
   void _showTaskActions(BuildContext context, KanbanTask task) {
     unawaited(
@@ -3225,3 +3531,98 @@ class _KanbanTaskDeadline {
   }
 }
 
+
+/// Avatar de responsável no carrossel de filtro rápido do board.
+class _AssigneeFilterAvatar extends StatelessWidget {
+  const _AssigneeFilterAvatar({
+    required this.user,
+    required this.selected,
+    required this.accent,
+    required this.onTap,
+  });
+
+  final KanbanUser user;
+  final bool selected;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final hasAvatar = user.avatar != null && user.avatar!.isNotEmpty;
+    final first = user.name.trim().isEmpty
+        ? '?'
+        : user.name.trim()[0].toUpperCase();
+    final firstName = () {
+      final t = user.name.trim();
+      if (t.isEmpty) return '—';
+      final i = t.indexOf(' ');
+      return i == -1 ? t : t.substring(0, i);
+    }();
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: SizedBox(
+        width: 56,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: selected
+                      ? accent
+                      : ThemeHelpers.borderColor(context)
+                          .withValues(alpha: 0.6),
+                  width: selected ? 2 : 1,
+                ),
+                boxShadow: selected
+                    ? [
+                        BoxShadow(
+                          color: accent.withValues(alpha: 0.35),
+                          blurRadius: 10,
+                          spreadRadius: -2,
+                          offset: const Offset(0, 3),
+                        ),
+                      ]
+                    : null,
+              ),
+              child: CircleAvatar(
+                radius: 18,
+                backgroundColor: accent.withValues(alpha: 0.12),
+                backgroundImage: hasAvatar ? NetworkImage(user.avatar!) : null,
+                child: hasAvatar
+                    ? null
+                    : Text(
+                        first,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: accent,
+                        ),
+                      ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              firstName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.labelSmall?.copyWith(
+                fontSize: 10,
+                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                color: selected
+                    ? accent
+                    : ThemeHelpers.textSecondaryColor(context),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

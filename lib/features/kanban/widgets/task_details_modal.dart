@@ -3642,6 +3642,24 @@ class _ActionStyle {
           Icons.restart_alt_rounded,
           Color(0xFFF97316),
         );
+      case 'cadence_sent':
+        return const _ActionStyle._(
+          'enviou cadência WhatsApp',
+          Icons.schedule_send_rounded,
+          Color(0xFF128C7E),
+        );
+      case 'cadence_skipped':
+        return const _ActionStyle._(
+          'pulou a cadência (sem contato)',
+          Icons.skip_next_rounded,
+          Color(0xFF94A3B8),
+        );
+      case 'cadence_failed':
+        return const _ActionStyle._(
+          'falha ao enviar cadência',
+          Icons.error_outline_rounded,
+          Color(0xFFEF4444),
+        );
       case 'updated':
       default:
         return _ActionStyle._(

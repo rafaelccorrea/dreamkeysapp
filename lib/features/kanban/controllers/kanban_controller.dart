@@ -31,8 +31,8 @@ class KanbanController extends ChangeNotifier {
   /// Equipes onde o usuário pode ver funis (`GET /kanban/teams` — igual ao web).
   List<KanbanTeam> _kanbanTeams = [];
 
-  // Filtros
-  KanbanPriority? _filterPriority;
+  // Filtros do board (responsável, tags, resultado, período, busca).
+  KanbanBoardFilters _boardFilters = KanbanBoardFilters.empty;
   int _filterClearGeneration = 0;
 
   // Seleção em massa / exclusão em lote — paridade `useCanBulkDeleteCards` + KanbanBoard web.
@@ -137,12 +137,44 @@ class KanbanController extends ChangeNotifier {
   }
 
   /// Estado de filtros (espelho do que vai para `getBoard`) — uso no hero / UI.
-  KanbanPriority? get filterPriority => _filterPriority;
+  KanbanBoardFilters get boardFilters => _boardFilters;
 
-  bool get hasActiveBoardFilters => _filterPriority != null;
+  bool get hasActiveBoardFilters => _boardFilters.isNotEmpty;
 
-  /// Incrementado em [clearFilters]; permite reset estável dos campos locais em [KanbanFilters].
+  /// Nº de filtros ativos — para badges/contadores.
+  int get activeBoardFilterCount => _boardFilters.activeCount;
+
+  /// Incrementado em [clearFilters]; permite reset estável dos campos locais.
   int get filterClearGeneration => _filterClearGeneration;
+
+  /// Responsáveis presentes no board atual (distintos, com avatar) — fonte do
+  /// carrossel e do filtro por responsável, sem precisar de endpoint extra.
+  List<KanbanUser> get availableAssignees {
+    final byId = <String, KanbanUser>{};
+    for (final t in _board?.tasks ?? const <KanbanTask>[]) {
+      final u = t.assignedTo;
+      if (u != null && u.id.isNotEmpty) {
+        byId.putIfAbsent(u.id, () => u);
+      }
+    }
+    final list = byId.values.toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return list;
+  }
+
+  /// Tags presentes no board atual (distintas, com cor) — fonte do filtro por
+  /// tag. Preferimos `tagDetails`; cards sem detalhe são ignorados aqui.
+  List<KanbanTagDetail> get availableTags {
+    final byId = <String, KanbanTagDetail>{};
+    for (final t in _board?.tasks ?? const <KanbanTask>[]) {
+      for (final tag in t.displayTagDetails ?? const <KanbanTagDetail>[]) {
+        if (tag.id.isNotEmpty) byId.putIfAbsent(tag.id, () => tag);
+      }
+    }
+    final list = byId.values.toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return list;
+  }
 
   bool get bulkSelectionActive => _bulkSelectionActive;
 
@@ -441,12 +473,12 @@ class KanbanController extends ChangeNotifier {
       );
       debugPrint('📋 [KANBAN_CTRL] - teamId: $_teamId');
       debugPrint('📋 [KANBAN_CTRL] - projectId: $_projectId');
-      debugPrint('📋 [KANBAN_CTRL] - priority: $_filterPriority');
+      debugPrint('📋 [KANBAN_CTRL] - filtros ativos: ${_boardFilters.activeCount}');
 
       final response = await _kanbanService.getBoard(
         _teamId!,
         projectId: _projectId,
-        priority: _filterPriority,
+        filters: _boardFilters,
       );
 
       debugPrint('📋 [KANBAN_CTRL] ========== RESPOSTA getBoard ==========');
@@ -530,7 +562,7 @@ class KanbanController extends ChangeNotifier {
             final personalBoardResponse = await _kanbanService.getBoard(
               personalTeamId,
               projectId: _projectId,
-              priority: _filterPriority,
+              filters: _boardFilters,
             );
             if (personalBoardResponse.success &&
                 personalBoardResponse.data != null) {
@@ -1083,9 +1115,9 @@ class KanbanController extends ChangeNotifier {
     debugPrint('🚀 [KANBAN_CTRL] ========== FIM selectProject ==========');
   }
 
-  /// Filtros reenviados à API (`KanbanBoardFiltersDto`) como no Intellisys.
-  void applyFilters({KanbanPriority? priority}) {
-    _filterPriority = priority;
+  /// Aplica um novo conjunto de filtros do board e recarrega (`KanbanBoardFiltersDto`).
+  void applyBoardFilters(KanbanBoardFilters filters) {
+    _boardFilters = filters;
     notifyListeners();
 
     _boardFilterDebounce?.cancel();
@@ -1095,9 +1127,18 @@ class KanbanController extends ChangeNotifier {
     });
   }
 
+  /// Atalho: alterna apenas o filtro por responsável (carrossel de avatares).
+  void toggleAssigneeFilter(String userId) {
+    final next = Set<String>.from(_boardFilters.assignedToIds);
+    if (!next.remove(userId)) next.add(userId);
+    applyBoardFilters(
+      _boardFilters.copyWith(assignedToIds: next, unassigned: false),
+    );
+  }
+
   void clearFilters() {
     _boardFilterDebounce?.cancel();
-    _filterPriority = null;
+    _boardFilters = KanbanBoardFilters.empty;
     _filterClearGeneration++;
     notifyListeners();
     if (_teamId != null) {
@@ -1479,6 +1520,7 @@ class KanbanController extends ChangeNotifier {
         projectId: _projectId,
         page: nextPage,
         limit: _kColumnPageSize,
+        filters: _boardFilters,
       );
 
       if (res.success && res.data != null) {

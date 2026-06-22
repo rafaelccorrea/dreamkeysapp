@@ -334,6 +334,13 @@ class ApiConstants {
       '/kanban/columns/$columnId/tasks';
   static String kanbanColumnsReorder(String teamId) =>
       '/kanban/columns/reorder/$teamId';
+
+  /// Config de cadência WhatsApp da coluna (`GET/PUT /kanban/columns/:id/cadence`).
+  static String kanbanColumnCadence(String columnId) =>
+      '/kanban/columns/$columnId/cadence';
+
+  /// Templates aprovados do WhatsApp oficial (`GET /whatsapp/templates`).
+  static const String whatsappTemplates = '/whatsapp/templates';
   static const String kanbanTasks = '/kanban/tasks';
   static String kanbanTaskById(String id) => '/kanban/tasks/$id';
   static String kanbanTaskMarkResult(String taskId) =>

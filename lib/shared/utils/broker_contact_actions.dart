@@ -9,6 +9,26 @@ class BrokerContactActions {
   static String digitsOnly(String? raw) =>
       (raw ?? '').replaceAll(RegExp(r'\D'), '');
 
+  /// Formata um telefone brasileiro para exibição: `(11) 91234-5678`.
+  /// Mantém o DDI quando presente e cai para o valor original se não
+  /// reconhecer o formato (ex.: número internacional).
+  static String formatBrazilPhone(String? raw) {
+    var d = digitsOnly(raw);
+    if (d.isEmpty) return raw?.trim() ?? '';
+    var prefix = '';
+    if (d.length > 11 && d.startsWith('55')) {
+      prefix = '+55 ';
+      d = d.substring(2);
+    }
+    if (d.length == 11) {
+      return '$prefix(${d.substring(0, 2)}) ${d.substring(2, 7)}-${d.substring(7)}';
+    }
+    if (d.length == 10) {
+      return '$prefix(${d.substring(0, 2)}) ${d.substring(2, 6)}-${d.substring(6)}';
+    }
+    return raw?.trim() ?? d;
+  }
+
   static Future<bool> callPhone(BuildContext context, String? phone) async {
     final d = digitsOnly(phone);
     if (d.length < 10) {
