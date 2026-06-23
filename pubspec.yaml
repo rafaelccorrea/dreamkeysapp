@@ -29,6 +29,12 @@ dependencies:
   local_auth: ^3.0.1
   image_picker: ^1.1.2
   image_cropper: ^12.2.1
+  # Mantido na linha 12.0.0-beta de propósito: é a única do file_picker que
+  # usa `win32 ^6`, exigido pela família *_plus (package_info_plus 10 /
+  # device_info_plus 13). Baixar para a 11.x estável (win32 ^5) conflita o
+  # solver. API usada: estática `FilePicker.pickFiles(...)`. Se o build do
+  # Android falhar com "Unresolved reference 'FileUtils'", é cache de Kotlin
+  # velho — rode `flutter clean` antes do `flutter build`.
   file_picker: ^12.0.0-beta.2
   google_fonts: ^8.1.0
   table_calendar: ^3.0.9
