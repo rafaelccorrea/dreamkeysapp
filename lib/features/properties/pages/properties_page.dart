@@ -2435,30 +2435,25 @@ class _PropertiesPageState extends State<PropertiesPage> {
                   ),
                   child: Row(
                     children: [
-                      const SizedBox(width: 8),
-                      // Chip de ícone (padrão FilterControl) — dá identidade
-                      // ao campo mais usado da tela.
-                      Container(
-                        width: 34,
-                        height: 34,
-                        decoration: BoxDecoration(
-                          color: accent.withValues(alpha: isDark ? 0.20 : 0.12),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: refreshing
-                            ? Padding(
-                                padding: const EdgeInsets.all(8),
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: accent,
-                                ),
-                              )
-                            : Icon(
-                                Icons.search_rounded,
-                                size: 18,
+                      const SizedBox(width: 14),
+                      // Ícone integrado (sem caixa) — mudo quando vazio, accent
+                      // quando há busca. Evita o "box dentro do box".
+                      refreshing
+                          ? SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
                                 color: accent,
                               ),
-                      ),
+                            )
+                          : Icon(
+                              Icons.search_rounded,
+                              size: 21,
+                              color: hasText
+                                  ? accent
+                                  : ThemeHelpers.textSecondaryColor(context),
+                            ),
                       const SizedBox(width: 10),
                       Expanded(
                         child: TextField(

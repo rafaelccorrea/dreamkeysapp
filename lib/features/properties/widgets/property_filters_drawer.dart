@@ -338,7 +338,10 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         // ── Tipo ───────────────────────────────────────
-                        const _SectionLabel(label: 'TIPO DE IMÓVEL'),
+                        const _SectionLabel(
+                          label: 'TIPO DE IMÓVEL',
+                          tone: Color(0xFF4A90E2),
+                        ),
                         const SizedBox(height: 8),
                         Wrap(
                           spacing: 6,
@@ -367,7 +370,10 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
                         ),
                         const SizedBox(height: 22),
                         // ── Status ─────────────────────────────────────
-                        const _SectionLabel(label: 'STATUS DO IMÓVEL'),
+                        const _SectionLabel(
+                          label: 'STATUS DO IMÓVEL',
+                          tone: Color(0xFF8B5CF6),
+                        ),
                         const SizedBox(height: 8),
                         Wrap(
                           spacing: 6,
@@ -396,7 +402,10 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
                         ),
                         const SizedBox(height: 22),
                         // ── Preço ──────────────────────────────────────
-                        const _SectionLabel(label: 'PREÇO'),
+                        const _SectionLabel(
+                          label: 'PREÇO',
+                          tone: Color(0xFF10B981),
+                        ),
                         const SizedBox(height: 8),
                         Row(
                           children: [
@@ -431,7 +440,10 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
                         ),
                         const SizedBox(height: 22),
                         // ── Área ───────────────────────────────────────
-                        const _SectionLabel(label: 'ÁREA (m²)'),
+                        const _SectionLabel(
+                          label: 'ÁREA (m²)',
+                          tone: Color(0xFFE6B84C),
+                        ),
                         const SizedBox(height: 8),
                         Row(
                           children: [
@@ -466,7 +478,10 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
                         ),
                         const SizedBox(height: 22),
                         // ── Ambientes ──────────────────────────────────
-                        const _SectionLabel(label: 'AMBIENTES'),
+                        const _SectionLabel(
+                          label: 'AMBIENTES',
+                          tone: Color(0xFF6366F1),
+                        ),
                         const SizedBox(height: 10),
                         _CountSelector(
                           label: 'Dormitórios',
@@ -496,6 +511,7 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
                         // ── Localização ────────────────────────────────
                         const _SectionLabel(
                           label: 'LOCALIZAÇÃO',
+                          tone: Color(0xFF14B8A6),
                           subtitle:
                               'Digite o CEP para preencher o resto automaticamente.',
                         ),
@@ -599,6 +615,9 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
                           icon: const Icon(LucideIcons.eraser, size: 16),
                           label: const Text('Limpar'),
                           style: OutlinedButton.styleFrom(
+                            // Neutro — não vermelho (ação secundária).
+                            foregroundColor:
+                                ThemeHelpers.textSecondaryColor(context),
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             side: BorderSide(
                               color: ThemeHelpers.borderColor(context),
@@ -718,35 +737,60 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
 class _SectionLabel extends StatelessWidget {
   final String label;
   final String? subtitle;
-  const _SectionLabel({required this.label, this.subtitle});
+  final Color? tone;
+  const _SectionLabel({required this.label, this.subtitle, this.tone});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final accent = AppColors.primary.primary;
+    // Cada seção tem sua cor coerente (passada por `tone`) — contraste e
+    // leitura rápida, sem ser "tudo vermelho".
+    final accent = tone ?? AppColors.primary.primary;
     final secondaryColor = ThemeHelpers.textSecondaryColor(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          label,
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: accent,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 1.5,
-            fontSize: 10.5,
-          ),
+        Row(
+          children: [
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color: accent,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: accent.withValues(alpha: 0.5),
+                    blurRadius: 6,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 7),
+            Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: accent,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.5,
+                fontSize: 10.5,
+              ),
+            ),
+          ],
         ),
         if (subtitle != null) ...[
           const SizedBox(height: 3),
-          Text(
-            subtitle!,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: secondaryColor,
-              fontWeight: FontWeight.w500,
-              height: 1.3,
-              fontSize: 11.5,
+          Padding(
+            padding: const EdgeInsets.only(left: 13),
+            child: Text(
+              subtitle!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: secondaryColor,
+                fontWeight: FontWeight.w500,
+                height: 1.3,
+                fontSize: 11.5,
+              ),
             ),
           ),
         ],

@@ -65,6 +65,8 @@
 	<string>O Intellisys envia notificações sobre leads, agendamentos e atualizações da sua carteira de imóveis.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>O Intellisys usa sua localização apenas quando você autoriza, para registrar check-in de visitas e atividades de campo vinculadas à sua conta.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>O Intellisys usa sua localização apenas durante o uso do app, para registrar check-in de visitas e atividades de campo. O app não rastreia sua localização em segundo plano.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
