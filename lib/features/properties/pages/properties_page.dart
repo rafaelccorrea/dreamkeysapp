@@ -947,335 +947,232 @@ class _PropertiesPageState extends State<PropertiesPage> {
   }
 
   Widget _buildPortfolioHeader(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final accent = _portfolioAccentColor(context);
     final hasFilters = _filters != null && _hasActiveFilters();
     final hasSearch = _searchQuery.trim().isNotEmpty;
-    final gatedGlobal = !hasFilters && !hasSearch;
 
-    // Ações rápidas do hero: apenas "Novo imóvel" (primário) e "Filtros".
-    // "Rascunhos" foi movido para o menu de overflow (3 pontinhos do AppBar)
-    // — uso menos frequente, não merece ocupar espaço aqui.
-    final quickActions = <Widget>[
-      _buildQuickActionButton(
-        context,
-        icon: Icons.add_business_rounded,
-        label: 'Novo imóvel',
-        isPrimary: true,
-        onPressed: _openPropertyCreateThenRefreshDrafts,
-      ),
-      _buildQuickActionButton(
-        context,
-        icon: Icons.tune_rounded,
-        label: hasFilters ? 'Filtros ativos' : 'Filtros',
-        highlight: hasFilters,
-        onPressed: () {
-          showModalBottomSheet<void>(
-            context: context,
-            isScrollControlled: true,
-            useSafeArea: true,
-            barrierColor: Colors.black54,
-            // O drawer já carrega o próprio container com border-radius e
-            // sombra premium — usamos transparente aqui pra ele não ficar
-            // dentro de um wrapper Material padrão.
-            backgroundColor: Colors.transparent,
-            builder: (context) => PropertyFiltersDrawer(
-              initialFilters: _filters,
-              onFiltersChanged: (filters) {
-                setState(() => _filters = filters);
-                _persistState();
-                _reloadList();
-              },
-            ),
-          );
-        },
-      ),
-    ];
-
-    final subtitleParts = [
-      DateFormat(
-        "'Atualização' HH:mm · d MMMM",
-        'pt_BR',
-      ).format(DateTime.now()),
-      if (_totalPages > 1) 'página $_currentPage de $_totalPages',
-      if (_globalStats != null && gatedGlobal) 'KPIs sincronizados com o CRM',
-      if (hasSearch)
-        'busca ativa para “${_searchQuery.length > 32 ? '${_searchQuery.substring(0, 32)}…' : _searchQuery}”'
-      else if (hasFilters)
-        'filtro granular ativo'
-      else if (!gatedGlobal)
-        'filtros combinados',
-    ].where((s) => s.trim().isNotEmpty).join(' · ');
-
-    final headline =
-        hasSearch ? 'Radar de imóveis' : 'Radar comercial Intellisys';
+    void openFilters() {
+      showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        barrierColor: Colors.black54,
+        backgroundColor: Colors.transparent,
+        builder: (context) => PropertyFiltersDrawer(
+          initialFilters: _filters,
+          onFiltersChanged: (filters) {
+            setState(() => _filters = filters);
+            _persistState();
+            _reloadList();
+          },
+        ),
+      );
+    }
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final w = constraints.maxWidth;
         final compact = w < 360;
-        final narrow = w < 332;
-        final spread = w >= 480;
-        final actionsTop = w >= 640;
+        final padH = compact ? 16.0 : _kHeaderPadH;
 
-        final padH = narrow ? 12.0 : (compact ? 16.0 : _kHeaderPadH);
-        // Gap mais amplo agora que os KPIs são fluidos (sem moldura) — dá
-        // respiração entre as colunas, evitando que números grandes pareçam
-        // "colados". Antes (com caixa) bastava 6/8 px.
-        final statSep = compact ? 14.0 : 18.0;
-        final innerW =
-            (w - padH * 2).clamp(0.0, double.infinity).toDouble();
-        final kpiCols = innerW >= 360 ? 4 : 2;
-        final gap = statSep;
-        // Sem caixa fixa, a altura final é definida pela tipografia interna do
-        // KPI fluido. Mantemos um valor razoável só para alinhar verticalmente
-        // os 4 tiles e dar espaço pra `FittedBox` reduzir números grandes.
-        final statH = compact ? 78.0 : 84.0;
-        final statTiles = _portfolioHeroKpiTiles(
-          context,
-          th: statH,
-        );
-
-        final mainTitles = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'GESTÃO PORTFÓLIO',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: accent,
-                letterSpacing: compact ? 1.15 : 2.35,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              headline,
-              style: (compact
-                      ? theme.textTheme.titleMedium
-                      : theme.textTheme.titleLarge)
-                  ?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    height: 1.02,
-                    color: ThemeHelpers.textColor(context),
-                  ),
-            ),
-          ],
-        );
-
-        final dateLineWidget = Text(
-          subtitleParts,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(context),
-            fontWeight: FontWeight.w600,
-            height: 1.35,
-          ),
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
-          textAlign: spread ? TextAlign.right : TextAlign.start,
-        );
-
-        Widget pillRow() {
-          return Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            alignment: WrapAlignment.start,
-            children: _portfolioHeroContextPills(
-              context,
-              gatedGlobal: gatedGlobal,
-              compact: compact,
-            ),
-          );
-        }
-
-        Widget insightBlock() => Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _buildHeaderSearchField(context),
-                const SizedBox(height: 12),
-                _buildBrokerFiltersPanel(context),
-              ],
-            );
-
-        Widget actionsBar() {
-          return Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            alignment: WrapAlignment.end,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: quickActions,
-          );
-        }
-
-        Widget heroTop;
-        if (!spread) {
-          heroTop = Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _portfolioHeroLeadingIcon(context),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        mainTitles,
-                        const SizedBox(height: 6),
-                        dateLineWidget,
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              pillRow(),
-              const SizedBox(height: 10),
-              insightBlock(),
-              const SizedBox(height: 10),
-              Align(
-                alignment: Alignment.centerRight,
-                child: actionsBar(),
-              ),
-            ],
-          );
-        } else {
-          heroTop = Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _portfolioHeroLeadingIcon(context),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          flex: 52,
-                          child: mainTitles,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          flex: 48,
-                          child: Align(
-                            alignment: Alignment.topRight,
-                            child: dateLineWidget,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (actionsTop) ...[
-                    const SizedBox(width: 12),
-                    actionsBar(),
-                  ],
-                ],
-              ),
-              const SizedBox(height: 12),
-              // O painel de atalhos do corretor sempre ocupa a largura
-              // inteira do hero, mesmo em telas largas — assim os toggles
-              // e chips não ficam apertados num quadrante centralizado.
-              pillRow(),
-              const SizedBox(height: 12),
-              insightBlock(),
-              if (!actionsTop) ...[
-                const SizedBox(height: 10),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: actionsBar(),
-                ),
-              ],
-            ],
-          );
-        }
-
-        return Container(
+        return DecoratedBox(
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: isDark
-                  ? [
-                      AppColors.background.backgroundDarkMode,
-                      AppColors.background.backgroundSecondaryDarkMode,
-                    ]
-                  : const [
-                      Colors.transparent,
-                      Colors.transparent,
-                    ],
-            ),
             border: Border(
               bottom: BorderSide(
-                color: ThemeHelpers.borderColor(context).withValues(alpha: 0.65),
+                color: ThemeHelpers.borderColor(context).withValues(alpha: 0.6),
               ),
             ),
           ),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              ..._portfolioAmbientGlows(context),
-              Padding(
-                padding: EdgeInsets.fromLTRB(
-                  padH,
-                  _kHeaderPadVTop,
-                  padH,
-                  12,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(padH, _kHeaderPadVTop, padH, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Cabeçalho editorial: ícone + eyebrow/título/subtítulo.
+                Row(
                   children: [
-                    heroTop,
-                    SizedBox(height: compact ? 8 : 10),
-                    _buildHeroKpiStripe(statTiles, gap, kpiCols),
-                    if (hasFilters || hasSearch) ...[
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          if (hasSearch)
-                            _buildActiveContextChip(
-                              context,
-                              Icons.search_rounded,
-                              _searchQuery,
-                              onClear: () {
-                                _searchController.clear();
-                                setState(() => _searchQuery = '');
-                                _persistState();
-                                _reloadList(refreshStats: false);
-                              },
-                            ),
-                          if (hasFilters)
-                            _buildActiveContextChip(
-                              context,
-                              Icons.tune_rounded,
-                              'Filtros aplicados',
-                              onClear: () {
-                                setState(() => _filters = null);
-                                _persistState();
-                                _reloadList();
-                              },
-                            ),
-                        ],
-                      ),
-                    ],
+                    _portfolioHeroLeadingIcon(context),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _portfolioTitleBlock(context, accent, hasSearch),
+                    ),
                   ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 16),
+                // Busca (muito usada) com o botão de filtros colado nela.
+                Row(
+                  children: [
+                    Expanded(child: _buildHeaderSearchField(context)),
+                    const SizedBox(width: 10),
+                    _buildHeroFilterButton(context, hasFilters, openFilters),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                // CTA primário — vermelho da marca.
+                _buildQuickActionButton(
+                  context,
+                  icon: Icons.add_business_rounded,
+                  label: 'Novo imóvel',
+                  isPrimary: true,
+                  fullWidth: true,
+                  onPressed: _openPropertyCreateThenRefreshDrafts,
+                ),
+                const SizedBox(height: 14),
+                // Atalhos do corretor — mantidos onde estavam.
+                _buildBrokerFiltersPanel(context),
+                if (hasFilters || hasSearch) ...[
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      if (hasSearch)
+                        _buildActiveContextChip(
+                          context,
+                          Icons.search_rounded,
+                          _searchQuery,
+                          onClear: () {
+                            _searchController.clear();
+                            setState(() => _searchQuery = '');
+                            _persistState();
+                            _reloadList(refreshStats: false);
+                          },
+                        ),
+                      if (hasFilters)
+                        _buildActiveContextChip(
+                          context,
+                          Icons.tune_rounded,
+                          'Filtros aplicados',
+                          onClear: () {
+                            setState(() => _filters = null);
+                            _persistState();
+                            _reloadList();
+                          },
+                        ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
           ),
         );
       },
     );
   }
 
+  /// Bloco de título do hero — eyebrow com dot + título forte + subtítulo
+  /// conciso (padrão do CRM). Sem a poluição da linha de "Atualização HH:mm…".
+  Widget _portfolioTitleBlock(
+    BuildContext context,
+    Color accent,
+    bool hasSearch,
+  ) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 7),
+            Text(
+              hasSearch ? 'IMÓVEIS · BUSCA' : 'IMÓVEIS · PORTFÓLIO',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: accent,
+                letterSpacing: 1.4,
+                fontWeight: FontWeight.w900,
+                fontSize: 10.5,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          hasSearch ? 'Resultados da busca' : 'Portfólio de imóveis',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.4,
+            height: 1.05,
+            color: ThemeHelpers.textColor(context),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          'Gerencie, divulgue e acompanhe seus imóveis.',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: ThemeHelpers.textSecondaryColor(context),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Botão de filtros do hero — colado na busca. Quadrado, com a cor da marca
+  /// e um dot quando há filtro ativo (feedback claro).
+  Widget _buildHeroFilterButton(
+    BuildContext context,
+    bool active,
+    VoidCallback onTap,
+  ) {
+    final accent = _portfolioAccentColor(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final iconColor = active ? accent : ThemeHelpers.textSecondaryColor(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: active
+                ? accent.withValues(alpha: isDark ? 0.16 : 0.09)
+                : ShellVisualTokens.dashboardGlassFill(context),
+            border: Border.all(
+              color: active
+                  ? accent.withValues(alpha: 0.5)
+                  : ShellVisualTokens.dashboardGlassBorder(context),
+              width: active ? 1.4 : 1,
+            ),
+          ),
+          child: Stack(
+            children: [
+              Center(
+                child: Icon(Icons.tune_rounded, size: 21, color: iconColor),
+              ),
+              if (active)
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: Container(
+                    width: 7,
+                    height: 7,
+                    decoration:
+                        BoxDecoration(color: accent, shape: BoxShape.circle),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Color _portfolioAccentColor(BuildContext context) {
     return Theme.of(context).brightness == Brightness.dark
-        ? const Color(0xFFFF4D67)
+        ? AppColors.primary.primaryDarkMode
         : AppColors.primary.primary;
   }
 
@@ -1450,16 +1347,20 @@ class _PropertiesPageState extends State<PropertiesPage> {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
         gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
           colors: [
             accent,
-            const Color(0xFF7C3AED),
+            isDark
+                ? AppColors.primary.primaryDarkDarkMode
+                : AppColors.primary.primaryDark,
           ],
         ),
         boxShadow: [
           BoxShadow(
             color: isDark
-                ? accent.withValues(alpha: 0.35)
-                : Colors.black.withValues(alpha: 0.14),
+                ? accent.withValues(alpha: 0.30)
+                : Colors.black.withValues(alpha: 0.12),
             blurRadius: isDark ? 14 : 10,
             offset: Offset(0, isDark ? 8 : 5),
           ),
@@ -2513,43 +2414,52 @@ class _PropertiesPageState extends State<PropertiesPage> {
               valueListenable: _searchRefreshingNotifier,
               builder: (context, refreshing, _) {
                 final hasText = value.text.trim().isNotEmpty;
+                final fieldFill = isDark
+                    ? AppColors.background.backgroundTertiaryDarkMode
+                    : AppColors.background.backgroundTertiary;
                 return Container(
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(14),
                     color: hasText
                         ? Color.alphaBlend(
-                            accent.withValues(alpha: isDark ? 0.10 : 0.05),
-                            ThemeHelpers.cardBackgroundColor(context),
+                            accent.withValues(alpha: isDark ? 0.08 : 0.04),
+                            fieldFill,
                           )
-                        : ThemeHelpers.cardBackgroundColor(context),
+                        : fieldFill,
                     border: Border.all(
                       color: hasText
-                          ? accent.withValues(alpha: isDark ? 0.55 : 0.38)
-                          : ThemeHelpers.borderColor(context),
-                      width: hasText ? 1.35 : 1,
+                          ? accent.withValues(alpha: isDark ? 0.50 : 0.38)
+                          : ThemeHelpers.borderLightColor(context),
+                      width: hasText ? 1.4 : 1,
                     ),
                   ),
                   child: Row(
                     children: [
-                      const SizedBox(width: 12),
-                      if (refreshing)
-                        SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: accent,
-                          ),
-                        )
-                      else
-                        Icon(
-                          Icons.search_rounded,
-                          size: 20,
-                          color: hasText
-                              ? accent
-                              : ThemeHelpers.textSecondaryColor(context),
-                        ),
                       const SizedBox(width: 8),
+                      // Chip de ícone (padrão FilterControl) — dá identidade
+                      // ao campo mais usado da tela.
+                      Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: accent.withValues(alpha: isDark ? 0.20 : 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: refreshing
+                            ? Padding(
+                                padding: const EdgeInsets.all(8),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: accent,
+                                ),
+                              )
+                            : Icon(
+                                Icons.search_rounded,
+                                size: 18,
+                                color: accent,
+                              ),
+                      ),
+                      const SizedBox(width: 10),
                       Expanded(
                         child: TextField(
                           controller: textController,
@@ -3745,12 +3655,13 @@ class _PropertiesPageState extends State<PropertiesPage> {
     required VoidCallback onPressed,
     bool isPrimary = false,
     bool highlight = false,
+    bool fullWidth = false,
   }) {
     final accent = _portfolioAccentColor(context);
     final theme = Theme.of(context);
     final style = theme.textTheme.labelLarge?.copyWith(
       fontWeight: FontWeight.w800,
-      fontSize: 12.75,
+      fontSize: 13.25,
       height: 1.15,
       letterSpacing: -0.1,
       color: isPrimary
@@ -3764,9 +3675,10 @@ class _PropertiesPageState extends State<PropertiesPage> {
       onTap: onPressed,
       borderRadius: BorderRadius.circular(14),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        width: fullWidth ? double.infinity : null,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           color: isPrimary
               ? accent
               : ShellVisualTokens.dashboardGlassFill(context),
@@ -3777,9 +3689,21 @@ class _PropertiesPageState extends State<PropertiesPage> {
                     ? accent.withValues(alpha: 0.55)
                     : ShellVisualTokens.dashboardGlassBorder(context),
           ),
+          boxShadow: isPrimary
+              ? [
+                  BoxShadow(
+                    color: accent.withValues(alpha: 0.28),
+                    blurRadius: 16,
+                    offset: const Offset(0, 6),
+                    spreadRadius: -4,
+                  ),
+                ]
+              : null,
         ),
         child: Row(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize: fullWidth ? MainAxisSize.max : MainAxisSize.min,
+          mainAxisAlignment:
+              fullWidth ? MainAxisAlignment.center : MainAxisAlignment.start,
           children: [
             Icon(
               icon,

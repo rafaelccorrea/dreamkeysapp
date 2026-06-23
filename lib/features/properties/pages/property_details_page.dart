@@ -1,4 +1,4 @@
-﻿import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,7 +10,6 @@ import '../../../../shared/widgets/skeleton_box.dart';
 import '../../../../shared/widgets/shimmer_image.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
-import '../widgets/property_public_toggle.dart';
 import '../models/property_activity_models.dart';
 import '../services/property_activity_service.dart';
 import '../../matches/widgets/matches_badge.dart';
@@ -42,7 +41,7 @@ final _currencyFormatter = NumberFormat.currency(
   decimalDigits: 2,
 );
 
-/// Aba interna da ficha de imÃ³vel.
+/// Aba interna da ficha de imóvel.
 enum _DetailsTab { details, activity, performance }
 
 extension on _DetailsTab {
@@ -68,7 +67,7 @@ extension on _DetailsTab {
     }
   }
 
-  /// Acento da aba â€” mesmas cores do web (`propertySplitTabs.ts`).
+  /// Acento da aba — mesmas cores do web (`propertySplitTabs.ts`).
   Color get tone {
     switch (this) {
       case _DetailsTab.details:
@@ -76,12 +75,12 @@ extension on _DetailsTab {
       case _DetailsTab.activity:
         return const Color(0xFFD97706);
       case _DetailsTab.performance:
-        return const Color(0xFF059669);
+        return const Color(0xFF10B981);
     }
   }
 }
 
-/// PÃ¡gina de detalhes da propriedade
+/// Página de detalhes da propriedade
 class PropertyDetailsPage extends StatefulWidget {
   final String propertyId;
   final Property? initialProperty;
@@ -125,14 +124,14 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   List<key_models.Key> _keys = [];
   bool _isLoadingKeys = false;
 
-  // CondomÃ­nio vinculado (sÃ³ quando `condominiumId` existe â€” paridade web).
+  // Condomínio vinculado (só quando `condominiumId` existe — paridade web).
   NamedEntityWithAddress? _linkedCondominium;
   bool _loadingCondominium = false;
 
-  /// Aba interna ativa: VisÃ£o geral, Comercial ou GestÃ£o.
+  /// Aba interna ativa: Visão geral, Comercial ou Gestão.
   _DetailsTab _activeTab = _DetailsTab.details;
 
-  /// Controlador da rolagem â€” controla FAB "voltar ao topo".
+  /// Controlador da rolagem — controla FAB "voltar ao topo".
   final ScrollController _detailsScrollController = ScrollController();
   bool _showScrollTopFab = false;
   String? _lastImageDiagnosticsSignature;
@@ -230,10 +229,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return 0;
   }
 
-  /// AvaliaÃ§Ã£o alinhada Ã s regras do backend (master/admin/manager, aprovador
-  /// na matriz, vÃ­nculo como responsÃ¡vel/captador, ou autorizaÃ§Ã£o de venda
+  /// Avaliação alinhada às regras do backend (master/admin/manager, aprovador
+  /// na matriz, vínculo como responsável/captador, ou autorização de venda
   /// assinada bloqueando vinculados). Veja
-  /// `property_edit_permissions.dart` para a lÃ³gica completa.
+  /// `property_edit_permissions.dart` para a lógica completa.
   PropertyEditPermissionResult get _editPermission {
     final access = ModuleAccessService.instance;
     return evaluatePropertyEditPermission(
@@ -256,15 +255,15 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  /// Pode deletar imagens individuais do imÃ³vel direto pelo carrossel
+  /// Pode deletar imagens individuais do imóvel direto pelo carrossel
   /// fullscreen (paridade com `imobx-front/PropertyGalleryFullscreenPage`).
   ///
   /// Espelha exatamente a regra do web:
   ///   `master/admin OR property:approve_publication OR property:approve_availability`
   ///
   /// Backend: `DELETE /gallery/:id` valida ownership pela company; o front
-  /// Ã© quem decide se o botÃ£o aparece. Ãštil pra reprovar fotos individuais
-  /// (nÃ£o-quadradas, categoria errada) sem precisar mandar a publicaÃ§Ã£o
+  /// é quem decide se o botão aparece. Útil pra reprovar fotos individuais
+  /// (não-quadradas, categoria errada) sem precisar mandar a publicação
   /// inteira de volta pra fila.
   bool get _canDeletePropertyImages {
     final access = ModuleAccessService.instance;
@@ -275,8 +274,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   }
 
   /// Define a imagem principal direto pelo carrossel fullscreen. Liberado para:
-  ///   - quem pode editar a ficha do imÃ³vel (responsÃ¡vel/captador/gestÃ£o)
-  ///   - quem tem permissÃ£o de aprovaÃ§Ã£o (mesma regra do botÃ£o de excluir foto)
+  ///   - quem pode editar a ficha do imóvel (responsável/captador/gestão)
+  ///   - quem tem permissão de aprovação (mesma regra do botão de excluir foto)
   ///
   /// Backend: `PATCH /gallery/:id/set-main`. Em caso de sucesso, o front
   /// atualiza local + sinaliza ao detalhe pra recarregar e mostrar a nova
@@ -292,22 +291,25 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return _property?.status == PropertyStatus.sold;
   }
 
-  /// Perfis elevados (master/admin/manager) podem republicar no site â€” mesma
+  /// Perfis elevados (master/admin/manager) podem republicar no site — mesma
   /// regra do web (`canChangePropertyStatusElevated`).
   bool get _canChangePropertyStatusElevated {
     final role = ModuleAccessService.instance.userRole?.toLowerCase() ?? '';
     return role == 'master' || role == 'admin' || role == 'manager';
   }
 
-  /// Mostra o botÃ£o "Republicar no site" â€” espelha o web:
+  /// Mostra o botão "Republicar no site" — espelha o web:
   /// `canChangePropertyStatusElevated && !canUndoSold`.
   bool get _canRepublishOnSite =>
       _canChangePropertyStatusElevated && !_canUndoSold;
 
   bool _undoSoldLoading = false;
   bool _republishLoading = false;
+  /// Base pública do site da empresa (para o link de compartilhar). Carregada
+  /// uma vez via `/public-site-config`.
+  String? _siteBaseUrl;
 
-  // â”€â”€â”€ Aba Atividades (histÃ³rico + atualizaÃ§Ãµes) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â”€â”€â”€ Aba Atividades (histórico + atualizações) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   final PropertyActivityService _activityService =
       PropertyActivityService.instance;
   List<PropertyHistoryEntry> _history = const [];
@@ -319,7 +321,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   final TextEditingController _updateComposer = TextEditingController();
   bool _submittingUpdate = false;
 
-  // â”€â”€â”€ Aba Desempenho (engajamento + observaÃ§Ãµes) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â”€â”€â”€ Aba Desempenho (engajamento + observações) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   PropertyEngagementStats? _engagement;
   List<PropertyEngagementByChannel> _engagementByChannel = const [];
   bool _loadingEngagement = false;
@@ -336,7 +338,42 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     // parcial e garantir feedback visual consistente.
     _isLoading = true;
     _loadProperty();
+    _loadSiteBaseUrl();
     _detailsScrollController.addListener(_handleDetailsScroll);
+  }
+
+  /// Base pública do site da empresa (custom domain ou subdomínio), do endpoint
+  /// `/public-site-config` — espelha o web (`publicUrl || subdomainUrl`). Usada
+  /// para montar o link compartilhável correto do imóvel. Fica null quando a
+  /// empresa não tem site/permite ver a config; nesse caso a seção de
+  /// "Compartilhar" nem aparece.
+  Future<void> _loadSiteBaseUrl() async {
+    try {
+      final response =
+          await _apiService.get<Map<String, dynamic>>('/public-site-config');
+      if (!mounted || !response.success || response.data == null) return;
+      final data = response.data!;
+      final pub = (data['publicUrl'] as String?)?.trim();
+      final sub = (data['subdomainUrl'] as String?)?.trim();
+      final base = (pub != null && pub.isNotEmpty)
+          ? pub
+          : ((sub != null && sub.isNotEmpty) ? sub : null);
+      if (base == null) return;
+      setState(() => _siteBaseUrl = base.replaceAll(RegExp(r'/+$'), ''));
+    } catch (_) {
+      // Sem base → seção de compartilhar permanece oculta. Silencioso.
+    }
+  }
+
+  /// URL pública completa do imóvel no site (ex.: `https://site/imovel/31020`).
+  /// `null` quando não há base do site.
+  String? _publicPropertyUrl(Property property) {
+    final base = _siteBaseUrl;
+    if (base == null || base.isEmpty) return null;
+    final id = (property.code != null && property.code!.trim().isNotEmpty)
+        ? property.code!.trim()
+        : property.id;
+    return '$base/imovel/${Uri.encodeComponent(id)}';
   }
 
   void _handleDetailsScroll() {
@@ -469,7 +506,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         });
       }
     } catch (e) {
-      debugPrint('âŒ [PROPERTY_DETAILS] condomÃ­nio: $e');
+      debugPrint('âŒ [PROPERTY_DETAILS] condomínio: $e');
       if (mounted) {
         setState(() {
           _loadingCondominium = false;
@@ -531,7 +568,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     if (widget.propertyId.trim().isEmpty) {
       setState(() {
         _isLoading = false;
-        _errorMessage = 'ID do imÃ³vel invÃ¡lido.';
+        _errorMessage = 'ID do imóvel inválido.';
       });
       return;
     }
@@ -551,7 +588,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           final property = response.data!;
           if (property.id.trim().isEmpty) {
             setState(() {
-              _errorMessage = 'ImÃ³vel retornou sem identificador vÃ¡lido.';
+              _errorMessage = 'Imóvel retornou sem identificador válido.';
               _isLoading = false;
             });
             return;
@@ -565,7 +602,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             property,
             source: 'loadProperty.success',
           );
-          // Carregar dados relacionados apÃ³s carregar propriedade
+          // Carregar dados relacionados após carregar propriedade
           _loadDocuments();
           _loadChecklists();
           _loadExpenses();
@@ -576,7 +613,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           }
         } else {
           setState(() {
-            // Se jÃ¡ existe algum snapshot local da propriedade, mantÃ©m a tela
+            // Se já existe algum snapshot local da propriedade, mantém a tela
             // renderizada em vez de trocar para estado de erro cheio.
             if (_property == null) {
               _errorMessage =
@@ -607,9 +644,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Tornar imÃ³vel disponÃ­vel?'),
+        title: const Text('Tornar imóvel disponível?'),
         content: Text(
-          'O status de vendido serÃ¡ removido. O imÃ³vel${property.code != null && property.code!.trim().isNotEmpty ? ' ${property.code!.trim()}' : ''} voltarÃ¡ ao cadastro como disponÃ­vel e a ficha serÃ¡ reativada.',
+          'O status de vendido será removido. O imóvel${property.code != null && property.code!.trim().isNotEmpty ? ' ${property.code!.trim()}' : ''} voltará ao cadastro como disponível e a ficha será reativada.',
         ),
         actions: [
           TextButton(
@@ -618,7 +655,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Tornar disponÃ­vel'),
+            child: const Text('Tornar disponível'),
           ),
         ],
       ),
@@ -631,7 +668,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       final response = await _propertyService.changePropertyStatus(
         property.id,
         status: PropertyStatus.available,
-        notes: 'Venda desfeita â€” imÃ³vel disponÃ­vel novamente',
+        notes: 'Venda desfeita — imóvel disponível novamente',
       );
 
       if (!mounted) return;
@@ -640,7 +677,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         setState(() => _property = response.data);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('ImÃ³vel disponÃ­vel novamente.'),
+            content: const Text('Imóvel disponível novamente.'),
             backgroundColor: AppColors.status.success,
           ),
         );
@@ -648,7 +685,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              response.message ?? 'NÃ£o foi possÃ­vel desfazer a venda.',
+              response.message ?? 'Não foi possível desfazer a venda.',
             ),
             backgroundColor: AppColors.status.error,
           ),
@@ -684,7 +721,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         setState(() => _property = response.data);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('ImÃ³vel republicado no site.'),
+            content: const Text('Imóvel republicado no site.'),
             backgroundColor: AppColors.status.success,
           ),
         );
@@ -692,7 +729,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              response.message ?? 'NÃ£o foi possÃ­vel republicar o imÃ³vel.',
+              response.message ?? 'Não foi possível republicar o imóvel.',
             ),
             backgroundColor: AppColors.status.error,
           ),
@@ -809,7 +846,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     if (created == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('NÃ£o foi possÃ­vel registrar a atualizaÃ§Ã£o.'),
+          content: const Text('Não foi possível registrar a atualização.'),
           backgroundColor: AppColors.status.error,
         ),
       );
@@ -837,8 +874,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       SnackBar(
         content: Text(
           response.success
-              ? 'ObservaÃ§Ãµes salvas.'
-              : (response.message ?? 'NÃ£o foi possÃ­vel salvar.'),
+              ? 'Observações salvas.'
+              : (response.message ?? 'Não foi possível salvar.'),
         ),
         backgroundColor:
             response.success ? AppColors.status.success : AppColors.status.error,
@@ -861,7 +898,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     if (_lastImageDiagnosticsSignature == signature) return;
     _lastImageDiagnosticsSignature = signature;
 
-    debugPrint('ðŸ–¼ï¸ [PROPERTY_DETAILS] DiagnÃ³stico de imagens ($source)');
+    debugPrint('ðŸ–¼ï¸ [PROPERTY_DETAILS] Diagnóstico de imagens ($source)');
     debugPrint('   - propertyId: ${property.id}');
     debugPrint('   - imageCount(api): ${property.imageCount}');
     debugPrint('   - images.length(raw): ${allImages.length}');
@@ -926,7 +963,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Tem certeza que deseja excluir "${_property!.title}"? Esta aÃ§Ã£o nÃ£o pode ser desfeita.',
+                  'Tem certeza que deseja excluir "${_property!.title}"? Esta ação não pode ser desfeita.',
                 ),
                 const SizedBox(height: 24),
                 Column(
@@ -967,7 +1004,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       if (mounted) {
         if (response.success) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Propriedade excluÃ­da com sucesso')),
+            const SnackBar(content: Text('Propriedade excluída com sucesso')),
           );
           Navigator.of(context).pop(true);
         } else {
@@ -987,7 +1024,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final theme = Theme.of(context);
 
     return AppScaffold(
-      title: 'Detalhes do ImÃ³vel',
+      title: 'Detalhes do Imóvel',
       currentBottomNavIndex: 1,
       showBottomNavigation: true,
       actions: [
@@ -1020,8 +1057,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           ),
         Builder(
           builder: (context) {
-            // Esconde o menu por completo se o usuÃ¡rio nÃ£o tem nenhuma aÃ§Ã£o
-            // disponÃ­vel (visualizaÃ§Ã£o-pura para imÃ³vel de outro corretor).
+            // Esconde o menu por completo se o usuário não tem nenhuma ação
+            // disponível (visualização-pura para imóvel de outro corretor).
             final canEdit = _canEditProperty;
             final canDelete = _canDeleteProperty;
             final hasOffersShortcut =
@@ -1100,7 +1137,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                 return _buildErrorState(
                   context,
                   theme,
-                  message: 'NÃ£o foi possÃ­vel carregar os detalhes do imÃ³vel.',
+                  message: 'Não foi possível carregar os detalhes do imóvel.',
                 );
               }
               return Stack(
@@ -1238,15 +1275,15 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     // Layout reformulado em estilo editorial:
     //
     // 1. Hero edge-to-edge (sem bordas arredondadas, sem padding lateral)
-    //    â€” a foto Ã© o protagonista e ocupa toda a largura da tela.
-    // 2. Bloco "headline" (tipo + cÃ³digo + tÃ­tulo + endereÃ§o) sem caixa.
+    //    — a foto é o protagonista e ocupa toda a largura da tela.
+    // 2. Bloco "headline" (tipo + código + título + endereço) sem caixa.
     // 3. Quick stats em strip horizontal.
-    // 4. PreÃ§o em destaque tipogrÃ¡fico (sem caixa).
-    // 5. AÃ§Ãµes rÃ¡pidas.
-    // 6. Tabs + conteÃºdo da aba.
+    // 4. Preço em destaque tipográfico (sem caixa).
+    // 5. Ações rápidas.
+    // 6. Tabs + conteúdo da aba.
     //
-    // Essa ordem coloca a informaÃ§Ã£o mais importante (foto â†’ tÃ­tulo â†’
-    // preÃ§o) com hierarquia visual real, em vez de "card dentro de card
+    // Essa ordem coloca a informação mais importante (foto â†’ título â†’
+    // preço) com hierarquia visual real, em vez de "card dentro de card
     // dentro de card" que era o layout antigo.
     return CustomScrollView(
       controller: _detailsScrollController,
@@ -1258,7 +1295,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         SliverToBoxAdapter(
           child: _buildDetailsHero(context, theme, property),
         ),
-        // 2. Hero textual: cÃ³digo + preÃ§o + tÃ­tulo + pills (paridade web)
+        // 2. Hero textual: código + preço + título + pills (paridade web)
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
@@ -1283,16 +1320,16 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ HERO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  /// Hero **edge-to-edge** â€” a foto Ã© o protagonista da tela.
+  /// Hero **edge-to-edge** — a foto é o protagonista da tela.
   ///
-  /// MudanÃ§as em relaÃ§Ã£o Ã  versÃ£o anterior:
-  /// - Sem `borderRadius: 20` â€” bordas retas, full-width
-  /// - Sem `Material elevation` + sombra â€” fica visualmente "preso" ao topo
-  /// - Sem `padding lateral 16` â€” ocupa 100% da largura da tela
-  /// - Altura de **340px** (era 248) pra dar mais peso visual Ã  foto
-  /// - **TÃ­tulo do imÃ³vel + endereÃ§o sobrepostos** no rodapÃ© da imagem
+  /// Mudanças em relação à versão anterior:
+  /// - Sem `borderRadius: 20` — bordas retas, full-width
+  /// - Sem `Material elevation` + sombra — fica visualmente "preso" ao topo
+  /// - Sem `padding lateral 16` — ocupa 100% da largura da tela
+  /// - Altura de **340px** (era 248) pra dar mais peso visual à foto
+  /// - **Título do imóvel + endereço sobrepostos** no rodapé da imagem
   ///   (estilo Airbnb/Booking) com gradiente bottom mais forte
-  /// - Featured/contador/dots reposicionados pra nÃ£o brigar com o tÃ­tulo
+  /// - Featured/contador/dots reposicionados pra não brigar com o título
   Widget _buildDetailsHero(
     BuildContext context,
     ThemeData theme,
@@ -1303,7 +1340,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         rawImages.where((img) => img.url.trim().isNotEmpty).toList();
     final hasValidMainImage =
         property.mainImage?.url.trim().isNotEmpty == true;
-    // Alguns payloads chegam com `mainImage` vÃ¡lida e `images` vazia.
+    // Alguns payloads chegam com `mainImage` válida e `images` vazia.
     final images = validImages.isNotEmpty
         ? validImages
         : (hasValidMainImage
@@ -1314,13 +1351,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         : _currentImageIndex.clamp(0, images.length - 1);
     if (kDebugMode && rawImages.length != validImages.length) {
       debugPrint(
-        'âš ï¸ [PROPERTY_DETAILS] Imagens com URL invÃ¡lida/vazia: '
+        'âš ï¸ [PROPERTY_DETAILS] Imagens com URL inválida/vazia: '
         '${rawImages.length - validImages.length} de ${rawImages.length}',
       );
     }
     if (kDebugMode && images.isEmpty) {
       debugPrint(
-        'âš ï¸ [PROPERTY_DETAILS] Hero sem imagem renderizÃ¡vel. '
+        'âš ï¸ [PROPERTY_DETAILS] Hero sem imagem renderizável. '
         'mainImage="${property.mainImage?.url ?? '(null)'}" '
         'imagesRaw=${rawImages.length}',
       );
@@ -1361,8 +1398,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         children: [
           Positioned.fill(child: imageLayer()),
 
-          // Gradient bottom mais forte â€” necessÃ¡rio pro tÃ­tulo sobreposto
-          // ler bem em fotos claras. Top tambÃ©m tem um leve "veneer" pra
+          // Gradient bottom mais forte — necessário pro título sobreposto
+          // ler bem em fotos claras. Top também tem um leve "veneer" pra
           // contadores/featured chip.
           IgnorePointer(
             child: DecoratedBox(
@@ -1398,7 +1435,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               child: _buildExpandHint(),
             ),
 
-          // Setas laterais para navegaÃ§Ã£o entre fotos
+          // Setas laterais para navegação entre fotos
           if (images.length > 1 && safeCurrentIndex > 0)
             Positioned(
               left: 8,
@@ -1430,7 +1467,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               ),
             ),
 
-          // Dots no fim (apenas quando hÃ¡ mais de uma imagem)
+          // Dots no fim (apenas quando há mais de uma imagem)
           if (images.length > 1)
             Positioned(
               left: 0,
@@ -1565,15 +1602,15 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  /// Indicadores de pÃ¡gina da hero.
+  /// Indicadores de página da hero.
   ///
-  /// Antes usava um `Row` com `total` dots â€” quebrava em overflow quando
-  /// o imÃ³vel tinha 12+ fotos (ex.: 20 dots Ã— ~12px = 240px+ que estoura
+  /// Antes usava um `Row` com `total` dots — quebrava em overflow quando
+  /// o imóvel tinha 12+ fotos (ex.: 20 dots × ~12px = 240px+ que estoura
   /// telas estreitas). Agora aplicamos uma regra adaptativa:
   ///
-  /// - AtÃ© **8 fotos**: mostra dots tradicionais (Instagram-like).
+  /// - Até **8 fotos**: mostra dots tradicionais (Instagram-like).
   /// - Mais que isso: usa um **indicador compacto "X / Y"** com fundo
-  ///   semitransparente â€” escala bem para qualquer nÃºmero de fotos.
+  ///   semitransparente — escala bem para qualquer número de fotos.
   Widget _buildHeroDots(int total, int current) {
     if (total > 8) {
       return Container(
@@ -1655,16 +1692,16 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ IDENTIDADE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  /// Bloco de "identidade" reformulado â€” **sem caixa visual encapsulada**.
+  /// Bloco de "identidade" reformulado — **sem caixa visual encapsulada**.
   ///
   /// Antes era um DecoratedBox com borderRadius 20, sombra e ClipRRect
-  /// envolvendo tudo, criando um "card sobre card". Repetia tambÃ©m o
-  /// tÃ­tulo + tipo + endereÃ§o que agora estÃ£o sobrepostos na hero.
+  /// envolvendo tudo, criando um "card sobre card". Repetia também o
+  /// título + tipo + endereço que agora estão sobrepostos na hero.
   ///
-  /// Agora Ã© sÃ³ conteÃºdo direto sobre o background da pÃ¡gina:
-  /// - Linha de cÃ³digo + matches badge + relacionados (compacto)
-  /// - Pills de meta-status (pÃºblico/privado, aceita proposta, MCMVâ€¦)
-  /// - Footer de identidade (se houver) â€” separado por linha sutil
+  /// Agora é só conteúdo direto sobre o background da página:
+  /// - Linha de código + matches badge + relacionados (compacto)
+  /// - Pills de meta-status (público/privado, aceita proposta, MCMV…)
+  /// - Footer de identidade (se houver) — separado por linha sutil
   Widget _buildIdentityCard(
     BuildContext context,
     ThemeData theme,
@@ -1684,7 +1721,40 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 1) Linha CRM: cÃ³digo (Ã  esquerda) + matches badge (canto direito).
+        // 1) Título do imóvel — primeira informação (paridade web).
+        Text(
+          property.title,
+          style: theme.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.025,
+            height: 1.2,
+            color: ThemeHelpers.textColor(context),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              Icons.location_on_outlined,
+              size: 16,
+              color: ThemeHelpers.textSecondaryColor(context),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                _formatPropertyHeroAddress(property),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: ThemeHelpers.textSecondaryColor(context),
+                  height: 1.4,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        // 2) Linha CRM: código (à esquerda) + matches badge (canto direito).
         Row(
           children: [
             if (hasCode) ...[
@@ -1694,7 +1764,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   Clipboard.setData(ClipboardData(text: property.code!));
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('CÃ³digo copiado'),
+                      content: Text('Código copiado'),
                       duration: Duration(seconds: 2),
                     ),
                   );
@@ -1747,55 +1817,28 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           ],
         ),
 
-        // 2) PreÃ§o â€” primeira informaÃ§Ã£o comercial (paridade web, apÃ³s cÃ³digo)
-        const SizedBox(height: 10),
+        // 3) Valores + botão "Republicar no site" (como no web).
+        const SizedBox(height: 12),
         _buildPriceShowcase(context, theme, property, isDark),
+        if (_canRepublishOnSite) ...[
+          const SizedBox(height: 12),
+          _buildRepublishButton(context, theme),
+        ],
 
         // 3) Eyebrow: inativo, site, destaque, atualizado
         const SizedBox(height: 10),
         _buildHeroEyebrowChips(context, theme, property, isDark),
 
-        // 4) TÃ­tulo + endereÃ§o
+        // 4) Specs principais — faixa horizontal refinada (números-chave) +
+        //    meta secundária (tipo, bairro, fotos) em chips discretos.
+        const SizedBox(height: 14),
+        _buildSpecsStrip(context, property, isDark),
         const SizedBox(height: 12),
-        Text(
-          property.title,
-          style: theme.textTheme.headlineSmall?.copyWith(
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.025,
-            height: 1.28,
-            color: ThemeHelpers.textColor(context),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(
-              Icons.location_on_outlined,
-              size: 16,
-              color: ThemeHelpers.textSecondaryColor(context),
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                _formatPropertyHeroAddress(property),
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                  height: 1.4,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-          ],
-        ),
-
-        // 5) Meta em pills discretas (tipo, bairro, quartos, Ã¡reaâ€¦)
-        const SizedBox(height: 10),
         _buildHeroMetaPillsRow(context, property, isDark),
 
-        // 6) STATUS DO IMÃ“VEL + SITUAÃ‡ÃƒO
-        // precisa ver. Acompanha a paridade com a versÃ£o web (badge roxa
-        // "Aguardando autorizaÃ§Ã£o do proprietÃ¡rio" + badge verde "Ativo").
+        // 6) STATUS DO IMÓVEL + SITUAÇÃO
+        // precisa ver. Acompanha a paridade com a versão web (badge roxa
+        // "Aguardando autorização do proprietário" + badge verde "Ativo").
         const SizedBox(height: 12),
         Wrap(
           spacing: 6,
@@ -1832,15 +1875,15 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                               ? Icons.hourglass_top_rounded
                               : Icons.check_circle_outline_rounded,
                           size: 14,
-                          color: const Color(0xFF059669),
+                          color: const Color(0xFF10B981),
                         ),
                         const SizedBox(width: 5),
                         Text(
                           _undoSoldLoading
-                              ? 'Tornando disponÃ­vel...'
-                              : 'Tornar disponÃ­vel',
+                              ? 'Tornando disponível...'
+                              : 'Tornar disponível',
                           style: const TextStyle(
-                            color: Color(0xFF059669),
+                            color: Color(0xFF10B981),
                             fontWeight: FontWeight.w800,
                             fontSize: 11,
                             letterSpacing: 0.15,
@@ -1859,8 +1902,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           ],
         ),
 
-        // 3) Pills de meta secundÃ¡rias (MCMV, aceita proposta, ofertas
-        //    pendentes, sem fotos). JÃ¡ excluÃ­mos "no site"/"privado" do
+        // 3) Pills de meta secundárias (MCMV, aceita proposta, ofertas
+        //    pendentes, sem fotos). Já excluímos "no site"/"privado" do
         //    helper porque agora vem na PropertySituationPill.
         if (pills.isNotEmpty) ...[
           const SizedBox(height: 6),
@@ -1871,14 +1914,14 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           ),
         ],
 
-        // 4) CaptaÃ§Ã£o â€” agora FLAT (sem moldura externa), sÃ³ conteÃºdo
-        // direto no fundo da pÃ¡gina.
+        // 4) Captação — agora FLAT (sem moldura externa), só conteúdo
+        // direto no fundo da página.
         if (_hasCaptorsContent(property)) ...[
           const SizedBox(height: 16),
           _buildCaptorsBlock(context, theme, property, isDark, muted),
         ],
 
-        // 5) Footer (responsÃ¡vel, datas)
+        // 5) Footer (responsável, datas)
         if (hasFooter && _formatHeroUpdatedLabel(property.updatedAt) == null) ...[
           const SizedBox(height: 14),
           Container(
@@ -1894,12 +1937,12 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   }
 
   /// Lista normalizada de captadores. Prioriza `captors` (multi, vindo da API
-  /// de detalhe). Cai para `capturedBy` (single, legacy) se o multi nÃ£o veio.
+  /// de detalhe). Cai para `capturedBy` (single, legacy) se o multi não veio.
   List<PropertyCaptor> _resolveCaptors(Property property) {
     final multi = property.captors ?? const <PropertyCaptor>[];
     if (multi.isNotEmpty) {
-      // Deduplica por id pra evitar repetiÃ§Ã£o quando o backend devolve tanto
-      // legacy quanto multi (rarÃ­ssimo, mas mantÃ©m UI limpa).
+      // Deduplica por id pra evitar repetição quando o backend devolve tanto
+      // legacy quanto multi (raríssimo, mas mantém UI limpa).
       final seen = <String>{};
       return multi.where((c) => seen.add(c.id)).toList();
     }
@@ -1920,11 +1963,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   bool _hasCaptorsContent(Property property) => _resolveCaptors(property).isNotEmpty;
 
-  /// Bloco refinado de captaÃ§Ã£o:
-  ///   - eyebrow "CAPTAÃ‡ÃƒO" + contador de captadores
+  /// Bloco refinado de captação:
+  ///   - eyebrow "CAPTAÇÃO" + contador de captadores
   ///   - lista de cards com avatar (foto ou iniciais coloridas), nome,
   ///     e linha de contato (telefone) abaixo
-  ///   - botÃ£o de "Ligar" e botÃ£o de "WhatsApp" quando hÃ¡ telefone
+  ///   - botão de "Ligar" e botão de "WhatsApp" quando há telefone
   Widget _buildCaptorsBlock(
     BuildContext context,
     ThemeData theme,
@@ -1937,7 +1980,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ? AppColors.primary.primaryDarkMode
         : AppColors.primary.primary;
 
-    // Bloco flat (sem moldura externa) â€” segue a identidade do hero da
+    // Bloco flat (sem moldura externa) — segue a identidade do hero da
     // PropertiesPage: eyebrow accent + contador + lista de captadores.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1947,7 +1990,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             Icon(Icons.flag_outlined, size: 13, color: accent),
             const SizedBox(width: 6),
             Text(
-              'CAPTAÃ‡ÃƒO',
+              'CAPTAÇÃO',
               style: TextStyle(
                 fontSize: 10.5,
                 fontWeight: FontWeight.w900,
@@ -1996,7 +2039,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  /// Pills com meta-info do imÃ³vel: pÃºblico, MCMV, aceita proposta, ofertas.
+  /// Pills com meta-info do imóvel: público, MCMV, aceita proposta, ofertas.
   List<Widget> _buildIdentityMetaPills(Property property, bool isDark) {
     final pills = <Widget>[];
 
@@ -2122,7 +2165,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  /// Devolve algo como "hÃ¡ 3d", "hÃ¡ 2h" ou null se a string for invÃ¡lida.
+  /// Devolve algo como "há 3d", "há 2h" ou null se a string for inválida.
   String? _humanRelativeTime(String iso) {
     if (iso.trim().isEmpty) return null;
     DateTime? dt;
@@ -2134,12 +2177,12 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final delta = DateTime.now().difference(dt);
     if (delta.isNegative) return null;
     if (delta.inMinutes < 1) return 'agora';
-    if (delta.inMinutes < 60) return 'hÃ¡ ${delta.inMinutes} min';
-    if (delta.inHours < 24) return 'hÃ¡ ${delta.inHours} h';
-    if (delta.inDays < 7) return 'hÃ¡ ${delta.inDays} d';
-    if (delta.inDays < 30) return 'hÃ¡ ${(delta.inDays / 7).floor()} sem';
-    if (delta.inDays < 365) return 'hÃ¡ ${(delta.inDays / 30).floor()} mes';
-    return 'hÃ¡ ${(delta.inDays / 365).floor()} a';
+    if (delta.inMinutes < 60) return 'há ${delta.inMinutes} min';
+    if (delta.inHours < 24) return 'há ${delta.inHours} h';
+    if (delta.inDays < 7) return 'há ${delta.inDays} d';
+    if (delta.inDays < 30) return 'há ${(delta.inDays / 7).floor()} sem';
+    if (delta.inDays < 365) return 'há ${(delta.inDays / 30).floor()} mes';
+    return 'há ${(delta.inDays / 365).floor()} a';
   }
 
   IconData _typeIcon(PropertyType type) {
@@ -2167,7 +2210,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return '$streetLine, $cityLine';
   }
 
-  /// Pills discretas do hero â€” paridade `PropertyHeroMetaChip` (web).
+  /// Pills discretas do hero — paridade `PropertyHeroMetaChip` (web).
   Widget _buildHeroMetaPillsRow(
     BuildContext context,
     Property property,
@@ -2192,56 +2235,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         label: neighborhood,
       ));
     }
-    final bedrooms = property.bedrooms;
-    if (bedrooms != null && bedrooms > 0) {
-      chips.add(_heroMetaChip(
-        context,
-        isDark: isDark,
-        icon: Icons.bed_outlined,
-        label: '$bedrooms quarto${bedrooms == 1 ? '' : 's'}',
-      ));
-    }
-    final suites = property.suites;
-    if (suites != null && suites > 0) {
-      chips.add(_heroMetaChip(
-        context,
-        isDark: isDark,
-        icon: Icons.king_bed_outlined,
-        label: '$suites suÃ­te${suites == 1 ? '' : 's'}',
-      ));
-    }
-    final bathrooms = property.bathrooms;
-    if (bathrooms != null && bathrooms > 0) {
-      chips.add(_heroMetaChip(
-        context,
-        isDark: isDark,
-        icon: Icons.bathtub_outlined,
-        label: '$bathrooms banheiro${bathrooms == 1 ? '' : 's'}',
-      ));
-    }
-    final parking = property.parkingSpaces;
-    if (parking != null && parking > 0) {
-      chips.add(_heroMetaChip(
-        context,
-        isDark: isDark,
-        icon: Icons.directions_car_filled_outlined,
-        label: '$parking vaga${parking == 1 ? '' : 's'}',
-      ));
-    }
-    String? areaLabel;
-    if (property.builtArea != null && property.builtArea! > 0) {
-      areaLabel = '${_formatAreaHero(property.builtArea!)} mÂ²';
-    } else if (property.totalArea > 0) {
-      areaLabel = '${_formatAreaHero(property.totalArea)} mÂ²';
-    }
-    if (areaLabel != null) {
-      chips.add(_heroMetaChip(
-        context,
-        isDark: isDark,
-        icon: Icons.straighten_rounded,
-        label: areaLabel,
-      ));
-    }
+    // Números-chave (quartos/suítes/banheiros/vagas/área) agora vivem na
+    // faixa de specs (_buildSpecsStrip); aqui ficam só os meta secundários.
     final photos = property.imageCount ?? property.images?.length ?? 0;
     if (photos > 0) {
       chips.add(_heroMetaChip(
@@ -2257,6 +2252,121 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       spacing: 6,
       runSpacing: 6,
       children: chips,
+    );
+  }
+
+  /// Faixa de specs principais — ícone + valor + label, distribuídos na
+  /// horizontal com divisórias finas e hairlines em cima/embaixo. Substitui a
+  /// lista monótona de pills; usa bem a largura e fica colado às margens.
+  Widget _buildSpecsStrip(
+    BuildContext context,
+    Property property,
+    bool isDark,
+  ) {
+    final items = <({IconData icon, String value, String label})>[];
+    final bedrooms = property.bedrooms;
+    if (bedrooms != null && bedrooms > 0) {
+      items.add((
+        icon: Icons.bed_outlined,
+        value: '$bedrooms',
+        label: bedrooms == 1 ? 'Quarto' : 'Quartos',
+      ));
+    }
+    final suites = property.suites;
+    if (suites != null && suites > 0) {
+      items.add((
+        icon: Icons.king_bed_outlined,
+        value: '$suites',
+        label: suites == 1 ? 'Suíte' : 'Suítes',
+      ));
+    }
+    final bathrooms = property.bathrooms;
+    if (bathrooms != null && bathrooms > 0) {
+      items.add((
+        icon: Icons.bathtub_outlined,
+        value: '$bathrooms',
+        label: bathrooms == 1 ? 'Banheiro' : 'Banheiros',
+      ));
+    }
+    final parking = property.parkingSpaces;
+    if (parking != null && parking > 0) {
+      items.add((
+        icon: Icons.directions_car_filled_outlined,
+        value: '$parking',
+        label: parking == 1 ? 'Vaga' : 'Vagas',
+      ));
+    }
+    String? area;
+    if (property.builtArea != null && property.builtArea! > 0) {
+      area = _formatAreaHero(property.builtArea!);
+    } else if (property.totalArea > 0) {
+      area = _formatAreaHero(property.totalArea);
+    }
+    if (area != null) {
+      items.add((icon: Icons.straighten_rounded, value: area, label: 'm²'));
+    }
+
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    final text = ThemeHelpers.textColor(context);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final line = ThemeHelpers.borderColor(context).withValues(alpha: 0.5);
+
+    final children = <Widget>[];
+    for (var i = 0; i < items.length; i++) {
+      final it = items[i];
+      children.add(
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(it.icon, size: 19, color: muted),
+              const SizedBox(height: 6),
+              Text(
+                it.value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  height: 1,
+                  letterSpacing: -0.2,
+                  color: text,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                it.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w600,
+                  height: 1,
+                  color: muted,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (i < items.length - 1) {
+        children.add(Container(width: 1, height: 36, color: line));
+      }
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: line),
+          bottom: BorderSide(color: line),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: children,
+      ),
     );
   }
 
@@ -2383,14 +2493,14 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       return _buildPriceUnavailableCard(context, theme, isDark);
     }
 
-    // Bloco de preÃ§o editorial â€” **sem caixa** (cores paridade web).
+    // Bloco de preço editorial — **sem caixa** (cores paridade web).
     //
-    // O preÃ§o Ã© a informaÃ§Ã£o mais importante depois da foto: ele Ã© a
-    // razÃ£o de o imÃ³vel existir na vitrine. Antes ficava encapsulado
-    // numa caixa secundÃ¡ria, sem destaque tipogrÃ¡fico real.
+    // O preço é a informação mais importante depois da foto: ele é a
+    // razão de o imóvel existir na vitrine. Antes ficava encapsulado
+    // numa caixa secundária, sem destaque tipográfico real.
     //
-    // Agora Ã© sÃ³ um padding inline sobre o background da pÃ¡gina, com a
-    // hierarquia tipogrÃ¡fica fazendo o trabalho: eyebrow accent fino +
+    // Agora é só um padding inline sobre o background da página, com a
+    // hierarquia tipográfica fazendo o trabalho: eyebrow accent fino +
     // valor grande em peso 900 + chips de meta abaixo.
     final priceBlock = hasSale && hasRent
         ? _buildPriceDualLayout(theme, property, isDark)
@@ -2406,7 +2516,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  /// CondomÃ­nio e IPTU abaixo dos preÃ§os principais (paridade `PriceExtrasLine`).
+  /// Condomínio e IPTU abaixo dos preços principais (paridade `PriceExtrasLine`).
   Widget? _buildPriceExtrasLine(
     ThemeData theme,
     Property property,
@@ -2453,9 +2563,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         runSpacing: 6,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          if (hasCondo) extra('CondomÃ­nio', property.condominiumFee!),
+          if (hasCondo) extra('Condomínio', property.condominiumFee!),
           if (hasCondo && hasIptu)
-            Text('Â·', style: TextStyle(color: muted, fontWeight: FontWeight.w700)),
+            Text('·', style: TextStyle(color: muted, fontWeight: FontWeight.w700)),
           if (hasIptu) extra('IPTU', property.iptu!),
         ],
       ),
@@ -2488,7 +2598,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'PreÃ§o sob consulta',
+                  'Preço sob consulta',
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w800,
                     color: ThemeHelpers.textColor(context),
@@ -2742,8 +2852,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     }
   }
 
-  /// Aba **Detalhes** â€” reÃºne cadastro, comercial e gestÃ£o (paridade com o web,
-  /// onde "Detalhes" concentra tudo do imÃ³vel). Reusa os blocos existentes.
+  /// Aba **Detalhes** — reúne cadastro, comercial e gestão (paridade com o web,
+  /// onde "Detalhes" concentra tudo do imóvel). Reusa os blocos existentes.
   Widget _buildDetailsTab(
     BuildContext context,
     ThemeData theme,
@@ -2761,14 +2871,14 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       if (property.description.trim().isNotEmpty)
         _buildFlushSection(
           theme: theme,
-          title: 'DescriÃ§Ã£o',
+          title: 'Descrição',
           icon: Icons.notes_outlined,
           tone: const Color(0xFF6366F1),
           child: _buildDescriptionCard(context, theme, property),
         ),
       _buildFlushSection(
         theme: theme,
-        title: 'CaracterÃ­sticas',
+        title: 'Características',
         icon: Icons.view_module_outlined,
         tone: const Color(0xFF6366F1),
         child: _buildCharacteristicsGrid(context, theme, property),
@@ -2776,9 +2886,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       if (condoId.isNotEmpty)
         _buildFlushSection(
           theme: theme,
-          title: 'CondomÃ­nio',
+          title: 'Condomínio',
           icon: Icons.apartment_rounded,
-          tone: const Color(0xFF059669),
+          tone: const Color(0xFF10B981),
           child: _buildCondominiumSection(context, theme, property),
         ),
       if (property.features.isNotEmpty)
@@ -2791,7 +2901,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ),
       _buildFlushSection(
         theme: theme,
-        title: 'LocalizaÃ§Ã£o',
+        title: 'Localização',
         icon: Icons.map_outlined,
         tone: const Color(0xFFEF4444),
         child: _buildMapSection(context, theme, property),
@@ -2816,7 +2926,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           theme: theme,
           title: 'Ofertas',
           icon: Icons.request_quote_outlined,
-          tone: const Color(0xFF059669),
+          tone: const Color(0xFF10B981),
           child: _buildOffersSection(context, theme, property),
         ),
       if (hasExpenses)
@@ -2845,53 +2955,38 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ),
       _buildFlushSection(
         theme: theme,
-        title: 'PublicaÃ§Ã£o no site',
-        icon: Icons.public_outlined,
-        tone: const Color(0xFF059669),
-        isLast: false,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            PropertyPublicToggle(
-              propertyId: property.id,
-              initialValue: property.isAvailableForSite ?? false,
-              propertyStatus: property.status,
-              isActive: property.isActive,
-              imageCount: property.imageCount ?? property.images?.length ?? 0,
-              onSuccess: () => _loadProperty(),
-              onError: (error) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(error),
-                    backgroundColor: AppColors.status.error,
-                  ),
-                );
-              },
-            ),
-            if (_canRepublishOnSite) ...[
-              const SizedBox(height: 12),
-              _buildRepublishButton(context, theme),
-            ],
-          ],
-        ),
-      ),
-      _buildFlushSection(
-        theme: theme,
         title: 'Ações rápidas',
         icon: Icons.bolt_rounded,
-        tone: const Color(0xFF6366F1),
+        // Vira a última seção quando "Compartilhar" não aparece.
+        isLast: !(property.isAvailableForSite == true && _siteBaseUrl != null),
+        // Tom coerente (azul info) — não vermelho.
+        tone: theme.brightness == Brightness.dark
+            ? AppColors.status.blueDarkMode
+            : AppColors.status.blue,
         child: Wrap(
           spacing: 8,
           runSpacing: 8,
           children: [
+            // Agendar visita — azul (ação de agenda), não vermelho.
             FilledButton.icon(
               onPressed: () => _openScheduleVisit(property),
+              style: FilledButton.styleFrom(
+                backgroundColor: theme.brightness == Brightness.dark
+                    ? AppColors.status.blueDarkMode
+                    : AppColors.status.blue,
+                foregroundColor: Colors.white,
+              ),
               icon: const Icon(Icons.event_rounded, size: 18),
               label: const Text('Agendar visita'),
             ),
+            // Nova vistoria — neutro.
             OutlinedButton.icon(
               onPressed: () => Navigator.of(context).pushNamed(
                 AppRoutes.inspectionCreate,
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: ThemeHelpers.textColor(context),
+                side: BorderSide(color: ThemeHelpers.borderColor(context)),
               ),
               icon: const Icon(Icons.camera_alt_outlined, size: 18),
               label: const Text('Nova vistoria'),
@@ -2899,14 +2994,17 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           ],
         ),
       ),
-      _buildFlushSection(
-        theme: theme,
-        title: 'Compartilhar',
-        icon: Icons.link_rounded,
-        tone: const Color(0xFF64748B),
-        isLast: true,
-        child: _buildShareLinkFooter(context, theme, property),
-      ),
+      // Compartilhar — só quando o imóvel está no site E temos a base pública
+      // (senão o link sairia errado). Copia a URL real do site.
+      if (property.isAvailableForSite == true && _siteBaseUrl != null)
+        _buildFlushSection(
+          theme: theme,
+          title: 'Compartilhar',
+          icon: Icons.link_rounded,
+          tone: const Color(0xFF64748B),
+          isLast: true,
+          child: _buildShareLinkFooter(context, theme, property),
+        ),
     ];
 
     return Column(
@@ -2915,8 +3013,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  /// BotÃ£o "Republicar no site" â€” perfis elevados (master/admin/manager).
-  /// Volta o imÃ³vel para DisponÃ­vel, ativo e visÃ­vel no site (backend valida).
+  /// Botão "Republicar no site" — perfis elevados (master/admin/manager).
+  /// Volta o imóvel para Disponível, ativo e visível no site (backend valida).
   Widget _buildRepublishButton(BuildContext context, ThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
     final accent =
@@ -2958,7 +3056,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return '${two(d.day)}/${two(d.month)}/${d.year} ${two(d.hour)}:${two(d.minute)}';
   }
 
-  // â”€â”€â”€ Aba ATIVIDADES (histÃ³rico + atualizaÃ§Ãµes) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â”€â”€â”€ Aba ATIVIDADES (histórico + atualizações) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   Widget _buildActivityTab(
     BuildContext context,
     ThemeData theme,
@@ -2970,7 +3068,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       children: [
         _buildFlushSection(
           theme: theme,
-          title: 'AtualizaÃ§Ãµes',
+          title: 'Atualizações',
           icon: Icons.campaign_outlined,
           tone: accent,
           child: Column(
@@ -2982,7 +3080,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                 _buildInlineLoader(context, accent)
               else if (_updates.data.isEmpty)
                 _buildActivityEmpty(
-                    context, theme, 'Nenhuma atualizaÃ§Ã£o ainda.')
+                    context, theme, 'Nenhuma atualização ainda.')
               else
                 ..._updates.data
                     .map((u) => _buildUpdateTile(context, theme, u)),
@@ -2991,7 +3089,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ),
         _buildFlushSection(
           theme: theme,
-          title: 'HistÃ³rico',
+          title: 'Histórico',
           icon: Icons.history_rounded,
           tone: const Color(0xFF475569),
           isLast: true,
@@ -3002,7 +3100,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                 _buildInlineLoader(context, accent)
               else if (_history.isEmpty)
                 _buildActivityEmpty(
-                    context, theme, 'Sem histÃ³rico registrado.')
+                    context, theme, 'Sem histórico registrado.')
               else
                 ..._history.map((h) => _buildHistoryTile(context, theme, h)),
             ],
@@ -3065,7 +3163,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             minLines: 1,
             maxLength: 2000,
             decoration: InputDecoration(
-              hintText: 'Escreva uma atualizaÃ§Ã£o sobre o imÃ³velâ€¦',
+              hintText: 'Escreva uma atualização sobre o imóvel…',
               border: InputBorder.none,
               counterText: '',
               isDense: true,
@@ -3116,7 +3214,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             children: [
               Expanded(
                 child: Text(
-                  '${update.user?.name ?? 'Sistema'} Â· ${_formatActivityDateTime(update.createdAt)}',
+                  '${update.user?.name ?? 'Sistema'} · ${_formatActivityDateTime(update.createdAt)}',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: muted,
                     fontWeight: FontWeight.w600,
@@ -3131,7 +3229,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  update.isSystem ? 'AutomÃ¡tico' : 'Manual',
+                  update.isSystem ? 'Automático' : 'Manual',
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: muted,
                     fontWeight: FontWeight.w700,
@@ -3200,7 +3298,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                 Padding(
                   padding: const EdgeInsets.only(top: 3),
                   child: Text(
-                    '${entry.user?.name != null ? '${entry.user!.name} Â· ' : ''}${_formatActivityDateTime(entry.createdAt)}',
+                    '${entry.user?.name != null ? '${entry.user!.name} · ' : ''}${_formatActivityDateTime(entry.createdAt)}',
                     style: theme.textTheme.labelSmall?.copyWith(color: muted),
                   ),
                 ),
@@ -3212,19 +3310,19 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  // â”€â”€â”€ Aba DESEMPENHO (engajamento + observaÃ§Ãµes) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â”€â”€â”€ Aba DESEMPENHO (engajamento + observações) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   Widget _buildPerformanceTab(
     BuildContext context,
     ThemeData theme,
     Property property,
   ) {
-    const accent = Color(0xFF059669);
+    const accent = Color(0xFF10B981);
     final published = property.isAvailableForSite == true;
     final engagementChild = !published
         ? _buildActivityEmpty(
             context,
             theme,
-            'ImÃ³vel fora do site â€” sem mÃ©tricas de engajamento.',
+            'Imóvel fora do site — sem métricas de engajamento.',
           )
         : (_loadingEngagement && !_engagementLoaded)
             ? _buildInlineLoader(context, accent)
@@ -3244,7 +3342,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // Paridade web: `PropertyScoreDetails` flush no step Desempenho (sem
-        // `PropertyDetailSection` duplicando o tÃ­tulo).
+        // `PropertyDetailSection` duplicando o título).
         PropertyScorePanel(result: scoreResult),
         const SizedBox(height: 20),
         _buildFlushSection(
@@ -3256,7 +3354,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ),
         _buildFlushSection(
           theme: theme,
-          title: 'ObservaÃ§Ãµes internas',
+          title: 'Observações internas',
           icon: Icons.lock_outline,
           tone: const Color(0xFFA855F7),
           isLast: true,
@@ -3269,10 +3367,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   Widget _buildEngagementMetrics(BuildContext context, ThemeData theme) {
     final stats = _engagement;
     final items = <(String, int, IconData)>[
-      ('VisualizaÃ§Ãµes', stats?.views ?? 0, Icons.visibility_outlined),
+      ('Visualizações', stats?.views ?? 0, Icons.visibility_outlined),
       ('WhatsApp', stats?.whatsappClicks ?? 0, Icons.chat_outlined),
       ('Telefone', stats?.phoneClicks ?? 0, Icons.call_outlined),
-      ('ImpressÃµes', stats?.prints ?? 0, Icons.bar_chart_rounded),
+      ('Impressões', stats?.prints ?? 0, Icons.bar_chart_rounded),
     ];
     return GridView.count(
       crossAxisCount: 2,
@@ -3291,7 +3389,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           ),
           child: Row(
             children: [
-              Icon(it.$3, size: 20, color: const Color(0xFF059669)),
+              Icon(it.$3, size: 20, color: const Color(0xFF10B981)),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -3328,7 +3426,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Por origem â€” Ãºltimos 30 dias',
+          'Por origem — últimos 30 dias',
           style: theme.textTheme.labelMedium?.copyWith(
             color: muted,
             fontWeight: FontWeight.w700,
@@ -3337,7 +3435,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         const SizedBox(height: 8),
         ..._engagementByChannel.map((ch) {
           final parts = <String>[
-            '${ch.views} visualizaÃ§Ãµes',
+            '${ch.views} visualizações',
             if (ch.whatsappClicks > 0) '${ch.whatsappClicks} WA',
             if (ch.phoneClicks > 0) '${ch.phoneClicks} tel',
             if (ch.emailClicks > 0) '${ch.emailClicks} e-mail',
@@ -3348,7 +3446,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.public, size: 16, color: Color(0xFF059669)),
+                const Icon(Icons.public, size: 16, color: Color(0xFF10B981)),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Column(
@@ -3361,7 +3459,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                         ),
                       ),
                       Text(
-                        parts.join(' Â· '),
+                        parts.join(' · '),
                         style:
                             theme.textTheme.bodySmall?.copyWith(color: muted),
                       ),
@@ -3394,7 +3492,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             minLines: 3,
             maxLength: 10000,
             decoration: InputDecoration(
-              hintText: 'AnotaÃ§Ãµes internas (nÃ£o aparecem no site)â€¦',
+              hintText: 'Anotações internas (não aparecem no site)…',
               counterText: '',
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -3417,7 +3515,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFFA855F7),
                 ),
-                child: Text(_savingNotes ? 'Salvandoâ€¦' : 'Salvar'),
+                child: Text(_savingNotes ? 'Salvando…' : 'Salvar'),
               ),
             ],
           ),
@@ -3437,7 +3535,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            notes.isEmpty ? 'Nenhuma observaÃ§Ã£o interna.' : notes,
+            notes.isEmpty ? 'Nenhuma observação interna.' : notes,
             style: theme.textTheme.bodyMedium?.copyWith(
               color: notes.isEmpty ? muted : null,
               height: 1.5,
@@ -3466,8 +3564,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   }
 
   /// Header flush (paridade web `PropertyDetailSectionTitle`): apenas uma
-  /// rÃ©gua vertical fina na cor da seÃ§Ã£o + tÃ­tulo bold + Ã­cone discreto Ã 
-  /// direita. Sem chip com background, sem moldura â€” nada que reforce a
+  /// régua vertical fina na cor da seção + título bold + ícone discreto à
+  /// direita. Sem chip com background, sem moldura — nada que reforce a
   /// ideia de "card dentro de card".
   Widget _buildSectionHeader(
     ThemeData theme,
@@ -3511,9 +3609,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  /// Wrapper flush de seÃ§Ã£o (paridade web `PropertyDetailSection`): padding
-  /// vertical, divisor inferior fininho, sem moldura/borda/cartÃ£o. Caller
-  /// passa o conteÃºdo direto, sem `Container` decorado por fora.
+  /// Wrapper flush de seção (paridade web `PropertyDetailSection`): padding
+  /// vertical, divisor inferior fininho, sem moldura/borda/cartão. Caller
+  /// passa o conteúdo direto, sem `Container` decorado por fora.
   Widget _buildFlushSection({
     required ThemeData theme,
     required String title,
@@ -3541,17 +3639,17 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  /// DescriÃ§Ã£o editorial â€” sem caixa, sem limite duro, com expand/collapse.
+  /// Descrição editorial — sem caixa, sem limite duro, com expand/collapse.
   ///
   /// Antes era um Container com border + sombra + stripe accent + texto
-  /// sem limite, virando paredÃ£o infinito em imÃ³veis com descriÃ§Ã£o
+  /// sem limite, virando paredão infinito em imóveis com descrição
   /// longa.
   ///
   /// Agora delega ao `_ExpandableDescription`:
   /// - Texto vai DIRETO sobre o background (sem caixa cinza)
-  /// - RÃ©gua accent fina Ã  esquerda como Ã¢nfase editorial
-  /// - Mostra ~5 linhas com **gradient fade** no rodapÃ© indicando truncamento
-  /// - BotÃ£o "Ver mais" / "Ver menos" â€” nÃ£o corta o conteÃºdo, sÃ³ recolhe
+  /// - Régua accent fina à esquerda como ânfase editorial
+  /// - Mostra ~5 linhas com **gradient fade** no rodapé indicando truncamento
+  /// - Botão "Ver mais" / "Ver menos" — não corta o conteúdo, só recolhe
   Widget _buildDescriptionCard(
     BuildContext context,
     ThemeData theme,
@@ -3560,7 +3658,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return _ExpandableDescription(text: property.description);
   }
 
-  /// Grade flat de caracterÃ­sticas â€” paridade `PropertyDetailsCharacteristicsSection`.
+  /// Grade flat de características — paridade `PropertyDetailsCharacteristicsSection`.
   Widget _buildCharacteristicsGrid(
     BuildContext context,
     ThemeData theme,
@@ -3571,20 +3669,20 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       final text = n == n.roundToDouble()
           ? n.toInt().toString()
           : n.toStringAsFixed(2).replaceAll('.', ',');
-      return '$text mÂ²';
+      return '$text m²';
     }
 
     final items = <({IconData icon, String label, String value})>[
       if (property.totalArea > 0)
         (
           icon: Icons.straighten_rounded,
-          label: 'Ãrea total',
+          label: 'Área total',
           value: formatArea(property.totalArea),
         ),
       if (property.builtArea != null && property.builtArea! > 0)
         (
           icon: Icons.home_outlined,
-          label: 'Ãrea construÃ­da',
+          label: 'Área construída',
           value: formatArea(property.builtArea!),
         ),
       if (property.bedrooms != null && property.bedrooms! > 0)
@@ -3596,7 +3694,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       if (property.suites != null && property.suites! > 0)
         (
           icon: Icons.king_bed_outlined,
-          label: 'SuÃ­tes',
+          label: 'Suítes',
           value: '${property.suites}',
         ),
       if (property.bathrooms != null && property.bathrooms! > 0)
@@ -3615,7 +3713,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
     if (items.isEmpty) {
       return Text(
-        'Nenhuma caracterÃ­stica cadastrada.',
+        'Nenhuma característica cadastrada.',
         style: theme.textTheme.bodyMedium?.copyWith(
           color: ThemeHelpers.textSecondaryColor(context),
         ),
@@ -3703,7 +3801,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final muted = ThemeHelpers.textSecondaryColor(context);
     final name = _linkedCondominium?.name.trim().isNotEmpty == true
         ? _linkedCondominium!.name.trim()
-        : 'CondomÃ­nio vinculado';
+        : 'Condomínio vinculado';
 
     if (_loadingCondominium) {
       return const Padding(
@@ -3744,7 +3842,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           _buildCondominiumInfoRow(
             theme,
             Icons.location_on_outlined,
-            'EndereÃ§o',
+            'Endereço',
             address,
             muted,
           ),
@@ -3753,7 +3851,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           _buildCondominiumInfoRow(
             theme,
             Icons.payments_outlined,
-            'Taxa informada no imÃ³vel',
+            'Taxa informada no imóvel',
             _currencyFormatter.format(fee),
             muted,
           ),
@@ -3806,36 +3904,54 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     ThemeData theme,
     Property property,
   ) {
+    final isDark = theme.brightness == Brightness.dark;
     final muted = ThemeHelpers.textSecondaryColor(context);
-    final path = property.code != null && property.code!.isNotEmpty
-        ? 'imovel/${property.code}'
-        : 'imovel/${property.id}';
+    // URL real do imóvel no site (a seção só aparece quando ela existe).
+    final url = _publicPropertyUrl(property) ??
+        (property.code != null && property.code!.isNotEmpty
+            ? 'imovel/${property.code}'
+            : 'imovel/${property.id}');
+    final blue =
+        isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
+    final fieldFill = isDark
+        ? AppColors.background.backgroundTertiaryDarkMode
+        : AppColors.background.backgroundTertiary;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Copie o link pÃºblico deste imÃ³vel para enviar ao cliente.',
+          'Copie o link público deste imóvel para enviar ao cliente.',
           style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.45),
         ),
         const SizedBox(height: 12),
-        SelectableText(
-          path,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.1,
+        // Link em pill — selecionável.
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          decoration: BoxDecoration(
+            color: fieldFill,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: ThemeHelpers.borderLightColor(context)),
+          ),
+          child: SelectableText(
+            url,
+            maxLines: 2,
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.1,
+              color: ThemeHelpers.textColor(context),
+            ),
           ),
         ),
         const SizedBox(height: 12),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              OutlinedButton.icon(
+        Row(
+          children: [
+            // Copiar — neutro.
+            Expanded(
+              child: OutlinedButton.icon(
                 onPressed: () {
-                  Clipboard.setData(ClipboardData(text: path));
+                  Clipboard.setData(ClipboardData(text: url));
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('Link copiado'),
@@ -3843,12 +3959,20 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                     ),
                   );
                 },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: ThemeHelpers.textColor(context),
+                  side: BorderSide(color: ThemeHelpers.borderColor(context)),
+                ),
                 icon: const Icon(Icons.content_copy_rounded, size: 18),
                 label: const Text('Copiar link'),
               ),
-              FilledButton.icon(
+            ),
+            const SizedBox(width: 8),
+            // Compartilhar — azul (comunicação), com o link real na mensagem.
+            Expanded(
+              child: FilledButton.icon(
                 onPressed: () {
-                  final msg = BrokerMessageTemplates.propertyShare(
+                  final base = BrokerMessageTemplates.propertyShare(
                     propertyTitle: property.title,
                     address: [
                       property.address,
@@ -3856,13 +3980,17 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                     ].where((s) => s.trim().isNotEmpty).join(', '),
                     code: property.code,
                   );
-                  BrokerContactActions.shareText(context, msg);
+                  BrokerContactActions.shareText(context, '$base\n$url');
                 },
+                style: FilledButton.styleFrom(
+                  backgroundColor: blue,
+                  foregroundColor: Colors.white,
+                ),
                 icon: const Icon(Icons.share_rounded, size: 18),
-                label: const Text('Compartilhar ficha'),
+                label: const Text('Compartilhar'),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ],
     );
@@ -3959,7 +4087,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               ),
             ),
             child: Text(
-              hasKeys ? 'Chave disponÃ­vel' : 'Sem chave',
+              hasKeys ? 'Chave disponível' : 'Sem chave',
               style: theme.textTheme.labelSmall?.copyWith(
                 fontWeight: FontWeight.w800,
                 color: hasKeys
@@ -3980,7 +4108,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           const SizedBox(height: 12),
           Align(
             alignment: Alignment.centerLeft,
-            child: OutlinedButton(
+            child: OutlinedButton.icon(
               onPressed: () {
                 if (hasKeys) {
                   Navigator.of(context).pushNamed(
@@ -3991,11 +4119,21 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   _showCreateKeyModal(context, property);
                 }
               },
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(0, 40),
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+              icon: Icon(
+                hasKeys ? Icons.vpn_key_rounded : Icons.add_rounded,
+                size: 18,
               ),
-              child: Text(hasKeys ? 'Gerenciar chaves' : 'Cadastrar chave'),
+              label: Text(hasKeys ? 'Gerenciar chaves' : 'Cadastrar chave'),
+              // Ação aditiva/neutra — nada de vermelho. Cor coerente: neutra.
+              style: OutlinedButton.styleFrom(
+                foregroundColor: ThemeHelpers.textColor(context),
+                side: BorderSide(color: ThemeHelpers.borderColor(context)),
+                minimumSize: const Size(0, 44),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
             ),
           ),
         ],
@@ -4020,7 +4158,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             Expanded(
               child: Text(
                 clients.isEmpty
-                    ? 'Vincule clientes interessados a este imÃ³vel.'
+                    ? 'Vincule clientes interessados a este imóvel.'
                     : '${clients.length} cliente(s) vinculado(s)',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: ThemeHelpers.textSecondaryColor(context),
@@ -4555,11 +4693,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                 );
                 final client = chk['client'] as Map<String, dynamic>?;
                 final clientName =
-                    client?['name']?.toString() ?? 'Cliente nÃ£o informado';
+                    client?['name']?.toString() ?? 'Cliente não informado';
 
                 return InkWell(
                   onTap: () {
-                    // TODO: Navegar para detalhes do checklist quando a pÃ¡gina existir
+                    // TODO: Navegar para detalhes do checklist quando a página existir
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text('Visualizar checklist: $checklistId'),
@@ -4625,7 +4763,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                               ),
                               child: Text(
                                 status == 'completed'
-                                    ? 'ConcluÃ­do'
+                                    ? 'Concluído'
                                     : status == 'in_progress'
                                     ? 'Em Andamento'
                                     : 'Pendente',
@@ -4759,7 +4897,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'Adicione contratos, IPTU, matrÃ­cula e outros documentos relacionados a esta propriedade',
+                            'Adicione contratos, IPTU, matrícula e outros documentos relacionados a esta propriedade',
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: ThemeHelpers.textSecondaryColor(context),
                             ),
@@ -4911,7 +5049,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Mapa de LocalizaÃ§Ã£o',
+                'Mapa de Localização',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: ThemeHelpers.textSecondaryColor(context),
                 ),
@@ -4940,7 +5078,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               onPressed: () {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('Abrir no mapa serÃ¡ implementado'),
+                    content: Text('Abrir no mapa será implementado'),
                   ),
                 );
               },
@@ -4957,47 +5095,73 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     ThemeData theme,
     List<String> features,
   ) {
+    final isDark = theme.brightness == Brightness.dark;
+    // Verde da identidade do imóvel (mais vivo) — chip refinado, nada do
+    // Chip nativo sem estilo.
+    final green = isDark ? const Color(0xFF34D399) : const Color(0xFF10B981);
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       children: features.map((feature) {
-        return Chip(
-          label: Text(feature),
-          avatar: Icon(_getFeatureIcon(feature), size: 18),
+        return Container(
+          padding: const EdgeInsets.fromLTRB(10, 8, 13, 8),
+          decoration: BoxDecoration(
+            color: green.withValues(alpha: isDark ? 0.14 : 0.08),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: green.withValues(alpha: isDark ? 0.40 : 0.28),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(_getFeatureIcon(feature), size: 16, color: green),
+              const SizedBox(width: 8),
+              Text(
+                feature,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.1,
+                  color: ThemeHelpers.textColor(context),
+                ),
+              ),
+            ],
+          ),
         );
       }).toList(),
     );
   }
 
   IconData _getFeatureIcon(String feature) {
-    // Mapeamento bÃ¡sico de Ã­cones para recursos
+    // Mapeamento básico de ícones para recursos
     final iconMap = {
       'Ar condicionado': Icons.ac_unit,
       'Aquecimento': Icons.whatshot,
       'Elevador': Icons.elevator,
       'Portaria 24h': Icons.security,
-      'SeguranÃ§a 24h': Icons.shield,
+      'Segurança 24h': Icons.shield,
       'Piscina': Icons.pool,
       'Academia': Icons.fitness_center,
       'Playground': Icons.child_care,
       'Churrasqueira': Icons.outdoor_grill,
-      'Ãrea gourmet': Icons.restaurant,
+      'Área gourmet': Icons.restaurant,
       'Jardim': Icons.local_florist,
-      'TerraÃ§o': Icons.roofing,
+      'Terraço': Icons.roofing,
       'Varanda': Icons.balcony,
       'Sacada': Icons.balcony,
       'Garagem coberta': Icons.garage,
       'Garagem descoberta': Icons.drive_eta,
-      'DepÃ³sito': Icons.inventory_2,
+      'Depósito': Icons.inventory_2,
       'Lavanderia': Icons.local_laundry_service,
       'Closet': Icons.checkroom,
       'Home office': Icons.work,
       'Lareira': Icons.fireplace,
       'Sistema de alarme': Icons.alarm,
-      'CÃ¢meras de seguranÃ§a': Icons.videocam,
+      'Câmeras de segurança': Icons.videocam,
       'Internet': Icons.wifi,
-      'GÃ¡s encanado': Icons.local_gas_station,
-      'Ãgua quente': Icons.water_drop,
+      'Gás encanado': Icons.local_gas_station,
+      'Água quente': Icons.water_drop,
       'Energia solar': Icons.solar_power,
       'Mobiliado': Icons.chair,
       'Semi-mobiliado': Icons.chair_outlined,
@@ -5120,9 +5284,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   TextFormField(
                     controller: notesController,
                     decoration: const InputDecoration(
-                      labelText: 'ObservaÃ§Ãµes (opcional)',
+                      labelText: 'Observações (opcional)',
                       hintText:
-                          'Adicione observaÃ§Ãµes sobre o interesse do cliente',
+                          'Adicione observações sobre o interesse do cliente',
                       border: OutlineInputBorder(),
                     ),
                     maxLines: 3,
@@ -5207,7 +5371,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           ? null
           : notesController.text.trim();
 
-      // Associar cliente Ã  propriedade
+      // Associar cliente à propriedade
 
       final response = await _clientService.associateClientToProperty(
         selectedClientIdRef[0]!,
@@ -5263,7 +5427,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final keyTypes = [
       {'value': 'main', 'label': 'Principal'},
       {'value': 'backup', 'label': 'Reserva'},
-      {'value': 'emergency', 'label': 'EmergÃªncia'},
+      {'value': 'emergency', 'label': 'Emergência'},
       {'value': 'garage', 'label': 'Garagem'},
       {'value': 'mailbox', 'label': 'Caixa de Correio'},
       {'value': 'other', 'label': 'Outra'},
@@ -5329,7 +5493,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                     ),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
-                        return 'Nome Ã© obrigatÃ³rio';
+                        return 'Nome é obrigatório';
                       }
                       return null;
                     },
@@ -5362,8 +5526,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   TextFormField(
                     controller: locationController,
                     decoration: const InputDecoration(
-                      labelText: 'LocalizaÃ§Ã£o',
-                      hintText: 'Ex: EscritÃ³rio',
+                      labelText: 'Localização',
+                      hintText: 'Ex: Escritório',
                       border: OutlineInputBorder(),
                     ),
                   ),
@@ -5371,8 +5535,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   TextFormField(
                     controller: descriptionController,
                     decoration: const InputDecoration(
-                      labelText: 'DescriÃ§Ã£o',
-                      hintText: 'InformaÃ§Ãµes adicionais sobre a chave',
+                      labelText: 'Descrição',
+                      hintText: 'Informações adicionais sobre a chave',
                       border: OutlineInputBorder(),
                     ),
                     maxLines: 3,
@@ -5487,9 +5651,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final expenseTypeRef = <String>['other'];
     final expenseTypes = [
       {'value': 'iptu', 'label': 'IPTU'},
-      {'value': 'condominium', 'label': 'CondomÃ­nio'},
+      {'value': 'condominium', 'label': 'Condomínio'},
       {'value': 'insurance', 'label': 'Seguro'},
-      {'value': 'maintenance', 'label': 'ManutenÃ§Ã£o'},
+      {'value': 'maintenance', 'label': 'Manutenção'},
       {'value': 'utilities', 'label': 'Utilidades'},
       {'value': 'other', 'label': 'Outro'},
     ];
@@ -5550,13 +5714,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   TextFormField(
                     controller: titleController,
                     decoration: const InputDecoration(
-                      labelText: 'TÃ­tulo *',
+                      labelText: 'Título *',
                       hintText: 'Ex: IPTU 2024',
                       border: OutlineInputBorder(),
                     ),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
-                        return 'TÃ­tulo Ã© obrigatÃ³rio';
+                        return 'Título é obrigatório';
                       }
                       return null;
                     },
@@ -5599,13 +5763,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                     ),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
-                        return 'Valor Ã© obrigatÃ³rio';
+                        return 'Valor é obrigatório';
                       }
                       final amount = double.tryParse(
                         value.replaceAll(',', '.'),
                       );
                       if (amount == null || amount <= 0) {
-                        return 'Valor invÃ¡lido';
+                        return 'Valor inválido';
                       }
                       return null;
                     },
@@ -5640,7 +5804,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                     },
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
-                        return 'Data de vencimento Ã© obrigatÃ³ria';
+                        return 'Data de vencimento é obrigatória';
                       }
                       return null;
                     },
@@ -5649,8 +5813,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   TextFormField(
                     controller: descriptionController,
                     decoration: const InputDecoration(
-                      labelText: 'DescriÃ§Ã£o',
-                      hintText: 'InformaÃ§Ãµes adicionais',
+                      labelText: 'Descrição',
+                      hintText: 'Informações adicionais',
                       border: OutlineInputBorder(),
                     ),
                     maxLines: 3,
@@ -6009,10 +6173,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     Map<String, dynamic> expense,
   ) async {
     // Por enquanto, apenas mostra mensagem
-    // TODO: Implementar modal de ediÃ§Ã£o completo
+    // TODO: Implementar modal de edição completo
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text('EdiÃ§Ã£o de despesa serÃ¡ implementada em breve'),
+        content: const Text('Edição de despesa será implementada em breve'),
         backgroundColor: AppColors.status.info,
       ),
     );
@@ -6031,11 +6195,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           children: [
             Icon(Icons.warning_amber_rounded, color: AppColors.status.error),
             const SizedBox(width: 12),
-            const Expanded(child: Text('Confirmar ExclusÃ£o')),
+            const Expanded(child: Text('Confirmar Exclusão')),
           ],
         ),
         content: Text(
-          'Tem certeza que deseja excluir a despesa "$expenseTitle"? Esta aÃ§Ã£o nÃ£o pode ser desfeita.',
+          'Tem certeza que deseja excluir a despesa "$expenseTitle"? Esta ação não pode ser desfeita.',
         ),
         actions: [
           TextButton(
@@ -6064,7 +6228,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         if (response.success) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: const Text('Despesa excluÃ­da com sucesso'),
+              content: const Text('Despesa excluída com sucesso'),
               backgroundColor: AppColors.status.success,
             ),
           );
@@ -6133,19 +6297,19 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   }
 }
 
-/// Visualizador fullscreen â€” paridade com `imobx-front/PropertyGalleryFullscreenPage`.
+/// Visualizador fullscreen — paridade com `imobx-front/PropertyGalleryFullscreenPage`.
 ///
-/// - **`BoxFit.contain`**: a imagem Ã© mostrada nas suas dimensÃµes reais
-///   (com letterbox em volta). Isso permite ao avaliador ver se a foto Ã©
-///   quadrada/retangular antes de aprovar â€” `cover` cortava as bordas e
-///   escondia desproporÃ§Ãµes.
-/// - **Pinch + double-tap zoom** via `InteractiveViewer` (atÃ© 5x).
-/// - **Pill de metadados** (categoria + dimensÃµes + ratio + badge "QUADRADA"
-///   ou "NÃƒO QUADRADA") â€” ajuda o avaliador a decidir rapidamente.
-/// - **BotÃ£o de excluir** disponÃ­vel para usuÃ¡rios com permissÃ£o
+/// - **`BoxFit.contain`**: a imagem é mostrada nas suas dimensões reais
+///   (com letterbox em volta). Isso permite ao avaliador ver se a foto é
+///   quadrada/retangular antes de aprovar — `cover` cortava as bordas e
+///   escondia desproporções.
+/// - **Pinch + double-tap zoom** via `InteractiveViewer` (até 5x).
+/// - **Pill de metadados** (categoria + dimensões + ratio + badge "QUADRADA"
+///   ou "NÃO QUADRADA") — ajuda o avaliador a decidir rapidamente.
+/// - **Botão de excluir** disponível para usuários com permissão
 ///   `propertyApprovePublication`/`propertyApproveAvailability` ou roles
-///   master/admin. ConfirmaÃ§Ã£o obrigatÃ³ria antes do delete.
-/// - Retorna `true` no pop quando alguma imagem foi deletada â€” a pÃ¡gina
+///   master/admin. Confirmação obrigatória antes do delete.
+/// - Retorna `true` no pop quando alguma imagem foi deletada — a página
 ///   pai usa isso pra recarregar o property.
 class _FullscreenGallery extends StatefulWidget {
   const _FullscreenGallery({
@@ -6174,7 +6338,7 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
   bool _deleting = false;
   bool _settingMain = false;
 
-  /// Cache de dimensÃµes reais (decodificadas) por url. Evita resolver de
+  /// Cache de dimensões reais (decodificadas) por url. Evita resolver de
   /// novo a cada rebuild e permite mostrar o ratio na barra inferior.
   final Map<String, Size> _resolvedSizes = {};
 
@@ -6198,9 +6362,9 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
           ? null
           : _images[_index];
 
-  /// Resolve dimensÃµes reais via `Image.image.resolve(...)` â€” apenas uma
-  /// vez por URL. Ãštil pro badge "QUADRADA"/"NÃƒO QUADRADA" e pra mostrar
-  /// "1920Ã—1080" na pill inferior.
+  /// Resolve dimensões reais via `Image.image.resolve(...)` — apenas uma
+  /// vez por URL. Útil pro badge "QUADRADA"/"NÃO QUADRADA" e pra mostrar
+  /// "1920×1080" na pill inferior.
   void _resolveSizeFor(PropertyImage? img) {
     if (img == null) return;
     if (_resolvedSizes.containsKey(img.url)) return;
@@ -6228,7 +6392,7 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
   bool _isApproximatelySquare(Size size) {
     if (size.width == 0 || size.height == 0) return false;
     final ratio = size.width / size.height;
-    // Toleramos Â±2% pra absorver compressÃµes e arredondamentos JPEG.
+    // Toleramos ±2% pra absorver compressões e arredondamentos JPEG.
     return (ratio - 1.0).abs() <= 0.02;
   }
 
@@ -6263,8 +6427,8 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
     }
   }
 
-  /// Define a foto atual como principal. Sem confirmaÃ§Ã£o por modal â€” a aÃ§Ã£o
-  /// Ã© reversÃ­vel (basta marcar outra) e o feedback fica no snackbar.
+  /// Define a foto atual como principal. Sem confirmação por modal — a ação
+  /// é reversível (basta marcar outra) e o feedback fica no snackbar.
   Future<void> _setCurrentAsMain() async {
     if (!widget.canSetMain || _settingMain) return;
     final img = _currentImage;
@@ -6284,7 +6448,7 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
           backgroundColor: AppColors.status.error,
           behavior: SnackBarBehavior.floating,
           content: Text(
-            res.message ?? 'NÃ£o foi possÃ­vel definir a foto principal.',
+            res.message ?? 'Não foi possível definir a foto principal.',
             style: const TextStyle(color: Colors.white),
           ),
         ),
@@ -6349,8 +6513,8 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
         ),
         content: Text(
           img.isMain
-              ? 'Esta Ã© a foto principal. Ao excluir, a prÃ³xima imagem assume como principal automaticamente. Esta aÃ§Ã£o nÃ£o pode ser desfeita.'
-              : 'A imagem serÃ¡ removida do imÃ³vel e do armazenamento. Esta aÃ§Ã£o nÃ£o pode ser desfeita.',
+              ? 'Esta é a foto principal. Ao excluir, a próxima imagem assume como principal automaticamente. Esta ação não pode ser desfeita.'
+              : 'A imagem será removida do imóvel e do armazenamento. Esta ação não pode ser desfeita.',
           style: TextStyle(
             color: Colors.white.withValues(alpha: 0.78),
             height: 1.4,
@@ -6390,7 +6554,7 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
           backgroundColor: AppColors.status.error,
           behavior: SnackBarBehavior.floating,
           content: Text(
-            res.message ?? 'NÃ£o foi possÃ­vel excluir a imagem.',
+            res.message ?? 'Não foi possível excluir a imagem.',
             style: const TextStyle(color: Colors.white),
           ),
         ),
@@ -6414,7 +6578,7 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
         backgroundColor: Color(0xFF3FA66B),
         behavior: SnackBarBehavior.floating,
         content: Text(
-          'Foto excluÃ­da com sucesso.',
+          'Foto excluída com sucesso.',
           style: TextStyle(color: Colors.white),
         ),
       ),
@@ -6425,7 +6589,7 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
       return;
     }
 
-    // Garante que o PageController acompanhe o novo Ã­ndice
+    // Garante que o PageController acompanhe o novo índice
     _controller.jumpToPage(_index);
     _resolveSizeFor(_currentImage);
   }
@@ -6442,7 +6606,7 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
       body: SafeArea(
         child: Stack(
           children: [
-            // â”€â”€â”€â”€â”€â”€â”€â”€â”€ Imagem em dimensÃµes reais (BoxFit.contain) â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // â”€â”€â”€â”€â”€â”€â”€â”€â”€ Imagem em dimensões reais (BoxFit.contain) â”€â”€â”€â”€â”€â”€â”€â”€â”€
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
@@ -6464,8 +6628,8 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
                           child: ShimmerImage(
                             imageUrl: _images[i].url,
                             // `contain` revela letterbox/pillarbox =
-                            // o avaliador percebe imagens nÃ£o-quadradas
-                            // sÃ³ de olhar.
+                            // o avaliador percebe imagens não-quadradas
+                            // só de olhar.
                             fit: BoxFit.contain,
                             width: double.infinity,
                             height: double.infinity,
@@ -6517,7 +6681,7 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
                   if (widget.canSetMain && current != null) ...[
                     const SizedBox(width: 10),
                     _GalleryRoundIconButton(
-                      // Amarelo "principal": estrela cheia quando jÃ¡ Ã© a
+                      // Amarelo "principal": estrela cheia quando já é a
                       // principal (somente leitura), contorno quando tap.
                       icon: current.isMain
                           ? Icons.star_rounded
@@ -6527,7 +6691,7 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
                       busy: _settingMain,
                       filled: current.isMain,
                       tooltip: current.isMain
-                          ? 'JÃ¡ Ã© a foto principal'
+                          ? 'Já é a foto principal'
                           : 'Definir como foto principal',
                     ),
                   ],
@@ -6536,7 +6700,7 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
                     _GalleryRoundIconButton(
                       icon: Icons.delete_outline_rounded,
                       onTap: _confirmAndDelete,
-                      // Vermelho semitransparente â€” "destrutivo" sem
+                      // Vermelho semitransparente — "destrutivo" sem
                       // berrar como vermelho puro num fundo preto.
                       tint: AppColors.status.error,
                       busy: _deleting,
@@ -6546,9 +6710,9 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
               ),
             ),
 
-            // â”€â”€â”€â”€â”€â”€â”€â”€â”€ Badge de proporÃ§Ã£o (NÃƒO QUADRADA) â”€â”€â”€â”€â”€â”€â”€â”€â”€
-            // Aparece sÃ³ quando temos as dimensÃµes e a foto NÃƒO Ã© quadrada.
-            // Quadrada nÃ£o recebe badge â€” evita ruÃ­do visual.
+            // â”€â”€â”€â”€â”€â”€â”€â”€â”€ Badge de proporção (NÃO QUADRADA) â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // Aparece só quando temos as dimensões e a foto NÃO é quadrada.
+            // Quadrada não recebe badge — evita ruído visual.
             if (size != null && !isSquare)
               Positioned(
                 top: 60,
@@ -6570,7 +6734,7 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
                 ),
               ),
 
-            // â”€â”€â”€â”€â”€â”€â”€â”€â”€ Dots (paginaÃ§Ã£o) â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // â”€â”€â”€â”€â”€â”€â”€â”€â”€ Dots (paginação) â”€â”€â”€â”€â”€â”€â”€â”€â”€
             if (total > 1)
               Positioned(
                 left: 0,
@@ -6603,10 +6767,10 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
   }
 }
 
-/// Pill com metadados (categoria + dimensÃµes + ratio + foto principal).
+/// Pill com metadados (categoria + dimensões + ratio + foto principal).
 ///
-/// Renderiza tudo em uma linha sÃ³ â€” fluido. Os "chips" internos tÃªm cores
-/// distintas por funÃ§Ã£o: categoria neutra, dimensÃµes accent-cinza, ratio
+/// Renderiza tudo em uma linha só — fluido. Os "chips" internos têm cores
+/// distintas por função: categoria neutra, dimensões accent-cinza, ratio
 /// verde se quadrada/cinza se desconhecido, "PRINCIPAL" amarelo.
 class _MetaPill extends StatelessWidget {
   const _MetaPill({
@@ -6625,7 +6789,7 @@ class _MetaPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final w = size?.width.toInt();
     final h = size?.height.toInt();
-    final dimsLabel = (w != null && h != null) ? '$w Ã— $h' : null;
+    final dimsLabel = (w != null && h != null) ? '$w × $h' : null;
     String? ratioLabel;
     if (size != null && size!.height > 0) {
       final r = size!.width / size!.height;
@@ -6723,9 +6887,9 @@ class _MetaChip extends StatelessWidget {
   }
 }
 
-/// Badge "NÃƒO QUADRADA" â€” chama atenÃ§Ã£o pro avaliador no canto superior
-/// direito quando a imagem foge da proporÃ§Ã£o quadrada (regra prioritÃ¡ria
-/// pedida pelo time de aprovaÃ§Ã£o).
+/// Badge "NÃO QUADRADA" — chama atenção pro avaliador no canto superior
+/// direito quando a imagem foge da proporção quadrada (regra prioritária
+/// pedida pelo time de aprovação).
 class _RatioWarningBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -6746,7 +6910,7 @@ class _RatioWarningBadge extends StatelessWidget {
           ),
           SizedBox(width: 6),
           Text(
-            'NÃƒO QUADRADA',
+            'NÃO QUADRADA',
             style: TextStyle(
               color: Color(0xFFE0AA3E),
               fontSize: 10.5,
@@ -6773,18 +6937,18 @@ class _GalleryRoundIconButton extends StatelessWidget {
 
   final IconData icon;
 
-  /// `null` desabilita o tap (estado "somente leitura" â€” usado, por
-  /// exemplo, na estrela quando a foto JÃ Ã© a principal).
+  /// `null` desabilita o tap (estado "somente leitura" — usado, por
+  /// exemplo, na estrela quando a foto JÁ é a principal).
   final VoidCallback? onTap;
 
-  /// Cor de destaque opcional (usada na aÃ§Ã£o destrutiva de excluir).
-  /// Quando setada, o botÃ£o herda essa cor no fundo (com alpha) e na borda.
+  /// Cor de destaque opcional (usada na ação destrutiva de excluir).
+  /// Quando setada, o botão herda essa cor no fundo (com alpha) e na borda.
   final Color? tint;
 
-  /// Quando `true`, mostra spinner em lugar do Ã­cone e desabilita o tap.
+  /// Quando `true`, mostra spinner em lugar do ícone e desabilita o tap.
   final bool busy;
 
-  /// Quando `true`, pinta o botÃ£o sÃ³lido na cor `tint` â€” usado para o
+  /// Quando `true`, pinta o botão sólido na cor `tint` — usado para o
   /// estado "ativo" (ex.: estrela cheia indicando foto principal).
   final bool filled;
 
@@ -6856,17 +7020,17 @@ class _GalleryRoundIconButton extends StatelessWidget {
   }
 }
 
-/// DescriÃ§Ã£o editorial expansÃ­vel.
+/// Descrição editorial expansível.
 ///
 /// Comportamento:
 /// - **Recolhida**: mostra ~5 linhas; quando o texto extrapola, aplica
-///   um `ShaderMask` com gradient fade no rodapÃ© indicando que tem mais
-///   conteÃºdo, e exibe o botÃ£o "Ver mais".
-/// - **Expandida**: texto completo + botÃ£o "Ver menos".
-/// - **Vazia**: mensagem discreta em itÃ¡lico, sem qualquer caixa.
+///   um `ShaderMask` com gradient fade no rodapé indicando que tem mais
+///   conteúdo, e exibe o botão "Ver mais".
+/// - **Expandida**: texto completo + botão "Ver menos".
+/// - **Vazia**: mensagem discreta em itálico, sem qualquer caixa.
 ///
-/// A detecÃ§Ã£o de "extrapolou as 5 linhas" Ã© feita via `TextPainter.didExceedMaxLines`
-/// no `LayoutBuilder` â€” assim o botÃ£o sÃ³ aparece se realmente o texto
+/// A detecção de "extrapolou as 5 linhas" é feita via `TextPainter.didExceedMaxLines`
+/// no `LayoutBuilder` — assim o botão só aparece se realmente o texto
 /// for longo o suficiente para ser truncado.
 class _ExpandableDescription extends StatefulWidget {
   const _ExpandableDescription({required this.text});
@@ -6903,7 +7067,7 @@ class _ExpandableDescriptionState extends State<_ExpandableDescription>
             const SizedBox(width: 8),
             Flexible(
               child: Text(
-                'Sem descriÃ§Ã£o cadastrada. Edite o imÃ³vel para adicionar contexto.',
+                'Sem descrição cadastrada. Edite o imóvel para adicionar contexto.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: secondary,
                   fontWeight: FontWeight.w600,
@@ -6928,7 +7092,7 @@ class _ExpandableDescriptionState extends State<_ExpandableDescription>
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // RÃ©gua accent fina Ã  esquerda â€” referÃªncia editorial discreta
+        // Régua accent fina à esquerda — referência editorial discreta
         Container(
           width: 3,
           margin: const EdgeInsets.only(right: 14),
@@ -6941,7 +7105,7 @@ class _ExpandableDescriptionState extends State<_ExpandableDescription>
           child: LayoutBuilder(
             builder: (context, constraints) {
               // Mede se o texto extrapola N linhas pra decidir se
-              // mostra o botÃ£o "Ver mais"/"Ver menos".
+              // mostra o botão "Ver mais"/"Ver menos".
               final tp = TextPainter(
                 text: TextSpan(text: cleaned, style: textStyle),
                 maxLines: _ExpandableDescription._kCollapsedMaxLines,
@@ -7005,7 +7169,7 @@ class _ExpandableDescriptionState extends State<_ExpandableDescription>
   }
 }
 
-/// BotÃ£o minimalista de toggle "Ver mais â†“ / Ver menos â†‘".
+/// Botão minimalista de toggle "Ver mais â†“ / Ver menos â†‘".
 class _ExpandToggle extends StatelessWidget {
   const _ExpandToggle({
     required this.expanded,
@@ -7056,14 +7220,14 @@ class _ExpandToggle extends StatelessWidget {
   }
 }
 
-/// Card refinado para um Ãºnico captador.
+/// Card refinado para um único captador.
 ///
 /// Layout:
 ///   [Avatar 36px] [Nome (bold) + linha de contato (telefone/email muted)]
-///   [AÃ§Ãµes em Ã­cone Ã  direita: Ligar / WhatsApp â€” sÃ³ quando hÃ¡ telefone]
+///   [Ações em ícone à direita: Ligar / WhatsApp — só quando há telefone]
 ///
-/// Avatar: foto se houver `avatar`, senÃ£o iniciais do nome em fundo gradiente
-/// derivado do accent (ou de um palette estÃ¡vel por hash do nome).
+/// Avatar: foto se houver `avatar`, senão iniciais do nome em fundo gradiente
+/// derivado do accent (ou de um palette estável por hash do nome).
 class _CaptorTile extends StatelessWidget {
   const _CaptorTile({
     required this.captor,
@@ -7075,8 +7239,8 @@ class _CaptorTile extends StatelessWidget {
   final Color accent;
   final Color muted;
 
-  /// Iniciais para o avatar quando nÃ£o hÃ¡ foto. Pega a primeira letra do
-  /// primeiro e do Ãºltimo nome â€” em pessoas com nome Ãºnico, repete a primeira.
+  /// Iniciais para o avatar quando não há foto. Pega a primeira letra do
+  /// primeiro e do último nome — em pessoas com nome único, repete a primeira.
   String _initials(String name) {
     final parts = name.trim().split(RegExp(r'\s+'));
     if (parts.isEmpty || parts.first.isEmpty) return '?';
@@ -7087,7 +7251,7 @@ class _CaptorTile extends StatelessWidget {
         .toUpperCase();
   }
 
-  /// Telefone formatado pra exibiÃ§Ã£o. Aceita E.164, dÃ­gitos puros, "(xx) ...".
+  /// Telefone formatado pra exibição. Aceita E.164, dígitos puros, "(xx) ...".
   String _displayPhone(String phone) {
     final digits = phone.replaceAll(RegExp(r'\D'), '');
     if (digits.length == 11) {
@@ -7111,7 +7275,7 @@ class _CaptorTile extends StatelessWidget {
   Future<void> _whatsapp(String phone) async {
     var digits = phone.replaceAll(RegExp(r'\D'), '');
     if (digits.isEmpty) return;
-    // Garante DDI 55 quando vem sÃ³ DDD + nÃºmero.
+    // Garante DDI 55 quando vem só DDD + número.
     if (digits.length <= 11 && !digits.startsWith('55')) {
       digits = '55$digits';
     }
