@@ -1,14 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/widgets/custom_text_field.dart';
 import '../models/kanban_models.dart';
 import '../services/kanban_service.dart';
 
 /// Modal de configuração da cadência WhatsApp automática de uma coluna.
-/// Espelha o `ColumnCadenceModal` da web (canais oficial/não-oficial,
-/// tentativas, intervalos e ações ao responder / não responder).
+/// Espelha o `ColumnCadenceModal` da web — canais oficial/não-oficial,
+/// tentativas, intervalos e ações ao responder / não responder.
+///
+/// Design flush (paridade com o drawer de filtros): seções abertas separadas
+/// por filete tracejado + eyebrow com dot; campos em pill; selects próprios
+/// (picker em bottom-sheet, nada de dropdown nativo); cor de tela coerente —
+/// verde do WhatsApp como accent, neutro no "Cancelar".
 class CadenceConfigModal extends StatefulWidget {
   final KanbanColumn column;
   final List<KanbanColumn> siblingColumns;
@@ -66,6 +72,11 @@ class _CadenceConfigModalState extends State<CadenceConfigModal> {
     _templateLangController.dispose();
     super.dispose();
   }
+
+  Color _fieldFill(BuildContext c) =>
+      Theme.of(c).brightness == Brightness.dark
+          ? AppColors.background.backgroundTertiaryDarkMode
+          : AppColors.background.backgroundTertiary;
 
   Future<void> _load() async {
     final res = await _service.getColumnCadence(widget.column.id);
@@ -179,8 +190,8 @@ class _CadenceConfigModalState extends State<CadenceConfigModal> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // Cor de tela coerente: verde do WhatsApp (não vermelho da marca).
     final accent = isDark ? const Color(0xFF25D366) : const Color(0xFF128C7E);
     final mq = MediaQuery.of(context);
 
@@ -193,18 +204,18 @@ class _CadenceConfigModalState extends State<CadenceConfigModal> {
         return Container(
           decoration: BoxDecoration(
             color: ThemeHelpers.backgroundColor(context),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
             border: Border.all(
-              color: ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
+              color: ThemeHelpers.borderColor(context).withValues(alpha: 0.40),
             ),
           ),
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.only(top: 10, bottom: 6),
+                padding: const EdgeInsets.only(top: 10, bottom: 4),
                 child: Center(
                   child: Container(
-                    width: 44,
+                    width: 40,
                     height: 4,
                     decoration: BoxDecoration(
                       color: ThemeHelpers.borderColor(context)
@@ -217,10 +228,19 @@ class _CadenceConfigModalState extends State<CadenceConfigModal> {
               _buildHeader(context, accent),
               Expanded(
                 child: _loading
-                    ? const Center(child: CircularProgressIndicator())
+                    ? Center(
+                        child: SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.4,
+                            color: accent,
+                          ),
+                        ),
+                      )
                     : ListView(
                         controller: scrollController,
-                        padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                        padding: const EdgeInsets.fromLTRB(20, 4, 20, 40),
                         children: _buildBody(context, accent),
                       ),
               ),
@@ -236,26 +256,22 @@ class _CadenceConfigModalState extends State<CadenceConfigModal> {
     return [
       _enabledTile(context, accent),
       if (_enabled) ...[
-        const SizedBox(height: 14),
-        _buildSection(
+        _section(
           context,
-          icon: Icons.schedule_outlined,
           accent: accent,
-          title: 'Quando enviar',
-          description: 'Tempo na coluna antes do 1º disparo automático.',
+          label: 'Quando enviar',
+          hint: 'Tempo na coluna antes do 1º disparo automático.',
           child: _numberField(
             controller: _sendAfterController,
             label: 'Enviar após (minutos na coluna)',
             accent: accent,
           ),
         ),
-        const SizedBox(height: 14),
-        _buildSection(
+        _section(
           context,
-          icon: Icons.forum_outlined,
           accent: accent,
-          title: 'Canal e mensagem',
-          description: 'Oficial usa template aprovado; não-oficial, texto livre.',
+          label: 'Canal e mensagem',
+          hint: 'Oficial usa template aprovado; não-oficial, texto livre.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -265,6 +281,7 @@ class _CadenceConfigModalState extends State<CadenceConfigModal> {
                 children: [
                   _ChipChoice(
                     label: 'Oficial (template)',
+                    icon: Icons.verified_outlined,
                     selected: _channel == 'official',
                     accent: accent,
                     onTap: () {
@@ -274,6 +291,7 @@ class _CadenceConfigModalState extends State<CadenceConfigModal> {
                   ),
                   _ChipChoice(
                     label: 'Não-oficial (texto)',
+                    icon: Icons.edit_outlined,
                     selected: _channel == 'unofficial',
                     accent: accent,
                     onTap: () => setState(() => _channel = 'unofficial'),
@@ -282,7 +300,7 @@ class _CadenceConfigModalState extends State<CadenceConfigModal> {
               ),
               const SizedBox(height: 14),
               if (_channel == 'official') ...[
-                _templateDropdown(context, accent),
+                _templateSelect(context, accent),
                 const SizedBox(height: 12),
                 CustomTextField(
                   controller: _templateLangController,
@@ -299,13 +317,11 @@ class _CadenceConfigModalState extends State<CadenceConfigModal> {
             ],
           ),
         ),
-        const SizedBox(height: 14),
-        _buildSection(
+        _section(
           context,
-          icon: Icons.repeat_rounded,
           accent: accent,
-          title: 'Tentativas',
-          description: 'Quantos disparos e o intervalo entre eles.',
+          label: 'Tentativas',
+          hint: 'Quantos disparos e o intervalo entre eles.',
           child: Column(
             children: [
               _numberField(
@@ -331,13 +347,11 @@ class _CadenceConfigModalState extends State<CadenceConfigModal> {
             ],
           ),
         ),
-        const SizedBox(height: 14),
-        _buildSection(
+        _section(
           context,
-          icon: Icons.call_split_rounded,
           accent: accent,
-          title: 'Ações',
-          description: 'O que fazer quando o lead responde ou não responde.',
+          label: 'Ações',
+          hint: 'O que fazer quando o lead responde ou não responde.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -364,7 +378,7 @@ class _CadenceConfigModalState extends State<CadenceConfigModal> {
               ),
               if (_onNoReplyAction == 'move_column') ...[
                 const SizedBox(height: 12),
-                _columnDropdown(
+                _columnSelect(
                   context,
                   accent,
                   value: _noReplyTargetColumnId,
@@ -396,7 +410,7 @@ class _CadenceConfigModalState extends State<CadenceConfigModal> {
               ),
               if (_onReplyAction == 'move_column') ...[
                 const SizedBox(height: 12),
-                _columnDropdown(
+                _columnSelect(
                   context,
                   accent,
                   value: _replyTargetColumnId,
@@ -408,88 +422,404 @@ class _CadenceConfigModalState extends State<CadenceConfigModal> {
         ),
       ],
       if (_loadError != null) ...[
-        const SizedBox(height: 12),
-        Text(
-          _loadError!,
-          style: TextStyle(color: Theme.of(context).colorScheme.error),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          decoration: BoxDecoration(
+            color: AppColors.status.warning.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: AppColors.status.warning.withValues(alpha: 0.35),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.info_outline_rounded,
+                  size: 18, color: AppColors.status.warning),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _loadError!,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: ThemeHelpers.textSecondaryColor(context),
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     ];
   }
 
+  /// Toggle-mestre da cadência. Superfície leve (é o controle de liga/desliga),
+  /// não um card de conteúdo — fica claro o estado ativo.
   Widget _enabledTile(BuildContext context, Color accent) {
     final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        color: _enabled
-            ? accent.withValues(alpha: 0.08)
-            : ThemeHelpers.cardBackgroundColor(context),
-        border: Border.all(
+    final isDark = theme.brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
           color: _enabled
-              ? accent.withValues(alpha: 0.45)
-              : ThemeHelpers.borderColor(context).withValues(alpha: 0.42),
+              ? accent.withValues(alpha: isDark ? 0.12 : 0.07)
+              : _fieldFill(context),
+          border: Border.all(
+            color: _enabled
+                ? accent.withValues(alpha: 0.40)
+                : ThemeHelpers.borderLightColor(context),
+          ),
         ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(11),
+                color: accent.withValues(alpha: isDark ? 0.20 : 0.14),
+              ),
+              child:
+                  Icon(Icons.schedule_send_outlined, color: accent, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Cadência automática',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: ThemeHelpers.textColor(context),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _enabled
+                        ? 'Ativa nesta coluna'
+                        : 'Desligada — leads não recebem follow-up',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: _enabled
+                          ? accent
+                          : ThemeHelpers.textSecondaryColor(context),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Switch.adaptive(
+              value: _enabled,
+              activeThumbColor: accent,
+              onChanged: (v) {
+                setState(() => _enabled = v);
+                if (v && _channel == 'official') _loadTemplates();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Seção flush: filete tracejado + eyebrow com dot + hint + conteúdo.
+  Widget _section(
+    BuildContext context, {
+    required Color accent,
+    required String label,
+    String? hint,
+    required Widget child,
+  }) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 22),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _DashedLine(color: ThemeHelpers.borderLightColor(context)),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: accent,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: accent.withValues(alpha: 0.45),
+                      blurRadius: 6,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  label.toUpperCase(),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.9,
+                    color: ThemeHelpers.textSecondaryColor(context),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (hint != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              hint,
+              style: theme.textTheme.labelSmall?.copyWith(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w500,
+                height: 1.3,
+                color: ThemeHelpers.textSecondaryColor(context)
+                    .withValues(alpha: 0.85),
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          child,
+        ],
+      ),
+    );
+  }
+
+  /// Pill no padrão FilterControl (chip de ícone + conteúdo).
+  Widget _filterControl(
+    BuildContext context, {
+    required IconData icon,
+    required Color accent,
+    required Widget child,
+    VoidCallback? onTap,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final control = Container(
+      constraints: const BoxConstraints(minHeight: 48),
+      padding: const EdgeInsets.fromLTRB(8, 6, 12, 6),
+      decoration: BoxDecoration(
+        color: _fieldFill(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: ThemeHelpers.borderLightColor(context)),
       ),
       child: Row(
         children: [
           Container(
-            width: 40,
-            height: 40,
+            width: 32,
+            height: 32,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              color: accent.withValues(alpha: 0.14),
+              color: accent.withValues(alpha: isDark ? 0.20 : 0.12),
+              borderRadius: BorderRadius.circular(9),
             ),
-            child: Icon(Icons.schedule_send_outlined, color: accent, size: 20),
+            child: Icon(icon, size: 17, color: accent),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
+          Expanded(child: child),
+        ],
+      ),
+    );
+    if (onTap == null) return control;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: control,
+    );
+  }
+
+  /// Select próprio (substitui o dropdown nativo): pill com valor/placeholder
+  /// + chevron, abre um picker estilizado em bottom-sheet.
+  Widget _select({
+    required BuildContext context,
+    required IconData icon,
+    required Color accent,
+    required String placeholder,
+    String? valueLabel,
+    required VoidCallback onTap,
+  }) {
+    final hasValue = valueLabel != null && valueLabel.isNotEmpty;
+    return _filterControl(
+      context,
+      icon: icon,
+      accent: accent,
+      onTap: onTap,
+      child: Row(
+        children: [
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Cadência automática',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    color: ThemeHelpers.textColor(context),
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  _enabled
-                      ? 'Ativa nesta coluna'
-                      : 'Desligada — leads não recebem follow-up',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
+            child: Text(
+              hasValue ? valueLabel : placeholder,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: hasValue
+                    ? ThemeHelpers.textColor(context)
+                    : ThemeHelpers.textSecondaryColor(context)
+                        .withValues(alpha: 0.9),
+              ),
             ),
           ),
-          Switch.adaptive(
-            value: _enabled,
-            activeThumbColor: accent,
-            onChanged: (v) {
-              setState(() => _enabled = v);
-              if (v && _channel == 'official') _loadTemplates();
-            },
+          Icon(
+            Icons.keyboard_arrow_down_rounded,
+            size: 20,
+            color: ThemeHelpers.textSecondaryColor(context),
           ),
         ],
       ),
     );
   }
 
-  Widget _templateDropdown(BuildContext context, Color accent) {
+  Future<void> _openPicker({
+    required String title,
+    required List<_Option> options,
+    required String? selected,
+    required Color accent,
+    required ValueChanged<String> onSelected,
+  }) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final mq = MediaQuery.of(ctx);
+        return Container(
+          constraints: BoxConstraints(maxHeight: mq.size.height * 0.7),
+          decoration: BoxDecoration(
+            color: ThemeHelpers.backgroundColor(ctx),
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(20)),
+            border: Border.all(
+              color: ThemeHelpers.borderColor(ctx).withValues(alpha: 0.40),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 10, bottom: 6),
+                child: Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: ThemeHelpers.borderColor(ctx)
+                          .withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 2, 20, 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              color: ThemeHelpers.textColor(ctx),
+                            ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  padding: EdgeInsets.fromLTRB(12, 0, 12, 12 + mq.padding.bottom),
+                  itemCount: options.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 4),
+                  itemBuilder: (_, i) {
+                    final o = options[i];
+                    final isSel = o.value == selected;
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () {
+                        onSelected(o.value);
+                        Navigator.of(ctx).pop();
+                      },
+                      child: Container(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+                        decoration: BoxDecoration(
+                          color: isSel
+                              ? accent.withValues(alpha: 0.10)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isSel
+                                ? accent.withValues(alpha: 0.45)
+                                : ThemeHelpers.borderLightColor(ctx),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                o.label,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight:
+                                      isSel ? FontWeight.w700 : FontWeight.w600,
+                                  color: isSel
+                                      ? accent
+                                      : ThemeHelpers.textColor(ctx),
+                                ),
+                              ),
+                            ),
+                            if (isSel)
+                              Icon(Icons.check_rounded,
+                                  size: 18, color: accent),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _templateSelect(BuildContext context, Color accent) {
     if (_loadingTemplates) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 8),
-        child: LinearProgressIndicator(),
+      return _filterControl(
+        context,
+        icon: Icons.description_outlined,
+        accent: accent,
+        child: Row(
+          children: [
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2, color: accent),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              'Carregando templates…',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: ThemeHelpers.textSecondaryColor(context),
+              ),
+            ),
+          ],
+        ),
       );
     }
     final names = _templates.map((t) => t.name).toSet().toList()..sort();
-    // Garante que um template já salvo apareça mesmo se não veio na lista.
     if (_templateName != null && !names.contains(_templateName)) {
       names.insert(0, _templateName!);
     }
@@ -503,47 +833,46 @@ class _CadenceConfigModalState extends State<CadenceConfigModal> {
             ),
       );
     }
-    return DropdownButtonFormField<String>(
-      initialValue: _templateName,
-      isExpanded: true,
-      decoration: InputDecoration(
-        labelText: 'Template aprovado',
-        prefixIcon: Icon(Icons.description_outlined, color: accent),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+    return _select(
+      context: context,
+      icon: Icons.description_outlined,
+      accent: accent,
+      placeholder: 'Selecionar template aprovado',
+      valueLabel: _templateName,
+      onTap: () => _openPicker(
+        title: 'Template aprovado',
+        accent: accent,
+        selected: _templateName,
+        options: [for (final n in names) _Option(n, n)],
+        onSelected: (v) => setState(() => _templateName = v),
       ),
-      items: [
-        for (final n in names)
-          DropdownMenuItem(value: n, child: Text(n, overflow: TextOverflow.ellipsis)),
-      ],
-      onChanged: (v) => setState(() => _templateName = v),
     );
   }
 
-  Widget _columnDropdown(
+  Widget _columnSelect(
     BuildContext context,
     Color accent, {
     required String? value,
     required ValueChanged<String?> onChanged,
   }) {
     final cols = widget.siblingColumns;
-    final validValue =
-        cols.any((c) => c.id == value) ? value : null;
-    return DropdownButtonFormField<String>(
-      initialValue: validValue,
-      isExpanded: true,
-      decoration: InputDecoration(
-        labelText: 'Coluna de destino',
-        prefixIcon: Icon(Icons.view_column_outlined, color: accent),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+    final validValue = cols.any((c) => c.id == value) ? value : null;
+    final selectedTitle = validValue == null
+        ? null
+        : cols.firstWhere((c) => c.id == validValue).title;
+    return _select(
+      context: context,
+      icon: Icons.view_column_outlined,
+      accent: accent,
+      placeholder: 'Escolher coluna de destino',
+      valueLabel: selectedTitle,
+      onTap: () => _openPicker(
+        title: 'Coluna de destino',
+        accent: accent,
+        selected: validValue,
+        options: [for (final c in cols) _Option(c.id, c.title)],
+        onSelected: (v) => onChanged(v),
       ),
-      items: [
-        for (final c in cols)
-          DropdownMenuItem(
-            value: c.id,
-            child: Text(c.title, overflow: TextOverflow.ellipsis),
-          ),
-      ],
-      onChanged: onChanged,
     );
   }
 
@@ -575,28 +904,24 @@ class _CadenceConfigModalState extends State<CadenceConfigModal> {
 
   Widget _buildHeader(BuildContext context, Color accent) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 4, 16, 12),
+    final isDark = theme.brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 4, 10, 14),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
+        ),
+      ),
       child: Row(
         children: [
           Container(
-            width: 42,
-            height: 42,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              gradient: LinearGradient(
-                colors: [accent, const Color(0xFF075E54)],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: accent.withValues(alpha: 0.32),
-                  blurRadius: 14,
-                  offset: const Offset(0, 6),
-                ),
-              ],
+              borderRadius: BorderRadius.circular(12),
+              color: accent.withValues(alpha: isDark ? 0.20 : 0.12),
             ),
-            child: const Icon(Icons.schedule_send_rounded,
-                color: Colors.white, size: 22),
+            child: Icon(Icons.schedule_send_rounded, color: accent, size: 21),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -606,7 +931,7 @@ class _CadenceConfigModalState extends State<CadenceConfigModal> {
                 Text(
                   'Cadência WhatsApp',
                   style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w800,
                     letterSpacing: -0.3,
                     color: ThemeHelpers.textColor(context),
                   ),
@@ -634,85 +959,6 @@ class _CadenceConfigModalState extends State<CadenceConfigModal> {
     );
   }
 
-  Widget _buildSection(
-    BuildContext context, {
-    required IconData icon,
-    required Color accent,
-    required String title,
-    required String description,
-    required Widget child,
-  }) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    return Container(
-      decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.42),
-        ),
-        boxShadow: isDark
-            ? null
-            : [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 14,
-                  offset: const Offset(0, 4),
-                  spreadRadius: -3,
-                ),
-              ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    color: accent.withValues(alpha: isDark ? 0.16 : 0.10),
-                    border: Border.all(color: accent.withValues(alpha: 0.22)),
-                  ),
-                  child: Icon(icon, color: accent, size: 19),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          color: ThemeHelpers.textColor(context),
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        description,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                          fontWeight: FontWeight.w600,
-                          height: 1.2,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            child,
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildFooter(BuildContext context, Color accent, MediaQueryData mq) {
     return Container(
       padding: EdgeInsets.fromLTRB(16, 12, 16, 12 + mq.padding.bottom),
@@ -730,12 +976,18 @@ class _CadenceConfigModalState extends State<CadenceConfigModal> {
             child: OutlinedButton(
               onPressed: _saving ? null : () => Navigator.of(context).pop(),
               style: OutlinedButton.styleFrom(
+                // Neutro: nada de vermelho num botão secundário.
+                foregroundColor: ThemeHelpers.textSecondaryColor(context),
+                side: BorderSide(color: ThemeHelpers.borderColor(context)),
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
                 ),
               ),
-              child: const Text('Cancelar'),
+              child: const Text(
+                'Cancelar',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
             ),
           ),
           const SizedBox(width: 12),
@@ -754,7 +1006,7 @@ class _CadenceConfigModalState extends State<CadenceConfigModal> {
                     )
                   : const Icon(Icons.check_rounded, size: 18),
               label: Text(
-                _saving ? 'Salvando...' : 'Salvar',
+                _saving ? 'Salvando...' : 'Salvar cadência',
                 style: const TextStyle(fontWeight: FontWeight.w800),
               ),
               style: FilledButton.styleFrom(
@@ -774,54 +1026,109 @@ class _CadenceConfigModalState extends State<CadenceConfigModal> {
   }
 }
 
+class _Option {
+  const _Option(this.value, this.label);
+  final String value;
+  final String label;
+}
+
+/// Chip de seleção — ativo usa *tint* (sem preenchimento sólido candy).
 class _ChipChoice extends StatelessWidget {
   const _ChipChoice({
     required this.label,
     required this.selected,
     required this.onTap,
     required this.accent,
+    this.icon,
   });
 
   final String label;
   final bool selected;
   final VoidCallback onTap;
   final Color accent;
+  final IconData? icon;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final fg = selected ? Colors.white : ThemeHelpers.textColor(context);
-    final bg = selected ? accent : ThemeHelpers.cardBackgroundColor(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final fieldFill = isDark
+        ? AppColors.background.backgroundTertiaryDarkMode
+        : AppColors.background.backgroundTertiary;
+    final fg = selected
+        ? accent
+        : ThemeHelpers.textColor(context).withValues(alpha: 0.82);
+    final bg =
+        selected ? accent.withValues(alpha: isDark ? 0.18 : 0.10) : fieldFill;
     final border =
         selected ? accent : ThemeHelpers.borderLightColor(context);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(999),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: border),
-          boxShadow: selected
-              ? [
-                  BoxShadow(
-                    color: accent.withValues(alpha: 0.30),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ]
-              : null,
+          border: Border.all(color: border, width: selected ? 1.2 : 1),
         ),
-        child: Text(
-          label,
-          style: theme.textTheme.labelMedium?.copyWith(
-            color: fg,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.1,
-          ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 14, color: fg),
+              const SizedBox(width: 6),
+            ],
+            Text(
+              label,
+              style: theme.textTheme.labelMedium?.copyWith(
+                fontSize: 12.5,
+                color: fg,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.1,
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
+}
+
+/// Filete tracejado fino — separa seções como na web.
+class _DashedLine extends StatelessWidget {
+  const _DashedLine({required this.color});
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 1,
+      width: double.infinity,
+      child: CustomPaint(painter: _DashedPainter(color)),
+    );
+  }
+}
+
+class _DashedPainter extends CustomPainter {
+  _DashedPainter(this.color);
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const dash = 5.0;
+    const gap = 4.0;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1;
+    double x = 0;
+    while (x < size.width) {
+      canvas.drawLine(Offset(x, 0), Offset(x + dash, 0), paint);
+      x += dash + gap;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedPainter oldDelegate) =>
+      oldDelegate.color != color;
 }

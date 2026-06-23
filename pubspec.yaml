@@ -6,7 +6,7 @@ publish_to: 'none'
 # Tem de ser SEMPRE maior que qualquer build já enviado para esta app.
 # Erro típico: "bundle version must be higher than … previousBundleVersion = N"
 # → subir só o +N (ex. +14 → +15 → +16), commit, novo pipeline.
-version: 1.0.6+33
+version: 1.0.6+34
 
 environment:
   sdk: ^3.9.2
@@ -53,6 +53,7 @@ dependencies:
   # o comportamento atual do app nem o build.
   live_activities: ^2.4.9
   package_info_plus: ^10.1.0
+  custom_refresh_indicator: ^4.0.1
 
 dev_dependencies:
   flutter_test:

@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'package:custom_refresh_indicator/custom_refresh_indicator.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
@@ -76,7 +77,6 @@ class KanbanPage extends StatefulWidget {
 class _KanbanPageState extends State<KanbanPage> {
   static const double _kHeaderPadVTop = 10;
   static const double _kKanbanColumnGap = 8;
-  static const double _kKanbanColumnRadius = 14;
   /// Coluna estreita demais prejudica legibilidade; abaixo disso liberamos scroll horizontal.
   static const double _kKanbanMinStretchColumnWidth = 220;
   static const double _kKanbanScrollColumnWidth = 300;
@@ -342,63 +342,17 @@ class _KanbanPageState extends State<KanbanPage> {
               ],
             ),
           ),
-          // Ações coladas na margem direita.
-          _kanbanIconAction(
-            context,
-            icon: Icons.refresh_rounded,
-            tooltip: 'Atualizar',
-            onPressed: () => controller.loadBoard(),
-          ),
-          if (canCreateTask) ...[
-            const SizedBox(width: 8),
+          // Atualizar agora é por pull-to-refresh (puxar o quadro pra baixo) —
+          // sem botão de reload colado no "Criar".
+          if (canCreateTask)
             _kanbanCreateButton(
               context,
               onPressed: () =>
                   _openHeroCreateNegotiationModal(context, controller),
             ),
-          ],
         ],
       ),
     );
-  }
-
-  /// Botão de ação só com ícone (usado pro "Atualizar" no header do quadro).
-  /// Versão premium: chip arredondado tintado com a cor do funil e borda fina.
-  Widget _kanbanIconAction(
-    BuildContext context, {
-    required IconData icon,
-    required VoidCallback onPressed,
-    String? tooltip,
-  }) {
-    final accent = _kanbanAccentColor(context);
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    final button = Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(12),
-        splashColor: accent.withValues(alpha: 0.16),
-        highlightColor: accent.withValues(alpha: 0.08),
-        child: Ink(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            color: accent.withValues(alpha: isDark ? 0.12 : 0.08),
-            border: Border.all(
-              color: accent.withValues(alpha: isDark ? 0.32 : 0.22),
-              width: 1,
-            ),
-          ),
-          child: Icon(icon, size: 19, color: accent),
-        ),
-      ),
-    );
-
-    if (tooltip == null) return button;
-    return Tooltip(message: tooltip, child: button);
   }
 
   /// Botão "Criar" — versão premium com gradient diagonal, glow colorido
@@ -486,9 +440,13 @@ class _KanbanPageState extends State<KanbanPage> {
           child: Stack(
             clipBehavior: Clip.none,
             children: [
-              CustomScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                slivers: [
+              CustomRefreshIndicator(
+                onRefresh: () => controller.loadBoard(),
+                offsetToArmed: 96,
+                builder: _kanbanPullRefreshBuilder,
+                child: CustomScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  slivers: [
                   if (controller.loadingProjects && controller.board != null)
                     SliverToBoxAdapter(
                       child: _kanbanSecondaryLoadBanner(
@@ -544,6 +502,7 @@ class _KanbanPageState extends State<KanbanPage> {
                     ),
                   ),
                 ],
+                ),
               ),
               if (controller.bulkSelectionActive)
                 Positioned(
@@ -698,8 +657,106 @@ class _KanbanPageState extends State<KanbanPage> {
 
   Color _kanbanAccentColor(BuildContext context) {
     return Theme.of(context).brightness == Brightness.dark
-        ? const Color(0xFFFF4D67)
+        ? AppColors.primary.primaryDarkMode
         : AppColors.primary.primary;
+  }
+
+  /// Indicador de pull-to-refresh próprio (pacote `custom_refresh_indicator`):
+  /// uma pílula da marca que desce ao puxar o quadro — nada do spinner circular
+  /// padrão. O conteúdo desliza junto pra dar feedback físico do gesto.
+  Widget _kanbanPullRefreshBuilder(
+    BuildContext context,
+    Widget child,
+    IndicatorController controller,
+  ) {
+    final accent = _kanbanAccentColor(context);
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final dragPct = controller.value.clamp(0.0, 1.0);
+        final shift = (controller.value * 64).clamp(0.0, 80.0);
+        final visible = controller.value > 0.02 ||
+            controller.isLoading ||
+            controller.isFinalizing;
+        return Stack(
+          children: [
+            Transform.translate(
+              offset: Offset(0, shift),
+              child: child,
+            ),
+            if (visible)
+              Positioned(
+                top: 10,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Opacity(
+                    opacity: dragPct == 0 ? 1 : dragPct,
+                    child: _kanbanRefreshPill(context, accent, controller, dragPct),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _kanbanRefreshPill(
+    BuildContext context,
+    Color accent,
+    IndicatorController controller,
+    double dragPct,
+  ) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final loading = controller.isLoading || controller.isFinalizing;
+    final armed = controller.isArmed;
+    final label = loading
+        ? 'Atualizando…'
+        : (armed ? 'Solte para atualizar' : 'Puxe para atualizar');
+    return Container(
+      padding: const EdgeInsets.fromLTRB(11, 8, 14, 8),
+      decoration: BoxDecoration(
+        color: ThemeHelpers.cardBackgroundColor(context),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: accent.withValues(alpha: isDark ? 0.45 : 0.30),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withValues(alpha: isDark ? 0.20 : 0.12),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+            spreadRadius: -6,
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 18,
+            height: 18,
+            child: loading
+                ? _SpinningGlyph(color: accent)
+                : Transform.rotate(
+                    angle: dragPct * math.pi,
+                    child: Icon(Icons.refresh_rounded, size: 18, color: accent),
+                  ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.1,
+              color: accent,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _kanbanHeroEyebrow(BuildContext context, bool compact) {
@@ -708,31 +765,13 @@ class _KanbanPageState extends State<KanbanPage> {
     final baseStyle = theme.textTheme.labelSmall?.copyWith(
       letterSpacing: compact ? 1.15 : 2.35,
       fontWeight: FontWeight.w900,
-      color: Colors.white,
+      color: accent,
     );
-    final textWidget = ShaderMask(
-      blendMode: BlendMode.srcIn,
-      shaderCallback: (bounds) {
-        if (bounds.width <= 0 || bounds.height <= 0) {
-          return LinearGradient(colors: [accent]).createShader(
-            Rect.fromLTWH(0, 0, 1, 1),
-          );
-        }
-        return LinearGradient(
-          colors: [
-            accent,
-            const Color(0xFFE11D48),
-            const Color(0xFF0891B2),
-          ],
-          stops: const [0.05, 0.55, 1.0],
-        ).createShader(Rect.fromLTWH(0, 0, bounds.width, bounds.height));
-      },
-      child: Text(
-        'FUNIS · CRM',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: baseStyle,
-      ),
+    final textWidget = Text(
+      'FUNIS · CRM',
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: baseStyle,
     );
     return SizedBox(
       width: double.infinity,
@@ -756,7 +795,9 @@ class _KanbanPageState extends State<KanbanPage> {
           end: Alignment.bottomRight,
           colors: [
             accent,
-            const Color(0xFF7C3AED),
+            isDark
+                ? AppColors.primary.primaryDarkDarkMode
+                : AppColors.primary.primaryDark,
           ],
         ),
         border: Border.all(
@@ -868,7 +909,7 @@ class _KanbanPageState extends State<KanbanPage> {
   /// marca) com leve tom roxo via gradiente para sinalizar "produtividade".
   Color _kanbanTasksButtonColor(BuildContext context) {
     return Theme.of(context).brightness == Brightness.dark
-        ? const Color(0xFFFF4D67)
+        ? AppColors.primary.primaryDarkMode
         : AppColors.primary.primary;
   }
 
@@ -932,10 +973,10 @@ class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
-  /// Cor "gerencial" do modo de seleção em lote — indigo. Diferente do accent
-  /// rosa do app, pra criar um contexto visual distinto ("modo edição/admin")
-  /// e quebrar a sensação de tela 100% preto-e-vermelho.
-  static const Color _kBulkManageColor = Color(0xFF6366F1);
+  /// Cor do modo de seleção em lote — azul info da paleta do sistema
+  /// (`status.blue`). Identidade única e coerente pro modo (toggle + dock),
+  /// distinta do vermelho da marca sem recorrer a indigo/cyan aleatórios.
+  static const Color _kBulkManageColor = Color(0xFF4A90E2);
 
   Widget _kanbanBulkToggleButton(
     BuildContext context,
@@ -946,9 +987,9 @@ class _KanbanPageState extends State<KanbanPage> {
     final active = controller.bulkSelectionActive;
     final disabled = controller.bulkDeleteEligibilityLoading;
 
-    // Quando ativo: cor "âmbar de aviso" (você está em um modo especial,
-    // saiba que clicar = sair). Quando inativo: indigo gerencial.
-    final color = active ? const Color(0xFFD97706) : _kBulkManageColor;
+    // Mesmo azul do modo (coerente com a dock). O estado ativo é sinalizado
+    // pelo ícone/label ("Sair do modo seleção") + borda/sombra mais fortes.
+    final color = _kBulkManageColor;
 
     return Material(
       color: Colors.transparent,
@@ -1179,93 +1220,42 @@ class _KanbanPageState extends State<KanbanPage> {
         : 'Nenhuma tarefa';
 
     final borderLine = ThemeHelpers.borderColor(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final surface = ThemeHelpers.cardBackgroundColor(context);
-    final tintTop = columnColor.withValues(alpha: synth ? 0.045 : (isDark ? 0.13 : 0.085));
-    final tintMid = columnColor.withValues(alpha: synth ? 0.02 : (isDark ? 0.055 : 0.035));
-    final borderTint = Color.alphaBlend(
-      columnColor.withValues(alpha: synth ? 0.12 : (isDark ? 0.38 : 0.18)),
-      borderLine,
-    );
 
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(_kKanbanColumnRadius),
-        border: Border.all(color: borderTint),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.28 : 0.06),
-            blurRadius: isDark ? 14 : 10,
-            offset: const Offset(0, 3),
+    // Lane aberta (achatado agressivo): sem card/borda/sombra. A coluna é
+    // delimitada só pela faixa de topo 3px na cor da etapa + o filete sob o
+    // header. O conteúdo assenta direto sobre o fundo do board.
+    return ClipRect(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 3,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: columnColor.withValues(alpha: synth ? 0.5 : 1),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
           ),
-          if (!isDark)
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.035),
-              blurRadius: 2,
-              offset: const Offset(0, 1),
-            ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(_kKanbanColumnRadius),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    stops: const [0.0, 0.22, 0.52, 1.0],
-                    colors: [
-                      tintTop,
-                      tintMid,
-                      Color.alphaBlend(columnColor.withValues(alpha: synth ? 0.03 : (isDark ? 0.06 : 0.045)), surface),
-                      Color.alphaBlend(
-                        theme.colorScheme.surface.withValues(alpha: isDark ? 0.12 : 0.06),
-                        surface,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              height: 3,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      columnColor,
-                      Color.alphaBlend(
-                        columnColor.withValues(alpha: 0.72),
-                        surface,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            Positioned.fill(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: ThemeHelpers.cardBackgroundColor(context),
-                      border: Border(
-                        bottom: BorderSide(
-                          color: Color.alphaBlend(
-                            columnColor.withValues(alpha: 0.2),
-                            borderLine,
-                          ),
+          Positioned.fill(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.transparent,
+                    border: Border(
+                      bottom: BorderSide(
+                        color: Color.alphaBlend(
+                          columnColor.withValues(alpha: 0.22),
+                          borderLine,
                         ),
                       ),
                     ),
+                  ),
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(10, 11, 8, 10),
                       child: Column(
@@ -1342,88 +1332,13 @@ class _KanbanPageState extends State<KanbanPage> {
                                     ),
                                   ),
                                   if (canEditCols && !synth)
-                                    PopupMenuButton<String>(
-                                      icon: Icon(
-                                        Icons.more_vert_rounded,
-                                        size: 22,
-                                        color: ThemeHelpers.textSecondaryColor(
-                                          context,
-                                        ),
+                                    _kanbanMenuTrigger(
+                                      context,
+                                      onTap: () => _showColumnActions(
+                                        context,
+                                        controller,
+                                        column,
                                       ),
-                                      itemBuilder: (context) => [
-                                        if (controller.permissions
-                                                ?.canEditColumns ??
-                                            true)
-                                          const PopupMenuItem(
-                                            value: 'edit',
-                                            child: Row(
-                                              children: [
-                                                Icon(Icons.edit, size: 18),
-                                                SizedBox(width: 8),
-                                                Text('Editar'),
-                                              ],
-                                            ),
-                                          ),
-                                        if (controller.permissions
-                                                ?.canEditColumns ??
-                                            true)
-                                          const PopupMenuItem(
-                                            value: 'cadence',
-                                            child: Row(
-                                              children: [
-                                                Icon(Icons.schedule_send_outlined,
-                                                    size: 18),
-                                                SizedBox(width: 8),
-                                                Text('Cadência WhatsApp'),
-                                              ],
-                                            ),
-                                          ),
-                                        if (controller.permissions
-                                                ?.canDeleteColumns ??
-                                            true)
-                                          const PopupMenuItem(
-                                            value: 'delete',
-                                            child: Row(
-                                              children: [
-                                                Icon(
-                                                  Icons.delete,
-                                                  size: 18,
-                                                  color: Colors.red,
-                                                ),
-                                                SizedBox(width: 8),
-                                                Text(
-                                                  'Deletar',
-                                                  style: TextStyle(
-                                                    color: Colors.red,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                      ],
-                                      onSelected: (value) {
-                                        if (value == 'edit') {
-                                          showModalBottomSheet(
-                                            context: context,
-                                            isScrollControlled: true,
-                                            backgroundColor: Colors.transparent,
-                                            builder: (context) =>
-                                                EditColumnModal(column: column),
-                                          );
-                                        } else if (value == 'cadence') {
-                                          _openCadenceConfig(
-                                            context,
-                                            controller,
-                                            column,
-                                          );
-                                        } else if (value == 'delete') {
-                                          _confirmDeleteColumn(
-                                            context,
-                                            controller,
-                                            column,
-                                          );
-                                        }
-                                      },
                                     ),
                                 ],
                               ),
@@ -1632,8 +1547,7 @@ class _KanbanPageState extends State<KanbanPage> {
             ),
           ],
         ),
-      ),
-    );
+      );
   }
 
   /// Footer da lista de cards — somente spinner do carregamento automático.
@@ -1643,26 +1557,16 @@ class _KanbanPageState extends State<KanbanPage> {
     ColumnPagination pagination,
   ) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final loading = pagination.loadingMore;
     final loaded = pagination.loadedCount;
 
     return Padding(
-      padding: const EdgeInsets.only(top: 6, bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       child: Material(
         color: Colors.transparent,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            color: columnColor.withValues(alpha: isDark ? 0.10 : 0.06),
-            border: Border.all(
-              color: columnColor.withValues(alpha: isDark ? 0.35 : 0.25),
-              width: 1,
-            ),
-          ),
+        child: Center(
           child: Row(
+            mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               if (loading) ...[
@@ -1709,32 +1613,18 @@ class _KanbanPageState extends State<KanbanPage> {
     if (controller.bulkSelectionActive) {
       final selected = controller.isBulkTaskSelected(task.id);
       final accent = Theme.of(context).colorScheme.primary;
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 4),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: controller.bulkDeleting
-                ? null
-                : () => controller.toggleBulkTaskSelection(task.id),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 160),
-              curve: Curves.easeOut,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color:
-                      selected ? accent : Colors.transparent,
-                  width: selected ? 2 : 1,
-                ),
-              ),
-              child: _buildTaskCard(
-                task,
-                bulkMode: true,
-                bulkSelected: selected,
-              ),
-            ),
+      // Seleção em lote sem box: tint sutil na linha quando selecionado (o
+      // checkbox no header do card já sinaliza o estado).
+      return Material(
+        color: selected ? accent.withValues(alpha: 0.08) : Colors.transparent,
+        child: InkWell(
+          onTap: controller.bulkDeleting
+              ? null
+              : () => controller.toggleBulkTaskSelection(task.id),
+          child: _buildTaskCard(
+            task,
+            bulkMode: true,
+            bulkSelected: selected,
           ),
         ),
       );
@@ -2056,19 +1946,15 @@ class _KanbanPageState extends State<KanbanPage> {
     final baseColor = ruleColor ?? priorityColor;
 
     final deadline = _KanbanTaskDeadline.fromDueDate(task.dueDate);
-    final cardSurface = ThemeHelpers.cardBackgroundColor(context);
     final secondaryText = ThemeHelpers.textSecondaryColor(context);
 
     // O accent de prazo (vencido/vence hoje) continua sobrepondo a cor base.
     final accent = deadline.accentColor(context);
-    final tintedSurface = accent == null
-        ? cardSurface
-        : Color.alphaBlend(accent.withValues(alpha: isDark ? 0.07 : 0.05), cardSurface);
-    final borderColor = accent != null
-        ? accent.withValues(alpha: isDark ? 0.45 : 0.32)
-        : (baseColor?.withValues(alpha: 0.28) ??
-            ThemeHelpers.borderColor(context));
-    final borderWidth = accent != null || baseColor != null ? 1.2 : 1.0;
+    // Linha aberta (achatado agressivo): sem card. Wash leve só quando há
+    // accent de prazo; demais leads ficam transparentes sobre o fundo do board.
+    final rowTint = accent == null
+        ? Colors.transparent
+        : accent.withValues(alpha: isDark ? 0.10 : 0.06);
     final leftStripe = accent ?? baseColor;
 
     final tags = task.displayTags;
@@ -2100,91 +1986,29 @@ class _KanbanPageState extends State<KanbanPage> {
             },
       child: Container(
         width: double.infinity,
-        margin: bulkMode ? EdgeInsets.zero : const EdgeInsets.only(bottom: 6),
+        margin: EdgeInsets.zero,
         decoration: BoxDecoration(
-          color: tintedSurface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: borderColor, width: borderWidth),
-          boxShadow: [
-            BoxShadow(
-              color: cardAccent.withValues(alpha: isDark ? 0.10 : 0.06),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-              spreadRadius: -4,
+          color: rowTint,
+          border: Border(
+            bottom: BorderSide(
+              color: ThemeHelpers.borderLightColor(context),
             ),
-            BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.04),
-              blurRadius: 6,
-              offset: const Offset(0, 2),
-              spreadRadius: -2,
-            ),
-          ],
+          ),
         ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: Stack(
-            children: [
-              // Glow sutil diagonal (canto superior direito) com a cor do
-              // card. Dá vida ao card sem virar uma cara colorida cheia.
+        child: Stack(
+          children: [
+            // Faixa lateral (identidade do lead): cor da regra/prazo.
+            if (leftStripe != null)
               Positioned(
-                top: -22,
-                right: -22,
-                child: IgnorePointer(
-                  child: Container(
-                    width: 110,
-                    height: 110,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: [
-                          cardAccent.withValues(alpha: isDark ? 0.20 : 0.13),
-                          cardAccent.withValues(alpha: 0.0),
-                        ],
-                      ),
-                    ),
-                  ),
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: 3,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(color: leftStripe),
                 ),
               ),
-              // Tira lateral em gradiente (mantida — é a identidade)
-              if (leftStripe != null)
-                Positioned(
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
-                  width: 4,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          leftStripe.withValues(alpha: 1.0),
-                          leftStripe.withValues(alpha: 0.55),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              if (deadline.isOverdue || deadline.isDueToday)
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: 2,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          accent!.withValues(alpha: 0.0),
-                          accent.withValues(alpha: 0.95),
-                          accent.withValues(alpha: 0.0),
-                        ],
-                        stops: const [0.0, 0.5, 1.0],
-                      ),
-                    ),
-                  ),
-                ),
-              Padding(
+            Padding(
                 padding: EdgeInsets.fromLTRB(
                   leftStripe != null ? 16 : 14,
                   14,
@@ -2410,8 +2234,7 @@ class _KanbanPageState extends State<KanbanPage> {
             ],
           ),
         ),
-      ),
-    );
+      );
   }
 
   Widget _taskCardMetric({
@@ -2644,80 +2467,148 @@ class _KanbanPageState extends State<KanbanPage> {
     return SizedBox(
       width: 26,
       height: 26,
-      child: PopupMenuButton<String>(
-        icon: const Icon(Icons.more_vert, size: 16),
-        padding: EdgeInsets.zero,
-        iconSize: 16,
-        constraints: const BoxConstraints(),
-        splashRadius: 18,
-        onSelected: (value) {
-          switch (value) {
-            case 'details':
-              showModalBottomSheet(
-                context: context,
-                isScrollControlled: true,
-                backgroundColor: Colors.transparent,
-                builder: (context) => TaskDetailsModal(task: task),
-              );
-              break;
-            case 'edit':
-              showModalBottomSheet(
-                context: context,
-                isScrollControlled: true,
-                backgroundColor: Colors.transparent,
-                builder: (context) => Padding(
-                  padding: EdgeInsets.only(
-                    bottom: MediaQuery.of(context).viewInsets.bottom,
-                  ),
-                  child: EditTaskModal(task: task),
+      child: _kanbanMenuTrigger(
+        context,
+        size: 18,
+        onTap: () => _showTaskCardActions(context, task),
+      ),
+    );
+  }
+
+  /// Gatilho estilizado dos 3 pontinhos — abre o menu de ações em bottom-sheet
+  /// (no lugar do `PopupMenuButton` nativo sem vida).
+  Widget _kanbanMenuTrigger(
+    BuildContext context, {
+    required VoidCallback onTap,
+    double size = 22,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Icon(
+            Icons.more_vert_rounded,
+            size: size,
+            color: ThemeHelpers.textSecondaryColor(context),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showKanbanActionMenu(
+    BuildContext context, {
+    required String title,
+    String? subtitle,
+    required List<_KanbanMenuAction> actions,
+  }) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _KanbanActionMenuSheet(
+        title: title,
+        subtitle: subtitle,
+        actions: actions,
+      ),
+    );
+  }
+
+  void _showColumnActions(
+    BuildContext context,
+    KanbanController controller,
+    KanbanColumn column,
+  ) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final perms = controller.permissions;
+    final blue = isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
+    final green = isDark ? const Color(0xFF25D366) : const Color(0xFF128C7E);
+    _showKanbanActionMenu(
+      context,
+      title: column.title,
+      subtitle: 'Etapa do funil',
+      actions: [
+        if (perms?.canEditColumns ?? true)
+          _KanbanMenuAction(
+            icon: Icons.edit_outlined,
+            label: 'Editar etapa',
+            accent: blue,
+            onTap: () => showModalBottomSheet(
+              context: context,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              builder: (_) => EditColumnModal(column: column),
+            ),
+          ),
+        if (perms?.canEditColumns ?? true)
+          _KanbanMenuAction(
+            icon: Icons.schedule_send_outlined,
+            label: 'Cadência WhatsApp',
+            accent: green,
+            onTap: () => _openCadenceConfig(context, controller, column),
+          ),
+        if (perms?.canDeleteColumns ?? true)
+          _KanbanMenuAction(
+            icon: Icons.delete_outline_rounded,
+            label: 'Deletar etapa',
+            destructive: true,
+            onTap: () => _confirmDeleteColumn(context, controller, column),
+          ),
+      ],
+    );
+  }
+
+  void _showTaskCardActions(BuildContext context, KanbanTask task) {
+    final ctrl = context.read<KanbanController>();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final perms = ctrl.permissions;
+    final blue = isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
+    final purple =
+        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
+    _showKanbanActionMenu(
+      context,
+      title: task.title,
+      subtitle: 'Lead',
+      actions: [
+        _KanbanMenuAction(
+          icon: Icons.info_outline_rounded,
+          label: 'Ver detalhes',
+          accent: blue,
+          onTap: () => showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: Colors.transparent,
+            builder: (_) => TaskDetailsModal(task: task),
+          ),
+        ),
+        if (perms?.canEditTasks ?? true)
+          _KanbanMenuAction(
+            icon: Icons.edit_outlined,
+            label: 'Editar lead',
+            accent: purple,
+            onTap: () => showModalBottomSheet(
+              context: context,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              builder: (ctx) => Padding(
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(ctx).viewInsets.bottom,
                 ),
-              );
-              break;
-            case 'delete':
-              final controller = context.read<KanbanController>();
-              _confirmDeleteTask(context, controller, task);
-              break;
-          }
-        },
-        itemBuilder: (context) {
-          final ctrl = context.read<KanbanController>();
-          final perms = ctrl.permissions;
-          return [
-            const PopupMenuItem(
-              value: 'details',
-              child: Row(
-                children: [
-                  Icon(Icons.info_outline, size: 18),
-                  SizedBox(width: 8),
-                  Text('Ver detalhes'),
-                ],
+                child: EditTaskModal(task: task),
               ),
             ),
-            if (perms?.canEditTasks ?? true)
-              const PopupMenuItem(
-                value: 'edit',
-                child: Row(
-                  children: [
-                    Icon(Icons.edit, size: 18),
-                    SizedBox(width: 8),
-                    Text('Editar'),
-                  ],
-                ),
-              ),
-            if (perms?.canDeleteTasks ?? true)
-              const PopupMenuItem(
-                value: 'delete',
-                child: Row(
-                  children: [
-                    Icon(Icons.delete_outline, size: 18, color: Colors.red),
-                    SizedBox(width: 8),
-                    Text('Excluir', style: TextStyle(color: Colors.red)),
-                  ],
-                ),
-              ),
-          ];
-        },
-      ),
+          ),
+        if (perms?.canDeleteTasks ?? true)
+          _KanbanMenuAction(
+            icon: Icons.delete_outline_rounded,
+            label: 'Excluir lead',
+            destructive: true,
+            onTap: () => _confirmDeleteTask(context, ctrl, task),
+          ),
+      ],
     );
   }
 
@@ -2832,8 +2723,7 @@ class _KanbanPageState extends State<KanbanPage> {
   ) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    const manage = _kBulkManageColor; // indigo
-    const cyan = Color(0xFF0891B2);
+    const manage = _kBulkManageColor; // azul info — identidade do modo
     final muted = ThemeHelpers.textSecondaryColor(context);
 
     final selected = controller.bulkSelectedCount;
@@ -2878,19 +2768,8 @@ class _KanbanPageState extends State<KanbanPage> {
                 Container(
                   padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: isDark
-                          ? [
-                              manage.withValues(alpha: 0.22),
-                              cyan.withValues(alpha: 0.12),
-                            ]
-                          : [
-                              manage.withValues(alpha: 0.12),
-                              cyan.withValues(alpha: 0.06),
-                            ],
-                    ),
+                    // Tint chapado (sem gradiente) — superfície limpa.
+                    color: manage.withValues(alpha: isDark ? 0.16 : 0.08),
                     border: Border(
                       bottom: BorderSide(
                         color: manage.withValues(alpha: 0.18),
@@ -2908,26 +2787,12 @@ class _KanbanPageState extends State<KanbanPage> {
                             height: 38,
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(12),
-                              gradient: LinearGradient(
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                                colors: [
-                                  manage,
-                                  Color.lerp(manage, cyan, 0.5)!,
-                                ],
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: manage.withValues(alpha: 0.45),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 3),
-                                  spreadRadius: -2,
-                                ),
-                              ],
+                              color: manage.withValues(
+                                  alpha: isDark ? 0.20 : 0.14),
                             ),
-                            child: const Icon(
+                            child: Icon(
                               Icons.library_add_check_rounded,
-                              color: Colors.white,
+                              color: manage,
                               size: 20,
                             ),
                           ),
@@ -2946,7 +2811,7 @@ class _KanbanPageState extends State<KanbanPage> {
                                 ),
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(999),
-                                  color: const Color(0xFF10B981),
+                                  color: manage,
                                   border: Border.all(
                                     color: ThemeHelpers.cardBackgroundColor(
                                       context,
@@ -3023,7 +2888,7 @@ class _KanbanPageState extends State<KanbanPage> {
                           context,
                           icon: Icons.done_all_rounded,
                           label: 'Todos',
-                          color: cyan,
+                          color: manage,
                           onPressed: disabled
                               ? null
                               : controller.bulkSelectAllCurrentTasks,
@@ -3411,5 +3276,203 @@ class _KanbanTaskDeadline {
       case _KanbanDeadlineStatus.none:
         return null;
     }
+  }
+}
+
+/// Glyph que gira continuamente — usado no indicador de pull-to-refresh
+/// enquanto o quadro recarrega (em vez do spinner circular padrão).
+class _SpinningGlyph extends StatefulWidget {
+  const _SpinningGlyph({required this.color});
+  final Color color;
+
+  @override
+  State<_SpinningGlyph> createState() => _SpinningGlyphState();
+}
+
+class _SpinningGlyphState extends State<_SpinningGlyph>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 850),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: _c,
+      child: Icon(Icons.sync_rounded, size: 18, color: widget.color),
+    );
+  }
+}
+
+/// Ação de um menu de 3-pontinhos do Kanban (coluna / card).
+class _KanbanMenuAction {
+  const _KanbanMenuAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.accent,
+    this.destructive = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final Color? accent;
+  final bool destructive;
+}
+
+/// Menu de ações em bottom-sheet estilizado — substitui o `PopupMenuButton`
+/// nativo. Grabber + cabeçalho (eyebrow + título) + linhas com chip de ícone
+/// tintado por intent (azul/verde/roxo) e vermelho só no destrutivo.
+class _KanbanActionMenuSheet extends StatelessWidget {
+  const _KanbanActionMenuSheet({
+    required this.title,
+    this.subtitle,
+    required this.actions,
+  });
+
+  final String title;
+  final String? subtitle;
+  final List<_KanbanMenuAction> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: ThemeHelpers.backgroundColor(context),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        border: Border.all(
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.40),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 10, bottom: 6),
+              child: Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color:
+                        ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 2, 20, 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (subtitle != null) ...[
+                          Text(
+                            subtitle!.toUpperCase(),
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.9,
+                              color: ThemeHelpers.textSecondaryColor(context),
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                        ],
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: ThemeHelpers.textColor(context),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Column(
+                children: [
+                  for (var i = 0; i < actions.length; i++) ...[
+                    if (i > 0) const SizedBox(height: 4),
+                    _row(context, actions[i]),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _row(BuildContext context, _KanbanMenuAction a) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final color = a.destructive
+        ? (isDark ? AppColors.status.errorDarkMode : AppColors.status.error)
+        : (a.accent ?? Theme.of(context).colorScheme.primary);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () {
+          Navigator.of(context).pop();
+          a.onTap();
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: isDark ? 0.20 : 0.12),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(a.icon, size: 19, color: color),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Text(
+                  a.label,
+                  style: TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w700,
+                    color: a.destructive
+                        ? color
+                        : ThemeHelpers.textColor(context),
+                  ),
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 20,
+                color:
+                    ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.6),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

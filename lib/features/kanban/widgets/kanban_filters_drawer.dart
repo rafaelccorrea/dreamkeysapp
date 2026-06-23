@@ -3,11 +3,12 @@ import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
-import '../../../shared/widgets/custom_text_field.dart';
 import '../models/kanban_models.dart';
 
-/// Bottom-sheet de filtros do board do Kanban — paridade com os filtros úteis
-/// da web (responsável, tags, resultado, período de criação e busca).
+/// Bottom-sheet de filtros do board do Kanban — paridade visual com os modais
+/// de filtro da web: seções *flush* (sem cards), separadas por filete tracejado
+/// + eyebrow com dot de cor; campos em pill com chip de ícone discreto; cor
+/// usada apenas como sinal (dot/ícone/ativo), nunca preenchendo blocos.
 ///
 /// As opções de responsável e tags são derivadas do board atual (passadas via
 /// [assignees] / [tags]), evitando endpoints extras.
@@ -72,6 +73,11 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
 
   static String _fmt(DateTime d) => DateFormat('dd/MM/yyyy').format(d);
 
+  Color _fieldFill(BuildContext c) =>
+      Theme.of(c).brightness == Brightness.dark
+          ? AppColors.background.backgroundTertiaryDarkMode
+          : AppColors.background.backgroundTertiary;
+
   KanbanBoardFilters _buildFilters() {
     final s = _searchController.text.trim();
     return KanbanBoardFilters(
@@ -121,21 +127,22 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    // Acento da marca/Kanban (header, contadores, botão Aplicar).
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // Acento da marca (header, contador, botão Aplicar).
     final accent =
         isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
-    // Cada seção ganha uma cor semântica própria — dá vida e leitura rápida.
+    // Acento por seção — usado só como sinal (dot + ícone + ativo), em tons
+    // refinados (sem candy/arco-íris).
     final cBusca =
         isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
     final cResp =
-        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
-    final cTags = isDark ? const Color(0xFFF472B6) : const Color(0xFFDB2777);
-    final cResult =
         isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
-    final cPeriodo =
+    final cTags =
+        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
+    final cResult =
         isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
+    final cPeriodo =
+        isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
     final mq = MediaQuery.of(context);
     final activeCount = _activeCount;
 
@@ -148,18 +155,18 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
         return Container(
           decoration: BoxDecoration(
             color: ThemeHelpers.backgroundColor(context),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
             border: Border.all(
-              color: ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
+              color: ThemeHelpers.borderColor(context).withValues(alpha: 0.40),
             ),
           ),
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.only(top: 10, bottom: 6),
+                padding: const EdgeInsets.only(top: 10, bottom: 4),
                 child: Center(
                   child: Container(
-                    width: 44,
+                    width: 40,
                     height: 4,
                     decoration: BoxDecoration(
                       color: ThemeHelpers.borderColor(context)
@@ -173,27 +180,21 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
               Expanded(
                 child: ListView(
                   controller: scrollController,
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 40),
                   children: [
-                    _buildSection(
+                    _section(
                       context,
-                      icon: Icons.search_rounded,
                       accent: cBusca,
-                      title: 'Busca',
-                      description: 'Nome, telefone, cliente ou título do lead.',
-                      child: CustomTextField(
-                        controller: _searchController,
-                        label: 'Buscar leads',
-                        prefixIcon: const Icon(Icons.search_rounded),
-                      ),
+                      label: 'Busca',
+                      hint: 'Nome, telefone, cliente ou título do lead.',
+                      first: true,
+                      child: _searchControl(context, cBusca),
                     ),
-                    const SizedBox(height: 14),
-                    _buildSection(
+                    _section(
                       context,
-                      icon: Icons.person_outline_rounded,
                       accent: cResp,
-                      title: 'Responsável',
-                      description: 'Filtre por um ou mais corretores.',
+                      label: 'Responsável',
+                      hint: 'Filtre por um ou mais corretores.',
                       child: Wrap(
                         spacing: 8,
                         runSpacing: 8,
@@ -226,13 +227,11 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 14),
-                    _buildSection(
+                    _section(
                       context,
-                      icon: Icons.sell_outlined,
                       accent: cTags,
-                      title: 'Tags',
-                      description: 'Filtre por etiquetas do CRM.',
+                      label: 'Tags',
+                      hint: 'Filtre por etiquetas do CRM.',
                       child: Wrap(
                         spacing: 8,
                         runSpacing: 8,
@@ -242,6 +241,7 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
                               label: t.name,
                               selected: _tagIds.contains(t.id),
                               accent: _hex(t.color) ?? cTags,
+                              dot: true,
                               onTap: () => setState(() {
                                 if (!_tagIds.remove(t.id)) _tagIds.add(t.id);
                               }),
@@ -252,13 +252,11 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 14),
-                    _buildSection(
+                    _section(
                       context,
-                      icon: Icons.flag_outlined,
                       accent: cResult,
-                      title: 'Resultado',
-                      description: 'Estágio do negócio.',
+                      label: 'Resultado',
+                      hint: 'Estágio do negócio.',
                       child: Wrap(
                         spacing: 8,
                         runSpacing: 8,
@@ -279,21 +277,19 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 14),
-                    _buildSection(
+                    _section(
                       context,
-                      icon: Icons.event_outlined,
                       accent: cPeriodo,
-                      title: 'Período de criação',
-                      description: 'Leads criados entre as datas.',
+                      label: 'Período de criação',
+                      hint: 'Leads criados entre as datas.',
                       child: Row(
                         children: [
                           Expanded(
-                            child: _dateField(
+                            child: _dateControl(
                               context,
-                              controller: _createdFromController,
-                              label: 'De',
                               accent: cPeriodo,
+                              controller: _createdFromController,
+                              placeholder: 'De',
                               onTap: () => _pickDate(isStart: true),
                               onClear: () => setState(() {
                                 _createdAfter = null;
@@ -301,13 +297,13 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
                               }),
                             ),
                           ),
-                          const SizedBox(width: 12),
+                          const SizedBox(width: 10),
                           Expanded(
-                            child: _dateField(
+                            child: _dateControl(
                               context,
-                              controller: _createdToController,
-                              label: 'Até',
                               accent: cPeriodo,
+                              controller: _createdToController,
+                              placeholder: 'Até',
                               onTap: () => _pickDate(isStart: false),
                               onClear: () => setState(() {
                                 _createdBefore = null;
@@ -331,27 +327,26 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
 
   Widget _buildHeader(BuildContext context, Color accent, int activeCount) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 4, 16, 12),
+    final isDark = theme.brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 4, 10, 14),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: ThemeHelpers.borderLightColor(context),
+          ),
+        ),
+      ),
       child: Row(
         children: [
           Container(
-            width: 42,
-            height: 42,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              gradient: LinearGradient(
-                colors: [accent, const Color(0xFF7C3AED)],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: accent.withValues(alpha: 0.32),
-                  blurRadius: 14,
-                  offset: const Offset(0, 6),
-                ),
-              ],
+              color: accent.withValues(alpha: isDark ? 0.20 : 0.12),
+              borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(Icons.tune_rounded, color: Colors.white, size: 22),
+            child: Icon(Icons.tune_rounded, color: accent, size: 21),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -361,7 +356,7 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
                 Text(
                   'Filtrar leads',
                   style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w800,
                     letterSpacing: -0.3,
                     color: ThemeHelpers.textColor(context),
                   ),
@@ -391,98 +386,203 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
     );
   }
 
-  Widget _buildSection(
+  /// Seção *flush*: filete tracejado (exceto a primeira) + eyebrow com dot de
+  /// cor + hint + conteúdo. Sem card, sem sombra, sem preenchimento.
+  Widget _section(
+    BuildContext context, {
+    required Color accent,
+    required String label,
+    String? hint,
+    required Widget child,
+    bool first = false,
+  }) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: EdgeInsets.only(top: first ? 16 : 22),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (!first) ...[
+            _DashedLine(color: ThemeHelpers.borderLightColor(context)),
+            const SizedBox(height: 18),
+          ],
+          Row(
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: accent,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: accent.withValues(alpha: 0.45),
+                      blurRadius: 6,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  label.toUpperCase(),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.9,
+                    color: ThemeHelpers.textSecondaryColor(context),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (hint != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              hint,
+              style: theme.textTheme.labelSmall?.copyWith(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w500,
+                height: 1.3,
+                color: ThemeHelpers.textSecondaryColor(context)
+                    .withValues(alpha: 0.85),
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          child,
+        ],
+      ),
+    );
+  }
+
+  /// Shell de campo no padrão da web (FilterControl): pill com chip de ícone
+  /// discreto + conteúdo bare.
+  Widget _filterControl(
     BuildContext context, {
     required IconData icon,
     required Color accent,
-    required String title,
-    required String description,
     required Widget child,
+    VoidCallback? onTap,
   }) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    return Container(
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final control = Container(
+      constraints: const BoxConstraints(minHeight: 48),
+      padding: const EdgeInsets.fromLTRB(8, 6, 10, 6),
       decoration: BoxDecoration(
-        // Leve tint na cor da seção sobre a superfície — dá vida sem pesar.
-        color: Color.alphaBlend(
-          accent.withValues(alpha: isDark ? 0.06 : 0.035),
-          ThemeHelpers.cardBackgroundColor(context),
-        ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: accent.withValues(alpha: isDark ? 0.28 : 0.20),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: accent.withValues(alpha: isDark ? 0.12 : 0.08),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
-            spreadRadius: -6,
+        color: _fieldFill(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: ThemeHelpers.borderLightColor(context)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: isDark ? 0.20 : 0.12),
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Icon(icon, size: 17, color: accent),
           ),
+          const SizedBox(width: 10),
+          Expanded(child: child),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        accent.withValues(alpha: isDark ? 0.32 : 0.18),
-                        accent.withValues(alpha: isDark ? 0.16 : 0.08),
-                      ],
-                    ),
-                    border: Border.all(color: accent.withValues(alpha: 0.30)),
-                    boxShadow: [
-                      BoxShadow(
-                        color: accent.withValues(alpha: 0.22),
-                        blurRadius: 8,
-                        offset: const Offset(0, 3),
-                        spreadRadius: -2,
-                      ),
-                    ],
-                  ),
-                  child: Icon(icon, color: accent, size: 20),
+    );
+    if (onTap == null) return control;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: control,
+    );
+  }
+
+  Widget _searchControl(BuildContext context, Color accent) {
+    final hasText = _searchController.text.isNotEmpty;
+    return _filterControl(
+      context,
+      icon: Icons.search_rounded,
+      accent: accent,
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              onChanged: (_) => setState(() {}),
+              textAlignVertical: TextAlignVertical.center,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: ThemeHelpers.textColor(context),
+              ),
+              decoration: InputDecoration(
+                isDense: true,
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.zero,
+                hintText: 'Nome, telefone, cliente…',
+                hintStyle: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: ThemeHelpers.textSecondaryColor(context)
+                      .withValues(alpha: 0.9),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          color: ThemeHelpers.textColor(context),
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        description,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                          fontWeight: FontWeight.w600,
-                          height: 1.2,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+              ),
             ),
-            const SizedBox(height: 14),
-            child,
-          ],
-        ),
+          ),
+          if (hasText)
+            GestureDetector(
+              onTap: () => setState(() => _searchController.clear()),
+              child: Icon(
+                Icons.close_rounded,
+                size: 18,
+                color: ThemeHelpers.textSecondaryColor(context),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dateControl(
+    BuildContext context, {
+    required Color accent,
+    required TextEditingController controller,
+    required String placeholder,
+    required VoidCallback onTap,
+    required VoidCallback onClear,
+  }) {
+    final filled = controller.text.isNotEmpty;
+    return _filterControl(
+      context,
+      icon: Icons.calendar_today_outlined,
+      accent: accent,
+      onTap: onTap,
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              filled ? controller.text : placeholder,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: filled
+                    ? ThemeHelpers.textColor(context)
+                    : ThemeHelpers.textSecondaryColor(context)
+                        .withValues(alpha: 0.9),
+              ),
+            ),
+          ),
+          if (filled)
+            GestureDetector(
+              onTap: onClear,
+              child: Icon(
+                Icons.close_rounded,
+                size: 18,
+                color: ThemeHelpers.textSecondaryColor(context),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -494,34 +594,6 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
             color: ThemeHelpers.textSecondaryColor(context),
             fontWeight: FontWeight.w600,
           ),
-    );
-  }
-
-  Widget _dateField(
-    BuildContext context, {
-    required TextEditingController controller,
-    required String label,
-    required Color accent,
-    required VoidCallback onTap,
-    required VoidCallback onClear,
-  }) {
-    return TextFormField(
-      controller: controller,
-      readOnly: true,
-      onTap: onTap,
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(Icons.calendar_today_outlined, color: accent, size: 18),
-        suffixIcon: controller.text.isEmpty
-            ? null
-            : IconButton(
-                icon: const Icon(Icons.clear_rounded, size: 18),
-                onPressed: onClear,
-              ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-      ),
     );
   }
 
@@ -543,27 +615,32 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
       ),
       child: Row(
         children: [
-          Expanded(
-            flex: 3,
-            child: OutlinedButton.icon(
-              onPressed: activeCount == 0 ? null : _clear,
-              icon: const Icon(Icons.filter_alt_off_outlined, size: 18),
-              label: const Text(
-                'Limpar',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+          if (activeCount > 0) ...[
+            Expanded(
+              flex: 3,
+              child: OutlinedButton.icon(
+                onPressed: _clear,
+                icon: const Icon(Icons.filter_alt_off_outlined, size: 18),
+                label: const Text(
+                  'Limpar',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: ThemeHelpers.textSecondaryColor(context),
+                  side: BorderSide(color: ThemeHelpers.borderColor(context)),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(width: 12),
+            const SizedBox(width: 12),
+          ],
           Expanded(
-            flex: 4,
+            flex: activeCount > 0 ? 4 : 1,
             child: FilledButton.icon(
               onPressed: _apply,
               icon: const Icon(Icons.check_rounded, size: 18),
@@ -605,6 +682,8 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
   }
 }
 
+/// Chip de seleção — ativo usa *tint* (fundo translúcido + borda + texto na cor),
+/// nunca preenchimento sólido com texto branco (evita o visual "candy").
 class _ChipChoice extends StatelessWidget {
   const _ChipChoice({
     required this.label,
@@ -612,6 +691,7 @@ class _ChipChoice extends StatelessWidget {
     required this.onTap,
     required this.accent,
     this.icon,
+    this.dot = false,
   });
 
   final String label;
@@ -619,45 +699,56 @@ class _ChipChoice extends StatelessWidget {
   final VoidCallback onTap;
   final Color accent;
   final IconData? icon;
+  final bool dot;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final fg = selected ? Colors.white : ThemeHelpers.textColor(context);
-    final bg = selected ? accent : ThemeHelpers.cardBackgroundColor(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final fieldFill = isDark
+        ? AppColors.background.backgroundTertiaryDarkMode
+        : AppColors.background.backgroundTertiary;
+    final fg = selected
+        ? accent
+        : ThemeHelpers.textColor(context).withValues(alpha: 0.82);
+    final bg = selected
+        ? accent.withValues(alpha: isDark ? 0.18 : 0.10)
+        : fieldFill;
     final border =
         selected ? accent : ThemeHelpers.borderLightColor(context);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(999),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: border),
-          boxShadow: selected
-              ? [
-                  BoxShadow(
-                    color: accent.withValues(alpha: 0.30),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ]
-              : null,
+          border: Border.all(color: border, width: selected ? 1.2 : 1),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (icon != null) ...[
+            if (dot) ...[
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: accent,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 7),
+            ] else if (icon != null) ...[
               Icon(icon, size: 14, color: fg),
               const SizedBox(width: 6),
             ],
             Text(
               label,
               style: theme.textTheme.labelMedium?.copyWith(
+                fontSize: 12.5,
                 color: fg,
-                fontWeight: FontWeight.w800,
+                fontWeight: FontWeight.w700,
                 letterSpacing: -0.1,
               ),
             ),
@@ -666,4 +757,42 @@ class _ChipChoice extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Filete tracejado fino — separa seções como na web (1px dashed borderLight).
+class _DashedLine extends StatelessWidget {
+  const _DashedLine({required this.color});
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 1,
+      width: double.infinity,
+      child: CustomPaint(painter: _DashedPainter(color)),
+    );
+  }
+}
+
+class _DashedPainter extends CustomPainter {
+  _DashedPainter(this.color);
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const dash = 5.0;
+    const gap = 4.0;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1;
+    double x = 0;
+    while (x < size.width) {
+      canvas.drawLine(Offset(x, 0), Offset(x + dash, 0), paint);
+      x += dash + gap;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedPainter oldDelegate) =>
+      oldDelegate.color != color;
 }
