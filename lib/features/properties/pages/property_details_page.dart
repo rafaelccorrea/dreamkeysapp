@@ -29,6 +29,8 @@ import '../../keys/models/key_model.dart' as key_models;
 import '../../../../shared/services/gallery_service.dart';
 import '../../../../shared/services/module_access_service.dart';
 import '../../../../core/constants/app_permissions.dart';
+import '../services/property_approval_service.dart';
+import '../widgets/approval_action_sheets.dart';
 import '../utils/property_edit_permissions.dart';
 import '../utils/property_status_visual.dart';
 import '../utils/compute_property_score.dart';
@@ -308,6 +310,112 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   /// Base pública do site da empresa (para o link de compartilhar). Carregada
   /// uma vez via `/public-site-config`.
   String? _siteBaseUrl;
+
+  // ─── Aprovação (na própria tela de detalhes, para quem tem permissão) ───
+  bool _approvalBusy = false;
+
+  bool get _canApproveAvailability => ModuleAccessService.instance
+      .hasPermission(AppPermissions.propertyApproveAvailability);
+  bool get _canRejectAvailability => ModuleAccessService.instance
+      .hasPermission(AppPermissions.propertyRejectAvailability);
+  bool get _canApprovePublication => ModuleAccessService.instance
+      .hasPermission(AppPermissions.propertyApprovePublication);
+  bool get _canRejectPublication => ModuleAccessService.instance
+      .hasPermission(AppPermissions.propertyRejectPublication);
+
+  bool _availabilityPending(Property p) =>
+      p.status == PropertyStatus.pendingApproval;
+
+  bool _publicationPending(Property p) =>
+      (p.publicationRequestedAt ?? '').isNotEmpty &&
+      p.isAvailableForSite != true &&
+      (p.publicationRejectedAt ?? '').isEmpty;
+
+  bool _showApprovalSection(Property p) =>
+      (_availabilityPending(p) &&
+          (_canApproveAvailability || _canRejectAvailability)) ||
+      (_publicationPending(p) &&
+          (_canApprovePublication || _canRejectPublication));
+
+  void _approvalSnack(String msg, {bool ok = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: ok ? AppColors.status.success : AppColors.status.error,
+      ),
+    );
+  }
+
+  Future<void> _doApproveAvailability(Property p) async {
+    setState(() => _approvalBusy = true);
+    final res = await PropertyApprovalService.instance
+        .approveAvailability(p.id, applyWatermark: false);
+    if (!mounted) return;
+    setState(() => _approvalBusy = false);
+    if (res.success) {
+      _approvalSnack('Disponibilidade aprovada.', ok: true);
+      _loadProperty();
+    } else {
+      _approvalSnack(res.message ?? 'Falha ao aprovar disponibilidade.');
+    }
+  }
+
+  Future<void> _doRejectAvailability(Property p) async {
+    final reason = await showRejectReasonSheet(
+      context: context,
+      title: 'Recusar disponibilidade',
+      propertySubtitle: p.title.isEmpty ? p.code : p.title,
+    );
+    if (reason == null) return;
+    setState(() => _approvalBusy = true);
+    final res = await PropertyApprovalService.instance
+        .rejectAvailability(p.id, reason: reason);
+    if (!mounted) return;
+    setState(() => _approvalBusy = false);
+    if (res.success) {
+      _approvalSnack('Imóvel recusado. Motivo enviado ao responsável.',
+          ok: true);
+      _loadProperty();
+    } else {
+      _approvalSnack(res.message ?? 'Falha ao recusar disponibilidade.');
+    }
+  }
+
+  Future<void> _doApprovePublication(Property p) async {
+    setState(() => _approvalBusy = true);
+    final res = await PropertyApprovalService.instance
+        .approvePublication(p.id, applyWatermark: null);
+    if (!mounted) return;
+    setState(() => _approvalBusy = false);
+    if (res.success) {
+      _approvalSnack('Publicação aprovada — imóvel já está no site.', ok: true);
+      _loadProperty();
+    } else {
+      _approvalSnack(res.message ?? 'Falha ao aprovar publicação.');
+    }
+  }
+
+  Future<void> _doRejectPublication(Property p) async {
+    final reason = await showRejectReasonSheet(
+      context: context,
+      title: 'Recusar publicação no site',
+      propertySubtitle: p.title.isEmpty ? p.code : p.title,
+    );
+    if (reason == null) return;
+    setState(() => _approvalBusy = true);
+    final res = await PropertyApprovalService.instance
+        .rejectPublication(p.id, reason: reason);
+    if (!mounted) return;
+    setState(() => _approvalBusy = false);
+    if (res.success) {
+      _approvalSnack('Publicação recusada. Responsável foi notificado.',
+          ok: true);
+      _loadProperty();
+    } else {
+      _approvalSnack(res.message ?? 'Falha ao recusar publicação.');
+    }
+  }
 
   // â”€â”€â”€ Aba Atividades (histórico + atualizações) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   final PropertyActivityService _activityService =
@@ -2868,6 +2976,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final condoId = property.condominiumId?.trim() ?? '';
 
     final sections = <Widget>[
+      // Aprovação pendente — no topo, para quem tem permissão. Integrada ao
+      // layout flush (não jogada).
+      if (_showApprovalSection(property))
+        _buildApprovalSection(context, theme, property),
       if (property.description.trim().isNotEmpty)
         _buildFlushSection(
           theme: theme,
@@ -3010,6 +3122,172 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: sections,
+    );
+  }
+
+  /// Seção de aprovação — aparece no topo dos detalhes para quem tem permissão,
+  /// quando há disponibilidade e/ou publicação pendentes. Integrada ao layout
+  /// flush (mesmo molde das outras seções), com Aprovar (verde) / Reprovar
+  /// (vermelho — destrutivo, faz sentido aqui).
+  Widget _buildApprovalSection(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    final isDark = theme.brightness == Brightness.dark;
+    final green =
+        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
+    final danger =
+        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    final tone =
+        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
+
+    final rows = <Widget>[];
+    if (_availabilityPending(property) &&
+        (_canApproveAvailability || _canRejectAvailability)) {
+      rows.add(_approvalRow(
+        context,
+        label: 'Disponibilidade na operação',
+        hint: 'Liberar este imóvel para a operação interna.',
+        onApprove: _canApproveAvailability
+            ? () => _doApproveAvailability(property)
+            : null,
+        onReject:
+            _canRejectAvailability ? () => _doRejectAvailability(property) : null,
+        green: green,
+        danger: danger,
+      ));
+    }
+    if (_publicationPending(property) &&
+        (_canApprovePublication || _canRejectPublication)) {
+      if (rows.isNotEmpty) {
+        rows.add(const SizedBox(height: 16));
+        rows.add(Divider(
+          height: 1,
+          color: ThemeHelpers.borderLightColor(context),
+        ));
+        rows.add(const SizedBox(height: 16));
+      }
+      rows.add(_approvalRow(
+        context,
+        label: 'Publicação no site',
+        hint: 'Liberar este imóvel para o portal público.',
+        onApprove: _canApprovePublication
+            ? () => _doApprovePublication(property)
+            : null,
+        onReject:
+            _canRejectPublication ? () => _doRejectPublication(property) : null,
+        green: green,
+        danger: danger,
+      ));
+    }
+
+    return _buildFlushSection(
+      theme: theme,
+      title: 'Aprovação pendente',
+      icon: Icons.verified_user_outlined,
+      tone: tone,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: rows,
+      ),
+    );
+  }
+
+  Widget _approvalRow(
+    BuildContext context, {
+    required String label,
+    required String hint,
+    VoidCallback? onApprove,
+    VoidCallback? onReject,
+    required Color green,
+    required Color danger,
+  }) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w800,
+            color: ThemeHelpers.textColor(context),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          hint,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: ThemeHelpers.textSecondaryColor(context),
+            height: 1.3,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            if (onReject != null)
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _approvalBusy ? null : onReject,
+                  icon: _approvalBusy
+                      ? SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(danger),
+                          ),
+                        )
+                      : const Icon(Icons.close_rounded, size: 20),
+                  label: const Text(
+                    'Reprovar',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: danger,
+                    side: BorderSide(color: danger.withValues(alpha: 0.5)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+              ),
+            if (onReject != null && onApprove != null)
+              const SizedBox(width: 10),
+            if (onApprove != null)
+              Expanded(
+                flex: 2,
+                child: FilledButton.icon(
+                  onPressed: _approvalBusy ? null : onApprove,
+                  icon: _approvalBusy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.check_rounded, size: 20),
+                  label: const Text(
+                    'Aprovar',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: green,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    elevation: 0,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ],
     );
   }
 
