@@ -23,8 +23,12 @@ import '../widgets/approval_property_card.dart';
 ///   margens, sem glows/painéis.
 /// - Greeting com ícone gradiente + eyebrow `letterSpacing 2.2` + título grande;
 ///   alerta de recusados como chip estático (sem animação).
-/// - **Navegação em abas flush com sublinhado** (mesmo padrão de Documentos/
-///   Chaves) — indicador na cor da fila ativa, filete inferior de largura total.
+/// - **Navegação em abas flush fixas com sublinhado** (sem scroll horizontal;
+///   mesmo DNA de Documentos/Chaves) — cada fila ocupa fração igual da largura,
+///   indicador na cor da fila ativa e filete inferior de largura total.
+/// - Filas da empresa (disponibilidade/publicação/proprietário/recusados)
+///   aparecem para quem tem qualquer permissão de aprovação ou bypass de
+///   master/admin/manager (`approvalQueueMenu`).
 /// - Cabeçalho de painel com ícone tonal achatado + eyebrow com bolinha.
 /// - Itens são **linhas flush** (`ApprovalPropertyCard`) — thumbnail grande com
 ///   código abaixo, sem faixa lateral; aprovar/recusar no próprio card para quem
@@ -46,7 +50,14 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
   static const int _kRejectedPageSize = 10;
 
   late final ModuleAccessService _moduleAccess = ModuleAccessService.instance;
-  late final bool _hasView;
+
+  /// Pode ver as filas da empresa (disponibilidade/publicação/proprietário/
+  /// recusados). Espelha o gating do web (`approvalQueueMenu`) e respeita o
+  /// bypass de master/admin/manager do [ModuleAccessService]. É um getter
+  /// (não `late final`) para reavaliar quando as permissões/role chegam depois
+  /// do `initState` — antes ficava preso em `false` por uma corrida de timing.
+  bool get _canViewQueues =>
+      _moduleAccess.hasAnyPermission(AppPermissions.approvalQueueMenu);
 
   // Estado por aba.
   bool _loadingMine = false;
@@ -78,18 +89,33 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
   Timer? _searchDebounce;
   String _appliedSearch = '';
 
+  bool _didLoadQueues = false;
+
   @override
   void initState() {
     super.initState();
-    _hasView = _moduleAccess.hasPermission(AppPermissions.propertyView);
+    // Reage quando permissões/role chegam depois do login (ChangeNotifier):
+    // recarrega as filas e reconstrói as abas.
+    _moduleAccess.addListener(_onAccessChanged);
     _bootstrap();
   }
 
   @override
   void dispose() {
+    _moduleAccess.removeListener(_onAccessChanged);
     _searchController.dispose();
     _searchDebounce?.cancel();
     super.dispose();
+  }
+
+  void _onAccessChanged() {
+    if (!mounted) return;
+    // Só dispara recarga das filas quando o acesso passou a existir e ainda
+    // não carregamos — evita loops e trabalho redundante.
+    if (_canViewQueues && !_didLoadQueues) {
+      _refreshAll();
+    }
+    setState(() {});
   }
 
   Future<void> _bootstrap() async {
@@ -97,9 +123,11 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
   }
 
   Future<void> _refreshAll() {
+    final canView = _canViewQueues;
+    if (canView) _didLoadQueues = true;
     return Future.wait([
       _loadMine(),
-      if (_hasView) ...[
+      if (canView) ...[
         _loadAvailability(),
         _loadPublication(),
         _loadOwnerAuth(),
@@ -473,7 +501,7 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  _hasView
+                  _canViewQueues
                       ? (pendingTotal == 0
                           ? 'Tudo em dia por aqui'
                           : '$pendingTotal ${pendingTotal == 1 ? 'imóvel aguarda' : 'imóveis aguardam'} aprovação')
@@ -618,7 +646,7 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
     );
   }
 
-  // ─── Tabs horizontais (pills com gradiente) ───────────────────────────
+  // ─── Abas flush fixas (sublinhado, sem scroll) ────────────────────────
 
   Widget _buildTabsRail(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -644,15 +672,15 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
         count: _myPending.total,
         accentColor: accent,
       ),
-      if (_hasView)
+      if (_canViewQueues)
         _TabSpec(
           tab: _Tab.availability,
           icon: LucideIcons.checkCircle2,
-          label: 'Disponibilidade',
+          label: 'Disponib.',
           count: _pendingAvailability.length,
           accentColor: ok,
         ),
-      if (_hasView)
+      if (_canViewQueues)
         _TabSpec(
           tab: _Tab.publication,
           icon: LucideIcons.globe,
@@ -660,15 +688,15 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
           count: _pendingPublication.length,
           accentColor: warn,
         ),
-      if (_hasView)
+      if (_canViewQueues)
         _TabSpec(
           tab: _Tab.ownerAuth,
           icon: LucideIcons.fileSignature,
-          label: 'Proprietário',
+          label: 'Propriet.',
           count: _pendingOwner.length,
           accentColor: purple,
         ),
-      if (_hasView)
+      if (_canViewQueues)
         _TabSpec(
           tab: _Tab.rejected,
           icon: LucideIcons.alertTriangle,
@@ -678,29 +706,28 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
         ),
     ];
 
-    // Barra de abas **flush** com sublinhado — o mesmo padrão de navegação do
-    // resto do app (Documentos, Chaves). Sem pills flutuantes: filete inferior
-    // de largura total e indicador na cor da fila ativa.
+    // Barra de abas **flush** com sublinhado — fixa (sem scroll horizontal):
+    // cada fila ocupa uma fração igual da largura (ícone + rótulo curto +
+    // contagem), com filete inferior de largura total e indicador na cor da
+    // fila ativa. Mesmo DNA de navegação do app (Documentos/Chaves).
     return Container(
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
         ),
       ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: _kPagePadH - 4),
-        child: Row(
-          children: [
-            for (final t in tabs)
-              _FlushTab(
+      padding: const EdgeInsets.symmetric(horizontal: _kPagePadH - 8),
+      child: Row(
+        children: [
+          for (final t in tabs)
+            Expanded(
+              child: _FlushTab(
                 spec: t,
                 selected: _activeTab == t.tab,
                 onTap: () => _selectTab(t.tab),
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -1194,8 +1221,10 @@ class _TabSpec {
   });
 }
 
-/// Aba **flush** com sublinhado (padrão de navegação do app). Sem fundo/pill:
-/// rótulo + contagem, indicador na cor da fila quando ativa.
+/// Aba **flush** vertical (ícone + rótulo curto + contagem), pensada para um
+/// layout fixo de largura igual (sem scroll). Indicador (sublinhado) na cor da
+/// fila quando ativa. O rótulo usa `FittedBox` para nunca estourar em telas
+/// estreitas.
 class _FlushTab extends StatelessWidget {
   final _TabSpec spec;
   final bool selected;
@@ -1224,44 +1253,67 @@ class _FlushTab extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
-              child: Row(
+              padding: const EdgeInsets.fromLTRB(4, 12, 4, 10),
+              child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(spec.icon, size: 16, color: fg),
-                  const SizedBox(width: 7),
-                  Text(
-                    spec.label,
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: fg,
-                      fontWeight:
-                          selected ? FontWeight.w900 : FontWeight.w600,
-                      letterSpacing: 0.1,
+                  // Ícone com a contagem sobreposta (badge) no canto superior.
+                  SizedBox(
+                    height: 22,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      alignment: Alignment.center,
+                      children: [
+                        Icon(spec.icon, size: 19, color: fg),
+                        if (spec.count > 0)
+                          Positioned(
+                            top: -7,
+                            right: -12,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 1,
+                              ),
+                              constraints: const BoxConstraints(minWidth: 16),
+                              decoration: BoxDecoration(
+                                color: tone,
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: ThemeHelpers.cardBackgroundColor(
+                                      context),
+                                  width: 1.5,
+                                ),
+                              ),
+                              child: Text(
+                                spec.count > 99 ? '99+' : '${spec.count}',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 9.5,
+                                  height: 1.25,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
-                  if (spec.count > 0) ...[
-                    const SizedBox(width: 7),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 1.5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: tone.withValues(alpha: selected ? 0.16 : 0.12),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        spec.count > 99 ? '99+' : '${spec.count}',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: selected
-                              ? tone
-                              : ThemeHelpers.textSecondaryColor(context),
-                          fontWeight: FontWeight.w900,
-                          fontSize: 11,
-                        ),
+                  const SizedBox(height: 6),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      spec.label,
+                      maxLines: 1,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: fg,
+                        fontWeight:
+                            selected ? FontWeight.w900 : FontWeight.w600,
+                        letterSpacing: 0.1,
+                        fontSize: 11.5,
                       ),
                     ),
-                  ],
+                  ),
                 ],
               ),
             ),

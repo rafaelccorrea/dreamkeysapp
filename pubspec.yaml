@@ -6,7 +6,7 @@ publish_to: 'none'
 # Tem de ser SEMPRE maior que qualquer build já enviado para esta app.
 # Erro típico: "bundle version must be higher than … previousBundleVersion = N"
 # → subir só o +N (ex. +14 → +15 → +16), commit, novo pipeline.
-version: 1.0.6+38
+version: 1.0.6+39
 
 environment:
   sdk: ^3.9.2
