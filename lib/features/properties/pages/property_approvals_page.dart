@@ -13,19 +13,22 @@ import '../../../shared/services/property_service.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../services/property_approval_service.dart';
+import '../widgets/approval_action_sheets.dart';
 import '../widgets/approval_property_card.dart';
 
 /// Tela de **Fila de Aprovação de Imóveis**.
 ///
 /// Identidade visual **flush** alinhada ao DNA do app:
-/// - Padding página `_kPagePadH=20 / top=10 / bottom=88`, sem glows/painéis.
-/// - Greeting com ícone gradiente + eyebrow `letterSpacing 2.2` + título grande.
-/// - **Navegação horizontal em pills** (segmented) com tint-ativo na cor da fila
-///   (verde/âmbar/roxo/vermelho) e fill neutro quando inativa.
+/// - Padding página `_kPagePadH=16 / top=10 / bottom=88`, conteúdo encostado nas
+///   margens, sem glows/painéis.
+/// - Greeting com ícone gradiente + eyebrow `letterSpacing 2.2` + título grande;
+///   alerta de recusados como chip estático (sem animação).
+/// - **Navegação em abas flush com sublinhado** (mesmo padrão de Documentos/
+///   Chaves) — indicador na cor da fila ativa, filete inferior de largura total.
 /// - Cabeçalho de painel com ícone tonal achatado + eyebrow com bolinha.
-/// - Itens são **linhas flush** (`ApprovalPropertyCard`) — faixa de status à
-///   esquerda, lazy thumbnail e filete inferior; ações de aprovar/reprovar
-///   vivem nos detalhes do imóvel, integradas ao layout.
+/// - Itens são **linhas flush** (`ApprovalPropertyCard`) — thumbnail grande com
+///   código abaixo, sem faixa lateral; aprovar/recusar no próprio card para quem
+///   tem permissão nas filas de disponibilidade/publicação.
 class PropertyApprovalsPage extends StatefulWidget {
   const PropertyApprovalsPage({super.key});
 
@@ -37,7 +40,7 @@ enum _Tab { mine, ownerAuth, availability, publication, rejected }
 
 class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
   static const double _kSectionGap = 12;
-  static const double _kPagePadH = 20;
+  static const double _kPagePadH = 16;
   static const double _kPagePadTop = 10;
   static const double _kPagePadBottom = 88;
   static const int _kRejectedPageSize = 10;
@@ -250,6 +253,74 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
     Navigator.of(context).pushNamed(AppRoutes.propertyDetails(p.id));
   }
 
+  // ─── Ações de aprovar/recusar direto no card (gated por permissão) ────────
+
+  bool get _canApproveAvailability => _moduleAccess
+      .hasPermission(AppPermissions.propertyApproveAvailability);
+  bool get _canRejectAvailability =>
+      _moduleAccess.hasPermission(AppPermissions.propertyRejectAvailability);
+  bool get _canApprovePublication => _moduleAccess
+      .hasPermission(AppPermissions.propertyApprovePublication);
+  bool get _canRejectPublication =>
+      _moduleAccess.hasPermission(AppPermissions.propertyRejectPublication);
+
+  void _actionSnack(String msg, {bool ok = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor:
+            ok ? AppColors.status.success : AppColors.status.error,
+      ),
+    );
+  }
+
+  /// Aprova o card conforme a fila. Retorna `true` em sucesso (para o card
+  /// encerrar o estado de carregamento). Atualiza as listas no fim.
+  Future<bool> _approveCard(Property p, ApprovalQueueKind kind) async {
+    final svc = PropertyApprovalService.instance;
+    final isPub = kind == ApprovalQueueKind.pendingPublication;
+    final res = isPub
+        ? await svc.approvePublication(p.id, applyWatermark: null)
+        : await svc.approveAvailability(p.id, applyWatermark: false);
+    if (!mounted) return false;
+    if (res.success) {
+      _actionSnack(
+        isPub
+            ? 'Publicação aprovada — imóvel já está no site.'
+            : 'Disponibilidade aprovada.',
+        ok: true,
+      );
+      await _refreshAll();
+      return true;
+    }
+    _actionSnack(res.message ?? 'Falha ao aprovar.');
+    return false;
+  }
+
+  /// Coleta o motivo (obrigatório) e recusa o card conforme a fila.
+  Future<bool> _rejectCard(Property p, ApprovalQueueKind kind) async {
+    final isPub = kind == ApprovalQueueKind.pendingPublication;
+    final reason = await showRejectReasonSheet(
+      context: context,
+      title: isPub ? 'Recusar publicação no site' : 'Recusar disponibilidade',
+      propertySubtitle: p.title.isEmpty ? p.code : p.title,
+    );
+    if (reason == null) return false;
+    final svc = PropertyApprovalService.instance;
+    final res = isPub
+        ? await svc.rejectPublication(p.id, reason: reason)
+        : await svc.rejectAvailability(p.id, reason: reason);
+    if (!mounted) return false;
+    if (res.success) {
+      _actionSnack('Imóvel recusado. Responsável foi notificado.', ok: true);
+      await _refreshAll();
+      return true;
+    }
+    _actionSnack(res.message ?? 'Falha ao recusar.');
+    return false;
+  }
+
   // ─── Helpers visuais ──────────────────────────────────────────────────
 
   Color _accentColor(BuildContext context) {
@@ -416,20 +487,38 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
                 ),
                 const SizedBox(height: 6),
                 if (_rejectedCounts.total > 0)
-                  Row(
-                    children: [
-                      _PulseDot(color: danger),
-                      const SizedBox(width: 7),
-                      Expanded(
-                        child: Text(
-                          '${_rejectedCounts.total} recusado${_rejectedCounts.total == 1 ? '' : 's'} aguardando reenvio',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: danger,
-                            fontWeight: FontWeight.w800,
-                          ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: danger.withValues(alpha: isDark ? 0.16 : 0.10),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color:
+                              danger.withValues(alpha: isDark ? 0.4 : 0.28),
                         ),
                       ),
-                    ],
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(LucideIcons.alertTriangle,
+                              size: 12, color: danger),
+                          const SizedBox(width: 6),
+                          Text(
+                            '${_rejectedCounts.total} recusado${_rejectedCounts.total == 1 ? '' : 's'} aguardando reenvio',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: danger,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 11.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   )
                 else
                   Text(
@@ -589,21 +678,29 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
         ),
     ];
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(_kPagePadH, 0, _kPagePadH, 0),
-      child: Row(
-        children: [
-          for (var i = 0; i < tabs.length; i++) ...[
-            _TabPill(
-              spec: tabs[i],
-              selected: _activeTab == tabs[i].tab,
-              onTap: () => _selectTab(tabs[i].tab),
-            ),
-            if (i < tabs.length - 1) const SizedBox(width: 8),
+    // Barra de abas **flush** com sublinhado — o mesmo padrão de navegação do
+    // resto do app (Documentos, Chaves). Sem pills flutuantes: filete inferior
+    // de largura total e indicador na cor da fila ativa.
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
+        ),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: _kPagePadH - 4),
+        child: Row(
+          children: [
+            for (final t in tabs)
+              _FlushTab(
+                spec: t,
+                selected: _activeTab == t.tab,
+                onTap: () => _selectTab(t.tab),
+              ),
           ],
-        ],
+        ),
       ),
     );
   }
@@ -804,14 +901,31 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
     final List<Widget> nodes = [];
 
     void addList(List<Property> list, ApprovalQueueKind kind) {
+      // Ações só nas filas de aprovação (disponibilidade/publicação) e somente
+      // para quem tem a permissão correspondente.
+      final canApprove = kind == ApprovalQueueKind.pendingAvailability
+          ? _canApproveAvailability
+          : kind == ApprovalQueueKind.pendingPublication
+              ? _canApprovePublication
+              : false;
+      final canReject = kind == ApprovalQueueKind.pendingAvailability
+          ? _canRejectAvailability
+          : kind == ApprovalQueueKind.pendingPublication
+              ? _canRejectPublication
+              : false;
       for (var i = 0; i < list.length; i++) {
+        final p = list[i];
         nodes.add(
           ApprovalPropertyCard(
-            property: list[i],
+            property: p,
             kind: kind,
-            onOpenDetails: () => _openDetails(list[i]),
+            onOpenDetails: () => _openDetails(p),
+            canApprove: canApprove,
+            canReject: canReject,
+            onApprove: canApprove ? () => _approveCard(p, kind) : null,
+            onReject: canReject ? () => _rejectCard(p, kind) : null,
           )
-              .animate(key: ValueKey('card-${list[i].id}-$kind'))
+              .animate(key: ValueKey('card-${p.id}-$kind'))
               .fadeIn(
                 delay: Duration(milliseconds: 40 * i),
                 duration: 220.ms,
@@ -1018,7 +1132,7 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
 // ─── Subwidgets internos ────────────────────────────────────────────────
 
 /// Placeholder de carregamento que reproduz a linha flush real
-/// (`ApprovalPropertyCard`): faixa de status, thumbnail 64, texto e filete.
+/// (`ApprovalPropertyCard`): thumbnail 72 com código abaixo, texto e filete.
 class _ApprovalRowSkeleton extends StatelessWidget {
   const _ApprovalRowSkeleton();
 
@@ -1030,35 +1144,31 @@ class _ApprovalRowSkeleton extends StatelessWidget {
           bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
         ),
       ),
-      child: IntrinsicHeight(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SkeletonBox(width: 3, borderRadius: 0),
+            Column(
+              children: [
+                SkeletonBox(width: 72, height: 72, borderRadius: 14),
+                const SizedBox(height: 7),
+                SkeletonText(width: 60, height: 12, borderRadius: 999),
+              ],
+            ),
+            const SizedBox(width: 14),
             Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(13, 14, 10, 14),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SkeletonBox(width: 64, height: 64, borderRadius: 12),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SkeletonText(width: 96, height: 18, borderRadius: 999),
-                          const SizedBox(height: 9),
-                          SkeletonText(width: double.infinity, height: 14),
-                          const SizedBox(height: 6),
-                          SkeletonText(width: 140, height: 12),
-                          const SizedBox(height: 8),
-                          SkeletonText(width: 80, height: 12),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SkeletonText(width: 96, height: 18, borderRadius: 999),
+                  const SizedBox(height: 9),
+                  SkeletonText(width: double.infinity, height: 14),
+                  const SizedBox(height: 6),
+                  SkeletonText(width: 140, height: 12),
+                  const SizedBox(height: 10),
+                  SkeletonText(width: 120, height: 14),
+                ],
               ),
             ),
           ],
@@ -1084,12 +1194,14 @@ class _TabSpec {
   });
 }
 
-class _TabPill extends StatelessWidget {
+/// Aba **flush** com sublinhado (padrão de navegação do app). Sem fundo/pill:
+/// rótulo + contagem, indicador na cor da fila quando ativa.
+class _FlushTab extends StatelessWidget {
   final _TabSpec spec;
   final bool selected;
   final VoidCallback onTap;
 
-  const _TabPill({
+  const _FlushTab({
     required this.spec,
     required this.selected,
     required this.onTap,
@@ -1098,88 +1210,73 @@ class _TabPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final tone = spec.accentColor;
-    final fg = selected ? tone : ThemeHelpers.textColor(context);
-    final fgSecondary =
-        selected ? tone : ThemeHelpers.textSecondaryColor(context);
-    final fieldFill = isDark
-        ? AppColors.background.backgroundTertiaryDarkMode
-        : AppColors.background.backgroundTertiary;
+    final fg = selected ? tone : ThemeHelpers.textSecondaryColor(context);
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 240),
-      curve: Curves.easeOutCubic,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        // Tint no selecionado — sem gradiente/sombra/texto branco.
-        color: selected ? tone.withValues(alpha: isDark ? 0.18 : 0.10) : fieldFill,
-        border: Border.all(
-          color: selected ? tone : ThemeHelpers.borderLightColor(context),
-          width: selected ? 1.2 : 1,
-        ),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(999),
-          splashColor: spec.accentColor.withValues(alpha: 0.18),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 14,
-              vertical: 9,
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(spec.icon, size: 16, color: fg),
-                const SizedBox(width: 7),
-                Text(
-                  spec.label,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: fg,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.1,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        splashColor: tone.withValues(alpha: 0.12),
+        highlightColor: tone.withValues(alpha: 0.06),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(spec.icon, size: 16, color: fg),
+                  const SizedBox(width: 7),
+                  Text(
+                    spec.label,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: fg,
+                      fontWeight:
+                          selected ? FontWeight.w900 : FontWeight.w600,
+                      letterSpacing: 0.1,
+                    ),
                   ),
-                ),
-                if (spec.count > 0) ...[
-                  const SizedBox(width: 8),
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 220),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 7,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: spec.accentColor
-                          .withValues(alpha: selected ? 0.22 : 0.16),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      spec.count > 99 ? '99+' : '${spec.count}',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: spec.accentColor,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 11,
+                  if (spec.count > 0) ...[
+                    const SizedBox(width: 7),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 1.5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: tone.withValues(alpha: selected ? 0.16 : 0.12),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        spec.count > 99 ? '99+' : '${spec.count}',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: selected
+                              ? tone
+                              : ThemeHelpers.textSecondaryColor(context),
+                          fontWeight: FontWeight.w900,
+                          fontSize: 11,
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ],
-                if (spec.count == 0 && !selected) ...[
-                  const SizedBox(width: 6),
-                  Container(
-                    width: 5,
-                    height: 5,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: fgSecondary.withValues(alpha: 0.4),
-                    ),
-                  ),
-                ],
-              ],
+              ),
             ),
-          ),
+            // Indicador (sublinhado) — anima a cor, altura estável p/ não pular.
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOut,
+              height: 2.5,
+              decoration: BoxDecoration(
+                color: selected ? tone : Colors.transparent,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(3)),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1248,27 +1345,3 @@ class _PanelSubsectionHeader extends StatelessWidget {
   }
 }
 
-class _PulseDot extends StatelessWidget {
-  final Color color;
-  const _PulseDot({required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 8,
-      height: 8,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
-      ),
-    )
-        .animate(onPlay: (c) => c.repeat(reverse: true))
-        .scaleXY(
-          begin: 1,
-          end: 1.5,
-          duration: 700.ms,
-          curve: Curves.easeInOut,
-        )
-        .fadeIn(begin: 0.55, duration: 700.ms);
-  }
-}

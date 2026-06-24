@@ -89,43 +89,45 @@ class _ProfilePageState extends State<ProfilePage> {
 
   // ─── Avatar ─────────────────────────────────────────────────────────────
 
-  Future<void> _handleAvatarChange(String? avatarUrlOrPath) async {
+  /// Aplica a troca/remoção da foto. Retorna `true` em sucesso para o modal
+  /// fechar; em erro retorna `false` (o modal permanece aberto para retry) e a
+  /// página mostra um toast. Não pisca o skeleton da página: o próprio modal
+  /// exibe o progresso, evitando flash atrás do sheet.
+  Future<bool> _handleAvatarChange(String? avatarUrlOrPath) async {
     if (avatarUrlOrPath == null) {
       final response = await ProfileService.instance.removeAvatar();
-      if (!mounted) return;
+      if (!mounted) return false;
       if (response.success && response.data != null) {
         setState(() => _profile = response.data);
-        _toast('Avatar removido com sucesso', success: true);
-      } else {
-        _toast(response.message ?? 'Erro ao remover avatar', success: false);
+        _toast('Foto removida com sucesso', success: true);
+        return true;
       }
-      return;
+      _toast(response.message ?? 'Erro ao remover foto', success: false);
+      return false;
     }
 
     final imageFile = File(avatarUrlOrPath);
     if (!await imageFile.exists()) {
-      if (!mounted) return;
-      _toast('Arquivo não encontrado', success: false);
-      return;
+      if (mounted) _toast('Arquivo não encontrado', success: false);
+      return false;
     }
-    setState(() => _isLoading = true);
     try {
       final response = await ProfileService.instance.uploadAvatar(imageFile);
-      if (!mounted) return;
-      if (response.success && response.data != null) {
+      if (!mounted) return false;
+      if (response.success) {
         await _loadProfile();
-        if (!mounted) return;
-        _toast('Avatar atualizado com sucesso!', success: true);
-      } else {
-        _toast(
-          response.message ?? 'Erro ao fazer upload do avatar',
-          success: false,
-        );
+        if (!mounted) return false;
+        _toast('Foto de perfil atualizada!', success: true);
+        return true;
       }
+      _toast(
+        response.message ?? 'Erro ao enviar a foto',
+        success: false,
+      );
+      return false;
     } catch (e) {
       if (mounted) _toast('Erro: $e', success: false);
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+      return false;
     }
   }
 
@@ -275,7 +277,9 @@ class _ProfilePageState extends State<ProfilePage> {
   // ─── Hero ───────────────────────────────────────────────────────────────
 
   Widget _buildHero(BuildContext context, ThemeData theme) {
-    final accent = AppColors.primary.primary;
+    final isDark = theme.brightness == Brightness.dark;
+    final accent =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
     final p = _profile!;
     final textColor = ThemeHelpers.textColor(context);
     final secondaryColor = ThemeHelpers.textSecondaryColor(context);
@@ -390,7 +394,12 @@ class _ProfilePageState extends State<ProfilePage> {
   // ─── Ações ──────────────────────────────────────────────────────────────
 
   Widget _buildActionsSection(BuildContext context, ThemeData theme) {
-    final accent = AppColors.primary.primary;
+    final isDark = theme.brightness == Brightness.dark;
+    final accent =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    // Azul (info) para dispositivos/sessões — cor com significado, não rainbow.
+    final info =
+        isDark ? AppColors.status.infoDarkMode : AppColors.status.info;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -405,13 +414,13 @@ class _ProfilePageState extends State<ProfilePage> {
         ),
         _FlatActionRow(
           icon: Icons.devices_outlined,
-          tone: accent,
+          tone: info,
           title: 'Sessões e dispositivos',
           subtitle: _sessionCount != null
               ? '$_sessionCount sessã${_sessionCount == 1 ? "o" : "ões"} ativa${_sessionCount == 1 ? "" : "s"}.'
               : 'Gerencie onde sua conta está conectada.',
           trailing: _sessionCount != null
-              ? _OutlineCounterBadge(value: '$_sessionCount', tone: accent)
+              ? _OutlineCounterBadge(value: '$_sessionCount', tone: info)
               : null,
           onTap: () => SessionsModal.show(context: context)
               .then((_) => _loadSessionCount()),
@@ -481,7 +490,11 @@ class _ProfilePageState extends State<ProfilePage> {
   // ─── Segurança e privacidade ────────────────────────────────────────────
 
   Widget _buildPrivacySection(BuildContext context, ThemeData theme) {
-    final accent = AppColors.primary.primary;
+    final isDark = theme.brightness == Brightness.dark;
+    final accent =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    final green =
+        isDark ? AppColors.status.successDarkMode : AppColors.status.success;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -496,7 +509,7 @@ class _ProfilePageState extends State<ProfilePage> {
         ),
         _FlatToggleRow(
           icon: Icons.public_rounded,
-          tone: AppColors.status.success,
+          tone: green,
           title: 'Presença no site público',
           hint: 'Aparecer na lista de corretores do site.',
           value: _profile?.isAvailableForPublicSite ?? false,
@@ -590,7 +603,8 @@ class _ProfilePageState extends State<ProfilePage> {
 // Widgets de UI (todos flat, sem cards encapsulando)
 // ──────────────────────────────────────────────────────────────────────────
 
-/// Eyebrow accent uppercase pequeno — mesmo padrão dos atalhos do corretor.
+/// Eyebrow accent uppercase pequeno — mesmo padrão dos atalhos do corretor,
+/// agora com uma pequena barra tonal à esquerda para dar estrutura/refino.
 class _SectionLabel extends StatelessWidget {
   const _SectionLabel({required this.label});
   final String label;
@@ -598,17 +612,36 @@ class _SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final accent = AppColors.primary.primary;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accent =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
-      child: Text(
-        label,
-        style: theme.textTheme.labelSmall?.copyWith(
-          color: accent,
-          fontWeight: FontWeight.w900,
-          letterSpacing: 1.65,
-          fontSize: 10.5,
-        ),
+      child: Row(
+        children: [
+          Container(
+            width: 3,
+            height: 12,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [accent, accent.withValues(alpha: 0.45)],
+              ),
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: accent,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.65,
+              fontSize: 10.5,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1036,8 +1069,9 @@ class _AvatarPlate extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = AppColors.primary.primary;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accent =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
     const size = 88.0;
 
     return Semantics(
@@ -1064,9 +1098,17 @@ class _AvatarPlate extends StatelessWidget {
                       shape: BoxShape.circle,
                       color: ThemeHelpers.cardBackgroundColor(context),
                       border: Border.all(
-                        color: accent.withValues(alpha: isDark ? 0.45 : 0.32),
+                        color: accent.withValues(alpha: isDark ? 0.5 : 0.34),
                         width: 1.5,
                       ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: accent.withValues(alpha: isDark ? 0.26 : 0.16),
+                          blurRadius: 18,
+                          spreadRadius: -4,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
                     ),
                     child: (profile.avatar ?? '').isNotEmpty
                         ? Image.network(
@@ -1112,7 +1154,8 @@ class _AvatarPlate extends StatelessWidget {
         : parts.length == 1
             ? parts.first[0].toUpperCase()
             : (parts.first[0] + parts.last[0]).toUpperCase();
-    final accent = AppColors.primary.primary;
+    final accent =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
     final toneDeep = HSLColor.fromColor(accent)
         .withLightness(
           (HSLColor.fromColor(accent).lightness * 0.78).clamp(0.0, 1.0),

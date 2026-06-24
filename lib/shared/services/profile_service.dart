@@ -384,30 +384,36 @@ class ProfileService {
       final response = await http.Response.fromStream(streamedResponse);
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
+        // O upload em si deu certo (2xx). Tentamos extrair a URL só para
+        // diagnóstico/optimismo, mas NÃO falhamos se o backend não ecoar a URL
+        // no formato esperado — o chamador recarrega o perfil (`getProfile`)
+        // e obtém o avatar real resolvido pelo CDN. Falhar aqui era a causa do
+        // bug "não consigo alterar a foto" (upload salvava, UI reportava erro).
+        String avatarUrl = '';
         try {
-          final jsonData = jsonDecode(response.body) as Map<String, dynamic>;
-          final avatarUrl = jsonData['avatarUrl']?.toString() ?? jsonData['avatar']?.toString() ?? jsonData['data']?.toString() ?? '';
-          
-          if (avatarUrl.isEmpty) {
-            debugPrint('⚠️ [PROFILE_SERVICE] Resposta não contém URL do avatar');
-            return ApiResponse.error(
-              message: 'Resposta inválida do servidor',
-              statusCode: response.statusCode,
-            );
+          final decoded = jsonDecode(response.body);
+          if (decoded is Map<String, dynamic>) {
+            final candidate = decoded['avatarUrl'] ??
+                decoded['avatar'] ??
+                (decoded['data'] is Map<String, dynamic>
+                    ? (decoded['data']['avatar'] ??
+                        decoded['data']['avatarUrl'])
+                    : decoded['data']) ??
+                (decoded['user'] is Map<String, dynamic>
+                    ? decoded['user']['avatar']
+                    : null);
+            avatarUrl = candidate?.toString() ?? '';
           }
-
-          debugPrint('✅ [PROFILE_SERVICE] Avatar enviado com sucesso: $avatarUrl');
-          return ApiResponse.success(
-            data: avatarUrl,
-            statusCode: response.statusCode,
-          );
         } catch (e) {
-          debugPrint('❌ [PROFILE_SERVICE] Erro ao parsear resposta: $e');
-          return ApiResponse.error(
-            message: 'Erro ao processar resposta: ${e.toString()}',
-            statusCode: response.statusCode,
-          );
+          debugPrint('⚠️ [PROFILE_SERVICE] Corpo não-JSON no upload (ok): $e');
         }
+
+        debugPrint('✅ [PROFILE_SERVICE] Avatar enviado (2xx). URL ecoada: '
+            '${avatarUrl.isEmpty ? "(nenhuma — recarregando perfil)" : avatarUrl}');
+        return ApiResponse.success(
+          data: avatarUrl,
+          statusCode: response.statusCode,
+        );
       }
 
       String errorMessage = 'Erro ao fazer upload do avatar';

@@ -1,24 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../../../../shared/services/profile_service.dart';
 
-/// Modal para gerenciamento de sessões
+/// Modal **flush** de gerenciamento de sessões/dispositivos.
+///
+/// Paleta coerente: **primary** no cabeçalho, **verde** para a sessão atual,
+/// **vermelho** apenas nas ações de encerrar. Linhas flush (sem Card pesado).
 class SessionsModal {
-  /// Retorna quando o sheet é fechado (útil para atualizar lista/contagem na tela pai).
-  static Future<void> show({
-    required BuildContext context,
-  }) {
+  /// Retorna quando o sheet é fechado (útil para atualizar contagem na tela pai).
+  static Future<void> show({required BuildContext context}) {
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      barrierColor: Colors.black54,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      clipBehavior: Clip.antiAlias,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.55),
       builder: (context) => const _SessionsModalContent(),
     );
   }
@@ -47,22 +46,19 @@ class _SessionsModalContentState extends State<_SessionsModalContent> {
       _isLoading = true;
       _errorMessage = null;
     });
-
     try {
       final response = await SessionService.instance.getSessions();
-
-      if (mounted) {
-        if (response.success && response.data != null) {
-          setState(() {
-            _sessions = response.data!;
-            _isLoading = false;
-          });
-        } else {
-          setState(() {
-            _errorMessage = response.message ?? 'Erro ao carregar sessões';
-            _isLoading = false;
-          });
-        }
+      if (!mounted) return;
+      if (response.success && response.data != null) {
+        setState(() {
+          _sessions = response.data!;
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _errorMessage = response.message ?? 'Erro ao carregar sessões';
+          _isLoading = false;
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -77,99 +73,65 @@ class _SessionsModalContentState extends State<_SessionsModalContent> {
   Future<void> _endSession(String sessionId) async {
     try {
       final response = await SessionService.instance.endSession(sessionId);
-
-      if (mounted) {
-        if (response.success) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Sessão encerrada com sucesso'),
-              backgroundColor: AppColors.status.success,
-            ),
-          );
-          _loadSessions();
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(response.message ?? 'Erro ao encerrar sessão'),
-              backgroundColor: AppColors.status.error,
-            ),
-          );
-        }
+      if (!mounted) return;
+      if (response.success) {
+        _snack('Sessão encerrada', AppColors.status.success);
+        _loadSessions();
+      } else {
+        _snack(response.message ?? 'Erro ao encerrar sessão',
+            AppColors.status.error);
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro: ${e.toString()}'),
-            backgroundColor: AppColors.status.error,
-          ),
-        );
-      }
+      if (mounted) _snack('Erro: ${e.toString()}', AppColors.status.error);
     }
   }
 
   Future<void> _endAllOtherSessions() async {
     try {
       final response = await SessionService.instance.endAllOtherSessions();
-
-      if (mounted) {
-        if (response.success) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Todas as outras sessões foram encerradas'),
-              backgroundColor: AppColors.status.success,
-            ),
-          );
-          _loadSessions();
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(response.message ?? 'Erro ao encerrar sessões'),
-              backgroundColor: AppColors.status.error,
-            ),
-          );
-        }
+      if (!mounted) return;
+      if (response.success) {
+        _snack('Outras sessões encerradas', AppColors.status.success);
+        _loadSessions();
+      } else {
+        _snack(response.message ?? 'Erro ao encerrar sessões',
+            AppColors.status.error);
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro: ${e.toString()}'),
-            backgroundColor: AppColors.status.error,
-          ),
-        );
-      }
+      if (mounted) _snack('Erro: ${e.toString()}', AppColors.status.error);
     }
   }
 
+  void _snack(String msg, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   IconData _getDeviceIcon(String device) {
-    final deviceLower = device.toLowerCase();
-    if (deviceLower.contains('mobile') || deviceLower.contains('android') || deviceLower.contains('ios')) {
-      return Icons.smartphone;
-    } else if (deviceLower.contains('tablet') || deviceLower.contains('ipad')) {
-      return Icons.tablet;
+    final d = device.toLowerCase();
+    if (d.contains('mobile') || d.contains('android') || d.contains('ios')) {
+      return Icons.smartphone_rounded;
+    } else if (d.contains('tablet') || d.contains('ipad')) {
+      return Icons.tablet_rounded;
     }
-    return Icons.computer;
+    return Icons.computer_rounded;
   }
 
   String _formatLastActivity(String lastActivity) {
     try {
       final date = DateTime.parse(lastActivity);
-      final now = DateTime.now();
-      final difference = now.difference(date);
-
-      if (difference.inMinutes < 1) {
-        return 'Agora mesmo';
-      } else if (difference.inHours < 1) {
-        return '${difference.inMinutes} minutos atrás';
-      } else if (difference.inDays < 1) {
-        return '${difference.inHours} horas atrás';
-      } else if (difference.inDays < 7) {
-        return '${difference.inDays} dias atrás';
-      } else {
-        return DateFormat('dd/MM/yyyy HH:mm', 'pt_BR').format(date);
-      }
-    } catch (e) {
+      final diff = DateTime.now().difference(date);
+      if (diff.inMinutes < 1) return 'Agora mesmo';
+      if (diff.inHours < 1) return '${diff.inMinutes} min atrás';
+      if (diff.inDays < 1) return '${diff.inHours}h atrás';
+      if (diff.inDays < 7) return '${diff.inDays}d atrás';
+      return DateFormat('dd/MM/yyyy HH:mm', 'pt_BR').format(date);
+    } catch (_) {
       return lastActivity;
     }
   }
@@ -178,134 +140,364 @@ class _SessionsModalContentState extends State<_SessionsModalContent> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final primary =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    final others = _sessions.where((s) => !s.isCurrent).length;
 
     return Container(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
       constraints: BoxConstraints(
         maxHeight: MediaQuery.of(context).size.height * 0.9,
       ),
+      decoration: BoxDecoration(
+        color: ThemeHelpers.cardBackgroundColor(context),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        border: Border.all(
+          color: primary.withValues(alpha: isDark ? 0.22 : 0.14),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.5 : 0.16),
+            blurRadius: 28,
+            offset: const Offset(0, -8),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 44,
+              height: 5,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(colors: [
+                  primary.withValues(alpha: 0.55),
+                  primary.withValues(alpha: 0.28),
+                ]),
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
+              child: _buildHeader(context, theme, isDark, primary, others),
+            ),
+            Flexible(child: _buildBody(context, theme, isDark, primary)),
+            if (!_isLoading && _errorMessage == null && others > 0)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                child: OutlinedButton.icon(
+                  onPressed: _endAllOtherSessions,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.status.error,
+                    side: BorderSide(
+                      color: AppColors.status.error.withValues(alpha: 0.5),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    minimumSize: const Size.fromHeight(48),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    textStyle: const TextStyle(
+                        fontWeight: FontWeight.w800, fontSize: 14),
+                  ),
+                  icon: const Icon(Icons.logout_rounded, size: 18),
+                  label: const Text('Encerrar as outras sessões'),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(
+    BuildContext context,
+    ThemeData theme,
+    bool isDark,
+    Color primary,
+    int others,
+  ) {
+    final subtitle = _isLoading
+        ? 'Carregando…'
+        : _sessions.isEmpty
+            ? 'Nenhuma sessão ativa'
+            : '${_sessions.length} ativa${_sessions.length == 1 ? '' : 's'}'
+                '${others > 0 ? ' · $others em outro${others == 1 ? '' : 's'} aparelho${others == 1 ? '' : 's'}' : ''}';
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(13),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                primary.withValues(alpha: isDark ? 0.42 : 0.22),
+                primary.withValues(alpha: isDark ? 0.22 : 0.12),
+              ],
+            ),
+            border: Border.all(color: primary.withValues(alpha: 0.4)),
+          ),
+          child: Icon(Icons.devices_rounded, color: primary, size: 20),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Sessões e dispositivos',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.3,
+                  color: ThemeHelpers.textColor(context),
+                  height: 1.1,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: ThemeHelpers.textSecondaryColor(context),
+                ),
+              ),
+            ],
+          ),
+        ),
+        _CircleClose(onTap: () => Navigator.pop(context)),
+      ],
+    );
+  }
+
+  Widget _buildBody(
+    BuildContext context,
+    ThemeData theme,
+    bool isDark,
+    Color primary,
+  ) {
+    if (_isLoading) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 40),
+        child: Center(child: CircularProgressIndicator(color: primary)),
+      );
+    }
+    if (_errorMessage != null) {
+      return _stateMessage(
+        context,
+        theme,
+        icon: Icons.cloud_off_rounded,
+        color: AppColors.status.error,
+        title: 'Não foi possível carregar',
+        body: _errorMessage!,
+        action: TextButton.icon(
+          onPressed: _loadSessions,
+          icon: const Icon(Icons.refresh_rounded, size: 18),
+          label: const Text('Tentar novamente'),
+          style: TextButton.styleFrom(foregroundColor: primary),
+        ),
+      );
+    }
+    if (_sessions.isEmpty) {
+      return _stateMessage(
+        context,
+        theme,
+        icon: Icons.devices_other_rounded,
+        color: ThemeHelpers.textSecondaryColor(context),
+        title: 'Nenhuma sessão ativa',
+        body: 'Quando você entrar em um dispositivo, ele aparece aqui.',
+      );
+    }
+    return ListView.separated(
+      shrinkWrap: true,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      itemCount: _sessions.length,
+      separatorBuilder: (_, _) => Divider(
+        height: 1,
+        color: ThemeHelpers.borderLightColor(context),
+      ),
+      itemBuilder: (context, i) =>
+          _buildSessionRow(context, theme, isDark, primary, _sessions[i]),
+    );
+  }
+
+  Widget _stateMessage(
+    BuildContext context,
+    ThemeData theme, {
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String body,
+    Widget? action,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(28, 36, 28, 36),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Header
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: Row(
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color.withValues(alpha: 0.12),
+              border: Border.all(color: color.withValues(alpha: 0.3)),
+            ),
+            child: Icon(icon, color: color, size: 26),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: ThemeHelpers.textColor(context),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            body,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: ThemeHelpers.textSecondaryColor(context),
+              height: 1.4,
+            ),
+          ),
+          if (action != null) ...[const SizedBox(height: 12), action],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSessionRow(
+    BuildContext context,
+    ThemeData theme,
+    bool isDark,
+    Color primary,
+    Session session,
+  ) {
+    final success =
+        isDark ? AppColors.status.successDarkMode : AppColors.status.success;
+    final danger =
+        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final tone = session.isCurrent ? success : primary;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              color: tone.withValues(alpha: isDark ? 0.16 : 0.1),
+              border: Border.all(color: tone.withValues(alpha: 0.28)),
+            ),
+            child: Icon(_getDeviceIcon(session.device), color: tone, size: 22),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  Icons.devices_outlined,
-                  color: AppColors.primary.primary,
-                  size: 24,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Sessões Ativas',
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: ThemeHelpers.textColor(context),
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        session.device.isEmpty
+                            ? 'Dispositivo'
+                            : session.device,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: ThemeHelpers.textColor(context),
+                          letterSpacing: -0.2,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                  ),
+                    if (session.isCurrent) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: success.withValues(alpha: isDark ? 0.18 : 0.12),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: success.withValues(alpha: 0.4),
+                          ),
+                        ),
+                        child: Text(
+                          'Este aparelho',
+                          style: TextStyle(
+                            color: success,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 10,
+                            letterSpacing: 0.1,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.pop(context),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
+                if (session.browser.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    session.operatingSystem != null &&
+                            session.operatingSystem!.isNotEmpty
+                        ? '${session.browser} · ${session.operatingSystem}'
+                        : session.browser,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: secondary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 4,
+                  children: [
+                    _metaChip(theme, secondary, Icons.schedule_rounded,
+                        _formatLastActivity(session.lastActivity)),
+                    if (session.ipAddress.isNotEmpty)
+                      _metaChip(theme, secondary, Icons.public_rounded,
+                          session.ipAddress),
+                  ],
                 ),
               ],
             ),
           ),
-
-          // Conteúdo
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : _errorMessage != null
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(20),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.error_outline,
-                                size: 48,
-                                color: AppColors.status.error,
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                _errorMessage!,
-                                textAlign: TextAlign.center,
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: ThemeHelpers.textColor(context),
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              ElevatedButton.icon(
-                                onPressed: _loadSessions,
-                                icon: const Icon(Icons.refresh),
-                                label: const Text('Tentar Novamente'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      )
-                    : _sessions.isEmpty
-                        ? Center(
-                            child: Padding(
-                              padding: const EdgeInsets.all(20),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.devices_other_outlined,
-                                    size: 48,
-                                    color: ThemeHelpers.textSecondaryColor(context),
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Text(
-                                    'Nenhuma sessão ativa',
-                                    style: theme.textTheme.bodyMedium?.copyWith(
-                                      color: ThemeHelpers.textColor(context),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          )
-                        : ListView.builder(
-                            padding: const EdgeInsets.symmetric(horizontal: 20),
-                            itemCount: _sessions.length,
-                            itemBuilder: (context, index) {
-                              final session = _sessions[index];
-                              return _buildSessionCard(context, theme, isDark, session);
-                            },
-                          ),
-          ),
-
-          // Botão de encerrar todas
-          if (!_isLoading && _errorMessage == null && _sessions.isNotEmpty)
+          if (!session.isCurrent)
             Padding(
-              padding: const EdgeInsets.all(20),
-              child: SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: _endAllOtherSessions,
-                  icon: const Icon(Icons.logout),
-                  label: const Text('Encerrar Todas as Outras Sessões'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.status.error,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    side: BorderSide(
-                      color: AppColors.status.error,
-                      width: 1.5,
+              padding: const EdgeInsets.only(left: 6, top: 2),
+              child: Material(
+                color: Colors.transparent,
+                shape: const CircleBorder(),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: () => _endSession(session.id),
+                  child: Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: danger.withValues(alpha: isDark ? 0.14 : 0.08),
+                      border: Border.all(
+                        color: danger.withValues(alpha: 0.3),
+                      ),
                     ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                    child: Icon(Icons.logout_rounded, size: 16, color: danger),
                   ),
                 ),
               ),
@@ -315,153 +507,58 @@ class _SessionsModalContentState extends State<_SessionsModalContent> {
     );
   }
 
-  Widget _buildSessionCard(
-    BuildContext context,
+  Widget _metaChip(
     ThemeData theme,
-    bool isDark,
-    Session session,
+    Color color,
+    IconData icon,
+    String text,
   ) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.primary.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(
-                    _getDeviceIcon(session.device),
-                    color: AppColors.primary.primary,
-                    size: 24,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              session.device,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w600,
-                                color: ThemeHelpers.textColor(context),
-                              ),
-                            ),
-                          ),
-                          if (session.isCurrent)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.status.success.withOpacity(0.2),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                'Sessão Atual',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: AppColors.status.success,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 10,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        session.browser,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (!session.isCurrent)
-                  IconButton(
-                    icon: const Icon(Icons.logout, size: 20),
-                    onPressed: () => _endSession(session.id),
-                    tooltip: 'Encerrar sessão',
-                    color: AppColors.status.error,
-                  ),
-              ],
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 13, color: color),
+        const SizedBox(width: 4),
+        Text(
+          text,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: color,
+            fontWeight: FontWeight.w600,
+            fontSize: 11,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Botão circular de fechar — coerente com os demais sheets refinados.
+class _CircleClose extends StatelessWidget {
+  const _CircleClose({required this.onTap});
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Material(
+      color: Colors.transparent,
+      shape: const CircleBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: secondary.withValues(alpha: isDark ? 0.14 : 0.08),
+            border: Border.all(
+              color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
             ),
-            if (session.operatingSystem != null) ...[
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Icon(
-                    Icons.desktop_windows_outlined,
-                    size: 16,
-                    color: ThemeHelpers.textSecondaryColor(context),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    session.operatingSystem!,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Icon(
-                  Icons.location_on_outlined,
-                  size: 16,
-                  color: ThemeHelpers.textSecondaryColor(context),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    session.ipAddress,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
-                    ),
-                  ),
-                ),
-                Icon(
-                  Icons.access_time_outlined,
-                  size: 16,
-                  color: ThemeHelpers.textSecondaryColor(context),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  _formatLastActivity(session.lastActivity),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                  ),
-                ),
-              ],
-            ),
-          ],
+          ),
+          child: Icon(Icons.close_rounded, size: 19, color: secondary),
         ),
       ),
     );
   }
 }
-
-
-
-
-
-
-
-

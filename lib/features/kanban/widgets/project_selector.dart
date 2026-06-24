@@ -419,6 +419,46 @@ class _StatusPill extends StatelessWidget {
   }
 }
 
+/// Chip de contagem de funis exibido no cabeçalho do bottom sheet.
+class _HeaderCountChip extends StatelessWidget {
+  final int count;
+  final Color accent;
+
+  const _HeaderCountChip({required this.count, required this.accent});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = count == 1
+        ? '1 funil disponível'
+        : '$count funis disponíveis';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: accent.withValues(alpha: 0.1),
+        border: Border.all(color: accent.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.layers_rounded, size: 12, color: accent),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.1,
+              color: accent,
+              height: 1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ============================================================================
 // PICKER SHEET
 // ============================================================================
@@ -472,10 +512,21 @@ class _ProjectPickerSheetState extends State<_ProjectPickerSheet> {
       builder: (context, scrollController) {
         return Container(
           decoration: BoxDecoration(
-            color: ThemeHelpers.cardBackgroundColor(context),
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              stops: const [0.0, 0.24],
+              colors: [
+                Color.alphaBlend(
+                  accent.withValues(alpha: isDark ? 0.12 : 0.055),
+                  ThemeHelpers.cardBackgroundColor(context),
+                ),
+                ThemeHelpers.cardBackgroundColor(context),
+              ],
+            ),
             borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
             border: Border.all(
-              color: ThemeHelpers.borderColor(context).withValues(alpha: 0.4),
+              color: accent.withValues(alpha: isDark ? 0.22 : 0.14),
             ),
             boxShadow: [
               BoxShadow(
@@ -483,17 +534,27 @@ class _ProjectPickerSheetState extends State<_ProjectPickerSheet> {
                 blurRadius: 28,
                 offset: const Offset(0, -8),
               ),
+              BoxShadow(
+                color: accent.withValues(alpha: isDark ? 0.18 : 0.08),
+                blurRadius: 24,
+                spreadRadius: -8,
+                offset: const Offset(0, -2),
+              ),
             ],
           ),
           child: Column(
             children: [
               const SizedBox(height: 10),
               Container(
-                width: 42,
-                height: 4,
+                width: 44,
+                height: 5,
                 decoration: BoxDecoration(
-                  color: ThemeHelpers.textSecondaryColor(context)
-                      .withValues(alpha: 0.4),
+                  gradient: LinearGradient(
+                    colors: [
+                      accent.withValues(alpha: 0.55),
+                      accent.withValues(alpha: 0.28),
+                    ],
+                  ),
                   borderRadius: BorderRadius.circular(999),
                 ),
               ),
@@ -502,11 +563,13 @@ class _ProjectPickerSheetState extends State<_ProjectPickerSheet> {
                 child: Row(
                   children: [
                     Container(
-                      width: 36,
-                      height: 36,
+                      width: 38,
+                      height: 38,
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(13),
                         gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
                           colors: [
                             accent.withValues(alpha: isDark ? 0.42 : 0.22),
                             const Color(0xFF0891B2)
@@ -515,6 +578,14 @@ class _ProjectPickerSheetState extends State<_ProjectPickerSheet> {
                         ),
                         border:
                             Border.all(color: accent.withValues(alpha: 0.4)),
+                        boxShadow: [
+                          BoxShadow(
+                            color: accent.withValues(alpha: isDark ? 0.3 : 0.16),
+                            blurRadius: 12,
+                            spreadRadius: -3,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
                       ),
                       child: Icon(
                         Icons.account_tree_rounded,
@@ -536,20 +607,39 @@ class _ProjectPickerSheetState extends State<_ProjectPickerSheet> {
                               height: 1.1,
                             ),
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '${widget.options.length} pipeline(s) disponível(is)',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: ThemeHelpers.textSecondaryColor(context),
-                            ),
+                          const SizedBox(height: 4),
+                          _HeaderCountChip(
+                            count: widget.options.length,
+                            accent: accent,
                           ),
                         ],
                       ),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.close_rounded),
-                      onPressed: () => Navigator.of(context).pop(),
+                    Material(
+                      color: Colors.transparent,
+                      shape: const CircleBorder(),
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: () => Navigator.of(context).pop(),
+                        child: Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: ThemeHelpers.textSecondaryColor(context)
+                                .withValues(alpha: isDark ? 0.14 : 0.08),
+                            border: Border.all(
+                              color: ThemeHelpers.borderColor(context)
+                                  .withValues(alpha: 0.5),
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.close_rounded,
+                            size: 19,
+                            color: ThemeHelpers.textSecondaryColor(context),
+                          ),
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -695,8 +785,21 @@ class _ProjectPickerTile extends StatelessWidget {
         child: Ink(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
+            gradient: selected
+                ? LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      accent.withValues(alpha: isDark ? 0.2 : 0.1),
+                      accent.withValues(alpha: isDark ? 0.1 : 0.045),
+                      ThemeHelpers.cardBackgroundColor(context)
+                          .withValues(alpha: 0.6),
+                    ],
+                    stops: const [0.0, 0.45, 1.0],
+                  )
+                : null,
             color: selected
-                ? accent.withValues(alpha: isDark ? 0.16 : 0.07)
+                ? null
                 : ThemeHelpers.cardBackgroundColor(context)
                     .withValues(alpha: 0.5),
             border: Border.all(
@@ -705,11 +808,36 @@ class _ProjectPickerTile extends StatelessWidget {
                   : ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
               width: selected ? 1.4 : 1,
             ),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: accent.withValues(alpha: isDark ? 0.2 : 0.1),
+                      blurRadius: 14,
+                      spreadRadius: -4,
+                      offset: const Offset(0, 5),
+                    ),
+                  ]
+                : null,
           ),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
             child: Row(
               children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOut,
+                  width: selected ? 3 : 0,
+                  height: 38,
+                  margin: EdgeInsets.only(right: selected ? 10 : 0),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [palette, palette.withValues(alpha: 0.5)],
+                    ),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
                 _FunnelGlyph(
                   color: palette,
                   accent: palette,
@@ -803,11 +931,27 @@ class _ProjectPickerTile extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 if (selected)
-                  Icon(Icons.check_circle_rounded, color: accent, size: 24)
+                  Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: accent.withValues(alpha: isDark ? 0.22 : 0.14),
+                      border: Border.all(
+                        color: accent.withValues(alpha: 0.45),
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.check_rounded,
+                      color: accent,
+                      size: 17,
+                    ),
+                  )
                 else
                   Icon(
                     Icons.chevron_right_rounded,
-                    color: ThemeHelpers.textSecondaryColor(context),
+                    color: ThemeHelpers.textSecondaryColor(context)
+                        .withValues(alpha: 0.7),
                   ),
               ],
             ),

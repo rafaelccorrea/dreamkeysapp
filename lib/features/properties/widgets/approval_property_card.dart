@@ -21,20 +21,51 @@ enum ApprovalQueueKind {
 
 enum _Urgency { fresh, warming, hot }
 
-/// Item da fila de aprovação — **linha flush** (sem card/sombra): faixa de
-/// status à esquerda, thumbnail, info e chevron. Toca para abrir os detalhes,
-/// onde ficam as ações de aprovar/reprovar (integradas ao layout).
-class ApprovalPropertyCard extends StatelessWidget {
+/// Item da fila de aprovação — **linha flush** (sem card/sombra e sem faixa
+/// lateral): thumbnail grande com o código logo abaixo, info à direita e, para
+/// quem tem permissão nas filas de disponibilidade/publicação, os botões de
+/// **Aprovar/Recusar** no próprio item. Tocar no corpo abre os detalhes.
+class ApprovalPropertyCard extends StatefulWidget {
   final Property property;
   final ApprovalQueueKind kind;
   final VoidCallback? onOpenDetails;
+
+  /// Gating de UI: só renderiza o botão quando há permissão.
+  final bool canApprove;
+  final bool canReject;
+
+  /// Callbacks que executam a ação e retornam `true` em sucesso. Quando `null`,
+  /// o botão correspondente não é exibido.
+  final Future<bool> Function()? onApprove;
+  final Future<bool> Function()? onReject;
 
   const ApprovalPropertyCard({
     super.key,
     required this.property,
     required this.kind,
     this.onOpenDetails,
+    this.canApprove = false,
+    this.canReject = false,
+    this.onApprove,
+    this.onReject,
   });
+
+  @override
+  State<ApprovalPropertyCard> createState() => _ApprovalPropertyCardState();
+}
+
+class _ApprovalPropertyCardState extends State<ApprovalPropertyCard> {
+  bool _approving = false;
+  bool _rejecting = false;
+
+  Property get property => widget.property;
+  ApprovalQueueKind get kind => widget.kind;
+
+  bool get _busy => _approving || _rejecting;
+
+  bool get _showApprove => widget.canApprove && widget.onApprove != null;
+  bool get _showReject => widget.canReject && widget.onReject != null;
+  bool get _showActions => _showApprove || _showReject;
 
   bool get _isAvailabilityFlow =>
       kind == ApprovalQueueKind.pendingAvailability ||
@@ -155,6 +186,26 @@ class ApprovalPropertyCard extends StatelessWidget {
     return pieces.join(' · ');
   }
 
+  Future<void> _runApprove() async {
+    if (widget.onApprove == null || _busy) return;
+    setState(() => _approving = true);
+    try {
+      await widget.onApprove!();
+    } finally {
+      if (mounted) setState(() => _approving = false);
+    }
+  }
+
+  Future<void> _runReject() async {
+    if (widget.onReject == null || _busy) return;
+    setState(() => _rejecting = true);
+    try {
+      await widget.onReject!();
+    } finally {
+      if (mounted) setState(() => _rejecting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -172,145 +223,230 @@ class ApprovalPropertyCard extends StatelessWidget {
     final timeLabel = since == null ? '' : _formatRelativeTime(since);
     final price = _priceLabel();
     final address = _addressLabel();
+    final code = property.code;
+    final hasCode = code != null && code.isNotEmpty;
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: onOpenDetails,
+        onTap: widget.onOpenDetails,
         child: Container(
           decoration: BoxDecoration(
             border: Border(
               bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
             ),
           ),
-          child: IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Faixa de status (identidade da linha) — vermelho/âmbar/verde/roxo.
-                Container(width: 3, color: statusColor),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 14, 6, 14),
-                    child: Row(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Coluna da esquerda: thumbnail grande + código logo abaixo.
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: ApprovalLazyThumbnail(
+                          propertyId: property.id,
+                          initialUrl: imageUrl,
+                          size: 72,
+                          radius: 14,
+                        ),
+                      ),
+                      if (hasCode) ...[
+                        const SizedBox(height: 7),
+                        _CodeChip(code: code),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: ApprovalLazyThumbnail(
-                            propertyId: property.id,
-                            initialUrl: imageUrl,
-                            size: 64,
-                            radius: 12,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Flexible(
-                                    child: _StatusPill(
-                                      label: _statusLabel(),
-                                      color: statusColor,
-                                    ),
-                                  ),
-                                  if (timeLabel.isNotEmpty) ...[
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      timeLabel,
-                                      style: theme.textTheme.labelSmall?.copyWith(
-                                        color: neutral,
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                  ],
-                                ],
+                        Row(
+                          children: [
+                            Flexible(
+                              child: _StatusPill(
+                                label: _statusLabel(),
+                                color: statusColor,
                               ),
-                              const SizedBox(height: 6),
+                            ),
+                            if (timeLabel.isNotEmpty) ...[
+                              const SizedBox(width: 8),
                               Text(
-                                property.title.isEmpty
-                                    ? 'Sem título'
-                                    : property.title,
-                                style: theme.textTheme.titleSmall?.copyWith(
-                                  fontWeight: FontWeight.w800,
-                                  color: ThemeHelpers.textColor(context),
-                                  height: 1.2,
-                                  letterSpacing: -0.2,
+                                timeLabel,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: neutral,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 11,
                                 ),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
                               ),
-                              if (address.isNotEmpty) ...[
-                                const SizedBox(height: 3),
-                                Row(
-                                  children: [
-                                    Icon(LucideIcons.mapPin,
-                                        size: 13, color: neutral),
-                                    const SizedBox(width: 4),
-                                    Expanded(
-                                      child: Text(
-                                        address,
-                                        style: theme.textTheme.bodySmall
-                                            ?.copyWith(
-                                          color: neutral,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                              if (price.isNotEmpty) ...[
-                                const SizedBox(height: 5),
-                                Text(
-                                  price,
-                                  style: theme.textTheme.bodyMedium?.copyWith(
-                                    color: ThemeHelpers.textColor(context),
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: -0.2,
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          property.title.isEmpty
+                              ? 'Sem título'
+                              : property.title,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: ThemeHelpers.textColor(context),
+                            height: 1.2,
+                            letterSpacing: -0.2,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (address.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Icon(LucideIcons.mapPin, size: 13, color: neutral),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  address,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: neutral,
+                                    fontWeight: FontWeight.w600,
                                   ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
-                              ],
-                              if (property.code != null &&
-                                  property.code!.isNotEmpty) ...[
-                                const SizedBox(height: 5),
-                                Text(
-                                  'CÓD ${property.code!}',
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color: neutral,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 1.1,
-                                    fontSize: 10,
-                                  ),
-                                ),
-                              ],
+                              ),
                             ],
                           ),
-                        ),
-                        const SizedBox(width: 6),
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Icon(
-                            LucideIcons.chevronRight,
-                            size: 18,
-                            color: neutral.withValues(alpha: 0.7),
+                        ],
+                        if (price.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            price,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: ThemeHelpers.textColor(context),
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.2,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
+                        ],
                       ],
                     ),
                   ),
-                ),
+                  const SizedBox(width: 4),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Icon(
+                      LucideIcons.chevronRight,
+                      size: 18,
+                      color: neutral.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
+              ),
+              if (_showActions) ...[
+                const SizedBox(height: 14),
+                _buildActions(context),
               ],
-            ),
+            ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActions(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final ok =
+        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
+    final danger =
+        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+
+    Widget spinner(Color c) => SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(strokeWidth: 2, color: c),
+        );
+
+    final rejectBtn = OutlinedButton.icon(
+      onPressed: _busy ? null : _runReject,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: danger,
+        side: BorderSide(color: danger.withValues(alpha: 0.5)),
+        padding: const EdgeInsets.symmetric(vertical: 11),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+      ),
+      icon: _rejecting
+          ? spinner(danger)
+          : const Icon(LucideIcons.xCircle, size: 16),
+      label: const Text('Recusar'),
+    );
+
+    final approveBtn = FilledButton.icon(
+      onPressed: _busy ? null : _runApprove,
+      style: FilledButton.styleFrom(
+        backgroundColor: ok,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(vertical: 11),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+      ),
+      icon: _approving
+          ? spinner(Colors.white)
+          : const Icon(LucideIcons.checkCircle2, size: 16),
+      label: const Text('Aprovar'),
+    );
+
+    return Row(
+      children: [
+        if (_showReject) Expanded(child: rejectBtn),
+        if (_showReject && _showApprove) const SizedBox(width: 10),
+        if (_showApprove) Expanded(child: approveBtn),
+      ],
+    );
+  }
+}
+
+/// Código do imóvel — chip discreto exibido abaixo da miniatura.
+class _CodeChip extends StatelessWidget {
+  final String code;
+
+  const _CodeChip({required this.code});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = isDark
+        ? AppColors.background.backgroundTertiaryDarkMode
+        : AppColors.background.backgroundTertiary;
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 72),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Text(
+        'CÓD $code',
+        textAlign: TextAlign.center,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: ThemeHelpers.textSecondaryColor(context),
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.6,
+          fontSize: 9.5,
+          height: 1,
         ),
       ),
     );
