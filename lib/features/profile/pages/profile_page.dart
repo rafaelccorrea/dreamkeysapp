@@ -1,5 +1,7 @@
 import 'dart:io';
+import 'dart:math' as math;
 
+import 'package:custom_refresh_indicator/custom_refresh_indicator.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -14,15 +16,25 @@ import '../widgets/avatar_edit_modal.dart';
 import '../widgets/change_password_modal.dart';
 import '../widgets/sessions_modal.dart';
 
+// ─── Paleta editorial do Perfil (índigo como acento principal, igual ao DNA
+// da tela de Usuários — calmo, não "tudo vermelho"). Tons com significado. ───
+Color _pIndigo(bool d) => d ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
+Color _pViolet(bool d) => d ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED);
+Color _pEmerald(bool d) => d ? const Color(0xFF34D399) : const Color(0xFF059669);
+Color _pAmber(bool d) => d ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
+Color _pBlue(bool d) => d ? const Color(0xFF60A5FA) : const Color(0xFF2563EB);
+
 /// Página de Perfil — identidade visual unificada com o resto do app.
 ///
 /// Convenções:
 ///   • Conteúdo flat (sem cards encapsulando), tudo flui no fundo da tela.
-///   • Eyebrows accent uppercase pequenos (10.5px w900 letterSpacing 1.65).
-///   • Paleta única: primary accent + neutros (text + secondary). Verde
-///     reservado para estado "ativo"; âmbar para avisos. Sem rainbow.
+///   • Eyebrows accent uppercase pequenos com barra tonal à esquerda.
+///   • Paleta editorial (mesmo DNA da tela de Usuários): **índigo** como acento
+///     principal + tons com significado — violet (cargo/segurança), emerald
+///     (ativo/site), amber (membro desde), blue (sessões). Calmo, não "tudo
+///     vermelho", sem virar rainbow.
+///   • Pull-to-refresh com pílula (mesmo idioma do Kanban CRM) — sem botão.
 ///   • Mesmo layout para light e dark mode — sem wrapper "glass" exclusivo.
-///   • Ícones outline 18–22px, sem chips coloridos de 44×44.
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
 
@@ -36,6 +48,11 @@ class _ProfilePageState extends State<ProfilePage> {
   String? _errorMessage;
   bool _isUpdatingVisibility = false;
   int? _sessionCount;
+
+  // Toast do avatar fica pendente e só é exibido DEPOIS que o sheet fecha —
+  // antes o SnackBar aparecia atrás do modal.
+  String? _pendingToastMsg;
+  bool _pendingToastOk = false;
 
   // ─── Lifecycle ──────────────────────────────────────────────────────────
 
@@ -99,16 +116,16 @@ class _ProfilePageState extends State<ProfilePage> {
       if (!mounted) return false;
       if (response.success && response.data != null) {
         setState(() => _profile = response.data);
-        _toast('Foto removida com sucesso', success: true);
+        _queueToast('Foto removida com sucesso', ok: true);
         return true;
       }
-      _toast(response.message ?? 'Erro ao remover foto', success: false);
+      _queueToast(response.message ?? 'Erro ao remover foto', ok: false);
       return false;
     }
 
     final imageFile = File(avatarUrlOrPath);
     if (!await imageFile.exists()) {
-      if (mounted) _toast('Arquivo não encontrado', success: false);
+      _queueToast('Arquivo não encontrado', ok: false);
       return false;
     }
     try {
@@ -117,18 +134,39 @@ class _ProfilePageState extends State<ProfilePage> {
       if (response.success) {
         await _loadProfile();
         if (!mounted) return false;
-        _toast('Foto de perfil atualizada!', success: true);
+        _queueToast('Foto de perfil atualizada!', ok: true);
         return true;
       }
-      _toast(
-        response.message ?? 'Erro ao enviar a foto',
-        success: false,
-      );
+      _queueToast(response.message ?? 'Erro ao enviar a foto', ok: false);
       return false;
     } catch (e) {
-      if (mounted) _toast('Erro: $e', success: false);
+      _queueToast('Erro: $e', ok: false);
       return false;
     }
+  }
+
+  /// Enfileira um toast para ser exibido só quando o sheet do avatar fechar.
+  void _queueToast(String msg, {required bool ok}) {
+    _pendingToastMsg = msg;
+    _pendingToastOk = ok;
+  }
+
+  void _flushPendingToast() {
+    final msg = _pendingToastMsg;
+    if (msg == null || !mounted) return;
+    _pendingToastMsg = null;
+    _toast(msg, success: _pendingToastOk);
+  }
+
+  Future<void> _openAvatarEditor() async {
+    final p = _profile;
+    if (p == null) return;
+    await AvatarEditModal.show(
+      context: context,
+      onSave: _handleAvatarChange,
+      currentAvatar: p.avatar,
+    );
+    _flushPendingToast();
   }
 
   Future<void> _togglePublicVisibility() async {
@@ -220,16 +258,6 @@ class _ProfilePageState extends State<ProfilePage> {
       userName: _profile?.name,
       userEmail: _profile?.email,
       userAvatar: _profile?.avatar,
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.refresh),
-          onPressed: () {
-            _loadProfile();
-            _loadSessionCount();
-          },
-          tooltip: 'Atualizar',
-        ),
-      ],
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 220),
         switchInCurve: Curves.easeOut,
@@ -246,13 +274,14 @@ class _ProfilePageState extends State<ProfilePage> {
                     padding: const EdgeInsets.all(24),
                     child: _buildErrorState(context, theme),
                   )
-                : RefreshIndicator(
+                : CustomRefreshIndicator(
                     key: const ValueKey('ok'),
-                    color: AppColors.primary.primary,
+                    offsetToArmed: 96,
                     onRefresh: () async {
                       await _loadProfile();
                       await _loadSessionCount();
                     },
+                    builder: _pullRefreshBuilder,
                     child: SingleChildScrollView(
                       physics: const AlwaysScrollableScrollPhysics(),
                       padding: const EdgeInsets.only(bottom: 56),
@@ -274,32 +303,146 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  // ─── Pull-to-refresh com pílula (mesmo idioma do Kanban CRM) ─────────────
+
+  Widget _pullRefreshBuilder(
+    BuildContext context,
+    Widget child,
+    IndicatorController controller,
+  ) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accent = _pIndigo(isDark);
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final dragPct = controller.value.clamp(0.0, 1.0);
+        final shift = (controller.value * 64).clamp(0.0, 80.0);
+        final visible = controller.value > 0.02 ||
+            controller.isLoading ||
+            controller.isFinalizing;
+        return Stack(
+          children: [
+            Transform.translate(offset: Offset(0, shift), child: child),
+            if (visible)
+              Positioned(
+                top: 10,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Opacity(
+                    opacity: dragPct == 0 ? 1 : dragPct,
+                    child: _refreshPill(context, accent, controller, dragPct),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _refreshPill(
+    BuildContext context,
+    Color accent,
+    IndicatorController controller,
+    double dragPct,
+  ) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final loading = controller.isLoading || controller.isFinalizing;
+    final armed = controller.isArmed;
+    final label = loading
+        ? 'Atualizando…'
+        : (armed ? 'Solte para atualizar' : 'Puxe para atualizar');
+    return Container(
+      padding: const EdgeInsets.fromLTRB(11, 8, 14, 8),
+      decoration: BoxDecoration(
+        color: ThemeHelpers.cardBackgroundColor(context),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: accent.withValues(alpha: isDark ? 0.45 : 0.30),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withValues(alpha: isDark ? 0.20 : 0.12),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+            spreadRadius: -6,
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 18,
+            height: 18,
+            child: loading
+                ? _SpinningGlyph(color: accent)
+                : Transform.rotate(
+                    angle: dragPct * math.pi,
+                    child:
+                        Icon(Icons.refresh_rounded, size: 18, color: accent),
+                  ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.1,
+              color: accent,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ─── Hero ───────────────────────────────────────────────────────────────
 
   Widget _buildHero(BuildContext context, ThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
-    final accent =
-        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    final indigo = _pIndigo(isDark);
+    final violet = _pViolet(isDark);
+    final emerald = _pEmerald(isDark);
+    final amber = _pAmber(isDark);
+    final blue = _pBlue(isDark);
     final p = _profile!;
     final textColor = ThemeHelpers.textColor(context);
     final secondaryColor = ThemeHelpers.textSecondaryColor(context);
+    final isPublic = p.isAvailableForPublicSite;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Eyebrow accent (mesmo padrão dos atalhos do corretor).
+          // Eyebrow editorial — dot esmeralda + label (acento índigo).
           Row(
             children: [
-              Icon(Icons.account_circle_outlined, size: 14, color: accent),
-              const SizedBox(width: 6),
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: emerald,
+                  boxShadow: [
+                    BoxShadow(
+                      color: emerald.withValues(alpha: 0.5),
+                      blurRadius: 7,
+                      spreadRadius: 1,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
               Text(
                 'PERFIL DA CONTA',
                 style: theme.textTheme.labelSmall?.copyWith(
-                  color: accent,
+                  color: indigo,
                   fontWeight: FontWeight.w900,
-                  letterSpacing: 1.65,
+                  letterSpacing: 2.0,
                   fontSize: 10.5,
                 ),
               ),
@@ -312,14 +455,7 @@ class _ProfilePageState extends State<ProfilePage> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              _AvatarPlate(
-                profile: p,
-                onTap: () => AvatarEditModal.show(
-                  context: context,
-                  onSave: _handleAvatarChange,
-                  currentAvatar: p.avatar,
-                ),
-              ),
+              _AvatarPlate(profile: p, onTap: _openAvatarEditor),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
@@ -339,16 +475,25 @@ class _ProfilePageState extends State<ProfilePage> {
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      p.email,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: secondaryColor,
-                        fontWeight: FontWeight.w500,
-                        height: 1.3,
-                        fontSize: 13,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    Row(
+                      children: [
+                        Icon(Icons.mail_outline_rounded,
+                            size: 13, color: secondaryColor),
+                        const SizedBox(width: 5),
+                        Expanded(
+                          child: Text(
+                            p.email,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: secondaryColor,
+                              fontWeight: FontWeight.w500,
+                              height: 1.3,
+                              fontSize: 13,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -356,7 +501,8 @@ class _ProfilePageState extends State<ProfilePage> {
             ],
           ),
           const SizedBox(height: 14),
-          // Pills de meta — cargo, empresa, sessões.
+          // Pills de meta — cores com significado (cargo, empresa, sessões,
+          // membro desde, visibilidade). Mais conteúdo, sem virar rainbow.
           Wrap(
             spacing: 6,
             runSpacing: 6,
@@ -364,25 +510,30 @@ class _ProfilePageState extends State<ProfilePage> {
               _MetaPill(
                 icon: Icons.workspace_premium_outlined,
                 label: _getRoleLabel(p.role),
-                tone: accent,
+                tone: violet,
               ),
               if ((p.companyName ?? '').trim().isNotEmpty)
                 _MetaPill(
                   icon: Icons.apartment_rounded,
                   label: p.companyName!.trim(),
-                  tone: secondaryColor,
+                  tone: indigo,
                 ),
               _MetaPill(
                 icon: Icons.devices_rounded,
                 label: _sessionCount != null
                     ? '$_sessionCount sessã${_sessionCount == 1 ? "o" : "ões"}'
                     : 'Sessões…',
-                tone: secondaryColor,
+                tone: blue,
               ),
               _MetaPill(
                 icon: Icons.event_outlined,
                 label: 'Desde ${_formatDate(p.createdAt)}',
-                tone: secondaryColor,
+                tone: amber,
+              ),
+              _MetaPill(
+                icon: isPublic ? Icons.public_rounded : Icons.lock_outline_rounded,
+                label: isPublic ? 'No site' : 'Perfil privado',
+                tone: isPublic ? emerald : secondaryColor,
               ),
             ],
           ),
@@ -395,11 +546,9 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _buildActionsSection(BuildContext context, ThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
-    final accent =
-        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
-    // Azul (info) para dispositivos/sessões — cor com significado, não rainbow.
-    final info =
-        isDark ? AppColors.status.infoDarkMode : AppColors.status.info;
+    final indigo = _pIndigo(isDark);
+    // Azul para dispositivos/sessões — cor com significado, não rainbow.
+    final blue = _pBlue(isDark);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -407,20 +556,20 @@ class _ProfilePageState extends State<ProfilePage> {
         const SizedBox(height: 6),
         _FlatActionRow(
           icon: Icons.tune_rounded,
-          tone: accent,
+          tone: indigo,
           title: 'Editar dados do perfil',
           subtitle: 'Nome, telefone, foto e informações pessoais.',
           onTap: () => Navigator.pushNamed(context, AppRoutes.profileEdit),
         ),
         _FlatActionRow(
           icon: Icons.devices_outlined,
-          tone: info,
+          tone: blue,
           title: 'Sessões e dispositivos',
           subtitle: _sessionCount != null
               ? '$_sessionCount sessã${_sessionCount == 1 ? "o" : "ões"} ativa${_sessionCount == 1 ? "" : "s"}.'
               : 'Gerencie onde sua conta está conectada.',
           trailing: _sessionCount != null
-              ? _OutlineCounterBadge(value: '$_sessionCount', tone: info)
+              ? _OutlineCounterBadge(value: '$_sessionCount', tone: blue)
               : null,
           onTap: () => SessionsModal.show(context: context)
               .then((_) => _loadSessionCount()),
@@ -491,10 +640,8 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _buildPrivacySection(BuildContext context, ThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
-    final accent =
-        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
-    final green =
-        isDark ? AppColors.status.successDarkMode : AppColors.status.success;
+    final violet = _pViolet(isDark);
+    final green = _pEmerald(isDark);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -502,7 +649,7 @@ class _ProfilePageState extends State<ProfilePage> {
         const SizedBox(height: 6),
         _FlatActionRow(
           icon: Icons.lock_outline_rounded,
-          tone: accent,
+          tone: violet,
           title: 'Alterar senha',
           subtitle: 'Fluxo seguro · sessões antigas podem ser invalidadas.',
           onTap: () => ChangePasswordModal.show(context: context),
@@ -591,7 +738,7 @@ class _ProfilePageState extends State<ProfilePage> {
           icon: const Icon(Icons.refresh),
           label: const Text('Tentar de novo'),
           style: TextButton.styleFrom(
-            foregroundColor: AppColors.primary.primary,
+            foregroundColor: _pIndigo(theme.brightness == Brightness.dark),
           ),
         ),
       ],
@@ -613,8 +760,7 @@ class _SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final accent =
-        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    final accent = _pIndigo(isDark);
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
       child: Row(
@@ -1070,8 +1216,7 @@ class _AvatarPlate extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final accent =
-        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    final accent = _pIndigo(isDark);
     const size = 88.0;
 
     return Semantics(
@@ -1154,8 +1299,7 @@ class _AvatarPlate extends StatelessWidget {
         : parts.length == 1
             ? parts.first[0].toUpperCase()
             : (parts.first[0] + parts.last[0]).toUpperCase();
-    final accent =
-        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    final accent = _pIndigo(isDark);
     final toneDeep = HSLColor.fromColor(accent)
         .withLightness(
           (HSLColor.fromColor(accent).lightness * 0.78).clamp(0.0, 1.0),
@@ -1232,6 +1376,38 @@ class _AvatarStatusDot extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Glyph que gira continuamente enquanto recarrega — mesmo idioma do
+/// pull-to-refresh do Kanban (em vez do spinner circular padrão).
+class _SpinningGlyph extends StatefulWidget {
+  const _SpinningGlyph({required this.color});
+  final Color color;
+
+  @override
+  State<_SpinningGlyph> createState() => _SpinningGlyphState();
+}
+
+class _SpinningGlyphState extends State<_SpinningGlyph>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 850),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: _c,
+      child: Icon(Icons.sync_rounded, size: 18, color: widget.color),
     );
   }
 }

@@ -88,6 +88,7 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
   final TextEditingController _searchController = TextEditingController();
   Timer? _searchDebounce;
   String _appliedSearch = '';
+  bool _searchFocused = false;
 
   bool _didLoadQueues = false;
 
@@ -438,125 +439,228 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
     );
   }
 
-  // ─── Greeting (estilo `_buildGreeting` do dashboard) ───────────────────
+  // ─── Hero editorial (mesmo DNA da tela de Usuários — sem ícone/banner) ──
 
   Widget _buildGreeting(BuildContext context) {
     final theme = Theme.of(context);
-    final accent = _accentColor(context);
     final isDark = theme.brightness == Brightness.dark;
+    final accent = _accentColor(context);
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final ok =
+        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
+    final warn =
+        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
+    final purple =
+        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
+    final danger =
+        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    final emerald =
+        isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
+
     final pendingTotal = _pendingTotal();
-    final danger = isDark
-        ? AppColors.status.errorDarkMode
-        : AppColors.status.error;
+    final hasRejected = _rejectedCounts.total > 0;
+    final dotColor =
+        hasRejected ? danger : (pendingTotal > 0 ? accent : emerald);
+
+    final subtitle = !_canViewQueues
+        ? 'Acompanhe seus imóveis na fila de aprovação.'
+        : hasRejected
+            ? '${_rejectedCounts.total} recusado${_rejectedCounts.total == 1 ? '' : 's'} aguardando reenvio · libere operação e site.'
+            : (pendingTotal == 0
+                ? 'Tudo em dia — nada aguardando aprovação agora.'
+                : 'Liberação para a operação e para o site.');
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(0, 4, 0, 0),
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  accent,
-                  isDark
-                      ? AppColors.primary.primaryDarkDarkMode
-                      : AppColors.primary.primaryDark,
-                ],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: isDark
-                      ? accent.withValues(alpha: 0.30)
-                      : accent.withValues(alpha: 0.18),
-                  blurRadius: isDark ? 14 : 11,
-                  offset: Offset(0, isDark ? 8 : 4),
-                  spreadRadius: isDark ? 0 : -1,
+          // Eyebrow editorial — dot semântico + label uppercase.
+          Row(
+            children: [
+              Container(
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: dotColor,
+                  boxShadow: [
+                    BoxShadow(
+                      color: dotColor.withValues(alpha: 0.55),
+                      blurRadius: 8,
+                      spreadRadius: 1,
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            child: const Icon(
-              LucideIcons.shieldCheck,
-              color: Colors.white,
-              size: 22,
+              ),
+              const SizedBox(width: 9),
+              Text(
+                'FILA DE APROVAÇÃO',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: accent,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 2.2,
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // Headline com número grande + rótulo na base (editorial).
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '$pendingTotal',
+                style: theme.textTheme.displaySmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: textColor,
+                  height: 1.0,
+                  letterSpacing: -1.0,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 5),
+                child: Text(
+                  pendingTotal == 1 ? 'pendência' : 'pendências',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: secondary,
+                    fontWeight: FontWeight.w800,
+                    height: 1.0,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: secondary,
+              fontWeight: FontWeight.w600,
+              height: 1.4,
             ),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'FILA DE APROVAÇÃO',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: accent,
+          if (_canViewQueues) ...[
+            const SizedBox(height: 18),
+            _buildHeroKpiStrip(context, ok, warn, purple, danger),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Strip editorial de KPIs por fila — 4 colunas separadas por filete fino.
+  Widget _buildHeroKpiStrip(
+    BuildContext context,
+    Color ok,
+    Color warn,
+    Color purple,
+    Color danger,
+  ) {
+    final divider = ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
+    final blocks = <Widget>[
+      _heroKpiBlock(context, LucideIcons.checkCircle2, 'DISPONIB.',
+          _pendingAvailability.length, 'p/ operar', ok),
+      _heroKpiBlock(context, LucideIcons.globe, 'PUBLIC.',
+          _pendingPublication.length, 'p/ o site', warn),
+      _heroKpiBlock(context, LucideIcons.fileSignature, 'PROPRIET.',
+          _pendingOwner.length, 'assinatura', purple),
+      _heroKpiBlock(context, LucideIcons.alertTriangle, 'RECUSADOS',
+          _rejectedCounts.total, 'ajustar', danger),
+    ];
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < blocks.length; i++) ...[
+            if (i > 0)
+              Container(
+                width: 1,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                color: divider,
+              ),
+            Expanded(child: blocks[i]),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _heroKpiBlock(
+    BuildContext context,
+    IconData icon,
+    String label,
+    int value,
+    String sub,
+    Color tone,
+  ) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 11, color: tone),
+              const SizedBox(width: 5),
+              Flexible(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 9,
                     fontWeight: FontWeight.w900,
-                    letterSpacing: 2.2,
+                    color: tone,
+                    letterSpacing: 1.2,
+                    height: 1.0,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  _canViewQueues
-                      ? (pendingTotal == 0
-                          ? 'Tudo em dia por aqui'
-                          : '$pendingTotal ${pendingTotal == 1 ? 'imóvel aguarda' : 'imóveis aguardam'} aprovação')
-                      : 'Acompanhe seus imóveis na fila',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    color: ThemeHelpers.textColor(context),
-                    height: 1.05,
-                    letterSpacing: -0.4,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                if (_rejectedCounts.total > 0)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 9,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: danger.withValues(alpha: isDark ? 0.16 : 0.10),
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(
-                          color:
-                              danger.withValues(alpha: isDark ? 0.4 : 0.28),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(LucideIcons.alertTriangle,
-                              size: 12, color: danger),
-                          const SizedBox(width: 6),
-                          Text(
-                            '${_rejectedCounts.total} recusado${_rejectedCounts.total == 1 ? '' : 's'} aguardando reenvio',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: danger,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 11.5,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                else
-                  Text(
-                    'Liberação para a operação e para o site',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
-                      height: 1.3,
-                    ),
-                  ),
-              ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '$value',
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w900,
+                color: tone,
+                letterSpacing: -0.6,
+                height: 1.0,
+                fontSize: 22,
+              ),
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            sub,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: secondary,
+              height: 1.0,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 7),
+          Container(
+            height: 2,
+            width: 18,
+            decoration: BoxDecoration(
+              color: tone,
+              borderRadius: BorderRadius.circular(2),
             ),
           ),
         ],
@@ -577,71 +681,103 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final accent = _accentColor(context);
-    final hasText = _searchController.text.trim().isNotEmpty;
-    final fieldFill = isDark
-        ? AppColors.background.backgroundTertiaryDarkMode
-        : AppColors.background.backgroundTertiary;
-    OutlineInputBorder fieldBorder(Color c, double w) => OutlineInputBorder(
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final cardColor = ThemeHelpers.cardBackgroundColor(context);
+    final borderColor = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : Colors.black.withValues(alpha: 0.06);
+    final hasText = _searchController.text.isNotEmpty;
+    final showAccent = _searchFocused || hasText;
+
+    // Controle único no estilo da tela de Usuários: container animado que
+    // tinge em accent quando há foco/texto, com filete e sombra sutis.
+    return Focus(
+      onFocusChange: (f) => setState(() => _searchFocused = f),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOutCubic,
+        height: 50,
+        decoration: BoxDecoration(
+          color: cardColor,
           borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: c, width: w),
-        );
-    return TextField(
-      controller: _searchController,
-      onChanged: (v) {
-        _onSearchChanged(v);
-        setState(() {});
-      },
-      textInputAction: TextInputAction.search,
-      style: theme.textTheme.bodyMedium?.copyWith(
-        color: ThemeHelpers.textColor(context),
-        fontWeight: FontWeight.w600,
-      ),
-      decoration: InputDecoration(
-        isDense: true,
-        filled: true,
-        fillColor: hasText
-            ? Color.alphaBlend(
-                accent.withValues(alpha: isDark ? 0.08 : 0.04), fieldFill)
-            : fieldFill,
-        contentPadding: const EdgeInsets.symmetric(vertical: 14),
-        hintText: 'Buscar por código, título, proprietário…',
-        hintStyle: theme.textTheme.bodyMedium?.copyWith(
-          color: ThemeHelpers.textSecondaryColor(context),
-          fontWeight: FontWeight.w500,
-        ),
-        // Ícone integrado (sem caixa) — mudo quando vazio, accent quando busca.
-        prefixIcon: Padding(
-          padding: const EdgeInsets.only(left: 14, right: 10),
-          child: Icon(
-            LucideIcons.search,
-            size: 20,
-            color: hasText
-                ? accent
-                : ThemeHelpers.textSecondaryColor(context),
+          border: Border.all(
+            color: showAccent
+                ? accent.withValues(alpha: isDark ? 0.5 : 0.42)
+                : borderColor,
+            width: showAccent ? 1.4 : 1,
           ),
+          boxShadow: showAccent
+              ? [
+                  BoxShadow(
+                    color: accent.withValues(alpha: isDark ? 0.18 : 0.12),
+                    blurRadius: 14,
+                    offset: const Offset(0, 5),
+                    spreadRadius: -4,
+                  ),
+                ]
+              : null,
         ),
-        prefixIconConstraints:
-            const BoxConstraints(minWidth: 38, minHeight: 38),
-        suffixIcon: _searchController.text.isEmpty
-            ? null
-            : IconButton(
-                icon: const Icon(LucideIcons.x, size: 16),
-                splashRadius: 18,
-                onPressed: () {
+        child: Row(
+          children: [
+            const SizedBox(width: 14),
+            Icon(
+              LucideIcons.search,
+              size: 18,
+              color: showAccent ? accent : secondary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: TextField(
+                controller: _searchController,
+                textInputAction: TextInputAction.search,
+                cursorColor: accent,
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.1,
+                ),
+                decoration: InputDecoration(
+                  hintText: 'Buscar por código, título, proprietário…',
+                  hintStyle: TextStyle(
+                    color: secondary.withValues(alpha: 0.75),
+                    fontWeight: FontWeight.w500,
+                    fontSize: 13.5,
+                  ),
+                  filled: false,
+                  fillColor: Colors.transparent,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  disabledBorder: InputBorder.none,
+                  errorBorder: InputBorder.none,
+                  focusedErrorBorder: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
+                  isDense: true,
+                ),
+                onChanged: (v) {
+                  _onSearchChanged(v);
+                  setState(() {});
+                },
+              ),
+            ),
+            if (hasText)
+              InkResponse(
+                radius: 18,
+                onTap: () {
                   _searchController.clear();
                   _onSearchChanged('');
                   setState(() {});
                 },
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Icon(LucideIcons.x, size: 15, color: secondary),
+                ),
               ),
-        border: fieldBorder(ThemeHelpers.borderLightColor(context), 1),
-        enabledBorder: fieldBorder(
-          hasText
-              ? accent.withValues(alpha: isDark ? 0.5 : 0.38)
-              : ThemeHelpers.borderLightColor(context),
-          hasText ? 1.4 : 1,
+            const SizedBox(width: 8),
+          ],
         ),
-        focusedBorder:
-            fieldBorder(accent.withValues(alpha: isDark ? 0.6 : 0.45), 1.5),
       ),
     );
   }

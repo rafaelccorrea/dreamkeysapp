@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart' show MediaType;
 import 'dart:convert';
 import '../../core/constants/api_constants.dart';
 import 'api_service.dart';
@@ -365,14 +366,18 @@ class ProfileService {
       // Headers
       request.headers['Authorization'] = 'Bearer $token';
 
-      // Adicionar arquivo
+      // Adicionar arquivo. O picker (imageQuality) e o cropper já entregam
+      // bytes JPEG; forçamos `filename`/`contentType` como image/jpeg para que
+      // o backend NÃO rejeite por extensão/mimetype quando a origem é HEIC,
+      // WebP, etc. (era a causa de "não aceita certos tipos de imagem").
       final fileStream = http.ByteStream(imageFile.openRead());
       final fileLength = await imageFile.length();
       final multipartFile = http.MultipartFile(
         'avatar',
         fileStream,
         fileLength,
-        filename: imageFile.path.split('/').last,
+        filename: 'avatar.jpg',
+        contentType: MediaType('image', 'jpeg'),
       );
       request.files.add(multipartFile);
 

@@ -7,16 +7,12 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../../../../shared/utils/image_crop_helper.dart';
 
-/// Modal **flush** de edição de foto de perfil.
+/// Modal **flush** de edição de foto de perfil — calmo e coerente (NÃO vermelho).
 ///
-/// Paleta coerente e com significado (sem rainbow):
-///   • **primary** (marca) — anel do avatar, badge de câmera e CTA de salvar.
-///   • **info/azul** — painel de dicas/especificações (informativo).
-///   • **success/verde** — confirmação de imagem selecionada.
-///   • **error/vermelho** — apenas a ação destrutiva de remover.
-///
-/// O `onSave` retorna `Future<bool>`: o modal aguarda, mostra progresso e só
-/// fecha em sucesso (em erro permanece aberto para nova tentativa).
+/// Acento **índigo** (mesmo DNA editorial da tela de Usuários) para avatar,
+/// origem e CTA; **verde** confirma a imagem selecionada; **vermelho** só na
+/// ação destrutiva de remover. Feedback de seleção fica inline (sem snackbar
+/// atrás do sheet); o resultado do upload é avisado pela página após fechar.
 class AvatarEditModal {
   static Future<void> show({
     required BuildContext context,
@@ -51,32 +47,36 @@ class _AvatarEditModalContentState extends State<_AvatarEditModalContent> {
   File? _selectedImage;
   bool _isUploading = false;
   bool _isRemoving = false;
+  String? _inlineError;
 
   bool get _busy => _isUploading || _isRemoving;
+  bool get _isDark => Theme.of(context).brightness == Brightness.dark;
 
-  Color _primary(bool isDark) =>
-      isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
-  Color _info(bool isDark) =>
-      isDark ? AppColors.status.infoDarkMode : AppColors.status.info;
-  Color _success(bool isDark) =>
-      isDark ? AppColors.status.successDarkMode : AppColors.status.success;
-  Color _danger(bool isDark) =>
-      isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+  // Acento calmo (índigo) — coerente com as telas editoriais do app.
+  Color get _accent =>
+      _isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
+  Color get _success =>
+      _isDark ? AppColors.status.successDarkMode : AppColors.status.success;
+  Color get _danger =>
+      _isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
 
   Future<void> _pickImage(ImageSource source) async {
+    setState(() => _inlineError = null);
     try {
       final XFile? pickedFile = await _imagePicker.pickImage(
         source: source,
-        maxWidth: 800,
-        maxHeight: 800,
-        imageQuality: 85,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 88,
       );
       if (pickedFile == null) return;
 
       final file = File(pickedFile.path);
       final fileSize = await file.length();
-      if (fileSize > 5 * 1024 * 1024) {
-        _snack('Arquivo muito grande. Máximo: 5MB', _danger(_isDark));
+      if (fileSize > 8 * 1024 * 1024) {
+        if (mounted) {
+          setState(() => _inlineError = 'Imagem muito grande (máx. 8MB).');
+        }
         return;
       }
 
@@ -84,31 +84,20 @@ class _AvatarEditModalContentState extends State<_AvatarEditModalContent> {
       try {
         final croppedFile = await ImageCropHelper.cropImageCircle(
           imagePath: file.path,
-          compressQuality: 85,
+          compressQuality: 88,
         );
         if (!mounted) return;
         setState(() => _selectedImage = croppedFile ?? file);
-      } catch (cropError) {
+      } catch (_) {
+        // Recorte indisponível para o formato — segue com a imagem original.
         if (!mounted) return;
         setState(() => _selectedImage = file);
-        _snack('Recorte indisponível. Usando imagem original.',
-            _info(_isDark));
       }
-    } catch (e) {
-      if (mounted) _snack('Erro ao selecionar imagem', _danger(_isDark));
+    } catch (_) {
+      if (mounted) {
+        setState(() => _inlineError = 'Não foi possível abrir essa imagem.');
+      }
     }
-  }
-
-  bool get _isDark => Theme.of(context).brightness == Brightness.dark;
-
-  void _snack(String msg, Color color) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        backgroundColor: color,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
   }
 
   Future<void> _handleUpload() async {
@@ -133,7 +122,7 @@ class _AvatarEditModalContentState extends State<_AvatarEditModalContent> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final primary = _primary(isDark);
+    final accent = _accent;
     final hasCurrent =
         widget.currentAvatar != null && widget.currentAvatar!.isNotEmpty;
 
@@ -142,7 +131,7 @@ class _AvatarEditModalContentState extends State<_AvatarEditModalContent> {
         color: ThemeHelpers.cardBackgroundColor(context),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
         border: Border.all(
-          color: primary.withValues(alpha: isDark ? 0.22 : 0.14),
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.6),
         ),
         boxShadow: [
           BoxShadow(
@@ -165,37 +154,42 @@ class _AvatarEditModalContentState extends State<_AvatarEditModalContent> {
               const SizedBox(height: 10),
               Center(
                 child: Container(
-                  width: 44,
+                  width: 42,
                   height: 5,
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(colors: [
-                      primary.withValues(alpha: 0.55),
-                      primary.withValues(alpha: 0.28),
-                    ]),
+                    color: ThemeHelpers.textSecondaryColor(context)
+                        .withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 16, 0),
-                child: _buildHeader(context, theme, isDark, primary),
-              ),
-              const SizedBox(height: 22),
-              _buildPreview(context, isDark, primary),
-              const SizedBox(height: 22),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: _buildSourceButtons(context, theme, isDark, primary),
-              ),
-              const SizedBox(height: 14),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: _buildTipPanel(context, theme, isDark),
+                child: _buildHeader(context, theme, isDark, accent),
               ),
               const SizedBox(height: 20),
+              _buildPreview(context, isDark, accent),
+              const SizedBox(height: 20),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: _buildSourceButtons(context, theme, isDark, accent),
+              ),
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: _buildTip(context, theme, isDark, accent),
+              ),
+              if (_inlineError != null) ...[
+                const SizedBox(height: 10),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: _buildInlineError(context, theme),
+                ),
+              ],
+              const SizedBox(height: 18),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                child: _buildActions(context, theme, isDark, primary, hasCurrent),
+                child: _buildActions(context, theme, isDark, accent, hasCurrent),
               ),
             ],
           ),
@@ -208,27 +202,20 @@ class _AvatarEditModalContentState extends State<_AvatarEditModalContent> {
     BuildContext context,
     ThemeData theme,
     bool isDark,
-    Color primary,
+    Color accent,
   ) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          width: 40,
-          height: 40,
+          width: 38,
+          height: 38,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(13),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                primary.withValues(alpha: isDark ? 0.42 : 0.22),
-                primary.withValues(alpha: isDark ? 0.22 : 0.12),
-              ],
-            ),
-            border: Border.all(color: primary.withValues(alpha: 0.4)),
+            borderRadius: BorderRadius.circular(12),
+            color: accent.withValues(alpha: isDark ? 0.18 : 0.1),
+            border: Border.all(color: accent.withValues(alpha: 0.28)),
           ),
-          child: Icon(Icons.photo_camera_rounded, color: primary, size: 20),
+          child: Icon(Icons.photo_camera_rounded, color: accent, size: 19),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -246,7 +233,7 @@ class _AvatarEditModalContentState extends State<_AvatarEditModalContent> {
               ),
               const SizedBox(height: 2),
               Text(
-                'Escolha de onde quer enviar sua nova foto.',
+                'Escolha de onde enviar sua nova foto.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: ThemeHelpers.textSecondaryColor(context),
                 ),
@@ -259,11 +246,10 @@ class _AvatarEditModalContentState extends State<_AvatarEditModalContent> {
     );
   }
 
-  Widget _buildPreview(BuildContext context, bool isDark, Color primary) {
-    final success = _success(isDark);
+  Widget _buildPreview(BuildContext context, bool isDark, Color accent) {
     final hasSelected = _selectedImage != null;
-    final ringColor = hasSelected ? success : primary;
-    const size = 132.0;
+    final ring = hasSelected ? _success : accent;
+    const size = 124.0;
 
     Widget inner;
     if (hasSelected) {
@@ -281,26 +267,12 @@ class _AvatarEditModalContentState extends State<_AvatarEditModalContent> {
 
     return Center(
       child: SizedBox(
-        width: size + 16,
-        height: size + 16,
+        width: size + 14,
+        height: size + 14,
         child: Stack(
           clipBehavior: Clip.none,
           alignment: Alignment.center,
           children: [
-            // Halo suave atrás do avatar.
-            Container(
-              width: size + 10,
-              height: size + 10,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    ringColor.withValues(alpha: isDark ? 0.22 : 0.14),
-                    ringColor.withValues(alpha: 0.0),
-                  ],
-                ),
-              ),
-            ),
             Container(
               width: size,
               height: size,
@@ -309,40 +281,37 @@ class _AvatarEditModalContentState extends State<_AvatarEditModalContent> {
                 shape: BoxShape.circle,
                 color: ThemeHelpers.cardBackgroundColor(context),
                 border: Border.all(
-                  color: ringColor.withValues(alpha: isDark ? 0.6 : 0.4),
+                  color: ring.withValues(alpha: isDark ? 0.55 : 0.38),
                   width: 2,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: ringColor.withValues(alpha: isDark ? 0.28 : 0.16),
-                    blurRadius: 18,
+                    color: ring.withValues(alpha: isDark ? 0.22 : 0.12),
+                    blurRadius: 16,
                     spreadRadius: -4,
-                    offset: const Offset(0, 8),
+                    offset: const Offset(0, 6),
                   ),
                 ],
               ),
               child: inner,
             ),
-            // Badge inferior — verde (selecionado) ou primary (câmera).
             Positioned(
-              bottom: 4,
-              right: 12,
+              bottom: 2,
+              right: 14,
               child: Container(
-                padding: const EdgeInsets.all(7),
+                padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: ringColor,
+                  color: ring,
                   border: Border.all(
                     color: ThemeHelpers.cardBackgroundColor(context),
                     width: 3,
                   ),
                 ),
                 child: Icon(
-                  hasSelected
-                      ? Icons.check_rounded
-                      : Icons.photo_camera_rounded,
+                  hasSelected ? Icons.check_rounded : Icons.photo_camera_rounded,
                   color: Colors.white,
-                  size: 16,
+                  size: 15,
                 ),
               ),
             ),
@@ -360,7 +329,7 @@ class _AvatarEditModalContentState extends State<_AvatarEditModalContent> {
       alignment: Alignment.center,
       child: Icon(
         Icons.person_rounded,
-        size: 64,
+        size: 58,
         color: ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.7),
       ),
     );
@@ -370,25 +339,25 @@ class _AvatarEditModalContentState extends State<_AvatarEditModalContent> {
     BuildContext context,
     ThemeData theme,
     bool isDark,
-    Color primary,
+    Color accent,
   ) {
     return Row(
       children: [
         Expanded(
-          child: _SourceTile(
+          child: _SourceButton(
             icon: Icons.photo_camera_rounded,
             label: 'Câmera',
-            tone: primary,
+            tone: accent,
             enabled: !_busy,
             onTap: () => _pickImage(ImageSource.camera),
           ),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 10),
         Expanded(
-          child: _SourceTile(
+          child: _SourceButton(
             icon: Icons.photo_library_rounded,
             label: 'Galeria',
-            tone: primary,
+            tone: accent,
             enabled: !_busy,
             onTap: () => _pickImage(ImageSource.gallery),
           ),
@@ -397,64 +366,25 @@ class _AvatarEditModalContentState extends State<_AvatarEditModalContent> {
     );
   }
 
-  Widget _buildTipPanel(BuildContext context, ThemeData theme, bool isDark) {
-    final info = _info(isDark);
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: info.withValues(alpha: isDark ? 0.12 : 0.07),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: info.withValues(alpha: isDark ? 0.3 : 0.2)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.info_outline_rounded, size: 16, color: info),
-              const SizedBox(width: 8),
-              Text(
-                'Para uma foto nítida',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  color: info,
-                  letterSpacing: 0.1,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          _tipRow(context, theme, Icons.crop_rounded,
-              'Quadrada (1:1), ideal 400×400px'),
-          const SizedBox(height: 6),
-          _tipRow(context, theme, Icons.image_outlined,
-              'JPG, PNG, GIF ou WebP'),
-          const SizedBox(height: 6),
-          _tipRow(context, theme, Icons.storage_rounded,
-              'Até 5MB por imagem'),
-        ],
-      ),
-    );
-  }
-
-  Widget _tipRow(
+  Widget _buildTip(
     BuildContext context,
     ThemeData theme,
-    IconData icon,
-    String text,
+    bool isDark,
+    Color accent,
   ) {
     final secondary = ThemeHelpers.textSecondaryColor(context);
     return Row(
       children: [
-        Icon(icon, size: 14, color: secondary),
-        const SizedBox(width: 8),
+        Icon(Icons.info_outline_rounded, size: 14, color: secondary),
+        const SizedBox(width: 7),
         Expanded(
           child: Text(
-            text,
+            'Foto quadrada e nítida fica melhor · JPG, PNG, HEIC ou WebP · até 8MB',
             style: theme.textTheme.bodySmall?.copyWith(
               color: secondary,
-              fontWeight: FontWeight.w600,
-              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              fontSize: 11.5,
+              height: 1.35,
             ),
           ),
         ),
@@ -462,25 +392,51 @@ class _AvatarEditModalContentState extends State<_AvatarEditModalContent> {
     );
   }
 
+  Widget _buildInlineError(BuildContext context, ThemeData theme) {
+    final danger = _danger;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: danger.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: danger.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.error_outline_rounded, size: 15, color: danger),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _inlineError!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: danger,
+                fontWeight: FontWeight.w700,
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildActions(
     BuildContext context,
     ThemeData theme,
     bool isDark,
-    Color primary,
+    Color accent,
     bool hasCurrent,
   ) {
-    final danger = _danger(isDark);
+    final danger = _danger;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // CTA primário — habilitado só quando há nova imagem selecionada.
         FilledButton.icon(
-          onPressed:
-              (_selectedImage == null || _busy) ? null : _handleUpload,
+          onPressed: (_selectedImage == null || _busy) ? null : _handleUpload,
           style: FilledButton.styleFrom(
-            backgroundColor: primary,
+            backgroundColor: accent,
             foregroundColor: Colors.white,
-            disabledBackgroundColor: primary.withValues(alpha: 0.35),
+            disabledBackgroundColor: accent.withValues(alpha: 0.35),
             disabledForegroundColor: Colors.white.withValues(alpha: 0.85),
             padding: const EdgeInsets.symmetric(vertical: 15),
             shape: RoundedRectangleBorder(
@@ -502,29 +458,28 @@ class _AvatarEditModalContentState extends State<_AvatarEditModalContent> {
           label: Text(_isUploading ? 'Enviando…' : 'Salvar foto'),
         ),
         if (hasCurrent) ...[
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
+          const SizedBox(height: 8),
+          TextButton.icon(
             onPressed: _busy ? null : _handleRemove,
-            style: OutlinedButton.styleFrom(
+            style: TextButton.styleFrom(
               foregroundColor: danger,
-              side: BorderSide(color: danger.withValues(alpha: 0.5)),
-              padding: const EdgeInsets.symmetric(vertical: 14),
+              padding: const EdgeInsets.symmetric(vertical: 12),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(12),
               ),
               textStyle:
-                  const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                  const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5),
             ),
             icon: _isRemoving
                 ? SizedBox(
-                    width: 18,
-                    height: 18,
+                    width: 16,
+                    height: 16,
                     child: CircularProgressIndicator(
-                      strokeWidth: 2.2,
+                      strokeWidth: 2,
                       color: danger,
                     ),
                   )
-                : const Icon(Icons.delete_outline_rounded, size: 18),
+                : const Icon(Icons.delete_outline_rounded, size: 17),
             label: Text(_isRemoving ? 'Removendo…' : 'Remover foto atual'),
           ),
         ],
@@ -533,9 +488,10 @@ class _AvatarEditModalContentState extends State<_AvatarEditModalContent> {
   }
 }
 
-/// Tile de origem (Câmera/Galeria) — flush, com ícone tonal e label.
-class _SourceTile extends StatelessWidget {
-  const _SourceTile({
+/// Botão de origem (Câmera/Galeria) — compacto e calmo: fundo neutro do card,
+/// borda sutil e ícone/rótulo no tom de acento. Nada de fill agressivo.
+class _SourceButton extends StatelessWidget {
+  const _SourceButton({
     required this.icon,
     required this.label,
     required this.tone,
@@ -559,24 +515,26 @@ class _SourceTile extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: enabled ? onTap : null,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(13),
           splashColor: tone.withValues(alpha: 0.12),
           highlightColor: tone.withValues(alpha: 0.06),
           child: Ink(
             decoration: BoxDecoration(
-              color: tone.withValues(alpha: isDark ? 0.1 : 0.05),
-              borderRadius: BorderRadius.circular(16),
+              color: isDark
+                  ? AppColors.background.backgroundTertiaryDarkMode
+                  : AppColors.background.backgroundTertiary,
+              borderRadius: BorderRadius.circular(13),
               border: Border.all(
-                color: tone.withValues(alpha: isDark ? 0.32 : 0.22),
+                color: ThemeHelpers.borderColor(context).withValues(alpha: 0.7),
               ),
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(icon, color: tone, size: 24),
-                  const SizedBox(height: 8),
+                  Icon(icon, color: tone, size: 19),
+                  const SizedBox(width: 8),
                   Text(
                     label,
                     style: theme.textTheme.labelLarge?.copyWith(
@@ -595,7 +553,7 @@ class _SourceTile extends StatelessWidget {
   }
 }
 
-/// Botão circular de fechar — coerente com o resto dos sheets refinados.
+/// Botão circular de fechar — coerente com os demais sheets refinados.
 class _CircleClose extends StatelessWidget {
   const _CircleClose({required this.onTap});
   final VoidCallback? onTap;

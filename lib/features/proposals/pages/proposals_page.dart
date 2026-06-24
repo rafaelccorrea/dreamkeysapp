@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
@@ -329,26 +328,21 @@ class _ProposalsPageState extends State<ProposalsPage> {
               ),
               slivers: [
                 SliverToBoxAdapter(
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      ..._heroAmbientGlows(context, accent),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(_kPadH, 8, _kPadH, 0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            _ProposalsHero(
-                              accent: accent,
-                              stats: _stats,
-                              filteredCount: _data?.total,
-                              statusFilter: _filters.status,
-                              hasFilter: _filters.status != null ||
-                                  _showDeletedOnly ||
-                                  (_search.text.trim().isNotEmpty),
-                              showingDeletedOnly: _showDeletedOnly,
-                            ),
-                            const SizedBox(height: 16),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(_kPadH, 8, _kPadH, 0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _ProposalsHero(
+                          accent: accent,
+                          stats: _stats,
+                          filteredCount: _data?.total,
+                          hasFilter: _filters.status != null ||
+                              _showDeletedOnly ||
+                              (_search.text.trim().isNotEmpty),
+                          showingDeletedOnly: _showDeletedOnly,
+                        ),
+                        const SizedBox(height: 16),
                         _SearchBar(
                           controller: _search,
                           accent: accent,
@@ -376,11 +370,9 @@ class _ProposalsPageState extends State<ProposalsPage> {
                             },
                           ),
                         ],
-                            const SizedBox(height: 12),
-                          ],
-                        ),
-                      ),
-                    ],
+                        const SizedBox(height: 12),
+                      ],
+                    ),
                   ),
                 ),
                 if (_loading)
@@ -452,60 +444,16 @@ class _ProposalsPageState extends State<ProposalsPage> {
     );
   }
 
-  List<Widget> _heroAmbientGlows(BuildContext context, Color accent) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final wine = isDark
-        ? AppColors.secondary.secondaryDarkMode
-        : AppColors.secondary.secondary;
-    return [
-      Positioned(
-        top: -72,
-        right: -48,
-        child: IgnorePointer(
-          child: Container(
-            width: 220,
-            height: 220,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: RadialGradient(
-                colors: [
-                  accent.withValues(alpha: isDark ? 0.22 : 0.12),
-                  Colors.transparent,
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-      Positioned(
-        top: 24,
-        left: -56,
-        child: IgnorePointer(
-          child: Container(
-            width: 160,
-            height: 160,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: RadialGradient(
-                colors: [
-                  wine.withValues(alpha: isDark ? 0.16 : 0.08),
-                  Colors.transparent,
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    ];
-  }
 }
 
+/// Hero **editorial flush** (sem banner/card) — mesmo DNA das telas de
+/// Usuários e Aprovações: eyebrow com dot semântico, número grande + rótulo,
+/// subtítulo contextual e faixa de KPIs.
 class _ProposalsHero extends StatelessWidget {
   const _ProposalsHero({
     required this.accent,
     this.stats,
     this.filteredCount,
-    this.statusFilter,
     this.hasFilter = false,
     this.showingDeletedOnly = false,
   });
@@ -513,444 +461,114 @@ class _ProposalsHero extends StatelessWidget {
   final Color accent;
   final ProposalStats? stats;
   final int? filteredCount;
-  final ProposalStatus? statusFilter;
   final bool hasFilter;
   final bool showingDeletedOnly;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final muted = ThemeHelpers.textSecondaryColor(context);
     final isDark = theme.brightness == Brightness.dark;
-    final now = DateTime.now();
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
     final wine = isDark
         ? AppColors.secondary.secondaryDarkMode
         : AppColors.secondary.secondary;
-    final surface = isDark
-        ? Colors.white.withValues(alpha: 0.04)
-        : Colors.white.withValues(alpha: 0.72);
+    final emerald =
+        isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
+    final danger =
+        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
 
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: accent.withValues(alpha: isDark ? 0.28 : 0.14),
-        ),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            surface,
-            accent.withValues(alpha: isDark ? 0.06 : 0.04),
-            wine.withValues(alpha: isDark ? 0.05 : 0.03),
-          ],
-          stops: const [0.0, 0.55, 1.0],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: accent.withValues(alpha: isDark ? 0.12 : 0.06),
-            blurRadius: 24,
-            offset: const Offset(0, 10),
-            spreadRadius: -8,
-          ),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
+    final total = stats?.total ?? 0;
+    final dotColor =
+        showingDeletedOnly ? danger : (hasFilter ? accent : emerald);
+    final subtitle = showingDeletedOnly
+        ? 'Mostrando apenas fichas excluídas — em auditoria.'
+        : hasFilter
+            ? 'Filtro aplicado · ${filteredCount ?? '—'} no resultado.'
+            : 'Crie, edite, acompanhe etapas e envie para assinatura.';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(0, 8, 0, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Textura diagonal sutil
-          Positioned.fill(
-            child: IgnorePointer(
-              child: CustomPaint(
-                painter: _HeroMeshPainter(
-                  accent: accent.withValues(alpha: isDark ? 0.07 : 0.05),
-                ),
-              ),
-            ),
-          ),
-          // Barra accent superior
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            height: 3,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    accent,
-                    Color.lerp(accent, wine, 0.5) ?? accent,
-                    wine.withValues(alpha: 0.4),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 16, 14, 14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _HeroIcon(accent: accent, wine: wine),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 6,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              _HeroModulePill(accent: accent),
-                              _HeroMetaPill(
-                                icon: Icons.calendar_today_rounded,
-                                label: DateFormat('d MMM', 'pt_BR')
-                                    .format(now)
-                                    .toUpperCase(),
-                              ),
-                              _HeroMetaPill(
-                                icon: Icons.schedule_rounded,
-                                label: DateFormat('HH:mm', 'pt_BR').format(now),
-                                mono: true,
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            'Propostas de compra',
-                            style: theme.textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.5,
-                              height: 1.05,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Row(
-                            children: [
-                              Container(
-                                width: 28,
-                                height: 3,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(2),
-                                  gradient: LinearGradient(
-                                    colors: [accent, wine],
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Container(
-                                  height: 1,
-                                  color: ThemeHelpers.borderLightColor(context)
-                                      .withValues(alpha: 0.7),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Crie, edite, acompanhe etapas e envie para assinatura.',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: muted,
-                              fontWeight: FontWeight.w600,
-                              height: 1.4,
-                            ),
-                          ),
-                          if (hasFilter) ...[
-                            const SizedBox(height: 10),
-                            _HeroContextChips(
-                              accent: accent,
-                              showingDeletedOnly: showingDeletedOnly,
-                              statusFilter: statusFilter,
-                            ),
-                          ],
-                        ],
-                      ),
+          Row(
+            children: [
+              Container(
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: dotColor,
+                  boxShadow: [
+                    BoxShadow(
+                      color: dotColor.withValues(alpha: 0.55),
+                      blurRadius: 8,
+                      spreadRadius: 1,
                     ),
                   ],
                 ),
-                if (stats != null) ...[
-                  const SizedBox(height: 14),
-                  Container(
-                    height: 1,
-                    color: ThemeHelpers.borderLightColor(context)
-                        .withValues(alpha: 0.65),
-                  ),
-                  const SizedBox(height: 4),
-                  _HeroKpiStrip(
-                    accent: accent,
-                    wine: wine,
-                    total: stats!.total,
-                    filteredCount: filteredCount,
-                    hasFilter: hasFilter,
-                    showingDeletedOnly: showingDeletedOnly,
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Linhas diagonais discretas no fundo do painel hero.
-class _HeroMeshPainter extends CustomPainter {
-  _HeroMeshPainter({required this.accent});
-
-  final Color accent;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = accent
-      ..strokeWidth = 0.6;
-    const step = 22.0;
-    for (var x = -size.height; x < size.width + size.height; x += step) {
-      canvas.drawLine(
-        Offset(x, size.height),
-        Offset(x + size.height, 0),
-        paint,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _HeroMeshPainter old) => old.accent != accent;
-}
-
-class _HeroModulePill extends StatelessWidget {
-  const _HeroModulePill({required this.accent});
-
-  final Color accent;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-      decoration: BoxDecoration(
-        color: accent.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: accent.withValues(alpha: 0.35)),
-      ),
-      child: Text(
-        'FICHAS DE PROPOSTA',
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: accent,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 1.6,
-              fontSize: 9.5,
-            ),
-      ),
-    );
-  }
-}
-
-class _HeroMetaPill extends StatelessWidget {
-  const _HeroMetaPill({
-    required this.icon,
-    required this.label,
-    this.mono = false,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool mono;
-
-  @override
-  Widget build(BuildContext context) {
-    final muted = ThemeHelpers.textSecondaryColor(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: ThemeHelpers.borderLightColor(context).withValues(alpha: 0.35),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 11, color: muted),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: muted,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: mono ? 0.2 : 0.8,
-                  fontFeatures: mono
-                      ? const [FontFeature.tabularFigures()]
-                      : null,
-                  fontSize: 9.5,
-                ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _HeroContextChips extends StatelessWidget {
-  const _HeroContextChips({
-    required this.accent,
-    required this.showingDeletedOnly,
-    this.statusFilter,
-  });
-
-  final Color accent;
-  final bool showingDeletedOnly;
-  final ProposalStatus? statusFilter;
-
-  @override
-  Widget build(BuildContext context) {
-    final chips = <Widget>[];
-    if (showingDeletedOnly) {
-      chips.add(_HeroContextChip(
-        label: 'Apenas excluídas',
-        icon: Icons.delete_outline_rounded,
-        tone: const Color(0xFFDC2626),
-      ));
-    }
-    if (statusFilter != null) {
-      final (label, tone) = switch (statusFilter!) {
-        ProposalStatus.processing => ('Em andamento', const Color(0xFF6366F1)),
-        ProposalStatus.finalized => ('Finalizadas', const Color(0xFF16A34A)),
-        ProposalStatus.canceled => ('Canceladas', const Color(0xFFDC2626)),
-      };
-      chips.add(_HeroContextChip(
-        label: label,
-        icon: Icons.filter_alt_rounded,
-        tone: tone,
-      ));
-    }
-    if (chips.isEmpty) {
-      chips.add(_HeroContextChip(
-        label: 'Filtro ativo',
-        icon: Icons.tune_rounded,
-        tone: accent,
-      ));
-    }
-    return Wrap(
-      spacing: 6,
-      runSpacing: 6,
-      children: chips,
-    );
-  }
-}
-
-class _HeroContextChip extends StatelessWidget {
-  const _HeroContextChip({
-    required this.label,
-    required this.icon,
-    required this.tone,
-  });
-
-  final String label;
-  final IconData icon;
-  final Color tone;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: tone.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: tone.withValues(alpha: 0.45)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 12, color: tone),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: tone,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.2,
-                ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _HeroIcon extends StatelessWidget {
-  const _HeroIcon({required this.accent, required this.wine});
-
-  final Color accent;
-  final Color wine;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      width: 56,
-      height: 56,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(17),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            accent,
-            Color.lerp(accent, wine, 0.65) ?? accent,
-          ],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: accent.withValues(alpha: isDark ? 0.38 : 0.26),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-            spreadRadius: -3,
-          ),
-        ],
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.22),
-          width: 1.2,
-        ),
-      ),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Positioned(
-            top: -3,
-            right: -3,
-            child: Container(
-              width: 14,
-              height: 14,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: 0.9),
-                border: Border.all(color: accent, width: 2),
               ),
+              const SizedBox(width: 9),
+              Text(
+                'FICHAS DE PROPOSTA',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: accent,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 2.2,
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '$total',
+                style: theme.textTheme.displaySmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: textColor,
+                  height: 1.0,
+                  letterSpacing: -1.0,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 5),
+                child: Text(
+                  total == 1 ? 'proposta' : 'propostas',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: secondary,
+                    fontWeight: FontWeight.w800,
+                    height: 1.0,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: secondary,
+              fontWeight: FontWeight.w600,
+              height: 1.4,
             ),
           ),
-          Positioned(
-            bottom: 7,
-            left: 7,
-            child: Icon(
-              Icons.draw_rounded,
-              size: 11,
-              color: Colors.white.withValues(alpha: 0.55),
+          if (stats != null) ...[
+            const SizedBox(height: 18),
+            _HeroKpiStrip(
+              accent: accent,
+              wine: wine,
+              total: stats!.total,
+              filteredCount: filteredCount,
+              hasFilter: hasFilter,
+              showingDeletedOnly: showingDeletedOnly,
             ),
-          ),
-          const Center(
-            child: Icon(
-              Icons.request_page_rounded,
-              color: Colors.white,
-              size: 27,
-            ),
-          ),
+          ],
         ],
       ),
     );
