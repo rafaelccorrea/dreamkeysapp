@@ -928,6 +928,12 @@ class _AppDrawerState extends State<AppDrawer> {
             (ModuleAccessService.instance.hasPermission('proposal:view') ||
                 ModuleAccessService.instance.hasPermission('proposal:view_team') ||
                 ModuleAccessService.instance.hasPermission('proposal:view_all'));
+    // Comissões: módulo da empresa + permissão de visualização (corretor vê só
+    // as próprias; master/admin/manager têm bypass no ModuleAccessService).
+    final canSeeCommissions = ModuleAccessService.instance
+            .hasCompanyModule(AppPermissions.moduleCommissionManagement) &&
+        ModuleAccessService.instance
+            .hasPermission(AppPermissions.commissionView);
     // Colaboradores → Usuários (drawer item).
     // Paridade com web: `user:view` AND (`create` OR `update` OR `delete`),
     // com bypass admin/master/manager via `hasAnyPermission`.
@@ -1202,6 +1208,28 @@ class _AppDrawerState extends State<AppDrawer> {
                                 },
                               ),
                             if (canSeeCheckIn)
+                              if (canSeeCommissions)
+                                _buildDrawerItem(
+                                  context: context,
+                                  currentRoute: activeRoute,
+                                  route: AppRoutes.commissions,
+                                  icon: LucideIcons.percent,
+                                  activeIcon: LucideIcons.percent,
+                                  title: 'Comissões',
+                                  accent: accent,
+                                  showLeadingTile: true,
+                                  onTap: () {
+                                    Navigator.pop(context);
+                                    if (activeRoute == AppRoutes.commissions) {
+                                      return;
+                                    }
+                                    Navigator.of(context)
+                                        .pushNamedAndRemoveUntil(
+                                      AppRoutes.commissions,
+                                      (route) => false,
+                                    );
+                                  },
+                                ),
                               _buildDrawerItem(
                                 context: context,
                                 currentRoute: activeRoute,

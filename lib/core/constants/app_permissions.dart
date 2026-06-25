@@ -80,6 +80,16 @@ class AppPermissions {
     userDelete,
   ];
 
+  // ─── Comissões ─────────────────────────────────────────────────────────
+  static const String commissionView = 'commission:view';
+  static const String commissionCreate = 'commission:create';
+  static const String commissionUpdate = 'commission:update';
+  static const String commissionDelete = 'commission:delete';
+  static const String commissionCalculate = 'commission:calculate';
+
+  /// Módulo (availableModules da empresa) que libera a entrada de Comissões.
+  static const String moduleCommissionManagement = 'commission_management';
+
   // ─── Teams (Colaboradores → Equipes) ───────────────────────────────────
   static const String teamView = 'team:view';
   static const String teamCreate = 'team:create';

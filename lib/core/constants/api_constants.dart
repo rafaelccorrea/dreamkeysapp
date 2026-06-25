@@ -531,6 +531,11 @@ class ApiConstants {
   static const String keyHistoryMyHistory = '/key-history/my-history';
   static const String keyHistoryStatistics = '/key-history/statistics';
 
+  // Endpoints de Comissões
+  static const String commissions = '/commissions';
+  static const String commissionStatistics = '/commissions/statistics';
+  static String commissionById(String id) => '/commissions/$id';
+
   // Endpoints de Despesas de Propriedades
   static String propertyExpenses(String propertyId) =>
       '/properties/$propertyId/expenses';

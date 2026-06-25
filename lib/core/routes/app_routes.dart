@@ -48,6 +48,7 @@ import '../../features/notes/pages/create_note_page.dart';
 import '../../features/notes/pages/notes_page.dart';
 import '../../features/proposals/pages/create_proposal_page.dart';
 import '../../features/proposals/pages/proposals_page.dart';
+import '../../features/commissions/pages/commissions_page.dart';
 import '../../features/workspace/pages/workspace_page.dart';
 import '../../features/workspace/pages/users_page.dart';
 import '../../features/workspace/pages/teams_page.dart';
@@ -144,6 +145,9 @@ class AppRoutes {
   static const String checkIn = '/check-in';
   /// Histórico de check-ins (lista paginada com filtros).
   static const String checkInList = '/check-in/list';
+
+  // Comissões
+  static const String commissions = '/commissions';
 
   // Fichas de proposta de compra
   static const String proposals = '/proposals';
@@ -393,6 +397,8 @@ class AppRoutes {
       return _buildRoute(const NotesPage(), settings);
     } else if (routeName == AppRoutes.notesCreate) {
       return _buildRoute(const CreateNotePage(), settings);
+    } else if (routeName == AppRoutes.commissions) {
+      return _buildRoute(const CommissionsPage(), settings);
     } else if (routeName == AppRoutes.proposals) {
       return _buildRoute(const ProposalsPage(), settings);
     } else if (routeName == AppRoutes.proposalCreate) {
