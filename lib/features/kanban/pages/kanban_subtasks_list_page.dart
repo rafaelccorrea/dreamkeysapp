@@ -6,20 +6,22 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/theme/shell_visual_tokens.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../models/kanban_subtask_models.dart';
 import '../services/kanban_subtask_service.dart';
-import '../widgets/subtask_card.dart';
+import '../widgets/subtask_flush_row.dart';
 
 /// Tela global "Lista de tarefas" — paridade com `MySubTasksPage.tsx`.
 ///
-/// Identidade visual da casa: shell gradient + ambient orbes, hero
-/// greeting com ícone gradiente, KPI strip slim, navegação horizontal em
-/// pills e cards fluidos.
+/// Identidade visual **flush**, alinhada ao DNA da Fila de Aprovação:
+/// hero editorial (eyebrow com dot + número grande + faixa de KPIs por
+/// categoria), busca animada, **abas flush fixas com sublinhado**, cabeçalho
+/// de painel com ícone tonal e itens em **linhas flush** (sem card/sombra).
+/// O acento violet/indigo e o check de conclusão são a característica própria
+/// da tela; o vermelho fica reservado para atraso real.
 class KanbanSubtasksListPage extends StatefulWidget {
   const KanbanSubtasksListPage({super.key});
 
@@ -500,281 +502,441 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
         : const Color(0xFF7C3AED); // violet-600
   }
 
-  Color _accentSecondary(BuildContext context) {
-    return Theme.of(context).brightness == Brightness.dark
-        ? const Color(0xFF6366F1) // indigo-500
-        : const Color(0xFF4F46E5); // indigo-600
-  }
-
-  List<Widget> _ambientHighlights(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final accent = _accentColor(context);
-    final secondary = _accentSecondary(context);
-    return [
-      // Glow superior direito — violet sutil (não mais cool isolado).
-      Positioned(
-        top: -90,
-        right: -60,
-        child: IgnorePointer(
-          child: Container(
-            width: 260,
-            height: 260,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: RadialGradient(
-                colors: [
-                  accent.withValues(alpha: isDark ? 0.12 : 0.055),
-                  accent.withValues(alpha: 0),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-      // Glow lateral esquerdo — indigo (par harmônico com violet).
-      Positioned(
-        top: 180,
-        left: -100,
-        child: IgnorePointer(
-          child: Container(
-            width: 240,
-            height: 240,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: RadialGradient(
-                colors: [
-                  secondary.withValues(alpha: isDark ? 0.10 : 0.045),
-                  secondary.withValues(alpha: 0),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    ];
-  }
-
   // ─── Build ───────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final viewportHeight = MediaQuery.sizeOf(context).height;
+    if (_bootLoading) {
+      return AppScaffold(
+        title: 'Tarefas',
+        showBottomNavigation: false,
+        body: _buildPageSkeleton(context),
+      );
+    }
     return AppScaffold(
       title: 'Tarefas',
       showBottomNavigation: false,
-      body: _bootLoading
-          ? _buildPageSkeleton(context)
-          : RefreshIndicator(
-              color: _accentColor(context),
-              onRefresh: _refresh,
-              child: SingleChildScrollView(
-                controller: _scrollController,
-                physics: const AlwaysScrollableScrollPhysics(),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minHeight: viewportHeight),
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      ..._ambientHighlights(context),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(
-                              _kPagePadH,
-                              _kPagePadTop,
-                              _kPagePadH,
-                              0,
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _buildGreeting(context),
-                                const SizedBox(height: 14),
-                                _buildSearchField(context),
-                                const SizedBox(height: _kSectionGap + 2),
-                              ],
-                            ),
-                          ),
-                          _buildBucketsRail(context),
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(
-                              8,
-                              _kSectionGap + 1,
-                              8,
-                              _kPagePadBottom,
-                            ),
-                            child: _buildBody(context),
-                          ),
-                        ],
-                      ),
-                    ],
+      body: RefreshIndicator(
+        color: _accentColor(context),
+        onRefresh: _refresh,
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            controller: _scrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      _kPagePadH,
+                      _kPagePadTop,
+                      _kPagePadH,
+                      0,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildGreeting(context),
+                        const SizedBox(height: _kSectionGap),
+                        _buildSearchField(context),
+                        const SizedBox(height: _kSectionGap),
+                      ],
+                    ),
                   ),
-                ),
+                  _buildTabsRail(context),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      _kPagePadH,
+                      _kSectionGap,
+                      _kPagePadH,
+                      _kPagePadBottom,
+                    ),
+                    child: _buildActivePanel(context),
+                  ),
+                ],
               ),
             ),
+          ),
+        ),
+      ),
     );
   }
 
-  // ─── Greeting ────────────────────────────────────────────────────────
+  /// Painel da aba ativa — cabeçalho (ícone tonal + eyebrow + título + dica)
+  /// seguido do corpo (lista flush / estados de vazio/erro/carregando).
+  Widget _buildActivePanel(BuildContext context) {
+    return Column(
+      key: ValueKey('panel-${_activeBucket.name}'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildPanelHeader(context),
+        const SizedBox(height: 14),
+        _buildBody(context),
+      ],
+    ).animate(key: ValueKey('panel-${_activeBucket.name}')).fadeIn(
+          duration: 220.ms,
+        );
+  }
 
-  Widget _buildGreeting(BuildContext context) {
-    final theme = Theme.of(context);
+  ({IconData icon, String eyebrow, String title, String hint, Color tone})
+      _panelMeta(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final accent = _accentColor(context);
-    final secondary = _accentSecondary(context);
+    final ok =
+        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
+    final warn =
+        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
+    final danger =
+        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    switch (_activeBucket) {
+      case _Bucket.pending:
+        return (
+          icon: LucideIcons.inbox,
+          eyebrow: 'A FAZER',
+          title: 'Tarefas pendentes',
+          hint: 'Tudo que ainda aguarda conclusão.',
+          tone: warn,
+        );
+      case _Bucket.today:
+        return (
+          icon: LucideIcons.calendar,
+          eyebrow: 'AGENDA DE HOJE',
+          title: 'Para hoje',
+          hint: 'Pendências com prazo para hoje.',
+          tone: accent,
+        );
+      case _Bucket.overdue:
+        return (
+          icon: LucideIcons.alertTriangle,
+          eyebrow: 'ATENÇÃO',
+          title: 'Tarefas atrasadas',
+          hint: 'Passaram do prazo e precisam de ação.',
+          tone: danger,
+        );
+      case _Bucket.completed:
+        return (
+          icon: LucideIcons.checkCircle2,
+          eyebrow: 'HISTÓRICO',
+          title: 'Concluídas',
+          hint: 'O que você já finalizou.',
+          tone: ok,
+        );
+      case _Bucket.all:
+        return (
+          icon: LucideIcons.list,
+          eyebrow: 'VISÃO GERAL',
+          title: 'Todas as tarefas',
+          hint: 'Pendentes e concluídas, sem filtro.',
+          tone: accent,
+        );
+    }
+  }
+
+  Widget _buildPanelHeader(BuildContext context) {
+    final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final stats = _heroStats;
-    final overdue = _baselineOverdue > 0 ? _baselineOverdue : stats.overdue;
-    // Total HONESTO do filtro atual: prefere `_response.total` (autoridade
-    // do backend pra essa query), e cai pro stats só como fallback até a
-    // resposta chegar. Quando o bucket é "Todas" e o baseline já está
-    // populado, usa esse pra cobrir o caso de servidores que retornam
-    // total escopado pela paginação.
-    final filteredTotal = _response.total > 0
-        ? _response.total
-        : (_activeBucket == _Bucket.all
-            ? _baselineTotal
-            : stats.total);
-    final danger = isDark
-        ? AppColors.status.errorDarkMode
-        : AppColors.status.error;
-    final subtitleColor = ThemeHelpers.textSecondaryColor(context);
-    final hasSearch = _appliedSearch.trim().isNotEmpty;
-    final hasOverdue = overdue > 0;
+    final meta = _panelMeta(context);
+    final tone = meta.tone;
 
-    // Headline curta — não tenta gritar "X tarefas aguardam você". Só
-    // diz o que a tela é. O contexto (filtro, busca) vai no chip ao lado.
-    const headline = 'Suas tarefas';
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: tone.withValues(alpha: isDark ? 0.20 : 0.12),
+          ),
+          child: Icon(meta.icon, color: tone, size: 20),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Ícone "marca" — gradiente violet/indigo, calmo,
-              // sem nada de vermelho.
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(13),
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [accent, secondary],
-                  ),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.32),
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: accent.withValues(alpha: isDark ? 0.32 : 0.18),
-                      blurRadius: 14,
-                      offset: const Offset(0, 6),
-                      spreadRadius: -4,
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  LucideIcons.listChecks,
-                  color: Colors.white,
-                  size: 22,
-                ),
-              ),
-              const SizedBox(width: 13),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          headline,
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w900,
-                            color: ThemeHelpers.textColor(context),
-                            letterSpacing: -0.4,
-                            height: 1.05,
-                          ),
-                        ),
-                        const SizedBox(width: 9),
-                        // Badge com o TOTAL real do filtro corrente.
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 9,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(999),
-                            color: accent.withValues(
-                                alpha: isDark ? 0.16 : 0.08),
-                            border: Border.all(
-                              color: accent.withValues(
-                                  alpha: isDark ? 0.34 : 0.22),
-                            ),
-                          ),
-                          child: Text(
-                            '$filteredTotal',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: accent,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 0.2,
-                              fontSize: 11.5,
-                            ),
-                          ),
+              Row(
+                children: [
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: tone,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: tone.withValues(alpha: 0.5),
+                          blurRadius: 6,
                         ),
                       ],
                     ),
-                    const SizedBox(height: 3),
-                    Text(
-                      hasSearch
-                          ? 'Filtradas por "${_appliedSearch.trim()}"'
-                          : 'Visão · ${_bucketLabel(_activeBucket)[0].toUpperCase()}${_bucketLabel(_activeBucket).substring(1)}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: subtitleColor,
-                        fontWeight: FontWeight.w700,
-                        height: 1.25,
-                      ),
+                  ),
+                  const SizedBox(width: 7),
+                  Text(
+                    meta.eyebrow,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: tone,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.2,
+                      fontSize: 10.5,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 3),
+              Text(
+                meta.title,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: ThemeHelpers.textColor(context),
+                  letterSpacing: -0.2,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                meta.hint,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: ThemeHelpers.textSecondaryColor(context),
+                  height: 1.32,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─── Hero editorial (mesmo DNA da Fila de Aprovação) ──────────────────
+
+  Widget _buildGreeting(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = _accentColor(context);
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final danger =
+        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    final emerald =
+        isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
+    final stats = _heroStats;
+
+    final pending = _baselinePending > 0 ? _baselinePending : stats.pending;
+    final overdue = _baselineOverdue > 0 ? _baselineOverdue : stats.overdue;
+    final hasSearch = _appliedSearch.trim().isNotEmpty;
+    final hasOverdue = overdue > 0;
+
+    final dotColor =
+        hasOverdue ? danger : (pending > 0 ? accent : emerald);
+    final subtitle = hasSearch
+        ? 'Filtrando por "${_appliedSearch.trim()}".'
+        : hasOverdue
+            ? '$overdue ${overdue == 1 ? 'tarefa atrasada' : 'tarefas atrasadas'} · priorize o que passou do prazo.'
+            : (pending == 0
+                ? 'Tudo em dia — nenhuma tarefa pendente agora.'
+                : 'Organize o que aguarda você e seu time.');
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(0, 4, 0, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Eyebrow editorial — dot semântico + label uppercase.
+          Row(
+            children: [
+              Container(
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: dotColor,
+                  boxShadow: [
+                    BoxShadow(
+                      color: dotColor.withValues(alpha: 0.55),
+                      blurRadius: 8,
+                      spreadRadius: 1,
                     ),
                   ],
                 ),
               ),
-              // Alerta de atraso (se houver) — chip compacto, vermelho
-              // SÓ aqui, onde faz sentido. Sem pulse dot solto.
-              if (hasOverdue) ...[
-                const SizedBox(width: 8),
-                _OverdueAlertButton(
-                  count: overdue,
-                  danger: danger,
-                  onTap: () => _selectBucket(_Bucket.overdue),
+              const SizedBox(width: 9),
+              Text(
+                'MINHAS TAREFAS',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: accent,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 2.2,
+                  fontSize: 11,
                 ),
-              ],
+              ),
             ],
           ),
+          const SizedBox(height: 10),
+          // Headline com número grande + rótulo na base (editorial).
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '$pending',
+                style: theme.textTheme.displaySmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: textColor,
+                  height: 1.0,
+                  letterSpacing: -1.0,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 5),
+                child: Text(
+                  pending == 1 ? 'pendente' : 'pendentes',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: secondary,
+                    fontWeight: FontWeight.w800,
+                    height: 1.0,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: secondary,
+              fontWeight: FontWeight.w600,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 18),
+          _buildHeroKpiStrip(context),
         ],
       ),
     );
   }
 
-  String _bucketLabel(_Bucket bucket) {
-    switch (bucket) {
-      case _Bucket.all:
-        return 'todas';
-      case _Bucket.pending:
-        return 'pendentes';
-      case _Bucket.today:
-        return 'hoje';
-      case _Bucket.overdue:
-        return 'atrasadas';
-      case _Bucket.completed:
-        return 'concluídas';
-    }
+  /// Faixa editorial de KPIs por categoria — 4 colunas separadas por filete.
+  Widget _buildHeroKpiStrip(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accent = _accentColor(context);
+    final ok =
+        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
+    final warn =
+        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
+    final danger =
+        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    final stats = _heroStats;
+    final divider = ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
+
+    final blocks = <Widget>[
+      _heroKpiBlock(context, LucideIcons.inbox, 'PENDENTES',
+          _baselinePending > 0 ? _baselinePending : stats.pending, 'a fazer', warn),
+      _heroKpiBlock(context, LucideIcons.calendar, 'HOJE',
+          _baselineToday > 0 ? _baselineToday : _todayCount(), 'no prazo', accent),
+      _heroKpiBlock(context, LucideIcons.alertTriangle, 'ATRASADAS',
+          _baselineOverdue > 0 ? _baselineOverdue : stats.overdue, 'agir', danger),
+      _heroKpiBlock(context, LucideIcons.checkCircle2, 'CONCLUÍDAS',
+          _baselineCompleted > 0 ? _baselineCompleted : stats.completed, 'feito', ok),
+    ];
+
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < blocks.length; i++) ...[
+            if (i > 0)
+              Container(
+                width: 1,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                color: divider,
+              ),
+            Expanded(child: blocks[i]),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _heroKpiBlock(
+    BuildContext context,
+    IconData icon,
+    String label,
+    int value,
+    String sub,
+    Color tone,
+  ) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 11, color: tone),
+              const SizedBox(width: 5),
+              Flexible(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w900,
+                    color: tone,
+                    letterSpacing: 1.0,
+                    height: 1.0,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '$value',
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w900,
+                color: tone,
+                letterSpacing: -0.6,
+                height: 1.0,
+                fontSize: 22,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            sub,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: secondary,
+              height: 1.0,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 7),
+          Container(
+            height: 2,
+            width: 18,
+            decoration: BoxDecoration(
+              color: tone,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // ─── Search ──────────────────────────────────────────────────────────
@@ -914,11 +1076,10 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
     );
   }
 
-  // ─── Bucket pills ────────────────────────────────────────────────────
+  // ─── Abas flush fixas (sublinhado, sem scroll) ────────────────────────
 
-  Widget _buildBucketsRail(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+  Widget _buildTabsRail(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final accent = _accentColor(context);
     final ok = isDark
         ? AppColors.status.greenDarkMode
@@ -929,7 +1090,6 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
     final danger = isDark
         ? AppColors.status.errorDarkMode
         : AppColors.status.error;
-    final subtitleColor = ThemeHelpers.textSecondaryColor(context);
 
     final stats = _heroStats;
 
@@ -940,8 +1100,7 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
         label: 'Pendentes',
         // Contagem REAL do bucket (vinda do baseline desfiltrado), com
         // fallback pro `_heroStats` enquanto o baseline ainda não chegou.
-        count:
-            _baselinePending > 0 ? _baselinePending : stats.pending,
+        count: _baselinePending > 0 ? _baselinePending : stats.pending,
         color: warn,
       ),
       _BucketSpec(
@@ -955,17 +1114,14 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
         bucket: _Bucket.overdue,
         icon: LucideIcons.alertTriangle,
         label: 'Atrasadas',
-        count:
-            _baselineOverdue > 0 ? _baselineOverdue : stats.overdue,
+        count: _baselineOverdue > 0 ? _baselineOverdue : stats.overdue,
         color: danger,
       ),
       _BucketSpec(
         bucket: _Bucket.completed,
         icon: LucideIcons.checkCircle2,
         label: 'Concluídas',
-        count: _baselineCompleted > 0
-            ? _baselineCompleted
-            : stats.completed,
+        count: _baselineCompleted > 0 ? _baselineCompleted : stats.completed,
         color: ok,
       ),
       _BucketSpec(
@@ -973,81 +1129,32 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
         icon: LucideIcons.list,
         label: 'Todas',
         count: _baselineTotal > 0 ? _baselineTotal : stats.total,
-        color: const Color(0xFF7C3AED),
+        color: accent,
       ),
     ];
 
-    final activeSpec = tabs.firstWhere(
-      (t) => t.bucket == _activeBucket,
-      orElse: () => tabs.first,
-    );
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Header da seção de navegação — orienta o usuário e mostra
-        // claramente qual filtro está ativo no momento (não fica só
-        // no destaque visual da pill).
-        Padding(
-          padding: const EdgeInsets.fromLTRB(_kPagePadH, 0, _kPagePadH, 8),
-          child: Row(
-            children: [
-              Icon(LucideIcons.slidersHorizontal, size: 12, color: subtitleColor),
-              const SizedBox(width: 6),
-              Text(
-                'FILTRAR POR',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: subtitleColor,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2.0,
-                  fontSize: 10,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Container(
-                width: 4,
-                height: 4,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: subtitleColor.withValues(alpha: 0.45),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Flexible(
-                child: Text(
-                  '${activeSpec.label} · ${activeSpec.count}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: activeSpec.color,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.4,
-                    fontSize: 11,
-                  ),
-                ),
-              ),
-            ],
-          ),
+    // Barra de abas **flush** com sublinhado — fixa (sem scroll): cada bucket
+    // ocupa fração igual da largura, contagem em badge sobre o ícone e
+    // indicador inferior na cor do bucket ativo. Mesmo DNA de Aprovações.
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
         ),
-        // Row scrollable das pills.
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: _kPagePadH - 2),
-          child: Row(
-            children: [
-              for (var i = 0; i < tabs.length; i++) ...[
-                _BucketPill(
-                  spec: tabs[i],
-                  selected: _activeBucket == tabs[i].bucket,
-                  onTap: () => _selectBucket(tabs[i].bucket),
-                ),
-                if (i < tabs.length - 1) const SizedBox(width: 8),
-              ],
-            ],
-          ),
-        ),
-      ],
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: _kPagePadH - 8),
+      child: Row(
+        children: [
+          for (final t in tabs)
+            Expanded(
+              child: _FlushTab(
+                spec: t,
+                selected: _activeBucket == t.bucket,
+                onTap: () => _selectBucket(t.bucket),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -1082,11 +1189,9 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (var i = 0; i < _response.data.length; i++) ...[
-          if (i > 0) const SizedBox(height: 10),
-          SubTaskCard(
+        for (var i = 0; i < _response.data.length; i++)
+          SubTaskFlushRow(
             subtask: _response.data[i],
-            showParentCard: true,
             busy: _busyIds.contains(_response.data[i].id),
             onTap: () => _openParentCard(_response.data[i]),
             onToggle: () => _toggle(_response.data[i]),
@@ -1104,7 +1209,6 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
                 duration: 240.ms,
                 curve: Curves.easeOutCubic,
               ),
-        ],
         if (_hasMorePages || _loadingMore) ...[
           const SizedBox(height: 12),
           Container(
@@ -1165,102 +1269,84 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
 
   Widget _buildListSkeleton() {
     return Column(
-      children: List.generate(
-        4,
-        (i) => Padding(
-          padding: EdgeInsets.only(bottom: i < 3 ? 12 : 0),
-          child: SkeletonBox(height: 96, borderRadius: 18),
-        ),
-      ),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: List.generate(4, (i) => const _TaskRowSkeleton()),
     );
   }
 
-  /// Skeleton de **tela inteira** — exibido enquanto a primeira carga
-  /// não chega. Cobre hero, KPIs, busca, pills e lista — sem layout shift
-  /// quando o conteúdo de fato aparece.
+  /// Skeleton de **tela inteira** — exibido enquanto a primeira carga não
+  /// chega. Cobre hero editorial, KPIs, busca, abas e lista flush — sem
+  /// layout shift quando o conteúdo de fato aparece.
   Widget _buildPageSkeleton(BuildContext context) {
     return SingleChildScrollView(
       physics: const NeverScrollableScrollPhysics(),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          ..._ambientHighlights(context),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              _kPagePadH,
-              _kPagePadTop,
-              _kPagePadH,
-              _kPagePadBottom,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Hero: ícone + textos
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SkeletonBox(width: 40, height: 40, borderRadius: 14),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SkeletonBox(
-                              width: 130,
-                              height: 9,
-                              borderRadius: 999,
-                            ),
-                            const SizedBox(height: 8),
-                            SkeletonBox(
-                              width: double.infinity,
-                              height: 22,
-                              borderRadius: 6,
-                            ),
-                            const SizedBox(height: 8),
-                            SkeletonBox(
-                              width: 200,
-                              height: 11,
-                              borderRadius: 4,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          _kPagePadH,
+          _kPagePadTop,
+          _kPagePadH,
+          _kPagePadBottom,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Hero editorial: eyebrow + número grande + subtítulo
+            const SizedBox(height: 4),
+            SkeletonBox(width: 150, height: 11, borderRadius: 999),
+            const SizedBox(height: 12),
+            SkeletonBox(width: 110, height: 34, borderRadius: 8),
+            const SizedBox(height: 10),
+            SkeletonBox(width: 230, height: 12, borderRadius: 4),
+            const SizedBox(height: 20),
+            // KPI strip
+            Row(
+              children: List.generate(
+                4,
+                (i) => Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SkeletonBox(width: 50, height: 9, borderRadius: 999),
+                        const SizedBox(height: 8),
+                        SkeletonBox(width: 28, height: 20, borderRadius: 4),
+                        const SizedBox(height: 6),
+                        SkeletonBox(width: 36, height: 9, borderRadius: 999),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 16),
-                // Search
-                SkeletonBox(
-                  width: double.infinity,
-                  height: 48,
-                  borderRadius: 14,
-                ),
-                const SizedBox(height: _kSectionGap + 4),
-                // Pills
-                Row(
-                  children: [
-                    SkeletonBox(width: 110, height: 36, borderRadius: 999),
-                    const SizedBox(width: 8),
-                    SkeletonBox(width: 90, height: 36, borderRadius: 999),
-                    const SizedBox(width: 8),
-                    SkeletonBox(width: 110, height: 36, borderRadius: 999),
-                  ],
-                ),
-                const SizedBox(height: _kSectionGap + 4),
-                // Lista de tarefas
-                ...List.generate(
-                  4,
-                  (i) => Padding(
-                    padding: EdgeInsets.only(bottom: i < 3 ? 12 : 0),
-                    child: SkeletonBox(height: 96, borderRadius: 18),
+              ),
+            ),
+            const SizedBox(height: 18),
+            // Search
+            SkeletonBox(width: double.infinity, height: 50, borderRadius: 14),
+            const SizedBox(height: _kSectionGap + 4),
+            // Abas flush
+            Row(
+              children: List.generate(
+                5,
+                (i) => Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 4, vertical: 12),
+                    child: Column(
+                      children: [
+                        SkeletonBox(width: 19, height: 19, borderRadius: 6),
+                        const SizedBox(height: 6),
+                        SkeletonBox(width: 44, height: 10, borderRadius: 999),
+                      ],
+                    ),
                   ),
                 ),
-              ],
+              ),
             ),
-          ),
-        ],
+            const SizedBox(height: _kSectionGap + 6),
+            // Lista flush
+            ...List.generate(4, (i) => const _TaskRowSkeleton()),
+          ],
+        ),
       ),
     );
   }
@@ -1407,12 +1493,15 @@ class _BucketSpec {
   });
 }
 
-class _BucketPill extends StatelessWidget {
+/// Aba **flush** vertical (ícone com badge de contagem + rótulo curto), num
+/// layout fixo de largura igual (sem scroll). Indicador (sublinhado) na cor do
+/// bucket quando ativa. Mesmo DNA de navegação da Fila de Aprovação.
+class _FlushTab extends StatelessWidget {
   final _BucketSpec spec;
   final bool selected;
   final VoidCallback onTap;
 
-  const _BucketPill({
+  const _FlushTab({
     required this.spec,
     required this.selected,
     required this.onTap,
@@ -1421,142 +1510,140 @@ class _BucketPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final fg = selected ? Colors.white : ThemeHelpers.textColor(context);
+    final tone = spec.color;
+    final fg = selected ? tone : ThemeHelpers.textSecondaryColor(context);
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOutCubic,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        gradient: selected
-            ? LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  spec.color,
-                  spec.color.withValues(alpha: 0.78),
-                ],
-              )
-            : null,
-        color:
-            selected ? null : ShellVisualTokens.dashboardGlassFill(context),
-        border: Border.all(
-          color: selected
-              ? spec.color.withValues(alpha: 0.3)
-              : ShellVisualTokens.dashboardGlassBorder(context),
-        ),
-        boxShadow: selected
-            ? [
-                BoxShadow(
-                  color:
-                      spec.color.withValues(alpha: isDark ? 0.4 : 0.32),
-                  blurRadius: 14,
-                  offset: const Offset(0, 6),
-                  spreadRadius: -3,
-                ),
-              ]
-            : null,
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(999),
-          splashColor: spec.color.withValues(alpha: 0.18),
-          child: Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(spec.icon, size: 16, color: fg),
-                const SizedBox(width: 7),
-                Text(
-                  spec.label,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: fg,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.1,
-                  ),
-                ),
-                if (spec.count > 0) ...[
-                  const SizedBox(width: 8),
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 220),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 7, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? Colors.white.withValues(alpha: 0.22)
-                          : spec.color.withValues(alpha: 0.16),
-                      borderRadius: BorderRadius.circular(999),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        splashColor: tone.withValues(alpha: 0.12),
+        highlightColor: tone.withValues(alpha: 0.06),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 12, 4, 10),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    height: 22,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      alignment: Alignment.center,
+                      children: [
+                        Icon(spec.icon, size: 19, color: fg),
+                        if (spec.count > 0)
+                          Positioned(
+                            top: -7,
+                            right: -12,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 1,
+                              ),
+                              constraints: const BoxConstraints(minWidth: 16),
+                              decoration: BoxDecoration(
+                                color: tone,
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: ThemeHelpers.cardBackgroundColor(
+                                      context),
+                                  width: 1.5,
+                                ),
+                              ),
+                              child: Text(
+                                spec.count > 99 ? '99+' : '${spec.count}',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 9.5,
+                                  height: 1.25,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
+                  ),
+                  const SizedBox(height: 6),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
                     child: Text(
-                      spec.count > 99 ? '99+' : '${spec.count}',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: selected ? Colors.white : spec.color,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 11,
+                      spec.label,
+                      maxLines: 1,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: fg,
+                        fontWeight:
+                            selected ? FontWeight.w900 : FontWeight.w600,
+                        letterSpacing: 0.1,
+                        fontSize: 11.5,
                       ),
                     ),
                   ),
                 ],
-              ],
+              ),
             ),
-          ),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOut,
+              height: 2.5,
+              decoration: BoxDecoration(
+                color: selected ? tone : Colors.transparent,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(3)),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-/// Botão compacto de "atenção: tem atraso" — aparece no canto direito do
-/// hero somente quando há overdue. Clique pula direto pra esse bucket.
-class _OverdueAlertButton extends StatelessWidget {
-  final int count;
-  final Color danger;
-  final VoidCallback onTap;
-  const _OverdueAlertButton({
-    required this.count,
-    required this.danger,
-    required this.onTap,
-  });
+/// Placeholder de carregamento que reproduz a linha flush real
+/// (`SubTaskFlushRow`): check à esquerda, chips, título e meta com filete.
+class _TaskRowSkeleton extends StatelessWidget {
+  const _TaskRowSkeleton();
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        splashColor: danger.withValues(alpha: 0.18),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            color: danger.withValues(alpha: isDark ? 0.14 : 0.08),
-            border: Border.all(
-              color: danger.withValues(alpha: isDark ? 0.34 : 0.24),
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 15),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SkeletonBox(width: 26, height: 26, borderRadius: 999),
+          const SizedBox(width: 13),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    SkeletonText(width: 70, height: 18, borderRadius: 999),
+                    const SizedBox(width: 6),
+                    SkeletonText(width: 54, height: 18, borderRadius: 999),
+                  ],
+                ),
+                const SizedBox(height: 9),
+                SkeletonText(width: double.infinity, height: 14),
+                const SizedBox(height: 8),
+                SkeletonText(width: 150, height: 12),
+                const SizedBox(height: 10),
+                SkeletonText(width: 110, height: 12),
+              ],
             ),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(LucideIcons.alertTriangle, size: 14, color: danger),
-              const SizedBox(width: 6),
-              Text(
-                '$count',
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      color: danger,
-                      fontWeight: FontWeight.w900,
-                      height: 1,
-                    ),
-              ),
-            ],
-          ),
-        ),
+        ],
       ),
     );
   }
