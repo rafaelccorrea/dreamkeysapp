@@ -26,6 +26,10 @@ class AdminUser {
   /// /admin/users/:id` (a listagem compacta não traz — fica vazio).
   final List<String> permissionIds;
 
+  /// IDs dos gestores responsáveis (apenas para corretores). Populado por
+  /// `GET /admin/users/:id`.
+  final List<String> managerIds;
+
   const AdminUser({
     required this.id,
     required this.name,
@@ -42,6 +46,7 @@ class AdminUser {
     this.createdAt,
     this.updatedAt,
     this.permissionIds = const [],
+    this.managerIds = const [],
   });
 
   factory AdminUser.fromJson(Map<String, dynamic> json) {
@@ -82,7 +87,23 @@ class AdminUser {
       createdAt: parseDate(json['createdAt']),
       updatedAt: parseDate(json['updatedAt']),
       permissionIds: _parsePermissionIds(json['permissions']),
+      managerIds: _parseManagerIds(json),
     );
+  }
+
+  static List<String> _parseManagerIds(Map<String, dynamic> json) {
+    final raw = json['managerIds'];
+    if (raw is List) {
+      final ids = raw
+          .map((e) => e is Map ? e['id']?.toString() : e?.toString())
+          .whereType<String>()
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (ids.isNotEmpty) return ids;
+    }
+    final single = json['managerId']?.toString();
+    if (single != null && single.isNotEmpty) return [single];
+    return const [];
   }
 
   static List<String> _parsePermissionIds(dynamic raw) {

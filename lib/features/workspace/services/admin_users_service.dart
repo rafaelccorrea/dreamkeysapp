@@ -179,22 +179,19 @@ class AdminUsersService {
     }
   }
 
-  /// Atualiza papel / acesso / visibilidade / permissões do usuário
-  /// (`PUT /admin/users/:id`). Envia apenas os campos informados.
+  /// Atualiza papel / gestores / permissões do usuário (`PUT /admin/users/:id`).
+  /// Envia apenas os campos informados. (Acesso ao app vai pelo endpoint
+  /// dedicado [updateAppAccess], espelhando o web.)
   Future<ApiResponse<void>> updateUser(
     String id, {
     String? role,
-    bool? hasAppAccess,
-    bool? isAvailableForPublicSite,
+    List<String>? managerIds,
     List<String>? permissionIds,
   }) async {
     try {
       final body = <String, dynamic>{};
       if (role != null) body['role'] = role;
-      if (hasAppAccess != null) body['hasAppAccess'] = hasAppAccess;
-      if (isAvailableForPublicSite != null) {
-        body['isAvailableForPublicSite'] = isAvailableForPublicSite;
-      }
+      if (managerIds != null) body['managerIds'] = managerIds;
       if (permissionIds != null) body['permissionIds'] = permissionIds;
 
       final res = await _api.put<Map<String, dynamic>>(
@@ -210,6 +207,55 @@ class AdminUsersService {
       return ApiResponse.success(data: null, statusCode: res.statusCode);
     } catch (e) {
       debugPrint('❌ [ADMIN_USERS] updateUser: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// Ativa/desativa o acesso ao app móvel (`PATCH /admin/users/:id/app-access`)
+  /// — mesmo endpoint do web (`usersApi.updateUserAppAccess`).
+  Future<ApiResponse<void>> updateAppAccess(
+    String id,
+    bool hasAppAccess,
+  ) async {
+    try {
+      final res = await _api.patch<Map<String, dynamic>>(
+        ApiConstants.adminUserAppAccess(id),
+        body: {'hasAppAccess': hasAppAccess},
+      );
+      if (!res.success) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao atualizar acesso ao app',
+          statusCode: res.statusCode,
+        );
+      }
+      return ApiResponse.success(data: null, statusCode: res.statusCode);
+    } catch (e) {
+      debugPrint('❌ [ADMIN_USERS] updateAppAccess: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// Lista gestores elegíveis (papéis manager + admin) para vincular a um
+  /// corretor. Espelha o `ManagerMultiSelector` do web.
+  Future<ApiResponse<List<AdminUser>>> listManagers({String? search}) async {
+    try {
+      final results = await Future.wait([
+        listUsers(role: 'manager', limit: 100, search: search, compact: true),
+        listUsers(role: 'admin', limit: 100, search: search, compact: true),
+      ]);
+      final merged = <String, AdminUser>{};
+      for (final r in results) {
+        if (r.success && r.data != null) {
+          for (final u in r.data!.users) {
+            merged[u.id] = u;
+          }
+        }
+      }
+      final list = merged.values.toList()
+        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      return ApiResponse.success(data: list, statusCode: 200);
+    } catch (e) {
+      debugPrint('❌ [ADMIN_USERS] listManagers: $e');
       return ApiResponse.error(message: e.toString(), statusCode: 0);
     }
   }
