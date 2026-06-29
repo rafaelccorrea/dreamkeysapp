@@ -226,6 +226,7 @@ class ApiConstants {
 
   // Endpoints de Permissions
   static const String myPermissions = '/permissions/my-permissions';
+  static const String permissionsByCategory = '/permissions/by-category';
 
   // Endpoints de Subscriptions
   static const String checkSubscriptionAccess = '/subscriptions/check-access';

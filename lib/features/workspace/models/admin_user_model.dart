@@ -22,6 +22,10 @@ class AdminUser {
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
+  /// IDs das permissões atribuídas ao usuário. Populado por `GET
+  /// /admin/users/:id` (a listagem compacta não traz — fica vazio).
+  final List<String> permissionIds;
+
   const AdminUser({
     required this.id,
     required this.name,
@@ -37,6 +41,7 @@ class AdminUser {
     this.lastLoginAt,
     this.createdAt,
     this.updatedAt,
+    this.permissionIds = const [],
   });
 
   factory AdminUser.fromJson(Map<String, dynamic> json) {
@@ -76,6 +81,49 @@ class AdminUser {
       lastLoginAt: parseDate(json['lastLoginAt']),
       createdAt: parseDate(json['createdAt']),
       updatedAt: parseDate(json['updatedAt']),
+      permissionIds: _parsePermissionIds(json['permissions']),
+    );
+  }
+
+  static List<String> _parsePermissionIds(dynamic raw) {
+    if (raw is! List) return const [];
+    final ids = <String>[];
+    for (final p in raw) {
+      if (p is Map) {
+        final id = p['id']?.toString();
+        if (id != null && id.isNotEmpty) ids.add(id);
+      } else if (p is String && p.isNotEmpty) {
+        ids.add(p);
+      }
+    }
+    return ids;
+  }
+
+  AdminUser copyWith({
+    String? role,
+    bool? active,
+    bool? isActiveInCompany,
+    bool? hasAppAccess,
+    bool? isAvailableForPublicSite,
+    List<String>? permissionIds,
+  }) {
+    return AdminUser(
+      id: id,
+      name: name,
+      email: email,
+      role: role ?? this.role,
+      active: active ?? this.active,
+      isActiveInCompany: isActiveInCompany ?? this.isActiveInCompany,
+      avatar: avatar,
+      phone: phone,
+      document: document,
+      hasAppAccess: hasAppAccess ?? this.hasAppAccess,
+      isAvailableForPublicSite:
+          isAvailableForPublicSite ?? this.isAvailableForPublicSite,
+      lastLoginAt: lastLoginAt,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      permissionIds: permissionIds ?? this.permissionIds,
     );
   }
 
@@ -190,6 +238,32 @@ class AdminUsersStats {
       newThisMonth: parseInt(
         json['newUsersThisMonth'] ?? json['newThisMonth'] ?? json['newUsers'],
       ),
+    );
+  }
+}
+
+/// Item do catálogo de permissões (`GET /permissions/by-category`).
+class UserPermission {
+  final String id;
+  final String name;
+  final String? description;
+  final String category;
+
+  const UserPermission({
+    required this.id,
+    required this.name,
+    this.description,
+    required this.category,
+  });
+
+  factory UserPermission.fromJson(Map<String, dynamic> json) {
+    return UserPermission(
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      description: (json['description']?.toString() ?? '').isEmpty
+          ? null
+          : json['description'].toString(),
+      category: json['category']?.toString() ?? 'other',
     );
   }
 }

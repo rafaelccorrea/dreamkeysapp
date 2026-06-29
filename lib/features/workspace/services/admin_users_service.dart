@@ -116,6 +116,104 @@ class AdminUsersService {
     }
   }
 
+  /// Detalhe completo do usuário (`GET /admin/users/:id`) — inclui as
+  /// permissões atribuídas (`permissionIds`). Lida com payload direto ou
+  /// envelopado em `{ data: {...} }`.
+  Future<ApiResponse<AdminUser>> getUserById(String id) async {
+    try {
+      final res = await _api.get<Map<String, dynamic>>(
+        ApiConstants.adminUserById(id),
+      );
+      if (!res.success || res.data == null) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao carregar usuário',
+          statusCode: res.statusCode,
+        );
+      }
+      final body = res.data!;
+      final raw = body['data'] is Map
+          ? Map<String, dynamic>.from(body['data'] as Map)
+          : body;
+      return ApiResponse.success(
+        data: AdminUser.fromJson(raw),
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [ADMIN_USERS] getUserById: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// Catálogo de permissões agrupado por categoria
+  /// (`GET /permissions/by-category`) → `{ categoria: [permissões] }`.
+  Future<ApiResponse<Map<String, List<UserPermission>>>>
+      getPermissionCatalog() async {
+    try {
+      final res = await _api.get<Map<String, dynamic>>(
+        ApiConstants.permissionsByCategory,
+      );
+      if (!res.success || res.data == null) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao carregar permissões',
+          statusCode: res.statusCode,
+        );
+      }
+      final body = res.data!;
+      final map = body['data'] is Map
+          ? Map<String, dynamic>.from(body['data'] as Map)
+          : body;
+      final out = <String, List<UserPermission>>{};
+      map.forEach((category, value) {
+        if (value is List) {
+          out[category] = value
+              .whereType<Map>()
+              .map((e) =>
+                  UserPermission.fromJson(Map<String, dynamic>.from(e)))
+              .toList();
+        }
+      });
+      return ApiResponse.success(data: out, statusCode: res.statusCode);
+    } catch (e) {
+      debugPrint('❌ [ADMIN_USERS] getPermissionCatalog: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// Atualiza papel / acesso / visibilidade / permissões do usuário
+  /// (`PUT /admin/users/:id`). Envia apenas os campos informados.
+  Future<ApiResponse<void>> updateUser(
+    String id, {
+    String? role,
+    bool? hasAppAccess,
+    bool? isAvailableForPublicSite,
+    List<String>? permissionIds,
+  }) async {
+    try {
+      final body = <String, dynamic>{};
+      if (role != null) body['role'] = role;
+      if (hasAppAccess != null) body['hasAppAccess'] = hasAppAccess;
+      if (isAvailableForPublicSite != null) {
+        body['isAvailableForPublicSite'] = isAvailableForPublicSite;
+      }
+      if (permissionIds != null) body['permissionIds'] = permissionIds;
+
+      final res = await _api.put<Map<String, dynamic>>(
+        ApiConstants.adminUserById(id),
+        body: body,
+      );
+      if (!res.success) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao salvar alterações',
+          statusCode: res.statusCode,
+        );
+      }
+      return ApiResponse.success(data: null, statusCode: res.statusCode);
+    } catch (e) {
+      debugPrint('❌ [ADMIN_USERS] updateUser: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
   Future<ApiResponse<void>> setActive(String userId, bool active) async {
     try {
       final url = active

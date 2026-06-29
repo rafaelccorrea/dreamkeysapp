@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/constants/app_permissions.dart';
+import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/state/screen_state_cache.dart';
@@ -13,6 +14,7 @@ import '../../../shared/widgets/skeleton_box.dart';
 import '../models/admin_user_model.dart';
 import '../services/admin_users_service.dart';
 import '../widgets/users_filters_sheet.dart';
+import 'edit_user_page.dart';
 
 /// Tela de Colaboradores → Usuários.
 ///
@@ -214,6 +216,20 @@ class _UsersPageState extends State<UsersPage> {
     _reload();
   }
 
+  Future<void> _openEdit(AdminUser u) async {
+    final canEdit = ModuleAccessService.instance.hasPermission(
+      AppPermissions.userUpdate,
+    );
+    if (!canEdit) return;
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => EditUserPage(user: u)),
+    );
+    if (changed == true && mounted) {
+      await _reload();
+      await _loadStats();
+    }
+  }
+
   Future<void> _toggleActive(AdminUser u) async {
     final canEdit = ModuleAccessService.instance.hasPermission(
       AppPermissions.userUpdate,
@@ -307,6 +323,7 @@ class _UsersPageState extends State<UsersPage> {
               _UsersList(
                 users: _users,
                 onToggleActive: _toggleActive,
+                onOpenEdit: _openEdit,
               ),
             if (_loadingMore)
               const Padding(
@@ -868,10 +885,15 @@ class _ToolbarState extends State<_Toolbar> {
 // ──────────────────────────────────────────────────────────────────────────
 
 class _UsersList extends StatelessWidget {
-  const _UsersList({required this.users, required this.onToggleActive});
+  const _UsersList({
+    required this.users,
+    required this.onToggleActive,
+    required this.onOpenEdit,
+  });
 
   final List<AdminUser> users;
   final Future<void> Function(AdminUser) onToggleActive;
+  final Future<void> Function(AdminUser) onOpenEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -880,7 +902,11 @@ class _UsersList extends StatelessWidget {
       child: Column(
         children: [
           for (final u in users) ...[
-            _UserCard(user: u, onToggleActive: () => onToggleActive(u)),
+            _UserCard(
+              user: u,
+              onToggleActive: () => onToggleActive(u),
+              onOpenEdit: () => onOpenEdit(u),
+            ),
             const SizedBox(height: 10),
           ],
         ],
@@ -890,10 +916,15 @@ class _UsersList extends StatelessWidget {
 }
 
 class _UserCard extends StatelessWidget {
-  const _UserCard({required this.user, required this.onToggleActive});
+  const _UserCard({
+    required this.user,
+    required this.onToggleActive,
+    required this.onOpenEdit,
+  });
 
   final AdminUser user;
   final Future<void> Function() onToggleActive;
+  final Future<void> Function() onOpenEdit;
 
   Color _roleColor(BuildContext context) {
     switch (user.role.toLowerCase()) {
@@ -975,7 +1006,7 @@ class _UserCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: canEdit ? () => _showUserSheet(context) : null,
+        onTap: canEdit ? () => onOpenEdit() : null,
         child: Container(
           decoration: BoxDecoration(
             color: cardColor,
@@ -1066,7 +1097,7 @@ class _UserCard extends StatelessWidget {
                   if (canEdit)
                     InkResponse(
                       radius: 20,
-                      onTap: () => _showUserSheet(context),
+                      onTap: () => _showUserActions(context),
                       child: Padding(
                         padding: const EdgeInsets.all(6),
                         child: Icon(
@@ -1204,7 +1235,7 @@ class _UserCard extends StatelessWidget {
     );
   }
 
-  void _showUserSheet(BuildContext context) {
+  void _showUserActions(BuildContext context) {
     final canEdit = ModuleAccessService.instance.hasPermission(
       AppPermissions.userUpdate,
     );
@@ -1213,20 +1244,32 @@ class _UserCard extends StatelessWidget {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       builder: (ctx) {
         final theme = Theme.of(ctx);
+        final isDark = theme.brightness == Brightness.dark;
         final textColor = ThemeHelpers.textColor(ctx);
         final secondaryColor = ThemeHelpers.textSecondaryColor(ctx);
+        final editAccent =
+            isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
+        final danger =
+            isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+        final emerald =
+            isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
+        final roleColor = _roleColor(ctx);
+        final presence = _presenceColor();
+        final willDeactivate = user.active;
+
         return Container(
           decoration: BoxDecoration(
             color: ThemeHelpers.cardBackgroundColor(ctx),
             borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(20)),
+                const BorderRadius.vertical(top: Radius.circular(24)),
             border: Border.all(
               color: ThemeHelpers.borderColor(ctx).withValues(alpha: 0.5),
             ),
           ),
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          padding: const EdgeInsets.fromLTRB(18, 10, 18, 18),
           child: SafeArea(
             top: false,
             child: Column(
@@ -1235,7 +1278,7 @@ class _UserCard extends StatelessWidget {
               children: [
                 Center(
                   child: Container(
-                    width: 36,
+                    width: 38,
                     height: 4,
                     decoration: BoxDecoration(
                       color: ThemeHelpers.borderColor(ctx),
@@ -1243,32 +1286,78 @@ class _UserCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                const SizedBox(height: 14),
-                Text(
-                  user.name,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    color: textColor,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  user.email,
-                  style: TextStyle(
-                    color: secondaryColor,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
+                const SizedBox(height: 16),
+                // Identidade.
+                Row(
+                  children: [
+                    _UserAvatar(
+                      name: user.name,
+                      avatarUrl: user.avatar,
+                      accent: theme.colorScheme.primary,
+                      presenceColor: presence,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            user.name.isEmpty ? '—' : user.name,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              color: textColor,
+                              letterSpacing: -0.2,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            user.email,
+                            style: TextStyle(
+                              color: secondaryColor,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 7),
+                          _Badge(
+                            label: user.roleLabel,
+                            color: roleColor,
+                            isDark: isDark,
+                            icon: LucideIcons.shieldCheck,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 18),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    user.active
-                        ? LucideIcons.userMinus
-                        : LucideIcons.userCheck,
-                  ),
-                  title: Text(user.active ? 'Desativar' : 'Ativar'),
+                _ActionTile(
+                  icon: LucideIcons.userPen,
+                  tone: editAccent,
+                  title: 'Editar usuário',
+                  subtitle: 'Papel, acessos e permissões',
+                  onTap: () async {
+                    Navigator.of(ctx).pop();
+                    await onOpenEdit();
+                  },
+                ),
+                const SizedBox(height: 10),
+                _ActionTile(
+                  icon: willDeactivate
+                      ? LucideIcons.userMinus
+                      : LucideIcons.userCheck,
+                  tone: willDeactivate ? danger : emerald,
+                  title: willDeactivate
+                      ? 'Desativar usuário'
+                      : 'Ativar usuário',
+                  subtitle: willDeactivate
+                      ? 'Revoga o acesso ao sistema'
+                      : 'Restaura o acesso ao sistema',
                   onTap: () async {
                     Navigator.of(ctx).pop();
                     await onToggleActive();
@@ -1279,6 +1368,86 @@ class _UserCard extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// Tile de ação do modal — ícone tonal em quadrado + título/subtítulo +
+/// chevron. Refinado, com toque amplo.
+class _ActionTile extends StatelessWidget {
+  const _ActionTile({
+    required this.icon,
+    required this.tone,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final Color tone;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: tone.withValues(alpha: isDark ? 0.10 : 0.06),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: tone.withValues(alpha: 0.28)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: tone.withValues(alpha: isDark ? 0.20 : 0.14),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, size: 19, color: tone),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w800,
+                        color: textColor,
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: secondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(LucideIcons.chevronRight, size: 18, color: secondary),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
