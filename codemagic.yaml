@@ -286,9 +286,18 @@ workflows:
         api_key: $APP_STORE_CONNECT_PRIVATE_KEY
         key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
         issuer_id: $APP_STORE_CONNECT_ISSUER_ID
-        # Upload + TestFlight (pós-processamento após build verde — pode levar 10–30 min na Apple).
-        submit_to_testflight: true
-        beta_groups:
-          - Teste Dev Intellisys
-        # Grupo externo (opcional; exige revisão beta da Apple):
-        # - Teste Intellisys
+        # Apenas SOBE a build para a App Store Connect (sem TestFlight).
+        # A submissão para a App Store (produção) é feita MANUALMENTE na
+        # App Store Connect: criar versão → anexar esta build → Enviar p/ análise.
+        # (Pós-processamento da Apple após build verde: ~10–30 min.)
+        submit_to_testflight: false
+        # — TestFlight desativado a pedido (envio direto pra App Store) —
+        # Para reativar o TestFlight, volte `submit_to_testflight: true` e
+        # descomente o grupo abaixo:
+        # beta_groups:
+        #   - Teste Dev Intellisys
+        #
+        # Para AUTOMATIZAR o envio pra App Store (só depois que a página do
+        # app já estiver 100% preenchida na App Store Connect), troque por:
+        # submit_to_app_store: true
+        # release_type: MANUAL   # você aperta "Liberar" quando for aprovado
