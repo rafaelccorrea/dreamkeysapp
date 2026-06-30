@@ -933,17 +933,20 @@ class _UserCard extends StatelessWidget {
   final Future<void> Function() onToggleActive;
   final Future<void> Function() onOpenEdit;
 
+  /// Cor do papel — alinhada ao hero (Corretor=verde, Gestor=azul, Admin=roxo)
+  /// para coerência em toda a tela de Usuários e na de Editar.
   Color _roleColor(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     switch (user.role.toLowerCase()) {
       case 'master':
-        return const Color(0xFF8B5CF6);
+        return isDark ? const Color(0xFFC4B5FD) : const Color(0xFF6D28D9);
       case 'admin':
-        return const Color(0xFFE65100);
+        return isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED);
       case 'manager':
-        return const Color(0xFF1E88E5);
+        return isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
       case 'user':
       default:
-        return Theme.of(context).colorScheme.primary;
+        return isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
     }
   }
 

@@ -13,19 +13,22 @@ import '../utils/permission_meta.dart';
 /// Acento por papel — torna a subtela coerente com QUEM se edita (Corretor,
 /// Gerente, Admin, Master). O vermelho da marca fica reservado para a ação
 /// principal (Salvar). Ver memória `color-strategy-subscreens`.
+/// Cores por papel — alinhadas ao hero da tela de Usuários (fonte de verdade):
+/// Corretor = verde, Gestor = azul/indigo, Admin = roxo. O conforto vem do
+/// uso TONAL (sem preenchimento neon) no segmented. Ver
+/// memória color-strategy-subscreens.
 Color _roleAccent(String role, bool isDark) {
   switch (role) {
     case 'master':
-      return isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED);
+      // Distinto do Admin (roxo mais profundo).
+      return isDark ? const Color(0xFFC4B5FD) : const Color(0xFF6D28D9);
     case 'admin':
-      return isDark ? const Color(0xFFFB923C) : const Color(0xFFEA580C);
+      return isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED); // roxo
     case 'manager':
-      return isDark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB);
+      return isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1); // azul
     case 'user':
     default:
-      // Corretor — grafite/ardósia sóbrio (papel mais comom; escala de cor
-      // cresce com o poder do papel). Ver memória color-strategy-subscreens.
-      return isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569);
+      return isDark ? const Color(0xFF34D399) : const Color(0xFF059669); // verde
   }
 }
 
@@ -283,36 +286,49 @@ class _EditUserPageState extends State<EditUserPage> {
         .toList();
     final empty = selected.isEmpty && unknown.isEmpty;
 
-    if (empty) {
-      return _SelectGestorButton(
-        missing: _managerMissing,
-        accent: _accent,
-        onTap: _openManagerSheet,
-      );
-    }
-
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final m in selected) ...[
-          _SelectedManagerRow(
-            name: m.name,
-            subtitle: m.roleLabel,
-            accent: _accent,
-            onRemove: () => setState(() => _selectedManagers.remove(m.id)),
+        // Botão de adicionar SEMPRE no topo da seção.
+        _AddGestorButton(
+          missing: _managerMissing,
+          accent: _accent,
+          onTap: _openManagerSheet,
+        ),
+        if (empty && _managerMissing) ...[
+          const SizedBox(height: 7),
+          Text(
+            'Obrigatório para corretores — selecione ao menos um gestor.',
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+              color: AppColors.status.error,
+            ),
           ),
-          const SizedBox(height: 8),
         ],
-        for (final id in unknown) ...[
-          _SelectedManagerRow(
-            name: 'Gestor vinculado',
-            subtitle: 'Toque em remover para desvincular',
-            accent: _accent,
-            onRemove: () => setState(() => _selectedManagers.remove(id)),
+        if (!empty) ...[
+          const SizedBox(height: 10),
+          // Chips horizontais (wrap), ordenados.
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final m in selected)
+                _ManagerChip(
+                  name: m.name,
+                  accent: _accent,
+                  onRemove: () =>
+                      setState(() => _selectedManagers.remove(m.id)),
+                ),
+              for (final id in unknown)
+                _ManagerChip(
+                  name: 'Gestor',
+                  accent: _accent,
+                  onRemove: () => setState(() => _selectedManagers.remove(id)),
+                ),
+            ],
           ),
-          const SizedBox(height: 8),
         ],
-        _AddMoreButton(accent: _accent, onTap: _openManagerSheet),
       ],
     );
   }
@@ -1060,7 +1076,8 @@ class _RoleChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = selected ? Colors.white : ThemeHelpers.textSecondaryColor(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final fg = selected ? color : ThemeHelpers.textSecondaryColor(context);
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
@@ -1068,18 +1085,16 @@ class _RoleChip extends StatelessWidget {
         curve: Curves.easeOutCubic,
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: selected ? color : Colors.transparent,
+          // Tonal suave (sem preenchimento saturado nem brilho) — conforto.
+          color: selected
+              ? color.withValues(alpha: isDark ? 0.20 : 0.12)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
-          boxShadow: selected
-              ? [
-                  BoxShadow(
-                    color: color.withValues(alpha: 0.35),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                    spreadRadius: -4,
-                  ),
-                ]
-              : null,
+          border: Border.all(
+            color: selected
+                ? color.withValues(alpha: isDark ? 0.5 : 0.38)
+                : Colors.transparent,
+          ),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1107,92 +1122,10 @@ class _RoleChip extends StatelessWidget {
 // Gestor — chips + picker
 // ───────────────────────────────────────────────────────────────────────────
 
-/// Linha de um gestor já vinculado — avatar + nome + papel + remover.
-/// Ordenada e limpa (substitui as pills bagunçadas).
-class _SelectedManagerRow extends StatelessWidget {
-  const _SelectedManagerRow({
-    required this.name,
-    required this.subtitle,
-    required this.accent,
-    required this.onRemove,
-  });
-  final String name;
-  final String subtitle;
-  final Color accent;
-  final VoidCallback onRemove;
-
-  String get _initials {
-    final p = name.trim().split(RegExp(r'\s+'));
-    if (p.isEmpty || p.first.isEmpty) return '?';
-    if (p.length == 1) return p.first.substring(0, 1).toUpperCase();
-    return '${p.first[0]}${p.last[0]}'.toUpperCase();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final textColor = ThemeHelpers.textColor(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(10, 9, 6, 9),
-      decoration: BoxDecoration(
-        color: accent.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(13),
-        border: Border.all(color: accent.withValues(alpha: 0.28)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: accent),
-            alignment: Alignment.center,
-            child: Text(
-              _initials,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w900),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  style: TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w800,
-                      color: textColor),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                Text(
-                  subtitle,
-                  style: TextStyle(fontSize: 11.5, color: secondary),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            onPressed: onRemove,
-            icon: Icon(LucideIcons.x, size: 16, color: secondary),
-            tooltip: 'Remover',
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Estado vazio do seletor de gestor — botão de largura total. Fica em tom de
-/// alerta (vermelho) quando é obrigatório e ainda não há gestor.
-class _SelectGestorButton extends StatelessWidget {
-  const _SelectGestorButton({
+/// Botão "Adicionar gestor" — fica sempre no topo da seção. Pill horizontal;
+/// tom de alerta (vermelho) quando obrigatório e ainda sem gestor.
+class _AddGestorButton extends StatelessWidget {
+  const _AddGestorButton({
     required this.missing,
     required this.accent,
     required this.onTap,
@@ -1204,54 +1137,25 @@ class _SelectGestorButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tone = missing ? AppColors.status.error : accent;
-    final secondary = ThemeHelpers.textSecondaryColor(context);
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
         decoration: BoxDecoration(
-          color: missing ? tone.withValues(alpha: 0.05) : Colors.transparent,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: tone.withValues(alpha: missing ? 0.45 : 0.4)),
+          color: tone.withValues(alpha: missing ? 0.07 : 0.08),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: tone.withValues(alpha: 0.4)),
         ),
         child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: tone.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(LucideIcons.userPlus, size: 17, color: tone),
+            Icon(LucideIcons.userPlus, size: 15, color: tone),
+            const SizedBox(width: 7),
+            Text(
+              'Adicionar gestor',
+              style: TextStyle(
+                  color: tone, fontWeight: FontWeight.w800, fontSize: 12.5),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Selecionar gestor responsável',
-                    style: TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w800,
-                      color: ThemeHelpers.textColor(context),
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Obrigatório para corretores',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: missing ? tone : secondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Icon(LucideIcons.chevronRight, size: 18, color: secondary),
           ],
         ),
       ),
@@ -1259,36 +1163,59 @@ class _SelectGestorButton extends StatelessWidget {
   }
 }
 
-/// Botão slim de "adicionar mais gestores".
-class _AddMoreButton extends StatelessWidget {
-  const _AddMoreButton({required this.accent, required this.onTap});
+/// Chip horizontal de um gestor vinculado — avatar + primeiro nome + remover.
+class _ManagerChip extends StatelessWidget {
+  const _ManagerChip(
+      {required this.name, required this.accent, required this.onRemove});
+  final String name;
   final Color accent;
-  final VoidCallback onTap;
+  final VoidCallback onRemove;
+
+  String get _first => name.trim().split(RegExp(r'\s+')).first;
+  String get _initials {
+    final p = name.trim().split(RegExp(r'\s+'));
+    if (p.isEmpty || p.first.isEmpty) return '?';
+    if (p.length == 1) return p.first.substring(0, 1).toUpperCase();
+    return '${p.first[0]}${p.last[0]}'.toUpperCase();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: accent.withValues(alpha: 0.4)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.plus, size: 15, color: accent),
-            const SizedBox(width: 6),
-            Text(
-              'Adicionar gestor',
-              style: TextStyle(
-                  color: accent, fontWeight: FontWeight.w800, fontSize: 12.5),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(4, 4, 8, 4),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: accent.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: accent),
+            alignment: Alignment.center,
+            child: Text(
+              _initials,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w900),
             ),
-          ],
-        ),
+          ),
+          const SizedBox(width: 7),
+          Text(
+            _first,
+            style: TextStyle(
+                color: accent, fontWeight: FontWeight.w800, fontSize: 12.5),
+          ),
+          const SizedBox(width: 6),
+          GestureDetector(
+            onTap: onRemove,
+            child: Icon(LucideIcons.x, size: 14, color: accent),
+          ),
+        ],
       ),
     );
   }
