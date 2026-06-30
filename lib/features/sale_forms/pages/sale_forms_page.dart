@@ -1,16 +1,17 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/constants/app_permissions.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
-import '../../../shared/services/purchase_proposals_service.dart';
+import '../../../shared/services/sale_forms_service.dart';
 import '../../../shared/widgets/app_scaffold.dart';
-import '../widgets/proposal_card.dart';
-import '../widgets/proposal_signatures_sheet.dart';
-import 'create_proposal_page.dart';
+import '../widgets/sale_form_card.dart';
+import '../widgets/sale_form_type_modal.dart';
+import 'create_sale_form_page.dart';
+import 'sale_form_detail_page.dart';
 
 const double _kPadH = 16;
-const double _kFabBottom = 96;
 
 Color _accent(BuildContext context) {
   return Theme.of(context).brightness == Brightness.dark
@@ -18,22 +19,22 @@ Color _accent(BuildContext context) {
       : AppColors.primary.primary;
 }
 
-/// Listagem de fichas de proposta — espelha `PurchaseProposalsPage.tsx` do
-/// imobx-front (mobile view).
-class ProposalsPage extends StatefulWidget {
-  const ProposalsPage({super.key});
+/// Listagem de fichas de venda — espelha `SaleFormsPage.tsx` (web) e o DNA da
+/// tela de Fichas de Proposta do mobile. Fase 1: leitura + cancelar/excluir.
+class SaleFormsPage extends StatefulWidget {
+  const SaleFormsPage({super.key});
 
   @override
-  State<ProposalsPage> createState() => _ProposalsPageState();
+  State<SaleFormsPage> createState() => _SaleFormsPageState();
 }
 
-class _ProposalsPageState extends State<ProposalsPage> {
+class _SaleFormsPageState extends State<SaleFormsPage> {
   final _search = TextEditingController();
   final _scroll = ScrollController();
 
-  ProposalListResult? _data;
-  ProposalStats? _stats;
-  ProposalFilters _filters = const ProposalFilters(limit: 20);
+  SaleFormListResult? _data;
+  SaleFormStats? _stats;
+  SaleFormFilters _filters = const SaleFormFilters(limit: 20);
   bool _loading = true;
   bool _loadingMore = false;
   String? _error;
@@ -55,15 +56,14 @@ class _ProposalsPageState extends State<ProposalsPage> {
   }
 
   void _onScroll() {
-    if (_loadingMore || _loading) return;
-    if (_data == null) return;
+    if (_loadingMore || _loading || _data == null) return;
     if (_data!.page >= _data!.totalPages) return;
     if (_scroll.position.pixels >= _scroll.position.maxScrollExtent - 280) {
       _loadMore();
     }
   }
 
-  ProposalFilters _withSearchAndDeleted(ProposalFilters base) {
+  SaleFormFilters _withSearchAndDeleted(SaleFormFilters base) {
     final s = _search.text.trim();
     return base.copyWith(
       search: s.isEmpty ? null : s,
@@ -77,8 +77,8 @@ class _ProposalsPageState extends State<ProposalsPage> {
       _error = null;
     });
     final f = _withSearchAndDeleted(_filters.copyWith(page: 1));
-    final statsFut = PurchaseProposalsService.instance.getStats();
-    final res = await PurchaseProposalsService.instance.list(filters: f);
+    final statsFut = SaleFormsService.instance.getStats(filters: f);
+    final res = await SaleFormsService.instance.list(filters: f);
     final statsRes = await statsFut;
     if (!mounted) return;
     setState(() {
@@ -88,19 +88,20 @@ class _ProposalsPageState extends State<ProposalsPage> {
         _data = res.data;
         _error = null;
       } else {
-        _error = res.message ?? 'Não foi possível carregar as propostas.';
+        _error = res.message ?? 'Não foi possível carregar as fichas de venda.';
       }
       if (statsRes.success && statsRes.data != null) {
         _stats = statsRes.data;
       }
     });
+    if (mounted) FocusScope.of(context).unfocus();
   }
 
   Future<void> _loadMore() async {
     if (_data == null) return;
     setState(() => _loadingMore = true);
     final next = _filters.copyWith(page: _data!.page + 1);
-    final res = await PurchaseProposalsService.instance.list(
+    final res = await SaleFormsService.instance.list(
       filters: _withSearchAndDeleted(next),
     );
     if (!mounted) return;
@@ -108,7 +109,7 @@ class _ProposalsPageState extends State<ProposalsPage> {
       _loadingMore = false;
       if (res.success && res.data != null) {
         _filters = next;
-        _data = ProposalListResult(
+        _data = SaleFormListResult(
           items: [..._data!.items, ...res.data!.items],
           total: res.data!.total,
           page: res.data!.page,
@@ -119,110 +120,80 @@ class _ProposalsPageState extends State<ProposalsPage> {
     });
   }
 
-  Future<void> _openCreate() async {
-    final created = await Navigator.of(
-      context,
-    ).push<bool>(MaterialPageRoute(builder: (_) => const CreateProposalPage()));
-    if (created == true && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Proposta criada com sucesso.')),
-      );
-      _load();
-    }
-  }
-
-  Future<void> _openDetail(PurchaseProposal p) async {
+  Future<void> _openDetail(SaleForm f) async {
+    // Com permissão e ficha editável → abre em EDIÇÃO; senão, visualização.
     final canUpdate = ModuleAccessService.instance.hasPermission(
-      'proposal:update',
+      AppPermissions.saleFormUpdate,
     );
-    final isOpen =
-        p.status == ProposalStatus.processing &&
-        p.deletedAt == null &&
-        canUpdate;
-    if (!isOpen) {
-      _openSignatures(p, showHistorico: true);
-      return;
-    }
-    final updated = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => CreateProposalPage(proposalId: p.id)),
+    final editable =
+        canUpdate &&
+        f.deletedAt == null &&
+        f.status != SaleFormStatus.finalized &&
+        f.status != SaleFormStatus.canceled;
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => editable
+            ? CreateSaleFormPage(saleFormId: f.id)
+            : SaleFormDetailPage(saleFormId: f.id),
+      ),
     );
-    if (updated == true && mounted) {
+    if (changed == true && mounted) _load();
+  }
+
+  Future<void> _openCreate() async {
+    final choice = await showSaleFormTypeModal(context);
+    if (choice == null || !mounted) return;
+    final created = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => CreateSaleFormPage(choice: choice)),
+    );
+    if (created == true && mounted) {
+      _toast('Ficha de venda criada com sucesso.', ok: true);
       _load();
     }
   }
 
-  void _openSignatures(
-    PurchaseProposal p, {
-    bool showHistorico = false,
-    int? etapaOverride,
-  }) {
-    final etapa = etapaOverride ?? p.etapa.number;
-    showProposalSignaturesSheet(
-      context,
-      proposalId: p.id,
-      proposalNumber: p.proposalNumber,
-      etapa: etapa,
-      initialHistorico: showHistorico,
-      defaultSigners: [
-        if (p.proponentName != null && p.proponentEmail != null)
-          ProposalSignerInput(
-            email: p.proponentEmail!,
-            name: p.proponentName!,
-            phone: p.proponentPhone,
-          ),
-        if (etapa >= 2 && p.ownerName != null && p.ownerEmail != null)
-          ProposalSignerInput(
-            email: p.ownerEmail!,
-            name: p.ownerName!,
-            phone: p.ownerPhone,
-          ),
-      ],
-      onChanged: _load,
-    );
-  }
-
-  Future<void> _confirmCancelar(PurchaseProposal p) async {
+  Future<void> _confirmCancelar(SaleForm f) async {
     final reason = await _askReason(
-      title: 'Cancelar proposta',
+      title: 'Cancelar ficha de venda',
       message:
-          'A proposta nº ${p.proposalNumber} não poderá mais ser enviada para assinatura.',
-      confirmLabel: 'Cancelar proposta',
+          'A ficha nº ${f.formNumber} será cancelada e não poderá mais ser enviada para assinatura.',
+      confirmLabel: 'Cancelar ficha',
     );
     if (reason == null || !mounted) return;
-    final res = await PurchaseProposalsService.instance.cancelar(p.id, reason);
+    final res = await SaleFormsService.instance.cancelar(f.id, reason);
     if (!mounted) return;
-    if (res.success) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Proposta cancelada.')));
-      _load();
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res.message ?? 'Falha ao cancelar.')),
-      );
-    }
+    _toast(
+      res.success ? 'Ficha cancelada.' : (res.message ?? 'Falha ao cancelar.'),
+      ok: res.success,
+    );
+    if (res.success) _load();
   }
 
-  Future<void> _confirmExcluir(PurchaseProposal p) async {
+  Future<void> _confirmExcluir(SaleForm f) async {
     final reason = await _askReason(
-      title: 'Excluir proposta',
+      title: 'Excluir ficha de venda',
       message:
-          'Excluir a ficha nº ${p.proposalNumber}? Esta ação fica em auditoria.',
+          'Excluir a ficha nº ${f.formNumber}? Esta ação fica em auditoria.',
       confirmLabel: 'Excluir',
     );
     if (reason == null || !mounted) return;
-    final res = await PurchaseProposalsService.instance.excluir(p.id, reason);
+    final res = await SaleFormsService.instance.excluir(f.id, reason);
     if (!mounted) return;
-    if (res.success) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Proposta excluída.')));
-      _load();
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res.message ?? 'Falha ao excluir.')),
-      );
-    }
+    _toast(
+      res.success ? 'Ficha excluída.' : (res.message ?? 'Falha ao excluir.'),
+      ok: res.success,
+    );
+    if (res.success) _load();
+  }
+
+  void _toast(String msg, {bool ok = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: ok ? AppColors.status.success : AppColors.status.error,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   Future<String?> _askReason({
@@ -234,45 +205,43 @@ class _ProposalsPageState extends State<ProposalsPage> {
     final accent = _accent(context);
     final res = await showDialog<String>(
       context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: Text(title),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(message),
-              const SizedBox(height: 12),
-              TextField(
-                controller: controller,
-                autofocus: true,
-                minLines: 2,
-                maxLines: 4,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: 'Motivo *',
-                  border: OutlineInputBorder(),
-                ),
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              minLines: 2,
+              maxLines: 4,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Motivo *',
+                border: OutlineInputBorder(),
               ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Voltar'),
-            ),
-            FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: accent),
-              onPressed: () {
-                final r = controller.text.trim();
-                if (r.isEmpty) return;
-                Navigator.of(ctx).pop(r);
-              },
-              child: Text(confirmLabel),
             ),
           ],
-        );
-      },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Voltar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: accent),
+            onPressed: () {
+              final r = controller.text.trim();
+              if (r.length < 5) return; // backend exige motivo (mín. 5)
+              Navigator.of(ctx).pop(r);
+            },
+            child: Text(confirmLabel),
+          ),
+        ],
+      ),
     );
     controller.dispose();
     return res;
@@ -283,17 +252,21 @@ class _ProposalsPageState extends State<ProposalsPage> {
     return ListenableBuilder(
       listenable: ModuleAccessService.instance,
       builder: (context, _) {
-        final canView = ModuleAccessService.instance.hasPermission(
-          'proposal:view',
-        );
+        final canView =
+            ModuleAccessService.instance.hasAnyPermission(
+              AppPermissions.saleFormMenu,
+            ) ||
+            ModuleAccessService.instance.hasPermission(
+              AppPermissions.saleFormView,
+            );
         if (!canView) {
           return AppScaffold(
-            title: 'Fichas de proposta',
+            title: 'Fichas de venda',
             currentBottomNavIndex: -1,
             showBottomNavigation: false,
             body: Center(
               child: Text(
-                'Sem permissão para fichas de proposta.',
+                'Sem permissão para fichas de venda.',
                 style: Theme.of(context).textTheme.bodyLarge,
               ),
             ),
@@ -306,15 +279,15 @@ class _ProposalsPageState extends State<ProposalsPage> {
 
   Widget _buildBody(BuildContext context) {
     final accent = _accent(context);
-    final canCreate = ModuleAccessService.instance.hasPermission(
-      'proposal:create',
-    );
     final canViewAll = ModuleAccessService.instance.hasPermission(
-      'proposal:view_all',
+      AppPermissions.saleFormViewAll,
+    );
+    final canCreate = ModuleAccessService.instance.hasPermission(
+      AppPermissions.saleFormCreate,
     );
 
     return AppScaffold(
-      title: 'Fichas de proposta',
+      title: 'Fichas de venda',
       currentBottomNavIndex: -1,
       showBottomNavigation: false,
       body: Stack(
@@ -324,6 +297,7 @@ class _ProposalsPageState extends State<ProposalsPage> {
             onRefresh: _load,
             child: CustomScrollView(
               controller: _scroll,
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               physics: const AlwaysScrollableScrollPhysics(
                 parent: BouncingScrollPhysics(),
               ),
@@ -334,14 +308,14 @@ class _ProposalsPageState extends State<ProposalsPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _ProposalsHero(
+                        _Hero(
                           accent: accent,
                           stats: _stats,
                           filteredCount: _data?.total,
                           hasFilter:
                               _filters.status != null ||
                               _showDeletedOnly ||
-                              (_search.text.trim().isNotEmpty),
+                              _search.text.trim().isNotEmpty,
                           showingDeletedOnly: _showDeletedOnly,
                         ),
                         const SizedBox(height: 16),
@@ -353,11 +327,11 @@ class _ProposalsPageState extends State<ProposalsPage> {
                         const SizedBox(height: 12),
                         _StatusChips(
                           current: _filters.status,
-                          accent: accent,
                           onChanged: (status) {
-                            setState(() {
-                              _filters = _filters.copyWith(status: status);
-                            });
+                            setState(
+                              () =>
+                                  _filters = _filters.copyWith(status: status),
+                            );
                             _load();
                           },
                         ),
@@ -379,16 +353,11 @@ class _ProposalsPageState extends State<ProposalsPage> {
                 ),
                 if (_loading)
                   SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(
-                      _kPadH,
-                      0,
-                      _kPadH,
-                      _kFabBottom,
-                    ),
+                    padding: const EdgeInsets.fromLTRB(_kPadH, 0, _kPadH, 96),
                     sliver: SliverList.separated(
                       itemCount: 6,
                       separatorBuilder: (_, _) => const SizedBox(height: 12),
-                      itemBuilder: (_, _) => const ProposalCardSkeleton(),
+                      itemBuilder: (_, _) => const SaleFormCardSkeleton(),
                     ),
                   )
                 else if (_error != null)
@@ -410,12 +379,7 @@ class _ProposalsPageState extends State<ProposalsPage> {
                   )
                 else
                   SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(
-                      _kPadH,
-                      0,
-                      _kPadH,
-                      _kFabBottom,
-                    ),
+                    padding: const EdgeInsets.fromLTRB(_kPadH, 0, _kPadH, 96),
                     sliver: SliverList.separated(
                       itemCount: _data!.items.length + (_loadingMore ? 1 : 0),
                       separatorBuilder: (_, _) => const SizedBox(height: 12),
@@ -426,16 +390,13 @@ class _ProposalsPageState extends State<ProposalsPage> {
                             child: Center(child: CircularProgressIndicator()),
                           );
                         }
-                        final p = _data!.items[i];
-                        return ProposalCard(
-                          proposal: p,
+                        final f = _data!.items[i];
+                        return SaleFormCard(
+                          saleForm: f,
                           accent: accent,
-                          onTap: () => _openDetail(p),
-                          onContinue: () => _openSignatures(p),
-                          onShowHistorico: () =>
-                              _openSignatures(p, showHistorico: true),
-                          onCancelar: () => _confirmCancelar(p),
-                          onExcluir: () => _confirmExcluir(p),
+                          onTap: () => _openDetail(f),
+                          onCancelar: () => _confirmCancelar(f),
+                          onExcluir: () => _confirmExcluir(f),
                         );
                       },
                     ),
@@ -457,11 +418,47 @@ class _ProposalsPageState extends State<ProposalsPage> {
   }
 }
 
-/// Hero **editorial flush** (sem banner/card) — mesmo DNA das telas de
-/// Usuários e Aprovações: eyebrow com dot semântico, número grande + rótulo,
-/// subtítulo contextual e faixa de KPIs.
-class _ProposalsHero extends StatelessWidget {
-  const _ProposalsHero({
+class _CreateFab extends StatelessWidget {
+  const _CreateFab({required this.accent, required this.onTap});
+  final Color accent;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: accent,
+      shape: const StadiumBorder(),
+      elevation: 6,
+      shadowColor: accent.withValues(alpha: 0.4),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: onTap,
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.add_rounded, color: Colors.white, size: 22),
+              SizedBox(width: 8),
+              Text(
+                'Nova ficha',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 15,
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Hero editorial — eyebrow com dot + número grande + subtítulo.
+class _Hero extends StatelessWidget {
+  const _Hero({
     required this.accent,
     this.stats,
     this.filteredCount,
@@ -470,7 +467,7 @@ class _ProposalsHero extends StatelessWidget {
   });
 
   final Color accent;
-  final ProposalStats? stats;
+  final SaleFormStats? stats;
   final int? filteredCount;
   final bool hasFilter;
   final bool showingDeletedOnly;
@@ -494,7 +491,7 @@ class _ProposalsHero extends StatelessWidget {
         ? 'Mostrando apenas fichas excluídas — em auditoria.'
         : hasFilter
         ? 'Filtro aplicado · ${filteredCount ?? '—'} no resultado.'
-        : 'Crie, edite, acompanhe etapas e envie para assinatura.';
+        : 'Acompanhe as vendas, status e envio para assinatura.';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(0, 8, 0, 0),
@@ -520,7 +517,7 @@ class _ProposalsHero extends StatelessWidget {
               ),
               const SizedBox(width: 9),
               Text(
-                'FICHAS DE PROPOSTA',
+                'FICHAS DE VENDA',
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: accent,
                   fontWeight: FontWeight.w900,
@@ -547,7 +544,7 @@ class _ProposalsHero extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: 5),
                 child: Text(
-                  total == 1 ? 'proposta' : 'propostas',
+                  total == 1 ? 'ficha' : 'fichas',
                   style: theme.textTheme.titleMedium?.copyWith(
                     color: secondary,
                     fontWeight: FontWeight.w800,
@@ -567,6 +564,118 @@ class _ProposalsHero extends StatelessWidget {
               height: 1.4,
             ),
           ),
+          if (stats != null) ...[
+            const SizedBox(height: 16),
+            _StatsStrip(stats: stats!),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Faixa de KPIs por status (valores distintos — sem repetir o total do hero).
+class _StatsStrip extends StatelessWidget {
+  const _StatsStrip({required this.stats});
+  final SaleFormStats stats;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final divider = ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
+    final warn = isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
+    final indigo = isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
+    final green = isDark ? const Color(0xFF4ADE80) : const Color(0xFF16A34A);
+    final blocks = <Widget>[
+      _StatBlock(
+        label: 'AGUARDANDO',
+        value: stats.waitingForSignature,
+        tone: warn,
+      ),
+      _StatBlock(label: 'EM ASSINAT.', value: stats.processing, tone: indigo),
+      _StatBlock(label: 'FINALIZADAS', value: stats.finalized, tone: green),
+    ];
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < blocks.length; i++) ...[
+            if (i > 0)
+              Container(
+                width: 1,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                color: divider,
+              ),
+            Expanded(child: blocks[i]),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _StatBlock extends StatelessWidget {
+  const _StatBlock({
+    required this.label,
+    required this.value,
+    required this.tone,
+  });
+  final String label;
+  final int value;
+  final Color tone;
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.w900,
+              color: tone,
+              letterSpacing: 1.0,
+              height: 1.0,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '$value',
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w900,
+              color: tone,
+              letterSpacing: -0.6,
+              height: 1.0,
+              fontSize: 22,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'fichas',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: secondary,
+              height: 1.0,
+            ),
+          ),
+          const SizedBox(height: 7),
+          Container(
+            height: 2,
+            width: 18,
+            decoration: BoxDecoration(
+              color: tone,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
         ],
       ),
     );
@@ -579,11 +688,9 @@ class _SearchBar extends StatelessWidget {
     required this.accent,
     required this.onSubmitted,
   });
-
   final TextEditingController controller;
   final Color accent;
   final VoidCallback onSubmitted;
-
   @override
   Widget build(BuildContext context) {
     final border = ThemeHelpers.borderColor(context);
@@ -592,8 +699,13 @@ class _SearchBar extends StatelessWidget {
       style: Theme.of(
         context,
       ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+      textInputAction: TextInputAction.search,
+      onSubmitted: (_) {
+        FocusScope.of(context).unfocus();
+        onSubmitted();
+      },
       decoration: InputDecoration(
-        hintText: 'Buscar número, proponente, ficha…',
+        hintText: 'Buscar número, comprador, vendedor…',
         isDense: true,
         prefixIcon: Icon(Icons.search_rounded, color: accent, size: 22),
         suffixIcon: IconButton(
@@ -619,44 +731,41 @@ class _SearchBar extends StatelessWidget {
           borderSide: BorderSide(color: accent.withValues(alpha: 0.65)),
         ),
       ),
-      onSubmitted: (_) => onSubmitted(),
     );
   }
 }
 
 class _StatusChips extends StatelessWidget {
-  const _StatusChips({
-    required this.current,
-    required this.accent,
-    required this.onChanged,
-  });
-
-  final ProposalStatus? current;
-  final Color accent;
-  final ValueChanged<ProposalStatus?> onChanged;
+  const _StatusChips({required this.current, required this.onChanged});
+  final SaleFormStatus? current;
+  final ValueChanged<SaleFormStatus?> onChanged;
 
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    final items = <(ProposalStatus?, String, Color)>[
-      (null, 'Todas', accent),
+    final items = <(SaleFormStatus?, String, Color)>[
+      (null, 'Todas', Theme.of(context).colorScheme.primary),
       (
-        ProposalStatus.processing,
-        'Em andamento',
+        SaleFormStatus.waitingForSignature,
+        'Aguardando',
+        dark ? AppColors.status.warningDarkMode : AppColors.status.warning,
+      ),
+      (
+        SaleFormStatus.processing,
+        'Em assinatura',
         dark ? AppColors.status.infoDarkMode : AppColors.status.info,
       ),
       (
-        ProposalStatus.finalized,
+        SaleFormStatus.finalized,
         'Finalizadas',
         dark ? AppColors.status.successDarkMode : AppColors.status.success,
       ),
       (
-        ProposalStatus.canceled,
+        SaleFormStatus.canceled,
         'Canceladas',
         dark ? AppColors.status.errorDarkMode : AppColors.status.error,
       ),
     ];
-
     // Grid de largura uniforme (2 colunas) — alinhado, sem scroll horizontal.
     // Item ímpar final ocupa a linha inteira para não deixar célula órfã.
     return LayoutBuilder(
@@ -693,14 +802,13 @@ class _StatusChip extends StatelessWidget {
     required this.selected,
     required this.onTap,
   });
-
   final String label;
   final Color tone;
   final bool selected;
   final VoidCallback onTap;
-
   @override
   Widget build(BuildContext context) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
     return Material(
       color: selected ? tone.withValues(alpha: 0.13) : Colors.transparent,
       borderRadius: BorderRadius.circular(12),
@@ -727,11 +835,7 @@ class _StatusChip extends StatelessWidget {
                 height: 8,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: selected
-                      ? tone
-                      : ThemeHelpers.textSecondaryColor(
-                          context,
-                        ).withValues(alpha: 0.35),
+                  color: selected ? tone : muted.withValues(alpha: 0.35),
                 ),
               ),
               const SizedBox(width: 8),
@@ -742,9 +846,7 @@ class _StatusChip extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
                     fontWeight: FontWeight.w800,
-                    color: selected
-                        ? tone
-                        : ThemeHelpers.textSecondaryColor(context),
+                    color: selected ? tone : muted,
                     letterSpacing: 0.1,
                   ),
                 ),
@@ -763,11 +865,9 @@ class _DeletedToggle extends StatelessWidget {
     required this.accent,
     required this.onChanged,
   });
-
   final bool value;
   final Color accent;
   final ValueChanged<bool> onChanged;
-
   @override
   Widget build(BuildContext context) {
     return InkWell(
@@ -811,7 +911,6 @@ class _DeletedToggle extends StatelessWidget {
 
 class _EmptyState extends StatelessWidget {
   const _EmptyState();
-
   @override
   Widget build(BuildContext context) {
     final muted = ThemeHelpers.textSecondaryColor(context);
@@ -820,63 +919,24 @@ class _EmptyState extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.request_page_outlined, size: 56, color: muted),
+          Icon(Icons.description_outlined, size: 56, color: muted),
           const SizedBox(height: 12),
           Text(
-            'Nenhuma proposta encontrada',
+            'Nenhuma ficha de venda encontrada',
             style: Theme.of(
               context,
             ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+            textAlign: TextAlign.center,
           ),
           const SizedBox(height: 6),
           Text(
-            'Toque em "Nova proposta" para registrar a primeira.',
+            'Ajuste a busca ou os filtros para tentar novamente.',
             textAlign: TextAlign.center,
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: muted),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _CreateFab extends StatelessWidget {
-  const _CreateFab({required this.accent, required this.onTap});
-
-  final Color accent;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: accent,
-      shape: const StadiumBorder(),
-      elevation: 6,
-      shadowColor: accent.withValues(alpha: 0.4),
-      child: InkWell(
-        customBorder: const StadiumBorder(),
-        onTap: onTap,
-        child: const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 22, vertical: 14),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.add_rounded, color: Colors.white, size: 22),
-              SizedBox(width: 8),
-              Text(
-                'Nova proposta',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 15,
-                  letterSpacing: 0.2,
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

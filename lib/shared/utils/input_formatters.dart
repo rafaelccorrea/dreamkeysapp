@@ -1,7 +1,39 @@
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 import 'masks.dart';
 
 /// Formatters customizados para TextFields
+
+/// Máscara monetária pt-BR baseada em **centavos** — os dígitos preenchem da
+/// direita para a esquerda e o valor é agrupado: `1.234,56`. NÃO inclui o
+/// símbolo "R$" (use `prefixText: 'R\$ '` no campo). É a máscara padrão de TODO
+/// input de valor monetário (ficha de venda, proposta, etc.).
+class CurrencyInputFormatter extends TextInputFormatter {
+  CurrencyInputFormatter({this.maxDigits = 13});
+
+  /// Limite de dígitos (centavos) — 13 ⇒ até 99.999.999.999,99.
+  final int maxDigits;
+  static final NumberFormat _fmt = NumberFormat('#,##0.00', 'pt_BR');
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var digits = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.isEmpty) return const TextEditingValue(text: '');
+    if (digits.length > maxDigits) digits = digits.substring(0, maxDigits);
+    final value = int.parse(digits) / 100.0;
+    final masked = _fmt.format(value);
+    return TextEditingValue(
+      text: masked,
+      selection: TextSelection.collapsed(offset: masked.length),
+    );
+  }
+
+  /// Formata um número já existente (prefill) no mesmo padrão da máscara.
+  static String format(num? v) => v == null ? '' : _fmt.format(v);
+}
 
 /// Formatter para CPF
 class CpfInputFormatter extends TextInputFormatter {

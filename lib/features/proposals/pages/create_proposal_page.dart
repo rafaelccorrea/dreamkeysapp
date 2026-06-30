@@ -310,11 +310,8 @@ class _CreateProposalPageState extends State<CreateProposalPage> {
     }
   }
 
-  String _money(double? v) {
-    if (v == null) return '';
-    final str = v.toStringAsFixed(2);
-    return Masks.money(str.replaceAll('.', ''));
-  }
+  // Prefill no mesmo padrão da máscara (1.234,56 — sem "R$", que vem do prefixo).
+  String _money(double? v) => CurrencyInputFormatter.format(v);
 
   String _formatDate(DateTime d) {
     return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
@@ -652,7 +649,7 @@ class _CreateProposalPageState extends State<CreateProposalPage> {
               label: 'Preço proposto *',
               controller: _proposedPrice,
               keyboard: TextInputType.number,
-              formatters: [MoneyInputFormatter()],
+              formatters: [CurrencyInputFormatter()],
               prefixText: 'R\$ ',
             ),
             _Field(
@@ -674,7 +671,7 @@ class _CreateProposalPageState extends State<CreateProposalPage> {
               label: 'Sinal (arras)',
               controller: _downPayment,
               keyboard: TextInputType.number,
-              formatters: [MoneyInputFormatter()],
+              formatters: [CurrencyInputFormatter()],
               prefixText: 'R\$ ',
             ),
             _Field(
@@ -697,7 +694,7 @@ class _CreateProposalPageState extends State<CreateProposalPage> {
               label: 'Multa mensal',
               controller: _monthlyPenalty,
               keyboard: TextInputType.number,
-              formatters: [MoneyInputFormatter()],
+              formatters: [CurrencyInputFormatter()],
               prefixText: 'R\$ ',
             ),
           ]),

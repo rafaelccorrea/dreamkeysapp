@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/purchase_proposals_service.dart';
+import '../../../shared/widgets/skeleton_box.dart';
 
 /// Card de uma proposta na listagem (mobile).
 ///
@@ -36,19 +37,22 @@ class ProposalCard extends StatelessWidget {
     final theme = Theme.of(context);
     final muted = ThemeHelpers.textSecondaryColor(context);
     final isDark = theme.brightness == Brightness.dark;
-    final canUpdate =
-        ModuleAccessService.instance.hasPermission('proposal:update');
-    final canDelete =
-        ModuleAccessService.instance.hasPermission('proposal:delete');
+    final canUpdate = ModuleAccessService.instance.hasPermission(
+      'proposal:update',
+    );
+    final canDelete = ModuleAccessService.instance.hasPermission(
+      'proposal:delete',
+    );
 
     final statusTone = _statusTone(proposal.status);
     final statusLabel = _statusLabel(proposal.status);
     final etapaLabel = _etapaLabel(proposal.etapa);
 
     final priceText = proposal.proposedPrice != null
-        ? NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$').format(
-            proposal.proposedPrice!,
-          )
+        ? NumberFormat.currency(
+            locale: 'pt_BR',
+            symbol: 'R\$',
+          ).format(proposal.proposedPrice!)
         : '—';
 
     // Contexto do imóvel (código + localização) — só renderiza se houver algo.
@@ -69,13 +73,13 @@ class ProposalCard extends StatelessWidget {
     }
     if (proposal.commissionPercentage != null &&
         proposal.commissionPercentage! > 0) {
-      valueExtras.add(
-        'Comissão ${_trimNum(proposal.commissionPercentage!)}%',
-      );
+      valueExtras.add('Comissão ${_trimNum(proposal.commissionPercentage!)}%');
     }
 
-    final maxEtapa = proposal.maxEtapaLiberadaParaEnvio ?? proposal.etapa.number;
-    final isProcessing = proposal.status == ProposalStatus.processing &&
+    final maxEtapa =
+        proposal.maxEtapaLiberadaParaEnvio ?? proposal.etapa.number;
+    final isProcessing =
+        proposal.status == ProposalStatus.processing &&
         proposal.deletedAt == null;
     final isFinalized = proposal.status == ProposalStatus.finalized;
     final isCanceled = proposal.status == ProposalStatus.canceled;
@@ -107,9 +111,7 @@ class ProposalCard extends StatelessWidget {
             border: Border.all(
               color: statusTone.withValues(alpha: isDark ? 0.34 : 0.24),
             ),
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.02)
-                : Colors.white,
+            color: isDark ? Colors.white.withValues(alpha: 0.02) : Colors.white,
             boxShadow: [
               if (!isDark)
                 BoxShadow(
@@ -153,13 +155,18 @@ class ProposalCard extends StatelessWidget {
                                   color: accent,
                                   fontWeight: FontWeight.w900,
                                   fontFeatures: const [
-                                    FontFeature.tabularFigures()
+                                    FontFeature.tabularFigures(),
                                   ],
                                 ),
                               ),
                             ),
                             const SizedBox(width: 8),
-                            Flexible(child: _StatusPill(tone: statusTone, label: statusLabel)),
+                            Flexible(
+                              child: _StatusPill(
+                                tone: statusTone,
+                                label: statusLabel,
+                              ),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 7),
@@ -202,8 +209,9 @@ class ProposalCard extends StatelessWidget {
               Divider(
                 height: 1,
                 thickness: 1,
-                color: ThemeHelpers.borderLightColor(context)
-                    .withValues(alpha: 0.7),
+                color: ThemeHelpers.borderLightColor(
+                  context,
+                ).withValues(alpha: 0.7),
               ),
               const SizedBox(height: 12),
 
@@ -294,8 +302,9 @@ class ProposalCard extends StatelessWidget {
                       ),
                     ),
                     style: FilledButton.styleFrom(
-                      backgroundColor:
-                          const Color(0xFF22C55E).withValues(alpha: 0.16),
+                      backgroundColor: const Color(
+                        0xFF22C55E,
+                      ).withValues(alpha: 0.16),
                       foregroundColor: const Color(0xFF16A34A),
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
@@ -352,6 +361,116 @@ class ProposalCard extends StatelessWidget {
   }
 }
 
+/// Placeholder de carregamento — **fiel** ao `ProposalCard` (mesmo container e
+/// posições: cabeçalho Nº+status, proponente, contexto, divisória, bloco de
+/// valor, tracker de etapas e rodapé). Usado na listagem enquanto `_loading`.
+class ProposalCardSkeleton extends StatelessWidget {
+  const ProposalCardSkeleton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: isDark ? Colors.white.withValues(alpha: 0.02) : Colors.white,
+        border: Border.all(
+          color: ThemeHelpers.borderLightColor(
+            context,
+          ).withValues(alpha: isDark ? 0.9 : 0.8),
+        ),
+        boxShadow: [
+          if (!isDark)
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 14,
+              offset: const Offset(0, 4),
+              spreadRadius: -6,
+            ),
+        ],
+      ),
+      padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: const [
+              SkeletonBox(width: 56, height: 20, borderRadius: 6),
+              SizedBox(width: 8),
+              SkeletonBox(width: 90, height: 20, borderRadius: 999),
+            ],
+          ),
+          const SizedBox(height: 13),
+          Row(
+            children: const [
+              Expanded(flex: 7, child: SkeletonText(height: 18)),
+              Spacer(flex: 3),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: const [
+              SkeletonBox(width: 60, height: 15, borderRadius: 6),
+              SizedBox(width: 8),
+              Expanded(flex: 4, child: SkeletonText(height: 12)),
+              Spacer(flex: 4),
+            ],
+          ),
+          const SizedBox(height: 14),
+          const SkeletonBox(width: double.infinity, height: 1),
+          const SizedBox(height: 14),
+          // Bloco de valor
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: const [
+              SkeletonText(width: 70, height: 9),
+              SizedBox(height: 7),
+              SkeletonBox(width: 150, height: 24, borderRadius: 6),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // Tracker de etapas (3 nós)
+          Row(
+            children: const [
+              SkeletonBox(width: 26, height: 26, borderRadius: 13),
+              Expanded(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 6),
+                  child: SkeletonBox(
+                    width: double.infinity,
+                    height: 3,
+                    borderRadius: 2,
+                  ),
+                ),
+              ),
+              SkeletonBox(width: 26, height: 26, borderRadius: 13),
+              Expanded(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 6),
+                  child: SkeletonBox(
+                    width: double.infinity,
+                    height: 3,
+                    borderRadius: 2,
+                  ),
+                ),
+              ),
+              SkeletonBox(width: 26, height: 26, borderRadius: 13),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: const [
+              SkeletonBox(width: 108, height: 12, borderRadius: 6),
+              SizedBox(width: 12),
+              SkeletonBox(width: 70, height: 12, borderRadius: 6),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _StatusDot extends StatelessWidget {
   const _StatusDot({required this.tone});
 
@@ -400,11 +519,11 @@ class _StatusPill extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: tone,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 0.5,
-              fontSize: 10,
-            ),
+          color: tone,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.5,
+          fontSize: 10,
+        ),
       ),
     );
   }
@@ -435,8 +554,9 @@ class _PropertyContextLine extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: ThemeHelpers.borderLightColor(context)
-                  .withValues(alpha: 0.8),
+              color: ThemeHelpers.borderLightColor(
+                context,
+              ).withValues(alpha: 0.8),
               borderRadius: BorderRadius.circular(5),
             ),
             child: Text(
@@ -498,10 +618,10 @@ class _MetaPill extends StatelessWidget {
           Text(
             label,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: tone,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 10.5,
-                ),
+              color: tone,
+              fontWeight: FontWeight.w800,
+              fontSize: 10.5,
+            ),
           ),
         ],
       ),
@@ -559,14 +679,16 @@ class _StageTracker extends StatelessWidget {
           ),
         );
       }
-      nodes.add(_StageNode(
-        step: step,
-        done: isDone(step),
-        active: isActive(step),
-        tone: tone,
-        border: border,
-        muted: muted,
-      ));
+      nodes.add(
+        _StageNode(
+          step: step,
+          done: isDone(step),
+          active: isActive(step),
+          tone: tone,
+          border: border,
+          muted: muted,
+        ),
+      );
     }
 
     return Column(
@@ -585,8 +707,9 @@ class _StageTracker extends StatelessWidget {
                       : (i == 2 ? TextAlign.end : TextAlign.center),
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: isActive(i + 1) ? tone : muted,
-                    fontWeight:
-                        isActive(i + 1) ? FontWeight.w900 : FontWeight.w700,
+                    fontWeight: isActive(i + 1)
+                        ? FontWeight.w900
+                        : FontWeight.w700,
                     fontSize: 9.5,
                     letterSpacing: 0.2,
                   ),
@@ -626,7 +749,9 @@ class _StageNode extends StatelessWidget {
       height: 22,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: done ? tone : (active ? tone.withValues(alpha: 0.14) : Colors.transparent),
+        color: done
+            ? tone
+            : (active ? tone.withValues(alpha: 0.14) : Colors.transparent),
         border: Border.all(
           color: filled ? tone : border.withValues(alpha: 0.7),
           width: active ? 2 : 1.4,

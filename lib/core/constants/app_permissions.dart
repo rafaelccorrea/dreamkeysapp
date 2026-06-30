@@ -80,6 +80,24 @@ class AppPermissions {
     userDelete,
   ];
 
+  // ─── Fichas de Venda (sale_form:*) ─────────────────────────────────────
+  static const String saleFormView = 'sale_form:view';
+  static const String saleFormViewTeam = 'sale_form:view_team';
+  static const String saleFormViewAll = 'sale_form:view_all';
+  static const String saleFormCreate = 'sale_form:create';
+  static const String saleFormUpdate = 'sale_form:update';
+  static const String saleFormDelete = 'sale_form:delete';
+  static const String saleFormExport = 'sale_form:export';
+  static const String saleFormViewDashboard = 'sale_form:view_dashboard';
+
+  /// Permissões que liberam a entrada de Fichas de Venda no drawer
+  /// (qualquer visão). Espelha o gating do web.
+  static const List<String> saleFormMenu = [
+    saleFormView,
+    saleFormViewTeam,
+    saleFormViewAll,
+  ];
+
   // ─── Comissões ─────────────────────────────────────────────────────────
   static const String commissionView = 'commission:view';
   static const String commissionCreate = 'commission:create';

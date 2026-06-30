@@ -928,6 +928,10 @@ class _AppDrawerState extends State<AppDrawer> {
             (ModuleAccessService.instance.hasPermission('proposal:view') ||
                 ModuleAccessService.instance.hasPermission('proposal:view_team') ||
                 ModuleAccessService.instance.hasPermission('proposal:view_all'));
+    final canSeeSaleForms =
+        ModuleAccessService.instance.hasCompanyModule('sale_forms') &&
+            ModuleAccessService.instance
+                .hasAnyPermission(AppPermissions.saleFormMenu);
     // Comissões: módulo da empresa + permissão de visualização (corretor vê só
     // as próprias; master/admin/manager têm bypass no ModuleAccessService).
     final canSeeCommissions = ModuleAccessService.instance
@@ -1203,6 +1207,27 @@ class _AppDrawerState extends State<AppDrawer> {
                                   }
                                   Navigator.of(context).pushNamedAndRemoveUntil(
                                     AppRoutes.proposals,
+                                    (route) => false,
+                                  );
+                                },
+                              ),
+                            if (canSeeSaleForms)
+                              _buildDrawerItem(
+                                context: context,
+                                currentRoute: activeRoute,
+                                route: AppRoutes.saleForms,
+                                icon: LucideIcons.handshake,
+                                activeIcon: LucideIcons.handshake,
+                                title: 'Fichas de venda',
+                                accent: accent,
+                                showLeadingTile: true,
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  if (activeRoute == AppRoutes.saleForms) {
+                                    return;
+                                  }
+                                  Navigator.of(context).pushNamedAndRemoveUntil(
+                                    AppRoutes.saleForms,
                                     (route) => false,
                                   );
                                 },

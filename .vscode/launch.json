@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Intellisys (debug)",
+      "request": "launch",
+      "type": "dart",
+      "toolArgs": ["--android-skip-build-dependency-validation"]
+    },
+    {
+      "name": "Intellisys (profile)",
+      "request": "launch",
+      "type": "dart",
+      "flutterMode": "profile",
+      "toolArgs": ["--android-skip-build-dependency-validation"]
+    },
+    {
+      "name": "Intellisys (release)",
+      "request": "launch",
+      "type": "dart",
+      "flutterMode": "release",
+      "toolArgs": ["--android-skip-build-dependency-validation"]
+    }
+  ]
+}

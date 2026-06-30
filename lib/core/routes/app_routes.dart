@@ -48,6 +48,7 @@ import '../../features/notes/pages/create_note_page.dart';
 import '../../features/notes/pages/notes_page.dart';
 import '../../features/proposals/pages/create_proposal_page.dart';
 import '../../features/proposals/pages/proposals_page.dart';
+import '../../features/sale_forms/pages/sale_forms_page.dart';
 import '../../features/commissions/pages/commissions_page.dart';
 import '../../features/workspace/pages/workspace_page.dart';
 import '../../features/workspace/pages/users_page.dart';
@@ -153,6 +154,8 @@ class AppRoutes {
   static const String proposals = '/proposals';
   static const String proposalCreate = '/proposals/create';
   static String proposalEdit(String id) => '/proposals/$id/edit';
+
+  static const String saleForms = '/sale-forms';
 
   static String propertyOfferDetails(String offerId) =>
       '/properties/offers/$offerId';
@@ -399,6 +402,8 @@ class AppRoutes {
       return _buildRoute(const CreateNotePage(), settings);
     } else if (routeName == AppRoutes.commissions) {
       return _buildRoute(const CommissionsPage(), settings);
+    } else if (routeName == AppRoutes.saleForms) {
+      return _buildRoute(const SaleFormsPage(), settings);
     } else if (routeName == AppRoutes.proposals) {
       return _buildRoute(const ProposalsPage(), settings);
     } else if (routeName == AppRoutes.proposalCreate) {

@@ -613,6 +613,25 @@ class ApiConstants {
   static String purchaseProposalUsuarios(String id) =>
       '/sistema/fichas-proposta/$id/usuarios';
 
+  // Fichas de Venda (permissões `sale_form:*`)
+  // Espelha `SaleFormsController` em `sistema/fichas-venda`.
+  static const String saleForms = '/sistema/fichas-venda';
+  static const String saleFormsStats = '/sistema/fichas-venda/stats';
+  static String saleFormById(String id) => '/sistema/fichas-venda/$id';
+  static String saleFormCancelar(String id) =>
+      '/sistema/fichas-venda/$id/cancelar';
+  static String saleFormExcluir(String id) =>
+      '/sistema/fichas-venda/$id/excluir';
+  static String saleFormAuditoria(String id) =>
+      '/sistema/fichas-venda/$id/auditoria';
+  static String saleFormPdf(String id) => '/sistema/fichas-venda/$id/pdf';
+  static String saleFormAnexos(String id) =>
+      '/sistema/fichas-venda/$id/anexos';
+  static String saleFormAssinaturas(String id) =>
+      '/sistema/fichas-venda/$id/assinaturas';
+  static String saleFormUsuarios(String id) =>
+      '/sistema/fichas-venda/$id/usuarios';
+
   // Endpoints de utilizadores (admin — módulo `user_management`)
   static const String adminUsers = '/admin/users';
   static String adminUserById(String id) => '/admin/users/$id';

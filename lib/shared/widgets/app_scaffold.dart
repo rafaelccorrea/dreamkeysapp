@@ -49,40 +49,32 @@ class _AppScaffoldState extends State<AppScaffold> {
     }
   }
 
-  static bool _isMainScreen(String? routeName) {
-    if (routeName == null) return false;
-
-    return routeName == AppRoutes.home ||
-        routeName == AppRoutes.properties ||
-        routeName == AppRoutes.kanban ||
-        routeName == AppRoutes.clients ||
-        routeName == AppRoutes.profile ||
-        routeName == AppRoutes.documents ||
-        routeName == AppRoutes.signatures;
-  }
-
   @override
   Widget build(BuildContext context) {
     final currentRoute = ModalRoute.of(context)?.settings.name;
     final navIndex = AppBottomNavigation.getIndexForRoute(currentRoute);
-    final isMainScreen = _isMainScreen(currentRoute);
+
+    // Voltar NUNCA deve fechar o app a partir de uma subtela. Decidimos pelo
+    // estado real da pilha:
+    //  • há rota anterior (ex.: detalhe sobre a lista) → deixa o pop normal
+    //    levar para a tela anterior;
+    //  • é a rota raiz (a pilha foi resetada ao navegar pelo menu) → em vez de
+    //    sair do app, volta para a Home. Só na própria Home o voltar é ignorado.
+    final canPopRoute = Navigator.of(context).canPop();
 
     // Mesmo critério que [useCupertinoNativeTransitions]: iOS nativo sem web —
     // desliga o arrasto do drawer na borda para não competir com o gesto de voltar.
     final disableDrawerEdgeDrag = useCupertinoNativeTransitions;
 
     return PopScope(
-      canPop: !isMainScreen,
+      canPop: canPopRoute,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop && isMainScreen) {
-          if (currentRoute == AppRoutes.home) {
-            return;
-          }
-          Navigator.of(context).pushNamedAndRemoveUntil(
-            AppRoutes.home,
-            (route) => route.settings.name == AppRoutes.home,
-          );
-        }
+        if (didPop) return;
+        if (currentRoute == AppRoutes.home) return;
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          AppRoutes.home,
+          (route) => false,
+        );
       },
       child: Scaffold(
         backgroundColor: Colors.transparent,
