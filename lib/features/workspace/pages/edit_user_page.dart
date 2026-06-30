@@ -161,7 +161,7 @@ class _EditUserPageState extends State<EditUserPage> {
 
   bool get _dirty =>
       _role != _role0 ||
-      (_isUser && _hasAppAccess != _app0) ||
+      _hasAppAccess != _app0 ||
       (_isUser && !_setEquals(_selectedManagers, _managers0)) ||
       !_setEquals(_selectedPerms, _perms0);
 
@@ -179,7 +179,8 @@ class _EditUserPageState extends State<EditUserPage> {
     setState(() => _saving = true);
 
     // 1) Acesso ao app via endpoint dedicado (espelha o web), se mudou.
-    if (_isUser && _hasAppAccess != _app0) {
+    //    Disponível para qualquer papel (corretor/gestor/admin/master).
+    if (_hasAppAccess != _app0) {
       final r = await AdminUsersService.instance
           .updateAppAccess(widget.user.id, _hasAppAccess);
       if (!mounted) return;
@@ -246,12 +247,14 @@ class _EditUserPageState extends State<EditUserPage> {
           includeMaster: _role0 == 'master',
           onChanged: (r) => setState(() => _role = r),
         ),
+        // Gestor responsável: exclusivo de corretor.
         if (_isUser) ...[
           const SizedBox(height: 14),
           _buildManagerSelector(),
-          const SizedBox(height: 14),
-          _buildAppAccessRow(),
         ],
+        // Acesso ao app móvel: disponível para todos os papéis.
+        const SizedBox(height: 14),
+        _buildAppAccessRow(),
         const SizedBox(height: _gap),
         _SectionLabel(
           icon: LucideIcons.shieldCheck,
@@ -459,7 +462,7 @@ class _EditUserPageState extends State<EditUserPage> {
                   const SizedBox(height: 2),
                   Text(
                     on
-                        ? 'O corretor pode entrar no aplicativo.'
+                        ? 'Pode entrar e usar o aplicativo.'
                         : 'Acesso ao aplicativo bloqueado.',
                     style: TextStyle(
                       fontSize: 12,
