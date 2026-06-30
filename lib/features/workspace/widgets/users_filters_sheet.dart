@@ -30,7 +30,9 @@ class UsersFilters {
     int n = 0;
     if (role != null && role!.isNotEmpty) n++;
     if (active != null) n++;
-    if (includeInactiveCompanyUsers) n++;
+    // `includeInactiveCompanyUsers` é `true` por padrão (baseline da lista).
+    // Só conta como filtro quando o usuário DESLIGA (escolha não-padrão).
+    if (!includeInactiveCompanyUsers) n++;
     if (hasAvatar != null) n++;
     if (dateRange != null && dateRange!.isNotEmpty) n++;
     if (neverLoggedIn) n++;
@@ -92,7 +94,7 @@ class UsersFilters {
       includeInactiveCompanyUsers:
           m['includeInactiveCompanyUsers'] is bool
               ? m['includeInactiveCompanyUsers'] as bool
-              : false,
+              : true,
       hasAvatar: m['hasAvatar'] is bool ? m['hasAvatar'] as bool : null,
       dateRange: m['dateRange']?.toString(),
       neverLoggedIn:
@@ -131,13 +133,15 @@ class _UsersFiltersSheetState extends State<UsersFiltersSheet> {
     final textColor = ThemeHelpers.textColor(context);
     final secondaryColor = ThemeHelpers.textSecondaryColor(context);
 
-    // Paleta editorial coerente com a tela de Usuários — tom por seção,
-    // com significado (não rainbow aleatório).
-    final indigo = isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
-    final violet = isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED);
-    final emerald = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
-    final blue = isDark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB);
-    final amber = isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
+    // Acento ÚNICO e coerente para todo o modal (sem rainbow) — alinhado ao
+    // acento da tela de Usuários. Ver memória color-strategy-subscreens.
+    final accent = isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
+    // Aliases mantidos para as seções usarem o mesmo tom coerente.
+    final indigo = accent;
+    final violet = accent;
+    final emerald = accent;
+    final blue = accent;
+    final amber = accent;
     final activeCount = _draft.activeCount;
 
     return DraggableScrollableSheet(
@@ -265,7 +269,7 @@ class _UsersFiltersSheetState extends State<UsersFiltersSheet> {
                             }),
                           ),
                           _Choice(
-                            label: 'Gerente',
+                            label: 'Gestor',
                             tone: violet,
                             selected: _draft.role == 'manager',
                             onTap: () => setState(() {
@@ -437,53 +441,65 @@ class _UsersFiltersSheetState extends State<UsersFiltersSheet> {
                   ],
                 ),
               ),
-              SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 6, 20, 14),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextButton(
-                          onPressed: () => Navigator.of(context).pop(),
-                          style: TextButton.styleFrom(
-                            foregroundColor: secondaryColor,
-                            padding:
-                                const EdgeInsets.symmetric(vertical: 15),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
+              Container(
+                decoration: BoxDecoration(
+                  border: Border(
+                    top: BorderSide(
+                        color: ThemeHelpers.borderLightColor(context)),
+                  ),
+                ),
+                child: SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.of(context).pop(),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: textColor,
+                              side: BorderSide(
+                                color: ThemeHelpers.borderColor(context)
+                                    .withValues(alpha: 0.7),
+                              ),
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              textStyle: const TextStyle(
+                                  fontWeight: FontWeight.w800, fontSize: 14),
                             ),
-                            textStyle: const TextStyle(
-                                fontWeight: FontWeight.w800, fontSize: 14),
-                          ),
-                          child: const Text('Cancelar'),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        flex: 2,
-                        child: FilledButton.icon(
-                          onPressed: () => Navigator.of(context).pop(_draft),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: indigo,
-                            foregroundColor: Colors.white,
-                            padding:
-                                const EdgeInsets.symmetric(vertical: 15),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            textStyle: const TextStyle(
-                                fontWeight: FontWeight.w900, fontSize: 14.5),
-                          ),
-                          icon: const Icon(LucideIcons.check, size: 18),
-                          label: Text(
-                            activeCount == 0
-                                ? 'Aplicar'
-                                : 'Aplicar ($activeCount)',
+                            child: const Text('Cancelar'),
                           ),
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 10),
+                        Expanded(
+                          flex: 2,
+                          child: FilledButton.icon(
+                            onPressed: () => Navigator.of(context).pop(_draft),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: indigo,
+                              foregroundColor: Colors.white,
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              textStyle: const TextStyle(
+                                  fontWeight: FontWeight.w900, fontSize: 14.5),
+                            ),
+                            icon: const Icon(LucideIcons.check, size: 18),
+                            label: Text(
+                              activeCount == 0
+                                  ? 'Aplicar filtros'
+                                  : 'Aplicar ($activeCount)',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -560,20 +576,37 @@ class _Section extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(icon, size: 13, color: tone),
-              const SizedBox(width: 7),
+              Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: tone.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                alignment: Alignment.center,
+                child: Icon(icon, size: 12, color: tone),
+              ),
+              const SizedBox(width: 8),
               Text(
                 title.toUpperCase(),
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w900,
-                  color: tone,
-                  letterSpacing: 1.2,
+                  color: ThemeHelpers.textColor(context),
+                  letterSpacing: 1.4,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Container(
+                  height: 1,
+                  color: ThemeHelpers.borderLightColor(context)
+                      .withValues(alpha: 0.8),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 11),
+          const SizedBox(height: 12),
           child,
         ],
       ),

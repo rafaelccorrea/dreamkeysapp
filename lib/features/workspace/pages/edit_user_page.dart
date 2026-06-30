@@ -23,7 +23,9 @@ Color _roleAccent(String role, bool isDark) {
       return isDark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB);
     case 'user':
     default:
-      return isDark ? const Color(0xFF2DD4BF) : const Color(0xFF0D9488);
+      // Corretor — grafite/ardósia sóbrio (papel mais comom; escala de cor
+      // cresce com o poder do papel). Ver memória color-strategy-subscreens.
+      return isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569);
   }
 }
 
@@ -34,7 +36,7 @@ String _roleLabel(String role) {
     case 'admin':
       return 'Administrador';
     case 'manager':
-      return 'Gerente';
+      return 'Gestor';
     default:
       return 'Corretor';
   }
@@ -63,6 +65,10 @@ class _EditUserPageState extends State<EditUserPage> {
   final List<MapEntry<String, List<UserPermission>>> _catalog = [];
   List<AdminUser> _managers = [];
 
+  /// Usuário exibido no hero — começa com o item da lista e é substituído pelo
+  /// detalhe (`GET /admin/users/:id`), que traz `lastLogin`, documento, etc.
+  late AdminUser _user;
+
   late String _role;
   late bool _hasAppAccess;
   Set<String> _selectedPerms = {};
@@ -84,6 +90,7 @@ class _EditUserPageState extends State<EditUserPage> {
   @override
   void initState() {
     super.initState();
+    _user = widget.user;
     _role = widget.user.role.toLowerCase();
     _hasAppAccess = widget.user.hasAppAccess;
     _bootstrap();
@@ -122,6 +129,7 @@ class _EditUserPageState extends State<EditUserPage> {
     }
     if (detailRes.success && detailRes.data != null) {
       final u = detailRes.data! as AdminUser;
+      _user = u;
       _role = u.role.toLowerCase();
       _hasAppAccess = u.hasAppAccess;
       _selectedPerms = {...u.permissionIds};
@@ -227,34 +235,18 @@ class _EditUserPageState extends State<EditUserPage> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(_padH, 14, _padH, 20),
       children: [
-        _FlushHero(user: widget.user, role: _role, accent: _accent),
+        _FlushHero(user: _user, role: _role, accent: _accent),
         const SizedBox(height: _gap),
-        _SectionLabel(
-            icon: LucideIcons.userCog, label: 'PAPEL NO SISTEMA', accent: _accent),
-        const SizedBox(height: 11),
+        // Sem título (só "Permissões" tem): o segmented já é autoexplicativo.
         _RoleSegmented(
           current: _role,
           includeMaster: _role0 == 'master',
           onChanged: (r) => setState(() => _role = r),
         ),
         if (_isUser) ...[
-          const SizedBox(height: _gap),
-          _SectionLabel(
-            icon: LucideIcons.userCheck,
-            label: 'GESTOR RESPONSÁVEL',
-            accent: _accent,
-            trailing: _managerMissing
-                ? _RequiredPill(color: AppColors.status.error)
-                : null,
-          ),
-          const SizedBox(height: 11),
+          const SizedBox(height: 14),
           _buildManagerSelector(),
-          const SizedBox(height: _gap),
-          _SectionLabel(
-              icon: LucideIcons.smartphone,
-              label: 'ACESSO AO APP MÓVEL',
-              accent: _accent),
-          const SizedBox(height: 11),
+          const SizedBox(height: 14),
           _buildAppAccessRow(),
         ],
         const SizedBox(height: _gap),
@@ -284,42 +276,43 @@ class _EditUserPageState extends State<EditUserPage> {
 
   Widget _buildManagerSelector() {
     final selected = _managers.where((m) => _selectedManagers.contains(m.id))
-        .toList();
-    // IDs selecionados que não vieram na lista (fallback).
+        .toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     final unknown = _selectedManagers
         .where((id) => _managers.every((m) => m.id != id))
         .toList();
+    final empty = selected.isEmpty && unknown.isEmpty;
+
+    if (empty) {
+      return _SelectGestorButton(
+        missing: _managerMissing,
+        accent: _accent,
+        onTap: _openManagerSheet,
+      );
+    }
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final m in selected)
-              _ManagerChip(
-                name: m.name,
-                accent: _accent,
-                onRemove: () =>
-                    setState(() => _selectedManagers.remove(m.id)),
-              ),
-            for (final id in unknown)
-              _ManagerChip(
-                name: 'Gestor',
-                accent: _accent,
-                onRemove: () => setState(() => _selectedManagers.remove(id)),
-              ),
-            _AddChip(
-              label: selected.isEmpty && unknown.isEmpty
-                  ? 'Selecionar gestor'
-                  : 'Adicionar',
-              accent: _accent,
-              highlight: _managerMissing,
-              onTap: _openManagerSheet,
-            ),
-          ],
-        ),
+        for (final m in selected) ...[
+          _SelectedManagerRow(
+            name: m.name,
+            subtitle: m.roleLabel,
+            accent: _accent,
+            onRemove: () => setState(() => _selectedManagers.remove(m.id)),
+          ),
+          const SizedBox(height: 8),
+        ],
+        for (final id in unknown) ...[
+          _SelectedManagerRow(
+            name: 'Gestor vinculado',
+            subtitle: 'Toque em remover para desvincular',
+            accent: _accent,
+            onRemove: () => setState(() => _selectedManagers.remove(id)),
+          ),
+          const SizedBox(height: 8),
+        ],
+        _AddMoreButton(accent: _accent, onTap: _openManagerSheet),
       ],
     );
   }
@@ -530,32 +523,30 @@ class _EditUserPageState extends State<EditUserPage> {
                     size: 16),
                 label: Text(allOn ? 'Limpar' : 'Tudo'),
               ),
-              child: Flexible(
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: perms.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 6),
-                  itemBuilder: (_, i) {
-                    final p = perms[i];
-                    final on = _selectedPerms.contains(p.id);
-                    return _PermRow(
-                      label: PermissionMeta.actionLabel(p.name),
-                      description: p.description,
-                      selected: on,
-                      accent: _accent,
-                      onTap: () {
-                        setState(() {
-                          if (on) {
-                            _selectedPerms.remove(p.id);
-                          } else {
-                            _selectedPerms.add(p.id);
-                          }
-                        });
-                        setSheet(() {});
-                      },
-                    );
-                  },
-                ),
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: perms.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 6),
+                itemBuilder: (_, i) {
+                  final p = perms[i];
+                  final on = _selectedPerms.contains(p.id);
+                  return _PermRow(
+                    label: PermissionMeta.actionLabel(p.name),
+                    description: p.description,
+                    selected: on,
+                    accent: _accent,
+                    onTap: () {
+                      setState(() {
+                        if (on) {
+                          _selectedPerms.remove(p.id);
+                        } else {
+                          _selectedPerms.add(p.id);
+                        }
+                      });
+                      setSheet(() {});
+                    },
+                  );
+                },
               ),
             );
           },
@@ -1001,31 +992,6 @@ class _CountPill extends StatelessWidget {
   }
 }
 
-class _RequiredPill extends StatelessWidget {
-  const _RequiredPill({required this.color});
-  final Color color;
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-      ),
-      child: Text(
-        'OBRIGATÓRIO',
-        style: TextStyle(
-          color: color,
-          fontWeight: FontWeight.w900,
-          fontSize: 9,
-          letterSpacing: 0.8,
-        ),
-      ),
-    );
-  }
-}
-
 // ───────────────────────────────────────────────────────────────────────────
 // Papel — segmented (cada papel na sua cor)
 // ───────────────────────────────────────────────────────────────────────────
@@ -1046,7 +1012,7 @@ class _RoleSegmented extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final items = <({String value, String label, IconData icon})>[
       (value: 'user', label: 'Corretor', icon: LucideIcons.user),
-      (value: 'manager', label: 'Gerente', icon: LucideIcons.briefcase),
+      (value: 'manager', label: 'Gestor', icon: LucideIcons.briefcase),
       (value: 'admin', label: 'Admin', icon: LucideIcons.shieldCheck),
       if (includeMaster)
         (value: 'master', label: 'Master', icon: LucideIcons.crown),
@@ -1141,14 +1107,20 @@ class _RoleChip extends StatelessWidget {
 // Gestor — chips + picker
 // ───────────────────────────────────────────────────────────────────────────
 
-class _ManagerChip extends StatelessWidget {
-  const _ManagerChip(
-      {required this.name, required this.accent, required this.onRemove});
+/// Linha de um gestor já vinculado — avatar + nome + papel + remover.
+/// Ordenada e limpa (substitui as pills bagunçadas).
+class _SelectedManagerRow extends StatelessWidget {
+  const _SelectedManagerRow({
+    required this.name,
+    required this.subtitle,
+    required this.accent,
+    required this.onRemove,
+  });
   final String name;
+  final String subtitle;
   final Color accent;
   final VoidCallback onRemove;
 
-  String get _first => name.trim().split(RegExp(r'\s+')).first;
   String get _initials {
     final p = name.trim().split(RegExp(r'\s+'));
     if (p.isEmpty || p.first.isEmpty) return '?';
@@ -1158,37 +1130,58 @@ class _ManagerChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
     return Container(
-      padding: const EdgeInsets.fromLTRB(4, 4, 8, 4),
+      padding: const EdgeInsets.fromLTRB(10, 9, 6, 9),
       decoration: BoxDecoration(
-        color: accent.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: accent.withValues(alpha: 0.3)),
+        color: accent.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: accent.withValues(alpha: 0.28)),
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 22,
-            height: 22,
+            width: 32,
+            height: 32,
             decoration: BoxDecoration(shape: BoxShape.circle, color: accent),
             alignment: Alignment.center,
             child: Text(
               _initials,
               style: const TextStyle(
-                  color: Colors.white, fontSize: 9, fontWeight: FontWeight.w900),
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900),
             ),
           ),
-          const SizedBox(width: 6),
-          Text(
-            _first,
-            style: TextStyle(
-                color: accent, fontWeight: FontWeight.w800, fontSize: 12.5),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
+                      color: textColor),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  subtitle,
+                  style: TextStyle(fontSize: 11.5, color: secondary),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
           ),
-          const SizedBox(width: 5),
-          GestureDetector(
-            onTap: onRemove,
-            child: Icon(LucideIcons.x, size: 13, color: accent),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            onPressed: onRemove,
+            icon: Icon(LucideIcons.x, size: 16, color: secondary),
+            tooltip: 'Remover',
           ),
         ],
       ),
@@ -1196,41 +1189,103 @@ class _ManagerChip extends StatelessWidget {
   }
 }
 
-class _AddChip extends StatelessWidget {
-  const _AddChip({
-    required this.label,
+/// Estado vazio do seletor de gestor — botão de largura total. Fica em tom de
+/// alerta (vermelho) quando é obrigatório e ainda não há gestor.
+class _SelectGestorButton extends StatelessWidget {
+  const _SelectGestorButton({
+    required this.missing,
     required this.accent,
-    required this.highlight,
     required this.onTap,
   });
-  final String label;
+  final bool missing;
   final Color accent;
-  final bool highlight;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final tone = highlight ? AppColors.status.error : accent;
+    final tone = missing ? AppColors.status.error : accent;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: tone.withValues(alpha: highlight ? 0.5 : 0.4),
-          ),
-          color: highlight ? tone.withValues(alpha: 0.06) : null,
+          color: missing ? tone.withValues(alpha: 0.05) : Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: tone.withValues(alpha: missing ? 0.45 : 0.4)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: tone.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(LucideIcons.userPlus, size: 17, color: tone),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Selecionar gestor responsável',
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
+                      color: ThemeHelpers.textColor(context),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Obrigatório para corretores',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: missing ? tone : secondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(LucideIcons.chevronRight, size: 18, color: secondary),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Botão slim de "adicionar mais gestores".
+class _AddMoreButton extends StatelessWidget {
+  const _AddMoreButton({required this.accent, required this.onTap});
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: accent.withValues(alpha: 0.4)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(LucideIcons.plus, size: 14, color: tone),
-            const SizedBox(width: 5),
+            Icon(LucideIcons.plus, size: 15, color: accent),
+            const SizedBox(width: 6),
             Text(
-              label,
+              'Adicionar gestor',
               style: TextStyle(
-                  color: tone, fontWeight: FontWeight.w800, fontSize: 12.5),
+                  color: accent, fontWeight: FontWeight.w800, fontSize: 12.5),
             ),
           ],
         ),
@@ -1617,7 +1672,7 @@ class _SheetShell extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          child,
+          Flexible(child: child),
         ],
       ),
     );

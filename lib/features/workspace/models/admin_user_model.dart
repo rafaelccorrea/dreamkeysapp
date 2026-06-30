@@ -83,7 +83,9 @@ class AdminUser {
       hasAppAccess: parseBool(json['hasAppAccess']),
       isAvailableForPublicSite:
           parseBool(json['isAvailableForPublicSite']),
-      lastLoginAt: parseDate(json['lastLoginAt']),
+      lastLoginAt: parseDate(
+        json['lastLoginAt'] ?? json['lastLogin'] ?? json['last_login'],
+      ),
       createdAt: parseDate(json['createdAt']),
       updatedAt: parseDate(json['updatedAt']),
       permissionIds: _parsePermissionIds(json['permissions']),
@@ -159,7 +161,7 @@ class AdminUser {
       case 'admin':
         return 'Administrador';
       case 'manager':
-        return 'Gerente';
+        return 'Gestor';
       case 'user':
       default:
         return 'Corretor';

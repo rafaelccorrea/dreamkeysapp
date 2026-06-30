@@ -154,6 +154,8 @@ class _UsersPageState extends State<UsersPage> {
         _error = res.message ?? 'Erro ao listar usuários';
       }
     });
+    // Resultados carregados → baixa o teclado (evita ficar tampando a lista).
+    if (mounted) FocusScope.of(context).unfocus();
   }
 
   Future<void> _loadMore() async {
@@ -302,6 +304,9 @@ class _UsersPageState extends State<UsersPage> {
         child: ListView(
           controller: _scrollController,
           physics: const AlwaysScrollableScrollPhysics(),
+          // Arrastar a lista fecha o teclado (problema recorrente de teclado
+          // atrapalhando ao rolar os resultados).
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           padding: const EdgeInsets.only(bottom: 28),
           children: [
             _Hero(stats: _stats, total: _total),
@@ -752,6 +757,7 @@ class _ToolbarState extends State<_Toolbar> {
                         isDense: true,
                       ),
                       onChanged: (_) => setState(() {}),
+                      onSubmitted: (_) => FocusScope.of(context).unfocus(),
                     ),
                   ),
                   if (hasText) ...[
@@ -759,6 +765,7 @@ class _ToolbarState extends State<_Toolbar> {
                       radius: 18,
                       onTap: () {
                         widget.controller.clear();
+                        FocusScope.of(context).unfocus();
                         setState(() {});
                       },
                       child: Padding(
