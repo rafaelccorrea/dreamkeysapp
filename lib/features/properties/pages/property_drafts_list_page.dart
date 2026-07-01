@@ -120,17 +120,16 @@ class _PropertyDraftsListPageState extends State<PropertyDraftsListPage> {
       AppRoutes.propertyCreate,
       arguments: <String, dynamic>{'localDraftId': draft.id},
     );
-    if (mounted &&
-        (result == true || result is PropertyWizardPopResult)) {
+    if (mounted && (result == true || result is PropertyWizardPopResult)) {
       await _refresh();
     }
   }
 
   Future<void> _goCreateNew() async {
-    final result = await Navigator.of(context)
-        .pushNamed(AppRoutes.propertyCreate);
-    if (mounted &&
-        (result == true || result is PropertyWizardPopResult)) {
+    final result = await Navigator.of(
+      context,
+    ).pushNamed(AppRoutes.propertyCreate);
+    if (mounted && (result == true || result is PropertyWizardPopResult)) {
       await _refresh();
     }
   }
@@ -196,9 +195,9 @@ class _PropertyDraftsListPageState extends State<PropertyDraftsListPage> {
       .length;
 
   int get _photoSum => _drafts.fold<int>(
-        0,
-        (acc, d) => acc + d.imagePaths.where((p) => File(p).existsSync()).length,
-      );
+    0,
+    (acc, d) => acc + d.imagePaths.where((p) => File(p).existsSync()).length,
+  );
 
   String get _lastUpdatedHint {
     if (_drafts.isEmpty) return '—';
@@ -227,8 +226,7 @@ class _PropertyDraftsListPageState extends State<PropertyDraftsListPage> {
           builder: (context, constraints) => SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             child: ConstrainedBox(
-              constraints:
-                  BoxConstraints(minHeight: constraints.maxHeight),
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [
@@ -250,8 +248,8 @@ class _PropertyDraftsListPageState extends State<PropertyDraftsListPage> {
                         _loading
                             ? _buildSkeleton()
                             : (_drafts.isEmpty
-                                ? _buildEmpty(context)
-                                : _buildList(context)),
+                                  ? _buildEmpty(context)
+                                  : _buildList(context)),
                       ],
                     ),
                   ),
@@ -275,8 +273,8 @@ class _PropertyDraftsListPageState extends State<PropertyDraftsListPage> {
     final headline = total == 0
         ? 'Nenhum rascunho por aqui'
         : (total == 1
-            ? '1 rascunho guardado neste aparelho'
-            : '$total rascunhos guardados neste aparelho');
+              ? '1 rascunho guardado neste aparelho'
+              : '$total rascunhos guardados neste aparelho');
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -355,29 +353,15 @@ class _PropertyDraftsListPageState extends State<PropertyDraftsListPage> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final accent = _accentColor(context);
-    final ok = isDark
-        ? AppColors.status.greenDarkMode
-        : AppColors.status.green;
+    final ok = isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
     final purple = isDark
         ? AppColors.status.purpleDarkMode
         : AppColors.status.purple;
 
     final items = <_KpiItem>[
-      _KpiItem(
-        label: 'Rascunhos',
-        value: '$_totalDrafts',
-        color: accent,
-      ),
-      _KpiItem(
-        label: 'Com fotos',
-        value: '$_draftsWithPhotos',
-        color: ok,
-      ),
-      _KpiItem(
-        label: 'Total fotos',
-        value: '$_photoSum',
-        color: purple,
-      ),
+      _KpiItem(label: 'Rascunhos', value: '$_totalDrafts', color: accent),
+      _KpiItem(label: 'Com fotos', value: '$_draftsWithPhotos', color: ok),
+      _KpiItem(label: 'Total fotos', value: '$_photoSum', color: purple),
       _KpiItem(
         label: 'Última edição',
         value: _lastUpdatedHint,
@@ -419,8 +403,9 @@ class _PropertyDraftsListPageState extends State<PropertyDraftsListPage> {
                     width: 1,
                     height: 32,
                     margin: const EdgeInsets.symmetric(horizontal: 8),
-                    color: ThemeHelpers.borderColor(context)
-                        .withValues(alpha: 0.4),
+                    color: ThemeHelpers.borderColor(
+                      context,
+                    ).withValues(alpha: 0.4),
                   ),
               ],
             ],
@@ -438,16 +423,15 @@ class _PropertyDraftsListPageState extends State<PropertyDraftsListPage> {
       children: [
         for (var i = 0; i < _drafts.length; i++) ...[
           _DraftCard(
-            draft: _drafts[i],
-            accent: _accentColor(context),
-            existingPhotoCount: _drafts[i]
-                .imagePaths
-                .where((p) => File(p).existsSync())
-                .length,
-            wizardTotalSteps: _kWizardTotalSteps,
-            onOpen: () => _openDraft(_drafts[i]),
-            onDelete: () => _confirmDelete(_drafts[i]),
-          )
+                draft: _drafts[i],
+                accent: _accentColor(context),
+                existingPhotoCount: _drafts[i].imagePaths
+                    .where((p) => File(p).existsSync())
+                    .length,
+                wizardTotalSteps: _kWizardTotalSteps,
+                onOpen: () => _openDraft(_drafts[i]),
+                onDelete: () => _confirmDelete(_drafts[i]),
+              )
               .animate(key: ValueKey('draft-${_drafts[i].id}'))
               .fadeIn(
                 delay: Duration(milliseconds: 50 * i),
@@ -502,63 +486,64 @@ class _PropertyDraftsListPageState extends State<PropertyDraftsListPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Center(
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Container(
-                  width: 200,
-                  height: 200,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        accent.withValues(alpha: isDark ? 0.18 : 0.10),
-                        accent.withValues(alpha: 0),
-                      ],
-                    ),
-                  ),
-                ),
-                Container(
-                  width: 96,
-                  height: 96,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        ThemeHelpers.cardBackgroundColor(context),
-                        ThemeHelpers.cardBackgroundColor(context),
-                      ],
-                    ),
-                    border: Border.all(
-                      color: accent.withValues(alpha: 0.32),
-                      width: 1.5,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: accent.withValues(alpha: 0.22),
-                        blurRadius: 24,
-                        offset: const Offset(0, 10),
-                        spreadRadius: -4,
+            child:
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Container(
+                      width: 200,
+                      height: 200,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: RadialGradient(
+                          colors: [
+                            accent.withValues(alpha: isDark ? 0.18 : 0.10),
+                            accent.withValues(alpha: 0),
+                          ],
+                        ),
                       ),
-                    ],
-                  ),
-                  child: ShaderMask(
-                    shaderCallback: (rect) => LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [accent, purple],
-                    ).createShader(rect),
-                    child: const Icon(
-                      LucideIcons.bookmarkPlus,
-                      size: 42,
-                      color: Colors.white,
                     ),
-                  ),
-                ),
-              ],
-            ).animate().scale(
+                    Container(
+                      width: 96,
+                      height: 96,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            ThemeHelpers.cardBackgroundColor(context),
+                            ThemeHelpers.cardBackgroundColor(context),
+                          ],
+                        ),
+                        border: Border.all(
+                          color: accent.withValues(alpha: 0.32),
+                          width: 1.5,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: accent.withValues(alpha: 0.22),
+                            blurRadius: 24,
+                            offset: const Offset(0, 10),
+                            spreadRadius: -4,
+                          ),
+                        ],
+                      ),
+                      child: ShaderMask(
+                        shaderCallback: (rect) => LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [accent, purple],
+                        ).createShader(rect),
+                        child: const Icon(
+                          LucideIcons.bookmarkPlus,
+                          size: 42,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ).animate().scale(
                   duration: 360.ms,
                   curve: Curves.easeOutBack,
                   begin: const Offset(0.85, 0.85),
@@ -664,11 +649,7 @@ class _KpiItem {
   final String value;
   final Color color;
 
-  _KpiItem({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
+  _KpiItem({required this.label, required this.value, required this.color});
 }
 
 class _KpiTile extends StatelessWidget {
@@ -751,10 +732,7 @@ class _EmptyStateBenefits extends StatelessWidget {
         children: [
           for (final b in benefits)
             Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 8,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: ShellVisualTokens.dashboardGlassFill(context),
                 border: Border.all(
@@ -777,9 +755,9 @@ class _EmptyStateBenefits extends StatelessWidget {
                 ],
               ),
             ).animate().fadeIn(
-                  delay: Duration(milliseconds: 200 + benefits.indexOf(b) * 80),
-                  duration: 260.ms,
-                ),
+              delay: Duration(milliseconds: 200 + benefits.indexOf(b) * 80),
+              duration: 260.ms,
+            ),
         ],
       ),
     );
@@ -866,8 +844,7 @@ class _DraftCard extends StatelessWidget {
     return parts.isEmpty ? null : parts.join(' · ');
   }
 
-  bool get _isRecent =>
-      DateTime.now().difference(draft.updatedAt).inHours < 1;
+  bool get _isRecent => DateTime.now().difference(draft.updatedAt).inHours < 1;
 
   @override
   Widget build(BuildContext context) {
@@ -922,8 +899,7 @@ class _DraftCard extends StatelessWidget {
                                     ),
                                   ),
                                 ),
-                                if (_isRecent)
-                                  _RecentBadge(accent: accent),
+                                if (_isRecent) _RecentBadge(accent: accent),
                               ],
                             ),
                             const SizedBox(height: 4),
@@ -942,17 +918,20 @@ class _DraftCard extends StatelessWidget {
                               const SizedBox(height: 4),
                               Row(
                                 children: [
-                                  Icon(LucideIcons.mapPin,
-                                      size: 13, color: neutral),
+                                  Icon(
+                                    LucideIcons.mapPin,
+                                    size: 13,
+                                    color: neutral,
+                                  ),
                                   const SizedBox(width: 4),
                                   Expanded(
                                     child: Text(
                                       location,
-                                      style:
-                                          theme.textTheme.bodySmall?.copyWith(
-                                        color: neutral,
-                                        fontWeight: FontWeight.w600,
-                                      ),
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(
+                                            color: neutral,
+                                            fontWeight: FontWeight.w600,
+                                          ),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                     ),
@@ -991,10 +970,7 @@ class _DraftCard extends StatelessWidget {
                     runSpacing: 6,
                     children: [
                       if (typeLabel.isNotEmpty)
-                        _MetaPill(
-                          icon: LucideIcons.tag,
-                          label: typeLabel,
-                        ),
+                        _MetaPill(icon: LucideIcons.tag, label: typeLabel),
                       _MetaPill(
                         icon: LucideIcons.image,
                         label: existingPhotoCount == 1
@@ -1010,10 +986,7 @@ class _DraftCard extends StatelessWidget {
                   const SizedBox(height: 12),
                   Row(
                     children: [
-                      _DangerIconButton(
-                        onTap: onDelete,
-                        color: danger,
-                      ),
+                      _DangerIconButton(onTap: onDelete, color: danger),
                       const Spacer(),
                       ElevatedButton.icon(
                         onPressed: onOpen,
@@ -1022,7 +995,9 @@ class _DraftCard extends StatelessWidget {
                           foregroundColor: Colors.white,
                           elevation: 0,
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 18, vertical: 13),
+                            horizontal: 18,
+                            vertical: 13,
+                          ),
                           minimumSize: Size.zero,
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           visualDensity: VisualDensity.compact,
@@ -1069,7 +1044,7 @@ class _DraftCard extends StatelessWidget {
             ]
           : [
               BoxShadow(
-                color: accent.withValues(alpha: 0.05),
+                color: const Color(0xFF1A2340).withValues(alpha: 0.05),
                 blurRadius: 14,
                 offset: const Offset(0, 6),
                 spreadRadius: -6,
@@ -1096,24 +1071,23 @@ class _DraftCard extends StatelessWidget {
           child: Container(
             width: 84,
             height: 84,
-            color: ThemeHelpers.borderLightColor(context).withValues(
-              alpha: 0.5,
-            ),
+            color: ThemeHelpers.borderLightColor(
+              context,
+            ).withValues(alpha: 0.5),
             child: thumbPath != null
                 ? Image.file(
                     File(thumbPath),
                     fit: BoxFit.cover,
                     errorBuilder: (context, error, stack) => Center(
-                      child: Icon(LucideIcons.imageOff,
-                          color: neutral, size: 24),
+                      child: Icon(
+                        LucideIcons.imageOff,
+                        color: neutral,
+                        size: 24,
+                      ),
                     ),
                   )
                 : Center(
-                    child: Icon(
-                      LucideIcons.fileEdit,
-                      color: neutral,
-                      size: 28,
-                    ),
+                    child: Icon(LucideIcons.fileEdit, color: neutral, size: 28),
                   ),
           ),
         ),
@@ -1126,9 +1100,7 @@ class _DraftCard extends StatelessWidget {
               decoration: BoxDecoration(
                 color: ThemeHelpers.cardBackgroundColor(context),
                 borderRadius: BorderRadius.circular(999),
-                border: Border.all(
-                  color: accent.withValues(alpha: 0.55),
-                ),
+                border: Border.all(color: accent.withValues(alpha: 0.55)),
                 boxShadow: [
                   BoxShadow(
                     color: accent.withValues(alpha: 0.28),
@@ -1232,10 +1204,7 @@ class _ProgressRow extends StatelessWidget {
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(999),
                   gradient: LinearGradient(
-                    colors: [
-                      accent,
-                      accent.withValues(alpha: 0.55),
-                    ],
+                    colors: [accent, accent.withValues(alpha: 0.55)],
                   ),
                   boxShadow: [
                     BoxShadow(
@@ -1280,9 +1249,9 @@ class _MetaPill extends StatelessWidget {
           Text(
             label,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: ThemeHelpers.textColor(context),
-                  fontWeight: FontWeight.w700,
-                ),
+              color: ThemeHelpers.textColor(context),
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ],
       ),
@@ -1307,13 +1276,13 @@ class _RecentBadge extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(
-              color: accent,
-              shape: BoxShape.circle,
-            ),
-          )
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: accent,
+                  shape: BoxShape.circle,
+                ),
+              )
               .animate(onPlay: (c) => c.repeat(reverse: true))
               .scaleXY(
                 begin: 1,
@@ -1326,11 +1295,11 @@ class _RecentBadge extends StatelessWidget {
           Text(
             'Recente',
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: accent,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.4,
-                  fontSize: 10,
-                ),
+              color: accent,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.4,
+              fontSize: 10,
+            ),
           ),
         ],
       ),

@@ -5,7 +5,7 @@ import '../../../shared/utils/avatar_url_resolver.dart';
 /// Paridade com `imobx-front` `usersApi.ts` — campos cobertos:
 /// `id`, `name`, `email`, `role`, `active`, `isActiveInCompany`,
 /// `avatar`, `phone`, `document`, `hasAppAccess`, `lastLoginAt`,
-/// `createdAt`, `updatedAt`, `isAvailableForPublicSite`.
+/// `createdAt`, `updatedAt`.
 class AdminUser {
   final String id;
   final String name;
@@ -17,7 +17,6 @@ class AdminUser {
   final String? phone;
   final String? document;
   final bool hasAppAccess;
-  final bool isAvailableForPublicSite;
   final DateTime? lastLoginAt;
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -41,7 +40,6 @@ class AdminUser {
     this.phone,
     this.document,
     this.hasAppAccess = false,
-    this.isAvailableForPublicSite = false,
     this.lastLoginAt,
     this.createdAt,
     this.updatedAt,
@@ -71,8 +69,10 @@ class AdminUser {
       email: json['email']?.toString() ?? '',
       role: json['role']?.toString() ?? 'user',
       active: parseBool(json['active'], defaultValue: true),
-      isActiveInCompany:
-          parseBool(json['isActiveInCompany'], defaultValue: true),
+      isActiveInCompany: parseBool(
+        json['isActiveInCompany'],
+        defaultValue: true,
+      ),
       avatar: AvatarUrlResolver.resolve(json['avatar']?.toString()),
       phone: (json['phone']?.toString() ?? '').isEmpty
           ? null
@@ -81,8 +81,6 @@ class AdminUser {
           ? null
           : json['document'].toString(),
       hasAppAccess: parseBool(json['hasAppAccess']),
-      isAvailableForPublicSite:
-          parseBool(json['isAvailableForPublicSite']),
       lastLoginAt: parseDate(
         json['lastLoginAt'] ?? json['lastLogin'] ?? json['last_login'],
       ),
@@ -127,7 +125,6 @@ class AdminUser {
     bool? active,
     bool? isActiveInCompany,
     bool? hasAppAccess,
-    bool? isAvailableForPublicSite,
     List<String>? permissionIds,
   }) {
     return AdminUser(
@@ -141,8 +138,6 @@ class AdminUser {
       phone: phone,
       document: document,
       hasAppAccess: hasAppAccess ?? this.hasAppAccess,
-      isAvailableForPublicSite:
-          isAvailableForPublicSite ?? this.isAvailableForPublicSite,
       lastLoginAt: lastLoginAt,
       createdAt: createdAt,
       updatedAt: updatedAt,
@@ -187,9 +182,10 @@ class AdminUsersPage {
     final raw = json['data'];
     final list = raw is List
         ? raw
-            .map((e) =>
-                AdminUser.fromJson(Map<String, dynamic>.from(e as Map)))
-            .toList()
+              .map(
+                (e) => AdminUser.fromJson(Map<String, dynamic>.from(e as Map)),
+              )
+              .toList()
         : <AdminUser>[];
     int parseInt(dynamic v, int fallback) {
       if (v == null) return fallback;
@@ -248,14 +244,15 @@ class AdminUsersStats {
       total: parseInt(json['totalUsers'] ?? json['total']),
       regulars:
           parseInt(json['regulars'] ?? json['users']) == 0 && roleMap != null
-              ? roleUser
-              : parseInt(json['regulars'] ?? json['users']),
-      admins: parseInt(json['administrators'] ?? json['admins']) == 0 &&
+          ? roleUser
+          : parseInt(json['regulars'] ?? json['users']),
+      admins:
+          parseInt(json['administrators'] ?? json['admins']) == 0 &&
               roleMap != null
           ? roleAdmin + roleMaster
           : parseInt(json['administrators'] ?? json['admins']),
-      managers: parseInt(json['managers'] ?? json['gestores']) == 0 &&
-              roleMap != null
+      managers:
+          parseInt(json['managers'] ?? json['gestores']) == 0 && roleMap != null
           ? roleManager
           : parseInt(json['managers'] ?? json['gestores']),
       newThisMonth: parseInt(

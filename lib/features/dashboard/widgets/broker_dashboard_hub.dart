@@ -51,42 +51,47 @@ class _BrokerDashboardHubState extends State<BrokerDashboardHub> {
     // do skeleton (aparece quando as visitas chegam; nada enquanto carrega).
     if (_todayVisits.isEmpty) return const SizedBox.shrink();
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _SectionHeader(
-          title: 'Visitas de hoje',
-          icon: Icons.event_available_rounded,
-          trailing: TextButton(
-            onPressed: () =>
-                Navigator.of(context).pushNamed(AppRoutes.calendar),
-            child: const Text('Agenda'),
+    // Espaçamento inferior próprio: separa o hub dos cards de resumo apenas
+    // quando há conteúdo. Vazio → nada, e os cards colam sob o hero.
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 13),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _SectionHeader(
+            title: 'Visitas de hoje',
+            icon: Icons.event_available_rounded,
+            trailing: TextButton(
+              onPressed: () =>
+                  Navigator.of(context).pushNamed(AppRoutes.calendar),
+              child: const Text('Agenda'),
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
-        ..._todayVisits
-            .take(4)
-            .map(
-              (a) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: _HubTile(
-                  title: a.title,
-                  subtitle: a.location ?? a.startDate.toString(),
-                  icon: Icons.place_outlined,
-                  accent: const Color(0xFF0891B2),
-                  onTap: () {
-                    if (a.location != null && a.location!.trim().isNotEmpty) {
-                      BrokerContactActions.openMaps(context, a.location!);
-                    } else {
-                      Navigator.of(
-                        context,
-                      ).pushNamed(AppRoutes.calendarDetails(a.id));
-                    }
-                  },
+          const SizedBox(height: 8),
+          ..._todayVisits
+              .take(4)
+              .map(
+                (a) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: _HubTile(
+                    title: a.title,
+                    subtitle: a.location ?? a.startDate.toString(),
+                    icon: Icons.place_outlined,
+                    accent: const Color(0xFF0891B2),
+                    onTap: () {
+                      if (a.location != null && a.location!.trim().isNotEmpty) {
+                        BrokerContactActions.openMaps(context, a.location!);
+                      } else {
+                        Navigator.of(
+                          context,
+                        ).pushNamed(AppRoutes.calendarDetails(a.id));
+                      }
+                    },
+                  ),
                 ),
               ),
-            ),
-      ],
+        ],
+      ),
     );
   }
 }

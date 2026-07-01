@@ -141,13 +141,15 @@ class ShellVisualTokens {
     final edge = ThemeHelpers.borderColor(context);
     return BoxDecoration(
       borderRadius: BorderRadius.circular(borderRadius),
+      // Mantém o painel claramente mais claro que o novo fundo cinza para
+      // "pular" (antes terminava em #E9EEF5, quase o fundo, e sumia).
       gradient: const LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [Color(0xFFFFFCFB), Color(0xFFE9EEF5)],
+        colors: [Color(0xFFFFFFFF), Color(0xFFF4F7FB)],
         stops: [0.0, 1.0],
       ),
-      border: Border.all(color: edge.withValues(alpha: 0.48)),
+      border: Border.all(color: edge.withValues(alpha: 0.55)),
       boxShadow: [
         BoxShadow(
           color: const Color(0xFF475569).withValues(alpha: 0.07),

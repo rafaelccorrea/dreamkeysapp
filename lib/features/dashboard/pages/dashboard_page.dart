@@ -144,9 +144,13 @@ class _DashboardPageState extends State<DashboardPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _buildGreeting(context, theme),
-                      SizedBox(height: _kSectionGap + 2),
+                      // Gap enxuto entre o hero e o que vem abaixo. O hub de
+                      // visitas some (SizedBox.shrink) quando não há visitas
+                      // hoje — por isso ele mesmo carrega o próprio espaçamento
+                      // inferior; assim, quando vazio, os cards ficam colados
+                      // logo abaixo do hero (sem buraco de dois gaps somados).
+                      const SizedBox(height: 8),
                       const BrokerDashboardHub(),
-                      SizedBox(height: _kSectionGap + 2),
                       _buildStatsCards(context, theme),
                       if (_dashboardData != null) ...[
                         SizedBox(height: _kSectionGap),
@@ -321,7 +325,6 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget _dashboardSkeletonHero(BuildContext context, double w) {
     final spread = w >= 480;
     final actionsTop = w >= 640;
-    final pillsBesideInsight = w >= 520;
 
     final iconPlate = SkeletonBox(width: 40, height: 40, borderRadius: 14);
 
@@ -343,26 +346,6 @@ class _DashboardPageState extends State<DashboardPage> {
         SkeletonBox(width: min(124, w * 0.36), height: 32, borderRadius: 999),
         SkeletonBox(width: min(142, w * 0.4), height: 32, borderRadius: 999),
         SkeletonBox(width: min(118, w * 0.34), height: 32, borderRadius: 999),
-      ],
-    );
-
-    final insight = Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SkeletonBox(width: 44, height: 44, borderRadius: 999),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SkeletonText(width: 64, height: 10),
-              const SizedBox(height: 6),
-              SkeletonText(width: double.infinity, height: 13),
-              const SizedBox(height: 6),
-              SkeletonText(width: min(260, w * 0.62), height: 13),
-            ],
-          ),
-        ),
       ],
     );
 
@@ -389,8 +372,6 @@ class _DashboardPageState extends State<DashboardPage> {
         ),
         const SizedBox(height: 12),
         pills,
-        const SizedBox(height: 10),
-        insight,
         const SizedBox(height: 10),
         Align(alignment: Alignment.centerRight, child: actions),
       ],
@@ -439,20 +420,7 @@ class _DashboardPageState extends State<DashboardPage> {
           ],
         ),
         const SizedBox(height: 12),
-        if (pillsBesideInsight)
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(flex: 40, child: pills),
-              const SizedBox(width: 12),
-              Expanded(flex: 60, child: insight),
-            ],
-          )
-        else ...[
-          pills,
-          const SizedBox(height: 10),
-          insight,
-        ],
+        pills,
         if (!actionsTop) ...[
           const SizedBox(height: 10),
           Align(alignment: Alignment.centerRight, child: actions),
@@ -491,9 +459,9 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _dashboardSkeletonSummaryTile(BuildContext context) {
     return Container(
-      height: 128,
+      height: 126,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
         ),
@@ -502,24 +470,30 @@ class _DashboardPageState extends State<DashboardPage> {
         ).withValues(alpha: 0.42),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 13, 12, 13),
+        padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Row(
               children: [
-                SkeletonBox(width: 38, height: 38, borderRadius: 11),
+                SkeletonBox(width: 40, height: 40, borderRadius: 13),
                 const Spacer(),
-                SkeletonBox(width: 16, height: 16, borderRadius: 5),
+                SkeletonBox(width: 26, height: 26, borderRadius: 13),
               ],
             ),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 SkeletonText(width: 84, height: 26, borderRadius: 6),
-                const SizedBox(height: 7),
-                SkeletonText(width: 72, height: 12, borderRadius: 4),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    SkeletonText(width: 58, height: 11, borderRadius: 4),
+                    const SizedBox(width: 6),
+                    SkeletonText(width: 52, height: 11, borderRadius: 4),
+                  ],
+                ),
               ],
             ),
           ],
@@ -1402,7 +1376,6 @@ class _DashboardPageState extends State<DashboardPage> {
     final firstName = userName.trim().isEmpty
         ? 'Usuário'
         : userName.trim().split(' ').first;
-    final performance = _dashboardData?.performance;
     final stats = _dashboardData?.stats;
     final upcomingAppointments =
         _dashboardData?.upcomingAppointments ?? const <DashboardAppointment>[];
@@ -1412,9 +1385,6 @@ class _DashboardPageState extends State<DashboardPage> {
       padding: const EdgeInsets.only(top: 2, bottom: 4),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final w = constraints.maxWidth;
-          final actionsTop = w >= 640;
-
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -1483,10 +1453,6 @@ class _DashboardPageState extends State<DashboardPage> {
                       ],
                     ),
                   ),
-                  if (actionsTop) ...[
-                    const SizedBox(width: 12),
-                    _buildHeaderActions(context, theme),
-                  ],
                 ],
               ),
 
@@ -1505,31 +1471,14 @@ class _DashboardPageState extends State<DashboardPage> {
 
               const SizedBox(height: 12),
 
-              // ── Insight panel (variação % do período) ──────────
-              _buildInsightPanel(context, theme, performance, stats),
-
-              const SizedBox(height: 12),
-
-              // ── Pill de período + ações ───────────────────────
+              // ── Período (informativo) à esquerda + Filtros à direita
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Flexible(
-                    child: _buildFilterPill(
-                      context,
-                      Icons.date_range_outlined,
-                      // Short label aqui — em telas estreitas o label
-                      // longo ("Período personalizado") estourava o
-                      // pill. `Flexible + ellipsis` no `_buildFilterPill`
-                      // já cuida do corte; o short label só evita
-                      // truncar em valores comuns ("7 dias", "30 dias").
-                      _activePeriodShortLabel(),
-                    ),
-                  ),
-                  if (!actionsTop) ...[
-                    const SizedBox(width: 10),
-                    _buildHeaderActions(context, theme),
-                  ],
+                  Flexible(child: _buildPeriodControl(context, theme)),
+                  const SizedBox(width: 12),
+                  _buildHeaderActions(context, theme),
                 ],
               ),
             ],
@@ -1600,104 +1549,67 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildInsightPanel(
-    BuildContext context,
-    ThemeData theme,
-    DashboardPerformance? performance,
-    DashboardStats? stats,
-  ) {
-    final growth = performance?.growthPercentage ?? 0;
-    final isPositive = growth >= 0;
-    final accent = isPositive
-        ? AppColors.status.success
-        : AppColors.status.error;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(11),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: accent.withOpacity(0.14),
-            ),
-            child: Icon(
-              isPositive
-                  ? Icons.trending_up_rounded
-                  : Icons.warning_amber_rounded,
-              color: accent,
-              size: 22,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'INSIGHT',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.8,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  performance == null
-                      ? 'Acompanhe a sua performance assim que os dados forem carregados.'
-                      : '${isPositive ? 'Crescimento' : 'Queda'} de ${growth.abs().toStringAsFixed(1)}% vs. período anterior · ${_formatCurrency(performance.thisMonth)} no mês.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: ThemeHelpers.textColor(context),
-                    fontWeight: FontWeight.w700,
-                    height: 1.32,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFilterPill(BuildContext context, IconData icon, String label) {
+  /// Tag informativa do período ativo no hero. Rotulada (eyebrow "PERÍODO"
+  /// → valor) pra ter hierarquia. Não é tocável de propósito: quem troca o
+  /// período é o botão de Filtros ao lado — esta tag só informa.
+  Widget _buildPeriodControl(BuildContext context, ThemeData theme) {
     final accent = _dashboardAccentColor(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final borderCol = ThemeHelpers.borderColor(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: const EdgeInsets.fromLTRB(8, 7, 12, 7),
       decoration: BoxDecoration(
         color: isDark
             ? accent.withValues(alpha: 0.07)
             : ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: isDark
               ? accent.withValues(alpha: 0.14)
               : borderCol.withValues(alpha: 0.55),
         ),
       ),
-      // `mainAxisSize: min` mas o Text precisa ser `Flexible` pra
-      // permitir ellipsis quando o pill ficar dentro de `Expanded` em
-      // telas estreitas — caso contrário, dá overflow horizontal
-      // (caso do label "Período personalizado").
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 15, color: accent),
-          const SizedBox(width: 7),
+          Container(
+            width: 30,
+            height: 30,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(9),
+              color: accent.withValues(alpha: isDark ? 0.18 : 0.10),
+            ),
+            child: Icon(Icons.date_range_rounded, size: 16, color: accent),
+          ),
+          const SizedBox(width: 9),
           Flexible(
-            child: Text(
-              label,
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w700,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'PERÍODO',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.2,
+                    fontSize: 9.5,
+                    height: 1,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _activePeriodShortLabel(),
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: ThemeHelpers.textColor(context),
+                    fontWeight: FontWeight.w800,
+                    height: 1,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
             ),
           ),
         ],
@@ -1806,41 +1718,58 @@ class _DashboardPageState extends State<DashboardPage> {
       return () => Navigator.of(context).pushNamed(route);
     }
 
+    // Paleta coerente com o app: status (info/success/warning) + vermelho da
+    // marca para Comissões (valor/dinheiro). Nada de cor inventada.
+    final isDark = theme.brightness == Brightness.dark;
+    final cInfo = isDark
+        ? AppColors.status.infoDarkMode
+        : AppColors.status.info;
+    final cSuccess = isDark
+        ? AppColors.status.successDarkMode
+        : AppColors.status.success;
+    final cWarning = isDark
+        ? AppColors.status.warningDarkMode
+        : AppColors.status.warning;
+
     final cards = [
       _buildSummaryCard(
         context: context,
         theme: theme,
         title: 'Imóveis',
+        caption: 'Na carteira',
         value: _formatNumber(stats.myProperties),
         icon: Icons.home_work_outlined,
-        color: const Color(0xFF6366F1),
+        color: cInfo,
         onTap: routeTap(AppRoutes.properties),
       ),
       _buildSummaryCard(
         context: context,
         theme: theme,
         title: 'Clientes',
+        caption: 'Ativos',
         value: _formatNumber(stats.myClients),
         icon: Icons.groups_2_outlined,
-        color: const Color(0xFF10B981),
+        color: cSuccess,
         onTap: routeTap(AppRoutes.clients),
       ),
       _buildSummaryCard(
         context: context,
         theme: theme,
         title: 'Vistorias',
+        caption: 'Realizadas',
         value: _formatNumber(stats.myInspections),
         icon: Icons.fact_check_outlined,
-        color: const Color(0xFFF59E0B),
+        color: cWarning,
         onTap: routeTap(AppRoutes.inspections),
       ),
       _buildSummaryCard(
         context: context,
         theme: theme,
         title: 'Comissões',
+        caption: 'Acumulado',
         value: _formatCurrency(stats.myCommissions),
         icon: Icons.payments_outlined,
-        color: const Color(0xFFEC4899),
+        color: _dashboardAccentColor(context),
         onTap: routeTap(AppRoutes.commissions),
       ),
     ];
@@ -2967,7 +2896,7 @@ class _DashboardPageState extends State<DashboardPage> {
             ? null
             : [
                 BoxShadow(
-                  color: color.withValues(alpha: 0.065),
+                  color: const Color(0xFF1A2340).withValues(alpha: 0.06),
                   blurRadius: 12,
                   offset: const Offset(0, 3),
                   spreadRadius: -4,
@@ -3782,7 +3711,7 @@ class _DashboardPageState extends State<DashboardPage> {
                   ? null
                   : [
                       BoxShadow(
-                        color: accent.withValues(alpha: 0.07),
+                        color: const Color(0xFF1A2340).withValues(alpha: 0.06),
                         blurRadius: 10,
                         offset: const Offset(0, 3),
                         spreadRadius: -4,
@@ -4281,7 +4210,7 @@ class _DashboardPageState extends State<DashboardPage> {
                   ? null
                   : [
                       BoxShadow(
-                        color: color.withValues(alpha: 0.06),
+                        color: const Color(0xFF1A2340).withValues(alpha: 0.055),
                         blurRadius: 12,
                         offset: const Offset(0, 4),
                         spreadRadius: -6,
@@ -4660,7 +4589,7 @@ class _DashboardPageState extends State<DashboardPage> {
             ? null
             : [
                 BoxShadow(
-                  color: base.withValues(alpha: 0.055),
+                  color: const Color(0xFF1A2340).withValues(alpha: 0.055),
                   blurRadius: 12,
                   offset: const Offset(0, 3),
                   spreadRadius: -4,
@@ -4849,7 +4778,7 @@ class _DashboardPageState extends State<DashboardPage> {
             ? null
             : [
                 BoxShadow(
-                  color: base.withValues(alpha: 0.06),
+                  color: const Color(0xFF1A2340).withValues(alpha: 0.06),
                   blurRadius: 12,
                   offset: const Offset(0, 3),
                   spreadRadius: -4,
@@ -5253,6 +5182,7 @@ class _DashboardPageState extends State<DashboardPage> {
     required BuildContext context,
     required ThemeData theme,
     required String title,
+    required String caption,
     required String value,
     required IconData icon,
     required Color color,
@@ -5265,14 +5195,14 @@ class _DashboardPageState extends State<DashboardPage> {
       fontWeight: FontWeight.w900,
       color: ThemeHelpers.textColor(context),
       letterSpacing: -0.85,
-      height: 1.05,
+      height: 1.0,
       fontFeatures: const [FontFeature.tabularFigures()],
     );
     final card = Container(
-      height: 128,
+      height: 126,
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(20),
         color: ThemeHelpers.cardBackgroundColor(
           context,
         ).withValues(alpha: isDark ? 0.5 : 1),
@@ -5292,60 +5222,128 @@ class _DashboardPageState extends State<DashboardPage> {
                 ),
               ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 13, 12, 13),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(11),
-                    color: color.withValues(alpha: isDark ? 0.20 : 0.12),
-                  ),
-                  child: Icon(icon, size: 19, color: color),
+      child: Stack(
+        children: [
+          // Brilho de cor no canto superior direito: dá vida sem faixa lateral
+          // (mantém o padrão flush) e amarra o card à sua cor de categoria.
+          Positioned(
+            top: -34,
+            right: -26,
+            child: Container(
+              width: 108,
+              height: 108,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    color.withValues(alpha: isDark ? 0.20 : 0.12),
+                    color.withValues(alpha: 0.0),
+                  ],
                 ),
-                const Spacer(),
-                if (onTap != null)
-                  Icon(
-                    Icons.arrow_outward_rounded,
-                    size: 16,
-                    color: ThemeHelpers.textSecondaryColor(
-                      context,
-                    ).withValues(alpha: 0.55),
-                  ),
-              ],
+              ),
             ),
-            Column(
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text(value, style: figureStyle),
+                Row(
+                  children: [
+                    // Plate com gradiente da cor da categoria: mais refinado
+                    // que o tile chapado.
+                    Container(
+                      width: 40,
+                      height: 40,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(13),
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            color.withValues(alpha: isDark ? 0.34 : 0.20),
+                            color.withValues(alpha: isDark ? 0.18 : 0.10),
+                          ],
+                        ),
+                        border: Border.all(
+                          color: color.withValues(alpha: isDark ? 0.34 : 0.22),
+                        ),
+                      ),
+                      child: Icon(icon, size: 20, color: color),
+                    ),
+                    const Spacer(),
+                    if (onTap != null)
+                      Container(
+                        width: 26,
+                        height: 26,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: color.withValues(alpha: isDark ? 0.16 : 0.10),
+                        ),
+                        child: Icon(
+                          Icons.arrow_outward_rounded,
+                          size: 14,
+                          color: color,
+                        ),
+                      ),
+                  ],
                 ),
-                const SizedBox(height: 5),
-                Text(
-                  title.toUpperCase(),
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.6,
-                    fontSize: 10.5,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(value, style: figureStyle),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Text(
+                          title.toUpperCase(),
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: ThemeHelpers.textColor(context),
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.6,
+                            fontSize: 10.5,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          width: 3,
+                          height: 3,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: color.withValues(alpha: 0.7),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            caption,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: ThemeHelpers.textSecondaryColor(context),
+                              fontWeight: FontWeight.w600,
+                              fontSize: 10.5,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
 

@@ -18,15 +18,9 @@ class LoginRequest {
   final String email;
   final String password;
 
-  LoginRequest({
-    required this.email,
-    required this.password,
-  });
+  LoginRequest({required this.email, required this.password});
 
-  Map<String, dynamic> toJson() => {
-        'email': email,
-        'password': password,
-      };
+  Map<String, dynamic> toJson() => {'email': email, 'password': password};
 }
 
 class LoginResponse {
@@ -51,9 +45,15 @@ class LoginResponse {
     }
     return LoginResponse(
       user: User.fromJson(root['user'] as Map<String, dynamic>),
-      token: root['access_token'] as String? ?? root['token'] as String? ?? root['accessToken'] as String? ?? '',
+      token:
+          root['access_token'] as String? ??
+          root['token'] as String? ??
+          root['accessToken'] as String? ??
+          '',
       refreshToken:
-          root['refresh_token'] as String? ?? root['refreshToken'] as String? ?? '',
+          root['refresh_token'] as String? ??
+          root['refreshToken'] as String? ??
+          '',
     );
   }
 }
@@ -70,7 +70,6 @@ class User {
   final String? updatedAt;
   final String? managerId;
   final List<String>? managedUserIds;
-  final bool? isAvailableForPublicSite;
   final String? document;
   final String? phone;
 
@@ -86,7 +85,6 @@ class User {
     this.updatedAt,
     this.managerId,
     this.managedUserIds,
-    this.isAvailableForPublicSite,
     this.document,
     this.phone,
   });
@@ -99,17 +97,23 @@ class User {
       role: json['role']?.toString() ?? '',
       owner: json['owner'] as bool? ?? false,
       avatar: AvatarUrlResolver.resolve(json['avatar']?.toString()),
-      companyId: json['companyId']?.toString() ?? json['company_id']?.toString(),
-      createdAt: json['createdAt']?.toString() ?? json['created_at']?.toString() ?? '',
-      updatedAt: json['updatedAt']?.toString() ?? json['updated_at']?.toString(),
-      managerId: json['managerId']?.toString() ?? json['manager_id']?.toString(),
+      companyId:
+          json['companyId']?.toString() ?? json['company_id']?.toString(),
+      createdAt:
+          json['createdAt']?.toString() ?? json['created_at']?.toString() ?? '',
+      updatedAt:
+          json['updatedAt']?.toString() ?? json['updated_at']?.toString(),
+      managerId:
+          json['managerId']?.toString() ?? json['manager_id']?.toString(),
       managedUserIds: json['managedUserIds'] != null
-          ? List<String>.from((json['managedUserIds'] as List).map((e) => e.toString()))
+          ? List<String>.from(
+              (json['managedUserIds'] as List).map((e) => e.toString()),
+            )
           : json['managed_user_ids'] != null
-              ? List<String>.from((json['managed_user_ids'] as List).map((e) => e.toString()))
-              : null,
-      isAvailableForPublicSite:
-          json['isAvailableForPublicSite'] as bool? ?? json['is_available_for_public_site'] as bool? ?? false,
+          ? List<String>.from(
+              (json['managed_user_ids'] as List).map((e) => e.toString()),
+            )
+          : null,
       document: json['document']?.toString(),
       phone: json['phone']?.toString(),
     );
@@ -131,8 +135,7 @@ class CheckTwoFactorResponse {
     return CheckTwoFactorResponse(
       requires2FA: json['requires2FA'] as bool? ?? false,
       emailExists: json['emailExists'] as bool? ?? false,
-      hasTwoFactorConfigured:
-          json['hasTwoFactorConfigured'] as bool? ?? false,
+      hasTwoFactorConfigured: json['hasTwoFactorConfigured'] as bool? ?? false,
     );
   }
 }
@@ -160,9 +163,7 @@ class AuthService {
     return broker;
   }
 
-  static bool _shouldFallbackToStandardLogin<T>(
-    ApiResponse<T> response,
-  ) {
+  static bool _shouldFallbackToStandardLogin<T>(ApiResponse<T> response) {
     if (response.error is! Map) return false;
     final err = Map<String, dynamic>.from(response.error as Map);
     final code = err['errorCode']?.toString();
@@ -237,19 +238,22 @@ class AuthService {
   Future<ApiResponse<CheckTwoFactorResponse>> check2FA(String email) async {
     try {
       debugPrint('🔍 [AUTH_SERVICE] Verificando 2FA para email: $email');
-      debugPrint('🌐 [AUTH_SERVICE] GET ${_apiUri(ApiConstants.check2FA, {'email': email})}');
+      debugPrint(
+        '🌐 [AUTH_SERVICE] GET ${_apiUri(ApiConstants.check2FA, {'email': email})}',
+      );
       final response = await _apiService.get<Map<String, dynamic>>(
         ApiConstants.check2FA,
         queryParameters: {'email': email},
       );
 
-      debugPrint('📥 [AUTH_SERVICE] Resposta check2FA - Success: ${response.success}, Status: ${response.statusCode}');
+      debugPrint(
+        '📥 [AUTH_SERVICE] Resposta check2FA - Success: ${response.success}, Status: ${response.statusCode}',
+      );
 
       if (response.success && response.data != null) {
         debugPrint('📋 [AUTH_SERVICE] Dados recebidos: ${response.data}');
         try {
-          final checkResponse =
-              CheckTwoFactorResponse.fromJson(response.data!);
+          final checkResponse = CheckTwoFactorResponse.fromJson(response.data!);
           debugPrint('✅ [AUTH_SERVICE] Check2FA parseado com sucesso');
           return ApiResponse.success(
             data: checkResponse,
@@ -267,7 +271,9 @@ class AuthService {
         }
       }
 
-      debugPrint('⚠️ [AUTH_SERVICE] Check2FA retornou erro: ${response.message}');
+      debugPrint(
+        '⚠️ [AUTH_SERVICE] Check2FA retornou erro: ${response.message}',
+      );
       return ApiResponse.error(
         message: response.message ?? 'Erro ao verificar 2FA',
         statusCode: response.statusCode,
@@ -290,10 +296,7 @@ class AuthService {
   }) async {
     final response = await _apiService.post<Map<String, dynamic>>(
       ApiConstants.verify2FA,
-      body: {
-        'tempToken': tempToken,
-        'code': code,
-      },
+      body: {'tempToken': tempToken, 'code': code},
     );
 
     if (response.success && response.data != null) {
@@ -320,8 +323,9 @@ class AuthService {
   /// Realiza refresh do token
   Future<ApiResponse<LoginResponse>> refreshToken() async {
     try {
-      final refreshToken = await SecureStorageService.instance.getRefreshToken();
-      
+      final refreshToken = await SecureStorageService.instance
+          .getRefreshToken();
+
       if (refreshToken == null || refreshToken.isEmpty) {
         debugPrint('❌ [AUTH_SERVICE] Refresh token não encontrado');
         return ApiResponse.error(
@@ -331,7 +335,7 @@ class AuthService {
       }
 
       debugPrint('🔄 [AUTH_SERVICE] Tentando renovar token...');
-      
+
       // Não tentar refresh novamente se este endpoint falhar (retryOn401 = false)
       final response = await _apiService.post<Map<String, dynamic>>(
         ApiConstants.refreshToken,
@@ -355,17 +359,21 @@ class AuthService {
             statusCode: response.statusCode,
           );
         } catch (e, stackTrace) {
-          debugPrint('❌ [AUTH_SERVICE] Erro ao fazer parse do LoginResponse no refresh: $e');
+          debugPrint(
+            '❌ [AUTH_SERVICE] Erro ao fazer parse do LoginResponse no refresh: $e',
+          );
           debugPrint('📚 [AUTH_SERVICE] StackTrace: $stackTrace');
           rethrow;
         }
       }
 
-      debugPrint('❌ [AUTH_SERVICE] Falha ao renovar token: ${response.message}');
+      debugPrint(
+        '❌ [AUTH_SERVICE] Falha ao renovar token: ${response.message}',
+      );
       // Se o refresh falhar, limpar tokens
       await SecureStorageService.instance.clearTokens();
       _apiService.clearToken();
-      
+
       return ApiResponse.error(
         message: response.message ?? 'Erro ao renovar token',
         statusCode: response.statusCode,
@@ -417,7 +425,7 @@ class AuthService {
       debugPrint('🚪 [AUTH_SERVICE] Iniciando logout...');
 
       await AppPushService.instance.unregisterFromBackendIfNeeded();
-      
+
       // Tentar fazer logout na API (mesmo que falhe, continuar limpando localmente)
       ApiResponse<void> response;
       try {
@@ -425,7 +433,9 @@ class AuthService {
           ApiConstants.logout,
           retryOn401: false, // Não tentar refresh se já está fazendo logout
         );
-        debugPrint('📤 [AUTH_SERVICE] Logout na API: ${response.success ? "sucesso" : "falhou"}');
+        debugPrint(
+          '📤 [AUTH_SERVICE] Logout na API: ${response.success ? "sucesso" : "falhou"}',
+        );
       } catch (e) {
         debugPrint('⚠️ [AUTH_SERVICE] Erro ao fazer logout na API: $e');
         // Continuar mesmo se a API falhar
@@ -437,18 +447,22 @@ class AuthService {
 
       // Sempre limpar sessão localmente, mesmo se a API falhar.
       // Mantém credenciais + biometria para o utilizador voltar a entrar com Face ID / dedo.
-      debugPrint('🧹 [AUTH_SERVICE] Encerrando sessão (mantendo login biométrico se ativo)...');
+      debugPrint(
+        '🧹 [AUTH_SERVICE] Encerrando sessão (mantendo login biométrico se ativo)...',
+      );
       _apiService.clearToken();
       await SecureStorageService.instance.clearAuthSessionKeepCredentials();
       ModuleAccessService.instance.clear();
       await LiveActivityService.instance.endCheckIn();
-      debugPrint('✅ [AUTH_SERVICE] Logout concluído — sessão limpa, credenciais biométricas preservadas');
+      debugPrint(
+        '✅ [AUTH_SERVICE] Logout concluído — sessão limpa, credenciais biométricas preservadas',
+      );
 
       return response;
     } catch (e, stackTrace) {
       debugPrint('❌ [AUTH_SERVICE] Erro durante logout: $e');
       debugPrint('📚 [AUTH_SERVICE] StackTrace: $stackTrace');
-      
+
       // Garantir que os dados sejam limpos mesmo em caso de erro
       try {
         _apiService.clearToken();
@@ -458,7 +472,7 @@ class AuthService {
       } catch (clearError) {
         debugPrint('❌ [AUTH_SERVICE] Erro ao limpar dados: $clearError');
       }
-      
+
       return ApiResponse.error(
         message: 'Erro ao fazer logout: ${e.toString()}',
         statusCode: 0,

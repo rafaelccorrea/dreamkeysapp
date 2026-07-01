@@ -9,6 +9,7 @@ import '../../../../shared/services/profile_service.dart';
 import '../../../../shared/services/settings_service.dart';
 import '../../../../shared/services/theme_service.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
+import '../../../../shared/widgets/brand_wordmark_logo.dart';
 import '../../../../shared/services/app_update_service.dart';
 import '../../../../shared/widgets/app_update_dialog.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
@@ -64,8 +65,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _checkForAppUpdate() async {
-    final info =
-        await AppUpdateService.instance.checkForUpdate(force: true);
+    final info = await AppUpdateService.instance.checkForUpdate(force: true);
     if (!mounted) return;
     if (info != null) {
       await showAppUpdateDialog(context, info);
@@ -82,8 +82,8 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Color _brand(BuildContext context) =>
       Theme.of(context).brightness == Brightness.dark
-          ? AppColors.primary.primaryDarkMode
-          : AppColors.primary.primary;
+      ? AppColors.primary.primaryDarkMode
+      : AppColors.primary.primary;
 
   Future<void> _loadData() async {
     debugPrint('⚙️ [SETTINGS PAGE] Iniciando carregamento de dados');
@@ -197,49 +197,48 @@ class _SettingsPageState extends State<SettingsPage> {
       body: _isLoading
           ? _buildSkeleton(context, theme, brand)
           : _errorMessage != null && _settings == null && _profile == null
-              ? _buildErrorState(context, theme, brand)
-              : RefreshIndicator(
-                  color: brand,
-                  onRefresh: _loadData,
-                  child: SingleChildScrollView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.only(top: 4, bottom: 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _buildPageMasthead(context, theme, brand),
-                        const SizedBox(height: 18),
-                        if (_profile != null)
-                          _buildProfileManchete(
-                              context, theme, brand, _profile!),
-                        if (_profile != null) const SizedBox(height: 14),
-                        _buildQuickStrip(context, theme, brand),
-                        const SizedBox(height: 14),
-                        _sectionSeparator(context),
-                        const SizedBox(height: 22),
-                        _buildChannelsSection(context, theme),
-                        const SizedBox(height: 28),
-                        _sectionSeparator(context),
-                        const SizedBox(height: 22),
-                        _buildEventsSection(context, theme),
-                        const SizedBox(height: 28),
-                        _sectionSeparator(context),
-                        const SizedBox(height: 22),
-                        _buildAppearanceSection(context, theme),
-                        const SizedBox(height: 28),
-                        _sectionSeparator(context),
-                        const SizedBox(height: 22),
-                        _buildAccountSection(context, theme, brand),
-                        const SizedBox(height: 28),
-                        _sectionSeparator(context),
-                        const SizedBox(height: 22),
-                        _buildAppUpdateSection(context, theme),
-                        const SizedBox(height: 32),
-                        _buildFooterSignature(context, theme, brand),
-                      ],
-                    ),
-                  ),
+          ? _buildErrorState(context, theme, brand)
+          : RefreshIndicator(
+              color: brand,
+              onRefresh: _loadData,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.only(top: 4, bottom: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildPageMasthead(context, theme, brand),
+                    const SizedBox(height: 18),
+                    if (_profile != null)
+                      _buildProfileManchete(context, theme, brand, _profile!),
+                    if (_profile != null) const SizedBox(height: 14),
+                    _buildQuickStrip(context, theme, brand),
+                    const SizedBox(height: 14),
+                    _sectionSeparator(context),
+                    const SizedBox(height: 22),
+                    _buildChannelsSection(context, theme),
+                    const SizedBox(height: 28),
+                    _sectionSeparator(context),
+                    const SizedBox(height: 22),
+                    _buildEventsSection(context, theme),
+                    const SizedBox(height: 28),
+                    _sectionSeparator(context),
+                    const SizedBox(height: 22),
+                    _buildAppearanceSection(context, theme),
+                    const SizedBox(height: 28),
+                    _sectionSeparator(context),
+                    const SizedBox(height: 22),
+                    _buildAccountSection(context, theme, brand),
+                    const SizedBox(height: 28),
+                    _sectionSeparator(context),
+                    const SizedBox(height: 22),
+                    _buildAppUpdateSection(context, theme),
+                    const SizedBox(height: 32),
+                    _buildFooterSignature(context, theme, brand),
+                  ],
                 ),
+              ),
+            ),
     );
   }
 
@@ -247,11 +246,7 @@ class _SettingsPageState extends State<SettingsPage> {
   // SKELETON & ERROR
   // ──────────────────────────────────────────────────────────────────────
 
-  Widget _buildSkeleton(
-    BuildContext context,
-    ThemeData theme,
-    Color brand,
-  ) {
+  Widget _buildSkeleton(BuildContext context, ThemeData theme, Color brand) {
     return SingleChildScrollView(
       padding: const EdgeInsets.only(top: 4, bottom: 16),
       child: Column(
@@ -329,7 +324,9 @@ class _SettingsPageState extends State<SettingsPage> {
             for (var i = 0; i < 3; i++) ...[
               Padding(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 20, vertical: 12),
+                  horizontal: 20,
+                  vertical: 12,
+                ),
                 child: Row(
                   children: [
                     SkeletonBox(width: 40, height: 40, borderRadius: 12),
@@ -353,8 +350,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   child: Divider(
                     height: 1,
-                    color: ThemeHelpers.borderColor(context)
-                        .withValues(alpha: 0.3),
+                    color: ThemeHelpers.borderColor(
+                      context,
+                    ).withValues(alpha: 0.3),
                   ),
                 ),
             ],
@@ -365,11 +363,7 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildErrorState(
-    BuildContext context,
-    ThemeData theme,
-    Color brand,
-  ) {
+  Widget _buildErrorState(BuildContext context, ThemeData theme, Color brand) {
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 40),
       physics: const AlwaysScrollableScrollPhysics(),
@@ -412,8 +406,7 @@ class _SettingsPageState extends State<SettingsPage> {
             style: FilledButton.styleFrom(
               backgroundColor: brand,
               foregroundColor: Colors.white,
-              padding:
-                  const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
@@ -429,7 +422,10 @@ class _SettingsPageState extends State<SettingsPage> {
   // ──────────────────────────────────────────────────────────────────────
 
   Widget _buildPageMasthead(
-      BuildContext context, ThemeData theme, Color brand) {
+    BuildContext context,
+    ThemeData theme,
+    Color brand,
+  ) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
       child: Column(
@@ -459,10 +455,9 @@ class _SettingsPageState extends State<SettingsPage> {
               Text(
                 'SINCRONIZADO',
                 style: theme.textTheme.labelSmall?.copyWith(
-                  color:
-                      ThemeHelpers.textSecondaryColor(context).withValues(
-                    alpha: 0.85,
-                  ),
+                  color: ThemeHelpers.textSecondaryColor(
+                    context,
+                  ).withValues(alpha: 0.85),
                   fontWeight: FontWeight.w800,
                   letterSpacing: 1.8,
                   fontSize: 9.5,
@@ -512,11 +507,7 @@ class _SettingsPageState extends State<SettingsPage> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          _AvatarRing(
-            profile: p,
-            accent: brand,
-            size: 64,
-          ),
+          _AvatarRing(profile: p, accent: brand, size: 64),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
@@ -572,8 +563,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   Text(
                     'NA PLATAFORMA DESDE · ${since.toUpperCase()}',
                     style: theme.textTheme.labelSmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context)
-                          .withValues(alpha: 0.7),
+                      color: ThemeHelpers.textSecondaryColor(
+                        context,
+                      ).withValues(alpha: 0.7),
                       fontWeight: FontWeight.w800,
                       letterSpacing: 1.2,
                       fontSize: 9,
@@ -587,8 +579,7 @@ class _SettingsPageState extends State<SettingsPage> {
           _GhostIconButton(
             icon: Icons.edit_rounded,
             tone: brand,
-            onTap: () =>
-                Navigator.pushNamed(context, AppRoutes.profileEdit),
+            onTap: () => Navigator.pushNamed(context, AppRoutes.profileEdit),
           ),
         ],
       ),
@@ -637,9 +628,7 @@ class _SettingsPageState extends State<SettingsPage> {
         accent: _toneAppearance,
         label: 'TEMA',
         value: themeShort,
-        sub: themeService.themeMode == ThemeMode.system
-            ? 'sistema'
-            : 'manual',
+        sub: themeService.themeMode == ThemeMode.system ? 'sistema' : 'manual',
       ),
       _QuickKpi(
         accent: brand,
@@ -649,8 +638,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     ];
 
-    final divColor =
-        ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
+    final divColor = ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -658,12 +646,7 @@ class _SettingsPageState extends State<SettingsPage> {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           for (var i = 0; i < items.length; i++) ...[
-            if (i > 0)
-              Container(
-                width: 1,
-                height: 44,
-                color: divColor,
-              ),
+            if (i > 0) Container(width: 1, height: 44, color: divColor),
             Expanded(child: items[i].render(context)),
           ],
         ],
@@ -976,7 +959,10 @@ class _SettingsPageState extends State<SettingsPage> {
   // ──────────────────────────────────────────────────────────────────────
 
   Widget _buildFooterSignature(
-      BuildContext context, ThemeData theme, Color brand) {
+    BuildContext context,
+    ThemeData theme,
+    Color brand,
+  ) {
     final lang = _shortLanguage(_settings?.language ?? 'pt-BR');
     final themeShort = ThemeService.instance.getThemeName();
     final year = DateTime.now().year;
@@ -988,8 +974,7 @@ class _SettingsPageState extends State<SettingsPage> {
         children: [
           Container(
             height: 1,
-            color:
-                ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
           ),
           const SizedBox(height: 16),
           Row(
@@ -1000,32 +985,15 @@ class _SettingsPageState extends State<SettingsPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    ShaderMask(
-                      shaderCallback: (rect) => LinearGradient(
-                        colors: [
-                          brand,
-                          AppColors.secondary.secondary,
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ).createShader(rect),
-                      child: Text(
-                        'Intellisys',
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          color: Colors.white,
-                          letterSpacing: -0.6,
-                          height: 1,
-                          fontSize: 22,
-                        ),
-                      ),
+                    const BrandWordmarkLogo(
+                      height: 26,
+                      alignment: Alignment.centerLeft,
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'Plataforma · CRM Imobiliário',
                       style: theme.textTheme.labelSmall?.copyWith(
-                        color:
-                            ThemeHelpers.textSecondaryColor(context),
+                        color: ThemeHelpers.textSecondaryColor(context),
                         fontWeight: FontWeight.w700,
                         letterSpacing: 0.4,
                         fontSize: 10,
@@ -1055,19 +1023,20 @@ class _SettingsPageState extends State<SettingsPage> {
               _FooterMeta(label: 'IDIOMA', value: lang),
               _FooterMeta(label: 'TEMA', value: themeShort),
               _FooterMeta(
-                  label: 'FUSO',
-                  value: _timezoneLabel(
-                      _settings?.timezone ?? 'America/Sao_Paulo')),
+                label: 'FUSO',
+                value: _timezoneLabel(
+                  _settings?.timezone ?? 'America/Sao_Paulo',
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 14),
           Text(
             '© $year Intellisys. Todos os direitos reservados.',
             style: theme.textTheme.labelSmall?.copyWith(
-              color:
-                  ThemeHelpers.textSecondaryColor(context).withValues(
-                alpha: 0.7,
-              ),
+              color: ThemeHelpers.textSecondaryColor(
+                context,
+              ).withValues(alpha: 0.7),
               fontWeight: FontWeight.w600,
               letterSpacing: 0.3,
               fontSize: 10,
@@ -1125,7 +1094,8 @@ class _SettingsPageState extends State<SettingsPage> {
             decoration: BoxDecoration(
               color: ThemeHelpers.cardBackgroundColor(sheetContext),
               borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(22)),
+                top: Radius.circular(22),
+              ),
               border: Border(
                 top: BorderSide(
                   color: tone.withValues(alpha: 0.35),
@@ -1143,8 +1113,9 @@ class _SettingsPageState extends State<SettingsPage> {
                     width: 40,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: ThemeHelpers.textSecondaryColor(sheetContext)
-                          .withValues(alpha: 0.35),
+                      color: ThemeHelpers.textSecondaryColor(
+                        sheetContext,
+                      ).withValues(alpha: 0.35),
                       borderRadius: BorderRadius.circular(99),
                     ),
                   ),
@@ -1160,9 +1131,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           children: [
                             Text(
                               'APARÊNCIA',
-                              style: Theme.of(sheetContext)
-                                  .textTheme
-                                  .labelSmall
+                              style: Theme.of(sheetContext).textTheme.labelSmall
                                   ?.copyWith(
                                     color: tone,
                                     fontWeight: FontWeight.w900,
@@ -1179,8 +1148,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                   ?.copyWith(
                                     fontWeight: FontWeight.w900,
                                     letterSpacing: -0.6,
-                                    color: ThemeHelpers.textColor(
-                                        sheetContext),
+                                    color: ThemeHelpers.textColor(sheetContext),
                                     height: 1.05,
                                   ),
                             ),
@@ -1198,14 +1166,10 @@ class _SettingsPageState extends State<SettingsPage> {
                   padding: const EdgeInsets.fromLTRB(20, 4, 20, 6),
                   child: Text(
                     'Escolhe como queres ver o app. Pode mudar a qualquer momento.',
-                    style: Theme.of(sheetContext)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(
-                              sheetContext),
-                          height: 1.35,
-                        ),
+                    style: Theme.of(sheetContext).textTheme.bodySmall?.copyWith(
+                      color: ThemeHelpers.textSecondaryColor(sheetContext),
+                      height: 1.35,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -1296,8 +1260,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   Text(
                     subtitle,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color:
-                          ThemeHelpers.textSecondaryColor(sheetContext),
+                      color: ThemeHelpers.textSecondaryColor(sheetContext),
                       height: 1.3,
                     ),
                   ),
@@ -1341,9 +1304,10 @@ class _SettingsPageState extends State<SettingsPage> {
       'agent' => 'Corretor',
       'manager' => 'Gestor',
       'user' => 'Usuário',
-      _ => role.isEmpty
-          ? 'Usuário'
-          : '${role[0].toUpperCase()}${role.substring(1).toLowerCase()}',
+      _ =>
+        role.isEmpty
+            ? 'Usuário'
+            : '${role[0].toUpperCase()}${role.substring(1).toLowerCase()}',
     };
   }
 
@@ -1545,8 +1509,9 @@ class _SwitchRow extends StatelessWidget {
                 onChanged: onChanged,
                 activeThumbColor: tone,
                 activeTrackColor: tone.withValues(alpha: 0.42),
-                inactiveTrackColor:
-                    ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+                inactiveTrackColor: ThemeHelpers.borderColor(
+                  context,
+                ).withValues(alpha: 0.5),
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
             ],
@@ -1599,9 +1564,9 @@ class _NavigationRow extends StatelessWidget {
                       title,
                       style: theme.textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w900,
-                        color: ThemeHelpers.textColor(context).withValues(
-                          alpha: disabled ? 0.85 : 1.0,
-                        ),
+                        color: ThemeHelpers.textColor(
+                          context,
+                        ).withValues(alpha: disabled ? 0.85 : 1.0),
                         letterSpacing: -0.2,
                         height: 1.2,
                       ),
@@ -1656,9 +1621,7 @@ class _ToneIconPlate extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        border: Border.all(
-          color: tone.withValues(alpha: active ? 0.42 : 0.22),
-        ),
+        border: Border.all(color: tone.withValues(alpha: active ? 0.42 : 0.22)),
       ),
       alignment: Alignment.center,
       child: Icon(
@@ -1769,10 +1732,8 @@ class _AvatarRing extends StatelessWidget {
             ? Image.network(
                 profile.avatar!,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => _Monogram(
-                  name: profile.name,
-                  accent: accent,
-                ),
+                errorBuilder: (_, __, ___) =>
+                    _Monogram(name: profile.name, accent: accent),
               )
             : _Monogram(name: profile.name, accent: accent),
       ),
@@ -1789,9 +1750,7 @@ class _Monogram extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final letter = name.trim().isEmpty
-        ? '?'
-        : name.trim()[0].toUpperCase();
+    final letter = name.trim().isEmpty ? '?' : name.trim()[0].toUpperCase();
     return Container(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
@@ -1905,8 +1864,9 @@ class _QuickKpi {
             sub,
             style: theme.textTheme.labelSmall?.copyWith(
               fontWeight: FontWeight.w600,
-              color: ThemeHelpers.textSecondaryColor(context)
-                  .withValues(alpha: 0.65),
+              color: ThemeHelpers.textSecondaryColor(
+                context,
+              ).withValues(alpha: 0.65),
               letterSpacing: 0.3,
               fontSize: 9,
               height: 1,
@@ -1945,8 +1905,9 @@ class _FooterMeta extends StatelessWidget {
         Text(
           label,
           style: theme.textTheme.labelSmall?.copyWith(
-            color:
-                ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.65),
+            color: ThemeHelpers.textSecondaryColor(
+              context,
+            ).withValues(alpha: 0.65),
             fontWeight: FontWeight.w800,
             letterSpacing: 1.2,
             fontSize: 9,

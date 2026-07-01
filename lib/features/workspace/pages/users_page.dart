@@ -91,14 +91,10 @@ class _UsersPageState extends State<UsersPage> {
   }
 
   void _persistState() {
-    ScreenStateCache.instance.save(
-      _stateCacheKey,
-      {
-        'search': _search,
-        'filters': _filters.toMap(),
-      },
-      ttl: const Duration(minutes: 15),
-    );
+    ScreenStateCache.instance.save(_stateCacheKey, {
+      'search': _search,
+      'filters': _filters.toMap(),
+    }, ttl: const Duration(minutes: 15));
   }
 
   @override
@@ -223,9 +219,9 @@ class _UsersPageState extends State<UsersPage> {
       AppPermissions.userUpdate,
     );
     if (!canEdit) return;
-    final changed = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => EditUserPage(user: u)),
-    );
+    final changed = await Navigator.of(
+      context,
+    ).push<bool>(MaterialPageRoute(builder: (_) => EditUserPage(user: u)));
     if (changed == true && mounted) {
       await _reload();
       await _loadStats();
@@ -255,7 +251,6 @@ class _UsersPageState extends State<UsersPage> {
             phone: u.phone,
             document: u.document,
             hasAppAccess: u.hasAppAccess,
-            isAvailableForPublicSite: u.isAvailableForPublicSite,
             lastLoginAt: u.lastLoginAt,
             createdAt: u.createdAt,
             updatedAt: u.updatedAt,
@@ -277,9 +272,8 @@ class _UsersPageState extends State<UsersPage> {
 
   @override
   Widget build(BuildContext context) {
-    final canView = ModuleAccessService.instance.hasPermission(
-          AppPermissions.userView,
-        ) ||
+    final canView =
+        ModuleAccessService.instance.hasPermission(AppPermissions.userView) ||
         ModuleAccessService.instance.hasCompanyModule('user_management');
 
     if (!canView) {
@@ -378,14 +372,10 @@ class _Hero extends StatelessWidget {
 
     // Paleta editorial — emerald pra "vivos / ativos", violet pra hierarquia,
     // amber pra fluxo (novos/mês), slate pra texto secundário.
-    final emerald =
-        isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
-    final indigo =
-        isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
-    final violet =
-        isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED);
-    final amber =
-        isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
+    final emerald = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
+    final indigo = isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
+    final violet = isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED);
+    final amber = isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
 
     final displayTotal = stats?.total ?? total;
     final regulars = stats?.regulars ?? 0;
@@ -396,8 +386,8 @@ class _Hero extends StatelessWidget {
     final subtitle = displayTotal == 0
         ? 'Convide o primeiro membro pra começar a montar sua equipe.'
         : (newThisMonth > 0
-            ? '$newThisMonth ${newThisMonth == 1 ? 'novo' : 'novos'} este mês · $regulars regulares · $admins administradores'
-            : '$regulars regulares · $admins administradores');
+              ? '$newThisMonth ${newThisMonth == 1 ? 'novo' : 'novos'} este mês · $regulars regulares · $admins administradores'
+              : '$regulars regulares · $admins administradores');
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
@@ -667,8 +657,7 @@ class _ToolbarState extends State<_Toolbar> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final accent =
-        isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
+    final accent = isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
     final textColor = ThemeHelpers.textColor(context);
     final secondaryColor = ThemeHelpers.textSecondaryColor(context);
     final borderColor = isDark
@@ -704,8 +693,7 @@ class _ToolbarState extends State<_Toolbar> {
                 boxShadow: showAccent
                     ? [
                         BoxShadow(
-                          color: accent.withValues(
-                              alpha: isDark ? 0.18 : 0.12),
+                          color: accent.withValues(alpha: isDark ? 0.18 : 0.12),
                           blurRadius: 14,
                           offset: const Offset(0, 5),
                           spreadRadius: -4,
@@ -781,11 +769,7 @@ class _ToolbarState extends State<_Toolbar> {
                   ],
                   // Divisor interno entre input e botão de filtros — fundindo
                   // os dois numa única peça (acaba o "card ao lado de card").
-                  Container(
-                    width: 1,
-                    height: 24,
-                    color: borderColor,
-                  ),
+                  Container(width: 1, height: 24, color: borderColor),
                   Material(
                     color: Colors.transparent,
                     child: InkWell(
@@ -860,7 +844,9 @@ class _ToolbarState extends State<_Toolbar> {
                 borderRadius: BorderRadius.circular(6),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 6, vertical: 4),
+                    horizontal: 6,
+                    vertical: 4,
+                  ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -1003,12 +989,16 @@ class _UserCard extends StatelessWidget {
     final phone = user.phone?.trim();
     final docMasked = _maskedDocument();
     final lastLoginLabel = user.lastLoginAt != null
-        ? DateFormat("d 'de' MMM · HH:mm", 'pt_BR')
-            .format(user.lastLoginAt!.toLocal())
+        ? DateFormat(
+            "d 'de' MMM · HH:mm",
+            'pt_BR',
+          ).format(user.lastLoginAt!.toLocal())
         : 'Nunca';
     final createdAtLabel = user.createdAt != null
-        ? DateFormat("d 'de' MMM yyyy", 'pt_BR')
-            .format(user.createdAt!.toLocal())
+        ? DateFormat(
+            "d 'de' MMM yyyy",
+            'pt_BR',
+          ).format(user.createdAt!.toLocal())
         : null;
     final isAppRoleUser = user.role.toLowerCase() == 'user';
 
@@ -1021,9 +1011,7 @@ class _UserCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: cardColor,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: borderColor.withValues(alpha: 0.55),
-            ),
+            border: Border.all(color: borderColor.withValues(alpha: 0.55)),
           ),
           padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
           child: Column(
@@ -1061,8 +1049,11 @@ class _UserCard extends StatelessWidget {
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(LucideIcons.mail,
-                                size: 11, color: secondaryColor),
+                            Icon(
+                              LucideIcons.mail,
+                              size: 11,
+                              color: secondaryColor,
+                            ),
                             const SizedBox(width: 5),
                             Flexible(
                               child: Text(
@@ -1140,53 +1131,28 @@ class _UserCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 12),
-              // ── META GRID: último acesso · visibilidade ───────────────
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: _MetaCell(
-                      icon: LucideIcons.clock,
-                      label: 'ÚLTIMO ACESSO',
-                      child: Text(
-                        lastLoginLabel,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w800,
-                          color: textColor,
-                          height: 1.2,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
+              // ── META: último acesso ───────────────────────────────────
+              _MetaCell(
+                icon: LucideIcons.clock,
+                label: 'ÚLTIMO ACESSO',
+                child: Text(
+                  lastLoginLabel,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: textColor,
+                    height: 1.2,
                   ),
-                  Container(
-                    width: 1,
-                    height: 32,
-                    margin: const EdgeInsets.symmetric(horizontal: 10),
-                    color: borderColor.withValues(alpha: 0.4),
-                  ),
-                  Expanded(
-                    child: _MetaCell(
-                      icon: LucideIcons.eye,
-                      label: 'VISIBILIDADE',
-                      child: _VisibilityPill(
-                        isPublic: user.isAvailableForPublicSite,
-                      ),
-                    ),
-                  ),
-                ],
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
               if (isAppRoleUser) ...[
                 const SizedBox(height: 10),
                 _AppAccessRow(active: user.hasAppAccess),
               ],
               const SizedBox(height: 12),
-              Container(
-                height: 1,
-                color: borderColor.withValues(alpha: 0.4),
-              ),
+              Container(height: 1, color: borderColor.withValues(alpha: 0.4)),
               const SizedBox(height: 10),
               // ── FOOTER: "Desde {date}" + edit hint ───────────────────
               Row(
@@ -1260,12 +1226,15 @@ class _UserCard extends StatelessWidget {
         final isDark = theme.brightness == Brightness.dark;
         final textColor = ThemeHelpers.textColor(ctx);
         final secondaryColor = ThemeHelpers.textSecondaryColor(ctx);
-        final editAccent =
-            isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
-        final danger =
-            isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-        final emerald =
-            isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
+        final editAccent = isDark
+            ? const Color(0xFF818CF8)
+            : const Color(0xFF6366F1);
+        final danger = isDark
+            ? AppColors.status.errorDarkMode
+            : AppColors.status.error;
+        final emerald = isDark
+            ? const Color(0xFF34D399)
+            : const Color(0xFF059669);
         final roleColor = _roleColor(ctx);
         final presence = _presenceColor();
         final willDeactivate = user.active;
@@ -1273,8 +1242,7 @@ class _UserCard extends StatelessWidget {
         return Container(
           decoration: BoxDecoration(
             color: ThemeHelpers.cardBackgroundColor(ctx),
-            borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(24)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
             border: Border.all(
               color: ThemeHelpers.borderColor(ctx).withValues(alpha: 0.5),
             ),
@@ -1494,7 +1462,8 @@ class _UserAvatar extends StatelessWidget {
   Widget _monogram() {
     final deep = HSLColor.fromColor(accent)
         .withLightness(
-            (HSLColor.fromColor(accent).lightness * 0.78).clamp(0.0, 1.0))
+          (HSLColor.fromColor(accent).lightness * 0.78).clamp(0.0, 1.0),
+        )
         .toColor();
     return Container(
       width: _size,
@@ -1717,52 +1686,6 @@ class _MetaCell extends StatelessWidget {
   }
 }
 
-/// Pílula compacta de visibilidade — verde quando público, neutra quando
-/// privado. Paridade com `UserCardVisibilityPill`.
-class _VisibilityPill extends StatelessWidget {
-  const _VisibilityPill({required this.isPublic});
-
-  final bool isPublic;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final tone = isPublic
-        ? const Color(0xFF10B981)
-        : (isDark
-            ? Colors.white.withValues(alpha: 0.5)
-            : Colors.black.withValues(alpha: 0.45));
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: tone.withValues(alpha: isDark ? 0.18 : 0.10),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: tone.withValues(alpha: isDark ? 0.35 : 0.25)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            isPublic ? LucideIcons.globe : LucideIcons.lock,
-            size: 10,
-            color: tone,
-          ),
-          const SizedBox(width: 4),
-          Text(
-            isPublic ? 'Público' : 'Privado',
-            style: TextStyle(
-              fontSize: 10.5,
-              fontWeight: FontWeight.w800,
-              color: tone,
-              letterSpacing: 0.2,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// Linha de status do acesso ao app móvel — só aparece para `role = user`.
 /// Indica se o colaborador tem permissão pra usar o app, igual ao bloco
 /// `App móvel` do `UserCardMeta` no web.
@@ -1778,8 +1701,8 @@ class _AppAccessRow extends StatelessWidget {
     final tone = active
         ? const Color(0xFF1E88E5)
         : (isDark
-            ? Colors.white.withValues(alpha: 0.5)
-            : Colors.black.withValues(alpha: 0.45));
+              ? Colors.white.withValues(alpha: 0.5)
+              : Colors.black.withValues(alpha: 0.45));
     return Row(
       children: [
         Icon(LucideIcons.smartphone, size: 10, color: secondaryColor),
@@ -1800,8 +1723,9 @@ class _AppAccessRow extends StatelessWidget {
           decoration: BoxDecoration(
             color: tone.withValues(alpha: isDark ? 0.18 : 0.10),
             borderRadius: BorderRadius.circular(999),
-            border:
-                Border.all(color: tone.withValues(alpha: isDark ? 0.35 : 0.25)),
+            border: Border.all(
+              color: tone.withValues(alpha: isDark ? 0.35 : 0.25),
+            ),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -1850,7 +1774,9 @@ class _UsersShimmer extends StatelessWidget {
                 color: ThemeHelpers.cardBackgroundColor(context),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                  color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+                  color: ThemeHelpers.borderColor(
+                    context,
+                  ).withValues(alpha: 0.5),
                 ),
               ),
               padding: const EdgeInsets.all(14),
@@ -1869,9 +1795,17 @@ class _UsersShimmer extends StatelessWidget {
                         SizedBox(height: 14),
                         Row(
                           children: [
-                            SkeletonBox(width: 60, height: 18, borderRadius: 999),
+                            SkeletonBox(
+                              width: 60,
+                              height: 18,
+                              borderRadius: 999,
+                            ),
                             SizedBox(width: 6),
-                            SkeletonBox(width: 70, height: 18, borderRadius: 999),
+                            SkeletonBox(
+                              width: 70,
+                              height: 18,
+                              borderRadius: 999,
+                            ),
                           ],
                         ),
                       ],
@@ -1903,8 +1837,9 @@ class _EmptyBlock extends StatelessWidget {
               width: 56,
               height: 56,
               decoration: BoxDecoration(
-                color: ThemeHelpers.borderColor(context)
-                    .withValues(alpha: 0.35),
+                color: ThemeHelpers.borderColor(
+                  context,
+                ).withValues(alpha: 0.35),
                 shape: BoxShape.circle,
               ),
               child: Icon(LucideIcons.users, size: 24, color: secondary),
@@ -1980,9 +1915,11 @@ class _UsersDeniedView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(LucideIcons.lock,
-                size: 38,
-                color: ThemeHelpers.textSecondaryColor(context)),
+            Icon(
+              LucideIcons.lock,
+              size: 38,
+              color: ThemeHelpers.textSecondaryColor(context),
+            ),
             const SizedBox(height: 12),
             Text(
               'Você não tem permissão para ver usuários.',

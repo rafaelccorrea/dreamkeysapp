@@ -10,10 +10,11 @@ import '../services/module_access_service.dart';
 /// Bottom Navigation Bar — design premium 2026.
 ///
 /// Características:
-///   • Barra compacta com gradient sutil + spotlight radial deslizante que
-///     segue o tab ativo (preenche o "vazio" do fundo com vida).
-///   • Item ativo: squircle vibrante com gradient + ícone branco + label em
-///     destaque (peso forte e cor temática).
+///   • Superfície alinhada aos tokens do tema (card no topo, fundo na base),
+///     casando com a paleta do app em light e dark — não um navy próprio.
+///   • Spotlight radial deslizante + hairline da marca seguem o tab ativo.
+///   • Item ativo: placa tingida na cor da marca (tone-plate, como no resto
+///     do app) + ícone e label na cor da marca — sem bloco vermelho sólido.
 ///   • Item inativo: ícone grande sutil + label discreto.
 ///   • Animações coreografadas (squircle anima cor e sombra; spotlight desliza
 ///     com easeOutCubic; label faz tween de peso e cor).
@@ -57,8 +58,8 @@ class AppBottomNavigation extends StatelessWidget {
   );
 
   // ─── Slot 3 dinâmico ────────────────────────────────────────────────────
-  // Se o usuário tem permissões da fila de aprovação ⇒ "Aprovações".
-  // Caso contrário ⇒ "Agenda" (calendário).
+  // Aprovador de imóveis (disponibilidade OU publicidade) ⇒ "Aprovações".
+  // Todo o resto ⇒ "Agenda" (calendário). Antes o fallback era "Tarefas".
   static const _NavItemSpec _approvalsItem = _NavItemSpec(
     icon: LucideIcons.shieldCheck,
     activeIcon: LucideIcons.shieldCheck,
@@ -71,28 +72,26 @@ class AppBottomNavigation extends StatelessWidget {
     label: 'Agenda',
     route: AppRoutes.calendar,
   );
-  static const _NavItemSpec _tasksItem = _NavItemSpec(
-    icon: LucideIcons.listChecks,
-    activeIcon: LucideIcons.listChecks,
-    label: 'Tarefas',
-    route: AppRoutes.kanbanSubtasks,
-  );
 
   /// Resolve o item que ocupa o slot 3 com base nas permissões atuais.
+  /// Usa a lista **específica de aprovador** ([propertyApprovalActions]) — não
+  /// a `approvalQueueMenu` (que inclui `property:view`/`create` e cairia pra
+  /// quase todo mundo). Assim só quem realmente aprova imóveis vê "Aprovações";
+  /// os demais veem "Agenda".
   static _NavItemSpec _resolveSlot3() {
-    final canSeeApprovals = ModuleAccessService.instance
-        .hasAnyPermission(AppPermissions.approvalQueueMenu);
-    if (canSeeApprovals) return _approvalsItem;
-    return _tasksItem;
+    final canApproveProperties = ModuleAccessService.instance.hasAnyPermission(
+      AppPermissions.propertyApprovalActions,
+    );
+    return canApproveProperties ? _approvalsItem : _calendarItem;
   }
 
   static List<_NavItemSpec> _resolveItems() => [
-        _homeItem,
-        _propertiesItem,
-        _kanbanItem,
-        _resolveSlot3(),
-        _profileItem,
-      ];
+    _homeItem,
+    _propertiesItem,
+    _kanbanItem,
+    _resolveSlot3(),
+    _profileItem,
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -120,6 +119,19 @@ class AppBottomNavigation extends StatelessWidget {
         ? AppColors.background.cardBackgroundDarkMode
         : AppColors.background.cardBackground;
 
+    // Superfície da barra alinhada aos tokens reais do tema (antes usava um
+    // navy #1B2030 que destoava do fundo do app). Topo = superfície de card,
+    // base = fundo da tela — mesma paleta do resto, light e dark.
+    final navTop = isDark
+        ? AppColors.background.cardBackgroundDarkMode
+        : AppColors.background.cardBackground;
+    final navBottom = isDark
+        ? AppColors.background.backgroundDarkMode
+        : AppColors.background.background;
+    final navBorder = isDark
+        ? AppColors.border.borderDarkMode
+        : AppColors.border.border;
+
     final bottomInset = MediaQuery.of(context).padding.bottom;
     final items = _resolveItems();
     final itemCount = items.length;
@@ -135,32 +147,17 @@ class AppBottomNavigation extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: isDark
-              ? [
-                  const Color(0xFF1B2030),
-                  const Color(0xFF11151E),
-                ]
-              : [
-                  Colors.white,
-                  const Color(0xFFF7F8FB),
-                ],
+          colors: [navTop, navBottom],
         ),
-        border: Border(
-          top: BorderSide(
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.06)
-                : const Color(0xFFE4E7EC),
-            width: 0.8,
-          ),
-        ),
+        border: Border(top: BorderSide(color: navBorder, width: 0.8)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.45 : 0.08),
-            blurRadius: 32,
+            color: Colors.black.withValues(alpha: isDark ? 0.38 : 0.06),
+            blurRadius: 30,
             offset: const Offset(0, -10),
           ),
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.20 : 0.04),
+            color: Colors.black.withValues(alpha: isDark ? 0.16 : 0.03),
             blurRadius: 6,
             offset: const Offset(0, -2),
           ),
@@ -256,7 +253,6 @@ class AppBottomNavigation extends StatelessWidget {
                         spec: spec,
                         isSelected: isSelected,
                         primaryColor: primaryColor,
-                        primaryDeep: primaryDeep,
                         inactiveColor: unselectedColor,
                         backgroundColor: backgroundColor,
                         isDark: isDark,
@@ -282,7 +278,8 @@ class AppBottomNavigation extends StatelessWidget {
     // a rota é '/properties/pending-approvals'.
     if (routeName == AppRoutes.propertyApprovals) return 3;
 
-    if (routeName == AppRoutes.kanbanSubtasks) return 3;
+    // Tarefas (/kanban/tarefas) não é mais slot da bottom nav — é subtela do
+    // CRM. Cai no `startsWith('/kanban')` abaixo e destaca o tab CRM (2).
 
     if (routeName == AppRoutes.properties ||
         routeName.startsWith('/properties')) {
@@ -291,8 +288,7 @@ class AppBottomNavigation extends StatelessWidget {
     if (routeName == AppRoutes.kanban || routeName.startsWith('/kanban')) {
       return 2;
     }
-    if (routeName == AppRoutes.calendar ||
-        routeName.startsWith('/calendar')) {
+    if (routeName == AppRoutes.calendar || routeName.startsWith('/calendar')) {
       return 3;
     }
     if (routeName == AppRoutes.profile ||
@@ -372,7 +368,6 @@ class _NavTab extends StatelessWidget {
     required this.spec,
     required this.isSelected,
     required this.primaryColor,
-    required this.primaryDeep,
     required this.inactiveColor,
     required this.backgroundColor,
     required this.isDark,
@@ -382,7 +377,6 @@ class _NavTab extends StatelessWidget {
   final _NavItemSpec spec;
   final bool isSelected;
   final Color primaryColor;
-  final Color primaryDeep;
   final Color inactiveColor;
   final Color backgroundColor;
   final bool isDark;
@@ -400,8 +394,11 @@ class _NavTab extends StatelessWidget {
       }
     }
 
-    const Color activeIconColor = Colors.white;
-    final Color activeLabelColor = isDark ? Colors.white : primaryDeep;
+    // Estado selecionado on-palette: placa tingida (não bloco vermelho sólido)
+    // + ícone e label na cor da marca — mesma linguagem das tone-plates do
+    // app (Configurações/Dashboard), em vez de ícone branco sobre vermelho.
+    final Color activeIconColor = primaryColor;
+    final Color activeLabelColor = primaryColor;
 
     return Material(
       color: Colors.transparent,
@@ -428,8 +425,12 @@ class _NavTab extends StatelessWidget {
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                           colors: [
-                            primaryColor,
-                            primaryDeep,
+                            primaryColor.withValues(
+                              alpha: isDark ? 0.26 : 0.16,
+                            ),
+                            primaryColor.withValues(
+                              alpha: isDark ? 0.14 : 0.08,
+                            ),
                           ],
                         )
                       : null,
@@ -437,7 +438,7 @@ class _NavTab extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: isSelected
-                        ? primaryDeep.withValues(alpha: 0.35)
+                        ? primaryColor.withValues(alpha: isDark ? 0.5 : 0.34)
                         : Colors.transparent,
                     width: 1,
                   ),
@@ -445,16 +446,11 @@ class _NavTab extends StatelessWidget {
                       ? [
                           BoxShadow(
                             color: primaryColor.withValues(
-                              alpha: isDark ? 0.55 : 0.40,
+                              alpha: isDark ? 0.22 : 0.13,
                             ),
-                            blurRadius: 14,
-                            spreadRadius: 0.3,
-                            offset: const Offset(0, 4),
-                          ),
-                          BoxShadow(
-                            color: primaryDeep.withValues(alpha: 0.25),
-                            blurRadius: 5,
-                            offset: const Offset(0, 2),
+                            blurRadius: 10,
+                            spreadRadius: -2,
+                            offset: const Offset(0, 3),
                           ),
                         ]
                       : null,
@@ -466,16 +462,17 @@ class _NavTab extends StatelessWidget {
                       AnimatedSwitcher(
                         duration: const Duration(milliseconds: 220),
                         transitionBuilder: (child, anim) => ScaleTransition(
-                          scale: Tween<double>(begin: 0.80, end: 1.0)
-                              .animate(anim),
+                          scale: Tween<double>(
+                            begin: 0.80,
+                            end: 1.0,
+                          ).animate(anim),
                           child: FadeTransition(opacity: anim, child: child),
                         ),
                         child: Icon(
                           isSelected ? spec.activeIcon : spec.icon,
                           key: ValueKey<bool>(isSelected),
                           size: 23,
-                          color:
-                              isSelected ? activeIconColor : inactiveColor,
+                          color: isSelected ? activeIconColor : inactiveColor,
                         ),
                       ),
                       if (notificationCount > 0)
@@ -541,10 +538,7 @@ class _NotificationBadge extends StatelessWidget {
           colors: [badgeColor, badgeDeep],
         ),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: backgroundColor,
-          width: 1.5,
-        ),
+        border: Border.all(color: backgroundColor, width: 1.5),
         boxShadow: [
           BoxShadow(
             color: badgeColor.withValues(alpha: 0.55),
@@ -554,10 +548,7 @@ class _NotificationBadge extends StatelessWidget {
           ),
         ],
       ),
-      constraints: const BoxConstraints(
-        minWidth: 16,
-        minHeight: 16,
-      ),
+      constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
       child: Text(
         count > 99 ? '99+' : '$count',
         style: const TextStyle(

@@ -25,12 +25,17 @@ class AppointmentCard extends StatelessWidget {
     final accent = AppointmentVisuals.colorFromHex(appointment.color);
     final statusColor = AppointmentVisuals.colorForStatus(appointment.status);
     final typeIcon = AppointmentVisuals.iconFor(appointment.type);
-    final relative =
-        AppointmentVisuals.relativeTimeLabel(appointment.startDate, appointment.endDate);
-    final duration =
-        AppointmentVisuals.durationLabel(appointment.startDate, appointment.endDate);
+    final relative = AppointmentVisuals.relativeTimeLabel(
+      appointment.startDate,
+      appointment.endDate,
+    );
+    final duration = AppointmentVisuals.durationLabel(
+      appointment.startDate,
+      appointment.endDate,
+    );
 
-    final isHappening = DateTime.now().isAfter(appointment.startDate) &&
+    final isHappening =
+        DateTime.now().isAfter(appointment.startDate) &&
         DateTime.now().isBefore(appointment.endDate);
 
     return Container(
@@ -47,7 +52,7 @@ class AppointmentCard extends StatelessWidget {
             ? null
             : [
                 BoxShadow(
-                  color: accent.withOpacity(0.06),
+                  color: const Color(0xFF1A2340).withValues(alpha: 0.05),
                   blurRadius: 16,
                   offset: const Offset(0, 6),
                   spreadRadius: -4,
@@ -147,10 +152,7 @@ class AppointmentCard extends StatelessWidget {
                           if (isHappening)
                             _LiveBadge(color: accent)
                           else
-                            _RelativeBadge(
-                              label: relative,
-                              color: statusColor,
-                            ),
+                            _RelativeBadge(label: relative, color: statusColor),
                         ],
                       ),
                       const SizedBox(height: 8),
@@ -170,11 +172,7 @@ class AppointmentCard extends StatelessWidget {
                         runSpacing: 4,
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          _meta(
-                            context,
-                            Icons.timer_outlined,
-                            duration,
-                          ),
+                          _meta(context, Icons.timer_outlined, duration),
                           if (appointment.location != null &&
                               appointment.location!.isNotEmpty)
                             _meta(
@@ -215,10 +213,10 @@ class AppointmentCard extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: c,
-                  fontWeight: FontWeight.w500,
-                  fontSize: 12,
-                ),
+              color: c,
+              fontWeight: FontWeight.w500,
+              fontSize: 12,
+            ),
           ),
         ),
       ],
@@ -415,7 +413,7 @@ class AppointmentBannerPill extends StatelessWidget {
               if (onTap != null) ...[
                 const SizedBox(width: 4),
                 Icon(Icons.chevron_right_rounded, size: 14, color: color),
-              ]
+              ],
             ],
           ),
         ),

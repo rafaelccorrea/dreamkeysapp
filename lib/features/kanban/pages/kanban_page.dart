@@ -29,8 +29,10 @@ import '../widgets/kanban_task_quick_actions_sheet.dart';
 final _compactIntFormatter = NumberFormat.decimalPattern('pt_BR');
 
 /// Valor monetário compacto para o card (ex.: "R$ 250 mil", "R$ 1,2 mi").
-final _compactCurrencyFormatter =
-    NumberFormat.compactCurrency(locale: 'pt_BR', symbol: r'R$ ');
+final _compactCurrencyFormatter = NumberFormat.compactCurrency(
+  locale: 'pt_BR',
+  symbol: r'R$ ',
+);
 
 /// Converte uma cor hex `#RRGGBB`/`#AARRGGBB` em [Color]. Retorna `null` quando
 /// vazia ou inválida, para que o card caia no fallback de cor.
@@ -77,6 +79,7 @@ class KanbanPage extends StatefulWidget {
 class _KanbanPageState extends State<KanbanPage> {
   static const double _kHeaderPadVTop = 10;
   static const double _kKanbanColumnGap = 8;
+
   /// Coluna estreita demais prejudica legibilidade; abaixo disso liberamos scroll horizontal.
   static const double _kKanbanMinStretchColumnWidth = 220;
   static const double _kKanbanScrollColumnWidth = 300;
@@ -391,8 +394,7 @@ class _KanbanPageState extends State<KanbanPage> {
             ),
           ),
           child: Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -425,15 +427,15 @@ class _KanbanPageState extends State<KanbanPage> {
         final bottomInset = MediaQuery.paddingOf(context).bottom + 8;
 
         final viewportH = MediaQuery.sizeOf(context).height;
-        final bodyMaxH =
-            constraints.hasBoundedHeight ? constraints.maxHeight : viewportH;
+        final bodyMaxH = constraints.hasBoundedHeight
+            ? constraints.maxHeight
+            : viewportH;
         final boardViewportH = math
             .max(bodyMaxH * 0.78, viewportH * 0.62)
             .clamp(400.0, 860.0)
             .toDouble();
 
-        final bulkDockOverlap =
-            controller.bulkSelectionActive ? 108.0 : 0.0;
+        final bulkDockOverlap = controller.bulkSelectionActive ? 108.0 : 0.0;
 
         return ScrollConfiguration(
           behavior: NoScrollbarScrollBehavior(),
@@ -447,61 +449,63 @@ class _KanbanPageState extends State<KanbanPage> {
                 child: CustomScrollView(
                   physics: const AlwaysScrollableScrollPhysics(),
                   slivers: [
-                  if (controller.loadingProjects && controller.board != null)
+                    if (controller.loadingProjects && controller.board != null)
+                      SliverToBoxAdapter(
+                        child: _kanbanSecondaryLoadBanner(
+                          context,
+                          controller,
+                          gutterH,
+                        ),
+                      ),
                     SliverToBoxAdapter(
-                      child: _kanbanSecondaryLoadBanner(
+                      child: _buildKanbanHero(
                         context,
                         controller,
                         gutterH,
+                        compact,
+                        w,
+                        toolsContinuation: _kanbanToolsContinuation(
+                          context,
+                          controller,
+                        ),
                       ),
                     ),
-                  SliverToBoxAdapter(
-                    child: _buildKanbanHero(
-                      context,
-                      controller,
-                      gutterH,
-                      compact,
-                      w,
-                      toolsContinuation:
-                          _kanbanToolsContinuation(context, controller),
+                    SliverToBoxAdapter(
+                      child: SizedBox(height: compact ? 16 : 22),
                     ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: SizedBox(height: compact ? 16 : 22),
-                  ),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: EdgeInsets.fromLTRB(
-                        gutterH,
-                        0,
-                        gutterH,
-                        bottomInset + bulkDockOverlap,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _kanbanBoardChromeHeader(context, controller),
-                          SizedBox(
-                            height: boardViewportH,
-                            child: ClipRect(
-                              child: LayoutBuilder(
-                                builder: (context, inner) {
-                                  return _buildKanbanHorizontalScroll(
-                                    context,
-                                    controller,
-                                    inner.maxWidth,
-                                    boardViewportH,
-                                  );
-                                },
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          gutterH,
+                          0,
+                          gutterH,
+                          bottomInset + bulkDockOverlap,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _kanbanBoardChromeHeader(context, controller),
+                            SizedBox(
+                              height: boardViewportH,
+                              child: ClipRect(
+                                child: LayoutBuilder(
+                                  builder: (context, inner) {
+                                    return _buildKanbanHorizontalScroll(
+                                      context,
+                                      controller,
+                                      inner.maxWidth,
+                                      boardViewportH,
+                                    );
+                                  },
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
                 ),
               ),
               if (controller.bulkSelectionActive)
@@ -554,19 +558,19 @@ class _KanbanPageState extends State<KanbanPage> {
                   'Preparando colunas do quadro…',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: ThemeHelpers.textColor(context),
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.2,
-                      ),
+                    color: ThemeHelpers.textColor(context),
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.2,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   'Sincronizando etapas e cards',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: ThemeHelpers.textSecondaryColor(context),
-                        fontWeight: FontWeight.w600,
-                      ),
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
@@ -579,10 +583,10 @@ class _KanbanPageState extends State<KanbanPage> {
     final gapCount = n <= 1 ? 0 : n - 1;
     final totalGapsPx = gapCount * _kKanbanColumnGap;
     final usable = viewportWidth > 0 ? viewportWidth : 0.0;
-    final perColIfStretch =
-        n > 0 ? (usable - totalGapsPx) / n : _kKanbanScrollColumnWidth;
-    final stretch =
-        n > 0 && perColIfStretch >= _kKanbanMinStretchColumnWidth;
+    final perColIfStretch = n > 0
+        ? (usable - totalGapsPx) / n
+        : _kKanbanScrollColumnWidth;
+    final stretch = n > 0 && perColIfStretch >= _kKanbanMinStretchColumnWidth;
 
     if (stretch) {
       return SizedBox(
@@ -597,12 +601,7 @@ class _KanbanPageState extends State<KanbanPage> {
                 padding: EdgeInsets.only(
                   right: i == n - 1 ? 0 : _kKanbanColumnGap,
                 ),
-                child: _buildColumn(
-                  context,
-                  controller,
-                  column,
-                  columnTasks,
-                ),
+                child: _buildColumn(context, controller, column, columnTasks),
               ),
             );
           }),
@@ -612,8 +611,7 @@ class _KanbanPageState extends State<KanbanPage> {
 
     final totalWidth =
         n * _kKanbanScrollColumnWidth + gapCount * _kKanbanColumnGap;
-    final minRowWidth =
-        usable > totalWidth ? usable : totalWidth;
+    final minRowWidth = usable > totalWidth ? usable : totalWidth;
 
     return SizedBox(
       height: h,
@@ -624,10 +622,7 @@ class _KanbanPageState extends State<KanbanPage> {
           scrollDirection: Axis.horizontal,
           physics: const AlwaysScrollableScrollPhysics(),
           child: ConstrainedBox(
-            constraints: BoxConstraints(
-              minWidth: minRowWidth,
-              minHeight: h,
-            ),
+            constraints: BoxConstraints(minWidth: minRowWidth, minHeight: h),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: List.generate(n, (i) {
@@ -675,15 +670,13 @@ class _KanbanPageState extends State<KanbanPage> {
       builder: (context, _) {
         final dragPct = controller.value.clamp(0.0, 1.0);
         final shift = (controller.value * 64).clamp(0.0, 80.0);
-        final visible = controller.value > 0.02 ||
+        final visible =
+            controller.value > 0.02 ||
             controller.isLoading ||
             controller.isFinalizing;
         return Stack(
           children: [
-            Transform.translate(
-              offset: Offset(0, shift),
-              child: child,
-            ),
+            Transform.translate(offset: Offset(0, shift), child: child),
             if (visible)
               Positioned(
                 top: 10,
@@ -692,7 +685,12 @@ class _KanbanPageState extends State<KanbanPage> {
                 child: Center(
                   child: Opacity(
                     opacity: dragPct == 0 ? 1 : dragPct,
-                    child: _kanbanRefreshPill(context, accent, controller, dragPct),
+                    child: _kanbanRefreshPill(
+                      context,
+                      accent,
+                      controller,
+                      dragPct,
+                    ),
                   ),
                 ),
               ),
@@ -775,10 +773,7 @@ class _KanbanPageState extends State<KanbanPage> {
     );
     return SizedBox(
       width: double.infinity,
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: textWidget,
-      ),
+      child: Align(alignment: Alignment.centerLeft, child: textWidget),
     );
   }
 
@@ -951,11 +946,7 @@ class _KanbanPageState extends State<KanbanPage> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  Icons.checklist_rounded,
-                  size: 17,
-                  color: color,
-                ),
+                Icon(Icons.checklist_rounded, size: 17, color: color),
                 const SizedBox(width: 7),
                 Text(
                   'Tarefas',
@@ -1077,12 +1068,15 @@ class _KanbanPageState extends State<KanbanPage> {
         const SizedBox(height: 4),
         Text(
           headline,
-          style: (compact ? theme.textTheme.titleMedium : theme.textTheme.titleLarge)
-              ?.copyWith(
-            fontWeight: FontWeight.w900,
-            height: 1.02,
-            color: ThemeHelpers.textColor(context),
-          ),
+          style:
+              (compact
+                      ? theme.textTheme.titleMedium
+                      : theme.textTheme.titleLarge)
+                  ?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    height: 1.02,
+                    color: ThemeHelpers.textColor(context),
+                  ),
         ),
         if (hasFilters) ...[
           const SizedBox(height: 6),
@@ -1104,7 +1098,6 @@ class _KanbanPageState extends State<KanbanPage> {
         Expanded(child: mainTitles),
       ],
     );
-
 
     return Padding(
       padding: EdgeInsets.fromLTRB(
@@ -1169,10 +1162,7 @@ class _KanbanPageState extends State<KanbanPage> {
         fullscreenDialog: true,
         builder: (_) => ChangeNotifierProvider<KanbanController>.value(
           value: controller,
-          child: CreateTaskModal(
-            columnId: createInColumn.id,
-            teamId: teamId,
-          ),
+          child: CreateTaskModal(columnId: createInColumn.id, teamId: teamId),
         ),
       ),
     );
@@ -1212,7 +1202,8 @@ class _KanbanPageState extends State<KanbanPage> {
     final theme = Theme.of(context);
     final synth = column.isSyntheticKanbanPlaceholder;
     final columnColor = _columnAccentColor(column, context);
-    final canEditCols = (controller.permissions?.canEditColumns ?? false) ||
+    final canEditCols =
+        (controller.permissions?.canEditColumns ?? false) ||
         (controller.permissions?.canDeleteColumns ?? false);
 
     final emptyCaption = synth
@@ -1256,298 +1247,291 @@ class _KanbanPageState extends State<KanbanPage> {
                       ),
                     ),
                   ),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(10, 11, 8, 10),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _columnStageGlyph(column, columnColor),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if (synth)
-                                      Padding(
-                                        padding:
-                                            const EdgeInsets.only(bottom: 4),
-                                        child: Text(
-                                          'Funil padrão',
-                                          style: theme.textTheme.labelSmall
-                                              ?.copyWith(
-                                            color: columnColor,
-                                            fontWeight: FontWeight.w800,
-                                            letterSpacing: 0.8,
-                                          ),
-                                        ),
-                                      ),
-                                    Text(
-                                      column.title,
-                                      style: theme.textTheme.titleMedium
-                                          ?.copyWith(
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: -0.35,
-                                        height: 1.08,
-                                      ),
-                                    ),
-                                    if (column.description != null &&
-                                        column.description!
-                                            .trim()
-                                            .isNotEmpty) ...[
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        column.description!,
-                                        style: theme.textTheme.bodySmall
-                                            ?.copyWith(
-                                          color:
-                                              ThemeHelpers.textSecondaryColor(
-                                            context,
-                                          ),
-                                          fontWeight: FontWeight.w600,
-                                          height: 1.35,
-                                        ),
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 11, 8, 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _columnStageGlyph(column, columnColor),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 2),
-                                    child: Text(
-                                      '${tasks.length}',
-                                      style:
-                                          theme.textTheme.titleSmall?.copyWith(
-                                        color: columnColor,
-                                        fontWeight: FontWeight.w900,
-                                        height: 1,
+                                  if (synth)
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 4),
+                                      child: Text(
+                                        'Funil padrão',
+                                        style: theme.textTheme.labelSmall
+                                            ?.copyWith(
+                                              color: columnColor,
+                                              fontWeight: FontWeight.w800,
+                                              letterSpacing: 0.8,
+                                            ),
                                       ),
                                     ),
+                                  Text(
+                                    column.title,
+                                    style: theme.textTheme.titleMedium
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w800,
+                                          letterSpacing: -0.35,
+                                          height: 1.08,
+                                        ),
                                   ),
-                                  if (canEditCols && !synth)
-                                    _kanbanMenuTrigger(
-                                      context,
-                                      onTap: () => _showColumnActions(
-                                        context,
-                                        controller,
-                                        column,
-                                      ),
+                                  if (column.description != null &&
+                                      column.description!
+                                          .trim()
+                                          .isNotEmpty) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      column.description!,
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(
+                                            color:
+                                                ThemeHelpers.textSecondaryColor(
+                                                  context,
+                                                ),
+                                            fontWeight: FontWeight.w600,
+                                            height: 1.35,
+                                          ),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
                                     ),
+                                  ],
                                 ],
                               ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: DragTarget<KanbanTask>(
-                      onWillAcceptWithDetails: synth ||
-                              controller.bulkSelectionActive
-                          ? (_) => false
-                          : (details) => details.data.columnId != column.id,
-                      onAcceptWithDetails: (details) {
-                        _handleTaskDrop(
-                          context,
-                          controller,
-                          details.data,
-                          column.id,
-                        );
-                      },
-                      builder: (context, candidateData, rejectedData) {
-                        final isTargeting = candidateData.isNotEmpty;
-                        final highlight = isTargeting
-                            ? columnColor.withValues(alpha: 0.09)
-                            : Colors.transparent;
-                        final dashedBorderColor = isTargeting
-                            ? columnColor.withValues(alpha: 0.55)
-                            : Colors.transparent;
-                        return AnimatedContainer(
-                          duration: const Duration(milliseconds: 140),
-                          curve: Curves.easeOut,
-                          margin: const EdgeInsets.symmetric(
-                            horizontal: 4,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: highlight,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: dashedBorderColor,
-                              width: isTargeting ? 1.4 : 0,
                             ),
-                          ),
-                          child: tasks.isEmpty
-                              ? Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 16,
-                                  ),
-                                  child: Center(
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          isTargeting
-                                              ? Icons
-                                                  .download_for_offline_outlined
-                                              : Icons.inbox_outlined,
-                                          size: 42,
-                                          color: isTargeting
-                                              ? columnColor
-                                              : ThemeHelpers
-                                                      .textSecondaryColor(
-                                                  context,
-                                                ).withValues(alpha: 0.45),
-                                        ),
-                                        const SizedBox(height: 10),
-                                        Text(
-                                          isTargeting
-                                              ? 'Solte para mover aqui'
-                                              : emptyCaption,
-                                          style: theme.textTheme.bodySmall
-                                              ?.copyWith(
-                                            color: isTargeting
-                                                ? columnColor
-                                                : ThemeHelpers
-                                                    .textSecondaryColor(
-                                                    context,
-                                                  ),
-                                            fontWeight: isTargeting
-                                                ? FontWeight.w800
-                                                : FontWeight.w600,
-                                            height: 1.4,
-                                          ),
-                                          textAlign: TextAlign.center,
-                                        ),
-                                      ],
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 2),
+                                  child: Text(
+                                    '${tasks.length}',
+                                    style: theme.textTheme.titleSmall?.copyWith(
+                                      color: columnColor,
+                                      fontWeight: FontWeight.w900,
+                                      height: 1,
                                     ),
                                   ),
-                                )
-                              : ScrollConfiguration(
-                                  behavior: NoScrollbarScrollBehavior(),
-                                  child: Builder(
-                                    builder: (context) {
-                                      // Paginação por coluna — auto load ao
-                                      // chegar no fim da lista; mantém item
-                                      // extra apenas para mostrar spinner.
-                                      final pagination = controller
-                                          .columnPaginationFor(column.id);
-                                      final showFooter = pagination.loadingMore;
-                                      final itemCount = tasks.length +
-                                          (showFooter ? 1 : 0);
-                                      return NotificationListener<
-                                        ScrollNotification
-                                      >(
-                                        onNotification: (notification) {
-                                          if (notification.metrics.axis !=
-                                              Axis.vertical) {
-                                            return false;
-                                          }
-                                          final nearBottom =
-                                              notification
-                                                  .metrics
-                                                  .pixels >=
-                                              notification
-                                                      .metrics
-                                                      .maxScrollExtent -
-                                                  120;
-                                          if (nearBottom &&
-                                              pagination.hasMore &&
-                                              !pagination.loadingMore) {
-                                            controller.loadMoreTasksForColumn(
-                                              column.id,
-                                            );
-                                          }
-                                          return false;
-                                        },
-                                        child: ListView.builder(
-                                          shrinkWrap: false,
-                                          physics:
-                                              const AlwaysScrollableScrollPhysics(),
-                                          padding: const EdgeInsets.fromLTRB(
-                                            6,
-                                            8,
-                                            6,
-                                            8,
-                                          ),
-                                          itemCount: itemCount,
-                                          itemBuilder: (context, index) {
-                                            if (index >= tasks.length) {
-                                              return _buildLoadMoreFooter(
-                                                context,
-                                                columnColor,
-                                                pagination,
-                                              );
-                                            }
-                                            final task = tasks[index];
-                                            return _buildDraggableTaskForReorder(
-                                              context,
-                                              controller,
-                                              task,
-                                              column.id,
-                                            );
-                                          },
-                                        ),
-                                      );
-                                    },
-                                  ),
                                 ),
-                        );
-                      },
+                                if (canEditCols && !synth)
+                                  _kanbanMenuTrigger(
+                                    context,
+                                    onTap: () => _showColumnActions(
+                                      context,
+                                      controller,
+                                      column,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
-                  if ((controller.permissions?.canCreateTasks ?? true) &&
-                      !synth)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 2, 8, 10),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            Navigator.of(context).push(
-                              adaptivePageRoute<void>(
-                                fullscreenDialog: true,
-                                builder: (_) =>
-                                    ChangeNotifierProvider<KanbanController>
-                                        .value(
-                                  value: controller,
-                                  child: CreateTaskModal(
-                                    columnId: column.id,
-                                    teamId: controller.teamId ?? '',
+                ),
+                Expanded(
+                  child: DragTarget<KanbanTask>(
+                    onWillAcceptWithDetails:
+                        synth || controller.bulkSelectionActive
+                        ? (_) => false
+                        : (details) => details.data.columnId != column.id,
+                    onAcceptWithDetails: (details) {
+                      _handleTaskDrop(
+                        context,
+                        controller,
+                        details.data,
+                        column.id,
+                      );
+                    },
+                    builder: (context, candidateData, rejectedData) {
+                      final isTargeting = candidateData.isNotEmpty;
+                      final highlight = isTargeting
+                          ? columnColor.withValues(alpha: 0.09)
+                          : Colors.transparent;
+                      final dashedBorderColor = isTargeting
+                          ? columnColor.withValues(alpha: 0.55)
+                          : Colors.transparent;
+                      return AnimatedContainer(
+                        duration: const Duration(milliseconds: 140),
+                        curve: Curves.easeOut,
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: highlight,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: dashedBorderColor,
+                            width: isTargeting ? 1.4 : 0,
+                          ),
+                        ),
+                        child: tasks.isEmpty
+                            ? Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 16,
+                                ),
+                                child: Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        isTargeting
+                                            ? Icons
+                                                  .download_for_offline_outlined
+                                            : Icons.inbox_outlined,
+                                        size: 42,
+                                        color: isTargeting
+                                            ? columnColor
+                                            : ThemeHelpers.textSecondaryColor(
+                                                context,
+                                              ).withValues(alpha: 0.45),
+                                      ),
+                                      const SizedBox(height: 10),
+                                      Text(
+                                        isTargeting
+                                            ? 'Solte para mover aqui'
+                                            : emptyCaption,
+                                        style: theme.textTheme.bodySmall?.copyWith(
+                                          color: isTargeting
+                                              ? columnColor
+                                              : ThemeHelpers.textSecondaryColor(
+                                                  context,
+                                                ),
+                                          fontWeight: isTargeting
+                                              ? FontWeight.w800
+                                              : FontWeight.w600,
+                                          height: 1.4,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ],
                                   ),
                                 ),
+                              )
+                            : ScrollConfiguration(
+                                behavior: NoScrollbarScrollBehavior(),
+                                child: Builder(
+                                  builder: (context) {
+                                    // Paginação por coluna — auto load ao
+                                    // chegar no fim da lista; mantém item
+                                    // extra apenas para mostrar spinner.
+                                    final pagination = controller
+                                        .columnPaginationFor(column.id);
+                                    final showFooter = pagination.loadingMore;
+                                    final itemCount =
+                                        tasks.length + (showFooter ? 1 : 0);
+                                    return NotificationListener<
+                                      ScrollNotification
+                                    >(
+                                      onNotification: (notification) {
+                                        if (notification.metrics.axis !=
+                                            Axis.vertical) {
+                                          return false;
+                                        }
+                                        final nearBottom =
+                                            notification.metrics.pixels >=
+                                            notification
+                                                    .metrics
+                                                    .maxScrollExtent -
+                                                120;
+                                        if (nearBottom &&
+                                            pagination.hasMore &&
+                                            !pagination.loadingMore) {
+                                          controller.loadMoreTasksForColumn(
+                                            column.id,
+                                          );
+                                        }
+                                        return false;
+                                      },
+                                      child: ListView.builder(
+                                        shrinkWrap: false,
+                                        physics:
+                                            const AlwaysScrollableScrollPhysics(),
+                                        padding: const EdgeInsets.fromLTRB(
+                                          6,
+                                          8,
+                                          6,
+                                          8,
+                                        ),
+                                        itemCount: itemCount,
+                                        itemBuilder: (context, index) {
+                                          if (index >= tasks.length) {
+                                            return _buildLoadMoreFooter(
+                                              context,
+                                              columnColor,
+                                              pagination,
+                                            );
+                                          }
+                                          final task = tasks[index];
+                                          return _buildDraggableTaskForReorder(
+                                            context,
+                                            controller,
+                                            task,
+                                            column.id,
+                                          );
+                                        },
+                                      ),
+                                    );
+                                  },
+                                ),
                               ),
-                            );
-                          },
-                          icon: const Icon(Icons.add_rounded, size: 18),
-                          label: const Text('Nova tarefa'),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 12,
+                      );
+                    },
+                  ),
+                ),
+                if ((controller.permissions?.canCreateTasks ?? true) && !synth)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 2, 8, 10),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            adaptivePageRoute<void>(
+                              fullscreenDialog: true,
+                              builder: (_) =>
+                                  ChangeNotifierProvider<
+                                    KanbanController
+                                  >.value(
+                                    value: controller,
+                                    child: CreateTaskModal(
+                                      columnId: column.id,
+                                      teamId: controller.teamId ?? '',
+                                    ),
+                                  ),
                             ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.add_rounded, size: 18),
+                        label: const Text('Nova tarefa'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 12,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
                           ),
                         ),
                       ),
                     ),
-                ],
-              ),
+                  ),
+              ],
             ),
-          ],
-        ),
-      );
+          ),
+        ],
+      ),
+    );
   }
 
   /// Footer da lista de cards — somente spinner do carregamento automático.
@@ -1621,11 +1605,7 @@ class _KanbanPageState extends State<KanbanPage> {
           onTap: controller.bulkDeleting
               ? null
               : () => controller.toggleBulkTaskSelection(task.id),
-          child: _buildTaskCard(
-            task,
-            bulkMode: true,
-            bulkSelected: selected,
-          ),
+          child: _buildTaskCard(task, bulkMode: true, bulkSelected: selected),
         ),
       );
     }
@@ -1703,9 +1683,7 @@ class _KanbanPageState extends State<KanbanPage> {
     if (KanbanSyntheticColumns.isSyntheticId(targetColumnId)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Etapas ainda não carregadas do servidor nesta vista.',
-          ),
+          content: Text('Etapas ainda não carregadas do servidor nesta vista.'),
         ),
       );
       return;
@@ -1815,7 +1793,9 @@ class _KanbanPageState extends State<KanbanPage> {
             boxShadow: [
               BoxShadow(
                 color: color.withValues(
-                  alpha: active ? (isDark ? 0.30 : 0.18) : (isDark ? 0.18 : 0.10),
+                  alpha: active
+                      ? (isDark ? 0.30 : 0.18)
+                      : (isDark ? 0.18 : 0.10),
                 ),
                 blurRadius: active ? 14 : 10,
                 offset: const Offset(0, 4),
@@ -1847,10 +1827,7 @@ class _KanbanPageState extends State<KanbanPage> {
                     padding: const EdgeInsets.symmetric(horizontal: 5),
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
-                        colors: [
-                          color,
-                          color.withValues(alpha: 0.82),
-                        ],
+                        colors: [color, color.withValues(alpha: 0.82)],
                       ),
                       borderRadius: BorderRadius.circular(999),
                       boxShadow: [
@@ -1908,10 +1885,7 @@ class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
-  void _openKanbanFilters(
-    BuildContext context,
-    KanbanController controller,
-  ) {
+  void _openKanbanFilters(BuildContext context, KanbanController controller) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1959,7 +1933,8 @@ class _KanbanPageState extends State<KanbanPage> {
 
     final tags = task.displayTags;
     final tagDetails = task.displayTagDetails;
-    final hasTags = (tagDetails != null && tagDetails.isNotEmpty) ||
+    final hasTags =
+        (tagDetails != null && tagDetails.isNotEmpty) ||
         (tags != null && tags.isNotEmpty);
 
     // Cor primária do card: accent do prazo > regra/prioridade > primary
@@ -1990,9 +1965,7 @@ class _KanbanPageState extends State<KanbanPage> {
         decoration: BoxDecoration(
           color: rowTint,
           border: Border(
-            bottom: BorderSide(
-              color: ThemeHelpers.borderLightColor(context),
-            ),
+            bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
           ),
         ),
         child: Stack(
@@ -2009,232 +1982,229 @@ class _KanbanPageState extends State<KanbanPage> {
                 ),
               ),
             Padding(
-                padding: EdgeInsets.fromLTRB(
-                  leftStripe != null ? 16 : 14,
-                  14,
-                  12,
-                  14,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // ─── HEADER: título à esquerda (sem avatar de responsável)
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (bulkMode) ...[
-                          Padding(
-                            padding:
-                                const EdgeInsets.only(right: 10, top: 2),
-                            child: Icon(
-                              bulkSelected
-                                  ? Icons.check_box_rounded
-                                  : Icons.check_box_outline_blank_rounded,
-                              size: 22,
-                              color: theme.colorScheme.primary,
-                            ),
-                          ),
-                        ],
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                task.title,
-                                style: theme.textTheme.titleSmall?.copyWith(
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 15,
-                                  height: 1.25,
-                                  letterSpacing: -0.2,
-                                  color: ThemeHelpers.textColor(context),
-                                ),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              if (assigned != null && !bulkMode) ...[
-                                const SizedBox(height: 3),
-                                Row(
-                                  children: [
-                                    Icon(
-                                      Icons.person_outline_rounded,
-                                      size: 11,
-                                      color: secondaryText,
-                                    ),
-                                    const SizedBox(width: 3),
-                                    Flexible(
-                                      child: Text(
-                                        _firstName(assigned.name),
-                                        style: theme.textTheme.labelSmall
-                                            ?.copyWith(
-                                          fontWeight: FontWeight.w700,
-                                          color: secondaryText,
-                                          fontSize: 11,
-                                          letterSpacing: -0.05,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ],
+              padding: EdgeInsets.fromLTRB(
+                leftStripe != null ? 16 : 14,
+                14,
+                12,
+                14,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // ─── HEADER: título à esquerda (sem avatar de responsável)
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (bulkMode) ...[
+                        Padding(
+                          padding: const EdgeInsets.only(right: 10, top: 2),
+                          child: Icon(
+                            bulkSelected
+                                ? Icons.check_box_rounded
+                                : Icons.check_box_outline_blank_rounded,
+                            size: 22,
+                            color: theme.colorScheme.primary,
                           ),
                         ),
-                        if (task.isCompleted)
-                          Padding(
-                            padding: const EdgeInsets.only(left: 6, top: 1),
-                            child: Icon(
-                              Icons.check_circle_rounded,
-                              size: 18,
-                              color: theme.colorScheme.primary,
-                            ),
-                          ),
-                        if (!bulkMode) _buildTaskCardMenu(task),
                       ],
-                    ),
-
-                    // ─── DESCRIÇÃO opcional (mais discreta agora)
-                    if (hasDescription) ...[
-                      const SizedBox(height: 10),
-                      Container(
-                        padding: const EdgeInsets.fromLTRB(10, 8, 10, 9),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(10),
-                          color: isDark
-                              ? Colors.white.withValues(alpha: 0.03)
-                              : Colors.black.withValues(alpha: 0.025),
-                          border: Border.all(
-                            color: isDark
-                                ? Colors.white.withValues(alpha: 0.05)
-                                : Colors.black.withValues(alpha: 0.04),
-                          ),
-                        ),
-                        child: Text(
-                          descriptionText,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: secondaryText,
-                            fontSize: 12.25,
-                            height: 1.45,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-
-                    // ─── PILLS de contexto (valor, prioridade, prazo,
-                    // resultado, recuperação, tags)
-                    if (hasValue ||
-                        task.priority != null ||
-                        deadline.isVisible ||
-                        hasTags ||
-                        task.isInRecovery ||
-                        task.hasCadence ||
-                        task.hasClosedResult) ...[
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: [
-                          if (hasValue) _valueChip(cardValue),
-                          if (task.priority != null)
-                            _priorityChip(task.priority!, priorityColor!),
-                          if (deadline.isVisible) _deadlineChip(deadline),
-                          if (task.hasClosedResult) _taskResultChip(task),
-                          if (task.isInRecovery && !task.hasClosedResult)
-                            _recoveryChip(),
-                          if (task.hasCadence && !task.hasClosedResult)
-                            _cadenceChip(task),
-                          if (hasTags)
-                            ..._buildTaskTagChips(
-                              tagDetails: tagDetails,
-                              tags: tags,
-                              theme: theme,
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              task.title,
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 15,
+                                height: 1.25,
+                                letterSpacing: -0.2,
+                                color: ThemeHelpers.textColor(context),
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                        ],
-                      ),
-                    ],
-
-                    // ─── CONTATO: telefone do lead + ações rápidas
-                    if (hasContact) ...[
-                      const SizedBox(height: 10),
-                      _taskCardContactRow(contactPhone, task),
-                    ],
-
-                    // ─── FOOTER: data + comentários (à esquerda), separados
-                    // por divisor sutil
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.only(top: 10),
-                      decoration: BoxDecoration(
-                        border: Border(
-                          top: BorderSide(
-                            color: isDark
-                                ? Colors.white.withValues(alpha: 0.05)
-                                : Colors.black.withValues(alpha: 0.05),
-                          ),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          _taskCardMetric(
-                            icon: Icons.schedule_rounded,
-                            label: _relativeCardTime(task.createdAt),
-                            color: secondaryText,
-                          ),
-                          if (task.commentsCount != null &&
-                              task.commentsCount! > 0) ...[
-                            const SizedBox(width: 12),
-                            _taskCardMetric(
-                              icon: Icons.mode_comment_outlined,
-                              label: '${task.commentsCount}',
-                              color: secondaryText,
-                            ),
+                            if (assigned != null && !bulkMode) ...[
+                              const SizedBox(height: 3),
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.person_outline_rounded,
+                                    size: 11,
+                                    color: secondaryText,
+                                  ),
+                                  const SizedBox(width: 3),
+                                  Flexible(
+                                    child: Text(
+                                      _firstName(assigned.name),
+                                      style: theme.textTheme.labelSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                            color: secondaryText,
+                                            fontSize: 11,
+                                            letterSpacing: -0.05,
+                                          ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ],
-                          const Spacer(),
-                          // Tag "Nova" para tarefas criadas há menos de 24h
-                          if (DateTime.now()
-                                  .difference(task.createdAt)
-                                  .inHours <
-                              24)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 7,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: cardAccent.withValues(
-                                  alpha: isDark ? 0.20 : 0.12,
-                                ),
-                                borderRadius: BorderRadius.circular(999),
-                                border: Border.all(
-                                  color: cardAccent.withValues(alpha: 0.4),
-                                ),
-                              ),
-                              child: Text(
-                                'NOVA',
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  fontWeight: FontWeight.w900,
-                                  fontSize: 9,
-                                  letterSpacing: 1.2,
-                                  color: cardAccent,
-                                  height: 1,
-                                ),
-                              ),
-                            ),
-                        ],
+                        ),
+                      ),
+                      if (task.isCompleted)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 6, top: 1),
+                          child: Icon(
+                            Icons.check_circle_rounded,
+                            size: 18,
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                      if (!bulkMode) _buildTaskCardMenu(task),
+                    ],
+                  ),
+
+                  // ─── DESCRIÇÃO opcional (mais discreta agora)
+                  if (hasDescription) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(10, 8, 10, 9),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(10),
+                        color: isDark
+                            ? Colors.white.withValues(alpha: 0.03)
+                            : Colors.black.withValues(alpha: 0.025),
+                        border: Border.all(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.05)
+                              : Colors.black.withValues(alpha: 0.04),
+                        ),
+                      ),
+                      child: Text(
+                        descriptionText,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: secondaryText,
+                          fontSize: 12.25,
+                          height: 1.45,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ],
-                ),
+
+                  // ─── PILLS de contexto (valor, prioridade, prazo,
+                  // resultado, recuperação, tags)
+                  if (hasValue ||
+                      task.priority != null ||
+                      deadline.isVisible ||
+                      hasTags ||
+                      task.isInRecovery ||
+                      task.hasCadence ||
+                      task.hasClosedResult) ...[
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        if (hasValue) _valueChip(cardValue),
+                        if (task.priority != null)
+                          _priorityChip(task.priority!, priorityColor!),
+                        if (deadline.isVisible) _deadlineChip(deadline),
+                        if (task.hasClosedResult) _taskResultChip(task),
+                        if (task.isInRecovery && !task.hasClosedResult)
+                          _recoveryChip(),
+                        if (task.hasCadence && !task.hasClosedResult)
+                          _cadenceChip(task),
+                        if (hasTags)
+                          ..._buildTaskTagChips(
+                            tagDetails: tagDetails,
+                            tags: tags,
+                            theme: theme,
+                          ),
+                      ],
+                    ),
+                  ],
+
+                  // ─── CONTATO: telefone do lead + ações rápidas
+                  if (hasContact) ...[
+                    const SizedBox(height: 10),
+                    _taskCardContactRow(contactPhone, task),
+                  ],
+
+                  // ─── FOOTER: data + comentários (à esquerda), separados
+                  // por divisor sutil
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.only(top: 10),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        top: BorderSide(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.05)
+                              : Colors.black.withValues(alpha: 0.05),
+                        ),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        _taskCardMetric(
+                          icon: Icons.schedule_rounded,
+                          label: _relativeCardTime(task.createdAt),
+                          color: secondaryText,
+                        ),
+                        if (task.commentsCount != null &&
+                            task.commentsCount! > 0) ...[
+                          const SizedBox(width: 12),
+                          _taskCardMetric(
+                            icon: Icons.mode_comment_outlined,
+                            label: '${task.commentsCount}',
+                            color: secondaryText,
+                          ),
+                        ],
+                        const Spacer(),
+                        // Tag "Nova" para tarefas criadas há menos de 24h
+                        if (DateTime.now().difference(task.createdAt).inHours <
+                            24)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: cardAccent.withValues(
+                                alpha: isDark ? 0.20 : 0.12,
+                              ),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: cardAccent.withValues(alpha: 0.4),
+                              ),
+                            ),
+                            child: Text(
+                              'NOVA',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 9,
+                                letterSpacing: 1.2,
+                                color: cardAccent,
+                                height: 1,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
-      );
+      ),
+    );
   }
 
   Widget _taskCardMetric({
@@ -2281,8 +2251,9 @@ class _KanbanPageState extends State<KanbanPage> {
       ];
     }
     final list = tags ?? const <String>[];
-    final visible =
-        list.length <= maxVisible ? list : list.take(maxVisible).toList();
+    final visible = list.length <= maxVisible
+        ? list
+        : list.take(maxVisible).toList();
     final extra = list.length - visible.length;
     return [
       for (final t in visible) _firstTagChip(t, theme),
@@ -2369,9 +2340,12 @@ class _KanbanPageState extends State<KanbanPage> {
   Widget _taskCardContactRow(String phone, KanbanTask task) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final secondaryText = ThemeHelpers.textSecondaryColor(context);
-    final callColor = isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
-    final whatsappColor =
-        isDark ? const Color(0xFF25D366) : const Color(0xFF0F8B7E);
+    final callColor = isDark
+        ? AppColors.status.blueDarkMode
+        : AppColors.status.blue;
+    final whatsappColor = isDark
+        ? const Color(0xFF25D366)
+        : const Color(0xFF0F8B7E);
     return Row(
       children: [
         Icon(Icons.phone_outlined, size: 13, color: secondaryText),
@@ -2566,8 +2540,9 @@ class _KanbanPageState extends State<KanbanPage> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final perms = ctrl.permissions;
     final blue = isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
-    final purple =
-        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
+    final purple = isDark
+        ? AppColors.status.purpleDarkMode
+        : AppColors.status.purple;
     _showKanbanActionMenu(
       context,
       title: task.title,
@@ -2634,7 +2609,8 @@ class _KanbanPageState extends State<KanbanPage> {
 
   Widget _deadlineChip(_KanbanTaskDeadline deadline) {
     final c =
-        deadline.accentColor(context) ?? ThemeHelpers.textSecondaryColor(context);
+        deadline.accentColor(context) ??
+        ThemeHelpers.textSecondaryColor(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
       decoration: BoxDecoration(
@@ -2746,7 +2722,9 @@ class _KanbanPageState extends State<KanbanPage> {
             ),
             boxShadow: [
               BoxShadow(
-                color: manage.withValues(alpha: isDark ? 0.22 : 0.12),
+                color: isDark
+                    ? manage.withValues(alpha: 0.22)
+                    : const Color(0xFF1A2340).withValues(alpha: 0.10),
                 blurRadius: 22,
                 spreadRadius: -4,
                 offset: const Offset(0, 10),
@@ -2771,9 +2749,7 @@ class _KanbanPageState extends State<KanbanPage> {
                     // Tint chapado (sem gradiente) — superfície limpa.
                     color: manage.withValues(alpha: isDark ? 0.16 : 0.08),
                     border: Border(
-                      bottom: BorderSide(
-                        color: manage.withValues(alpha: 0.18),
-                      ),
+                      bottom: BorderSide(color: manage.withValues(alpha: 0.18)),
                     ),
                   ),
                   child: Row(
@@ -2788,7 +2764,8 @@ class _KanbanPageState extends State<KanbanPage> {
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(12),
                               color: manage.withValues(
-                                  alpha: isDark ? 0.20 : 0.14),
+                                alpha: isDark ? 0.20 : 0.14,
+                              ),
                             ),
                             child: Icon(
                               Icons.library_add_check_rounded,
@@ -2868,10 +2845,7 @@ class _KanbanPageState extends State<KanbanPage> {
                         onPressed: disabled
                             ? null
                             : () => controller.exitBulkSelectionMode(),
-                        icon: Icon(
-                          Icons.close_rounded,
-                          color: muted,
-                        ),
+                        icon: Icon(Icons.close_rounded, color: muted),
                         visualDensity: VisualDensity.compact,
                       ),
                     ],
@@ -2982,8 +2956,9 @@ class _KanbanPageState extends State<KanbanPage> {
     final bg = filled
         ? color.withValues(alpha: disabled ? 0.45 : 1)
         : Color.alphaBlend(
-            (neutral ? borderCol : color)
-                .withValues(alpha: isDark ? 0.14 : 0.08),
+            (neutral ? borderCol : color).withValues(
+              alpha: isDark ? 0.14 : 0.08,
+            ),
             ThemeHelpers.cardBackgroundColor(context),
           );
     final fg = filled
@@ -2993,9 +2968,7 @@ class _KanbanPageState extends State<KanbanPage> {
               : color);
     final borderColor = filled
         ? Colors.transparent
-        : (neutral
-              ? borderCol
-              : color.withValues(alpha: isDark ? 0.45 : 0.32));
+        : (neutral ? borderCol : color.withValues(alpha: isDark ? 0.45 : 0.32));
 
     return Material(
       color: Colors.transparent,
@@ -3006,10 +2979,7 @@ class _KanbanPageState extends State<KanbanPage> {
           decoration: BoxDecoration(
             color: bg,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: borderColor,
-              width: 1,
-            ),
+            border: Border.all(color: borderColor, width: 1),
             boxShadow: filled && !disabled
                 ? [
                     BoxShadow(
@@ -3022,10 +2992,7 @@ class _KanbanPageState extends State<KanbanPage> {
                 : null,
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 10,
-              vertical: 11,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               mainAxisSize: MainAxisSize.min,
@@ -3053,10 +3020,7 @@ class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
-  void _confirmBulkDelete(
-    BuildContext context,
-    KanbanController controller,
-  ) {
+  void _confirmBulkDelete(BuildContext context, KanbanController controller) {
     final n = controller.bulkSelectedCount;
     showDialog<void>(
       context: context,
@@ -3084,7 +3048,7 @@ class _KanbanPageState extends State<KanbanPage> {
                     ok
                         ? 'Exclusão concluída.'
                         : (controller.error ??
-                            'Alguns ou todos os cards não puderam ser excluídos. O quadro foi atualizado.'),
+                              'Alguns ou todos os cards não puderam ser excluídos. O quadro foi atualizado.'),
                   ),
                   backgroundColor: ok ? Colors.green : Colors.orange.shade900,
                 ),
@@ -3365,8 +3329,9 @@ class _KanbanActionMenuSheet extends StatelessWidget {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color:
-                        ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
+                    color: ThemeHelpers.borderColor(
+                      context,
+                    ).withValues(alpha: 0.55),
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
@@ -3466,8 +3431,9 @@ class _KanbanActionMenuSheet extends StatelessWidget {
               Icon(
                 Icons.chevron_right_rounded,
                 size: 20,
-                color:
-                    ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.6),
+                color: ThemeHelpers.textSecondaryColor(
+                  context,
+                ).withValues(alpha: 0.6),
               ),
             ],
           ),

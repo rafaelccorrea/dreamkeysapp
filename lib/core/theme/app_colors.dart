@@ -20,6 +20,7 @@ class PrimaryColors {
 
   /// Light — principal
   final Color primary = const Color(0xFFD32F2F);
+
   /// Dark — principal (mais clara para contraste)
   final Color primaryDarkMode = const Color(0xFFE53935);
 
@@ -60,7 +61,9 @@ class TextColors {
 class BackgroundColors {
   BackgroundColors._();
 
-  final Color background = const Color(0xFFF8FAFC);
+  // Cinza frio (não quase-branco): dá contraste para os cards brancos
+  // "pularem" no light — antes era #F8FAFC e o app ficava chapado/morto.
+  final Color background = const Color(0xFFE9ECF3);
   final Color backgroundDarkMode = const Color(0xFF0C0C16);
 
   final Color backgroundSecondary = const Color(0xFFF5F7FA);
@@ -79,7 +82,9 @@ class BackgroundColors {
 class BorderColors {
   BorderColors._();
 
-  final Color border = const Color(0xFFE5E7EB);
+  // Um pouco mais definida (cool) que #E5E7EB para o contorno do card ler
+  // limpo contra o fundo cinza — parte do refino de contraste no light.
+  final Color border = const Color(0xFFDDE1E9);
   final Color borderDarkMode = const Color(0xFF1E1E30);
 
   final Color borderLight = const Color(0xFFF3F4F6);

@@ -81,13 +81,21 @@ class _CalendarPageState extends State<CalendarPage>
       result = result.where((a) => a.type == _filters.type).toList();
     }
     if (_filters.startDate != null && _filters.endDate != null) {
-      final s = DateTime(_filters.startDate!.year, _filters.startDate!.month,
-          _filters.startDate!.day);
-      final e = DateTime(_filters.endDate!.year, _filters.endDate!.month,
-          _filters.endDate!.day, 23, 59, 59);
+      final s = DateTime(
+        _filters.startDate!.year,
+        _filters.startDate!.month,
+        _filters.startDate!.day,
+      );
+      final e = DateTime(
+        _filters.endDate!.year,
+        _filters.endDate!.month,
+        _filters.endDate!.day,
+        23,
+        59,
+        59,
+      );
       result = result
-          .where((a) =>
-              !a.startDate.isBefore(s) && !a.startDate.isAfter(e))
+          .where((a) => !a.startDate.isBefore(s) && !a.startDate.isAfter(e))
           .toList();
     }
     return result;
@@ -163,15 +171,13 @@ class _CalendarPageState extends State<CalendarPage>
         onApply: (f) {
           setState(() => _filters = f);
           context.read<AppointmentController>().setFilters(
-                status: f.status?.value,
-                type: f.type?.value,
-                startDate: f.startDate,
-                endDate: f.endDate,
-                onlyMyData: f.onlyMyData,
-              );
-          context
-              .read<AppointmentController>()
-              .loadAppointments(reset: true);
+            status: f.status?.value,
+            type: f.type?.value,
+            startDate: f.startDate,
+            endDate: f.endDate,
+            onlyMyData: f.onlyMyData,
+          );
+          context.read<AppointmentController>().loadAppointments(reset: true);
         },
       ),
     );
@@ -268,18 +274,14 @@ class _CalendarPageState extends State<CalendarPage>
                         : const SizedBox.shrink(),
                   ),
                 ),
-                SliverToBoxAdapter(
-                  child: _buildHero(ctrl, theme, filtered),
-                ),
+                SliverToBoxAdapter(child: _buildHero(ctrl, theme, filtered)),
                 SliverToBoxAdapter(
                   child: _buildStatsRow(ctrl, theme, filtered),
                 ),
                 SliverToBoxAdapter(
                   child: _buildPendingInvitesPill(ctrl, theme),
                 ),
-                SliverToBoxAdapter(
-                  child: _buildViewModeSection(theme),
-                ),
+                SliverToBoxAdapter(child: _buildViewModeSection(theme)),
                 if (_viewMode == CalendarViewMode.month ||
                     _viewMode == CalendarViewMode.week)
                   SliverToBoxAdapter(child: _buildCalendar(theme))
@@ -288,9 +290,7 @@ class _CalendarPageState extends State<CalendarPage>
                 if (_viewMode != CalendarViewMode.agenda)
                   SliverToBoxAdapter(child: _buildSelectedDayHeader(theme)),
                 if (_viewMode != CalendarViewMode.agenda)
-                  SliverToBoxAdapter(
-                    child: _buildSelectedDayList(theme),
-                  ),
+                  SliverToBoxAdapter(child: _buildSelectedDayList(theme)),
                 const SliverToBoxAdapter(child: SizedBox(height: 100)),
               ],
             ),
@@ -319,7 +319,7 @@ class _CalendarPageState extends State<CalendarPage>
                     color: Colors.black.withOpacity(0.05),
                     blurRadius: 8,
                     offset: const Offset(0, 2),
-                  )
+                  ),
                 ],
         ),
         child: TextField(
@@ -349,8 +349,10 @@ class _CalendarPageState extends State<CalendarPage>
             enabledBorder: InputBorder.none,
             focusedBorder: InputBorder.none,
             filled: false,
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 14,
+            ),
           ),
           onChanged: (v) {
             ctrl.setSearchTerm(v);
@@ -376,18 +378,23 @@ class _CalendarPageState extends State<CalendarPage>
     final todayAppts =
         filtered.where((a) => _isSameDay(a.startDate, today)).toList()
           ..sort((a, b) => a.startDate.compareTo(b.startDate));
-    final upcomingToday =
-        todayAppts.where((a) => !a.endDate.isBefore(now)).toList();
+    final upcomingToday = todayAppts
+        .where((a) => !a.endDate.isBefore(now))
+        .toList();
     final next = upcomingToday.isNotEmpty
         ? upcomingToday.first
-        : filtered.where((a) => a.startDate.isAfter(now)).fold<Appointment?>(
-              null,
-              (acc, a) =>
-                  acc == null || a.startDate.isBefore(acc.startDate) ? a : acc,
-            );
+        : filtered
+              .where((a) => a.startDate.isAfter(now))
+              .fold<Appointment?>(
+                null,
+                (acc, a) => acc == null || a.startDate.isBefore(acc.startDate)
+                    ? a
+                    : acc,
+              );
 
-    final tomorrowCount =
-        filtered.where((a) => _isSameDay(a.startDate, tomorrow)).length;
+    final tomorrowCount = filtered
+        .where((a) => _isSameDay(a.startDate, tomorrow))
+        .length;
 
     return _PremiumHero(
       next: next,
@@ -423,16 +430,20 @@ class _CalendarPageState extends State<CalendarPage>
     final today = DateTime(now.year, now.month, now.day);
     final weekEnd = today.add(const Duration(days: 7));
 
-    final todayCount =
-        filtered.where((a) => _isSameDay(a.startDate, today)).length;
+    final todayCount = filtered
+        .where((a) => _isSameDay(a.startDate, today))
+        .length;
     final weekCount = filtered
-        .where((a) =>
-            !a.startDate.isBefore(today) && a.startDate.isBefore(weekEnd))
+        .where(
+          (a) => !a.startDate.isBefore(today) && a.startDate.isBefore(weekEnd),
+        )
         .length;
     final pendingCount = filtered
-        .where((a) =>
-            a.status == AppointmentStatus.scheduled ||
-            a.status == AppointmentStatus.confirmed)
+        .where(
+          (a) =>
+              a.status == AppointmentStatus.scheduled ||
+              a.status == AppointmentStatus.confirmed,
+        )
         .length;
     final completedCount = filtered
         .where((a) => a.status == AppointmentStatus.completed)
@@ -479,19 +490,15 @@ class _CalendarPageState extends State<CalendarPage>
               ),
           ];
 
-          final divColor = ThemeHelpers.borderLightColor(context)
-              .withValues(alpha: 0.55);
+          final divColor = ThemeHelpers.borderLightColor(
+            context,
+          ).withValues(alpha: 0.55);
 
           return Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               for (var i = 0; i < items.length; i++) ...[
-                if (i > 0)
-                  Container(
-                    width: 1,
-                    height: 38,
-                    color: divColor,
-                  ),
+                if (i > 0) Container(width: 1, height: 38, color: divColor),
                 Expanded(child: items[i].render(context, theme)),
               ],
             ],
@@ -504,10 +511,7 @@ class _CalendarPageState extends State<CalendarPage>
   // ---------------------------------------------------------------------------
   // PENDING INVITES PILL
   // ---------------------------------------------------------------------------
-  Widget _buildPendingInvitesPill(
-    AppointmentController ctrl,
-    ThemeData theme,
-  ) {
+  Widget _buildPendingInvitesPill(AppointmentController ctrl, ThemeData theme) {
     final pending = ctrl.pendingInvites.length;
     if (pending == 0) return const SizedBox.shrink();
     return Padding(
@@ -517,8 +521,7 @@ class _CalendarPageState extends State<CalendarPage>
         decoration: BoxDecoration(
           color: AppColors.status.warning.withOpacity(0.10),
           borderRadius: BorderRadius.circular(14),
-          border:
-              Border.all(color: AppColors.status.warning.withOpacity(0.32)),
+          border: Border.all(color: AppColors.status.warning.withOpacity(0.32)),
         ),
         child: Row(
           children: [
@@ -550,10 +553,9 @@ class _CalendarPageState extends State<CalendarPage>
                       ),
                     ),
                     TextSpan(
-                      text: 'convite${pending > 1 ? 's' : ''} aguardando sua resposta',
-                      style: TextStyle(
-                        color: ThemeHelpers.textColor(context),
-                      ),
+                      text:
+                          'convite${pending > 1 ? 's' : ''} aguardando sua resposta',
+                      style: TextStyle(color: ThemeHelpers.textColor(context)),
                     ),
                   ],
                 ),
@@ -603,9 +605,9 @@ class _CalendarPageState extends State<CalendarPage>
       onTap: isOnToday
           ? null
           : () => setState(() {
-                _selectedDay = today;
-                _focusedDay = today;
-              }),
+              _selectedDay = today;
+              _focusedDay = today;
+            }),
       borderRadius: BorderRadius.circular(12),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
@@ -668,19 +670,17 @@ class _CalendarPageState extends State<CalendarPage>
         padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(24),
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.03)
-              : Colors.white,
+          color: isDark ? Colors.white.withValues(alpha: 0.03) : Colors.white,
           border: Border.all(
-            color: ThemeHelpers.borderColor(context).withValues(
-              alpha: isDark ? 0.55 : 0.7,
-            ),
+            color: ThemeHelpers.borderColor(
+              context,
+            ).withValues(alpha: isDark ? 0.55 : 0.7),
           ),
           boxShadow: [
             BoxShadow(
               color: isDark
                   ? Colors.black.withValues(alpha: 0.18)
-                  : primary.withValues(alpha: 0.06),
+                  : const Color(0xFF1A2340).withValues(alpha: 0.06),
               blurRadius: 24,
               offset: const Offset(0, 10),
               spreadRadius: -8,
@@ -735,7 +735,8 @@ class _CalendarPageState extends State<CalendarPage>
                     final f = DateFormat('MMMM yyyy', 'pt_BR').format(date);
                     return AppointmentVisuals.capitalize(f);
                   },
-                  titleTextStyle: theme.textTheme.titleLarge?.copyWith(
+                  titleTextStyle:
+                      theme.textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.w900,
                         letterSpacing: -0.5,
                         fontSize: 18,
@@ -821,9 +822,7 @@ class _CalendarPageState extends State<CalendarPage>
                         children: events.take(3).map((e) {
                           final c = AppointmentVisuals.colorFromHex(e.color);
                           return Container(
-                            margin: const EdgeInsets.symmetric(
-                              horizontal: 1.5,
-                            ),
+                            margin: const EdgeInsets.symmetric(horizontal: 1.5),
                             width: 5,
                             height: 5,
                             decoration: BoxDecoration(
@@ -898,12 +897,7 @@ class _CalendarPageState extends State<CalendarPage>
   ///
   /// Tudo animado com `AnimatedContainer` 200ms — sensação de calendário
   /// "vivo" ao trocar seleção.
-  Widget _dayCell(
-    DateTime day,
-    bool selected,
-    bool isToday,
-    bool outside,
-  ) {
+  Widget _dayCell(DateTime day, bool selected, bool isToday, bool outside) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final primary = AppColors.primary.primary;
@@ -914,13 +908,15 @@ class _CalendarPageState extends State<CalendarPage>
     if (selected) {
       textColor = Colors.white;
     } else if (outside) {
-      textColor =
-          ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.4);
+      textColor = ThemeHelpers.textSecondaryColor(
+        context,
+      ).withValues(alpha: 0.4);
     } else if (isToday) {
       textColor = primary;
     } else if (isWeekend) {
-      textColor =
-          ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.85);
+      textColor = ThemeHelpers.textSecondaryColor(
+        context,
+      ).withValues(alpha: 0.85);
     } else {
       textColor = ThemeHelpers.textColor(context);
     }
@@ -1143,7 +1139,9 @@ class _CalendarPageState extends State<CalendarPage>
               Icon(
                 Icons.event_busy_rounded,
                 size: 48,
-                color: ThemeHelpers.textSecondaryColor(context).withOpacity(0.6),
+                color: ThemeHelpers.textSecondaryColor(
+                  context,
+                ).withOpacity(0.6),
               ),
               const SizedBox(height: 12),
               Text(
@@ -1228,14 +1226,14 @@ class _CalendarPageState extends State<CalendarPage>
     final accent = isToday
         ? AppColors.primary.primary
         : isPast
-            ? ThemeHelpers.textSecondaryColor(context)
-            : AppColors.status.info;
+        ? ThemeHelpers.textSecondaryColor(context)
+        : AppColors.status.info;
 
     final label = isToday
         ? 'HOJE'
         : isTomorrow
-            ? 'AMANHÃ'
-            : DateFormat('EEEE', 'pt_BR').format(day).toUpperCase();
+        ? 'AMANHÃ'
+        : DateFormat('EEEE', 'pt_BR').format(day).toUpperCase();
 
     return Padding(
       padding: const EdgeInsets.only(top: 4),
@@ -1528,11 +1526,7 @@ class _PremiumHero extends StatelessWidget {
           const SizedBox(height: 22),
           // ── Próximo compromisso ou estado vazio ──────────────────────
           if (next != null)
-            _AgendaNextFluid(
-              next: next!,
-              isDark: isDark,
-              onTap: onTapNext,
-            )
+            _AgendaNextFluid(next: next!, isDark: isDark, onTap: onTapNext)
           else
             _AgendaEmptyFluid(
               todayCount: todayCount,
@@ -1607,8 +1601,10 @@ class _AgendaNextFluid extends StatelessWidget {
     final now = DateTime.now();
     final isHappening =
         now.isAfter(next.startDate) && now.isBefore(next.endDate);
-    final relative =
-        AppointmentVisuals.relativeTimeLabel(next.startDate, next.endDate);
+    final relative = AppointmentVisuals.relativeTimeLabel(
+      next.startDate,
+      next.endDate,
+    );
     final timeStr = AppointmentVisuals.formattedTime(next.startDate);
 
     return Material(
@@ -1626,9 +1622,7 @@ class _AgendaNextFluid extends StatelessWidget {
               Row(
                 children: [
                   Icon(
-                    isHappening
-                        ? Icons.bolt_rounded
-                        : Icons.schedule_rounded,
+                    isHappening ? Icons.bolt_rounded : Icons.schedule_rounded,
                     size: 13,
                     color: color,
                   ),
@@ -1664,9 +1658,7 @@ class _AgendaNextFluid extends StatelessWidget {
                         letterSpacing: -1.5,
                         height: 1,
                         fontSize: 44,
-                        fontFeatures: const [
-                          FontFeature.tabularFigures(),
-                        ],
+                        fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
                     const SizedBox(width: 16),
@@ -1721,11 +1713,11 @@ class _AgendaNextFluid extends StatelessWidget {
                                     next.type.label,
                                     style: theme.textTheme.labelMedium
                                         ?.copyWith(
-                                      fontWeight: FontWeight.w800,
-                                      color: color,
-                                      fontSize: 11,
-                                      letterSpacing: 0.1,
-                                    ),
+                                          fontWeight: FontWeight.w800,
+                                          color: color,
+                                          fontSize: 11,
+                                          letterSpacing: 0.1,
+                                        ),
                                   ),
                                 ],
                               ),
@@ -1737,10 +1729,9 @@ class _AgendaNextFluid extends StatelessWidget {
                                     Icon(
                                       Icons.place_outlined,
                                       size: 13,
-                                      color: ThemeHelpers
-                                              .textSecondaryColor(
-                                            context,
-                                          ),
+                                      color: ThemeHelpers.textSecondaryColor(
+                                        context,
+                                      ),
                                     ),
                                     const SizedBox(width: 4),
                                     ConstrainedBox(
@@ -1751,13 +1742,13 @@ class _AgendaNextFluid extends StatelessWidget {
                                         next.location!,
                                         style: theme.textTheme.bodySmall
                                             ?.copyWith(
-                                          color: ThemeHelpers
-                                                  .textSecondaryColor(
-                                                context,
-                                              ),
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 12,
-                                        ),
+                                              color:
+                                                  ThemeHelpers.textSecondaryColor(
+                                                    context,
+                                                  ),
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 12,
+                                            ),
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                       ),
@@ -1812,8 +1803,8 @@ class _AgendaEmptyFluid extends StatelessWidget {
     final headline = hasToday
         ? 'Sem mais compromissos hoje'
         : (tomorrowCount > 0
-            ? 'Hoje livre — $tomorrowCount amanhã'
-            : 'Sem compromissos à vista');
+              ? 'Hoje livre — $tomorrowCount amanhã'
+              : 'Sem compromissos à vista');
     final subtitle = hasToday
         ? 'Aproveite para revisar leads ou planejar amanhã.'
         : 'Toque abaixo para criar um novo compromisso.';
@@ -1882,11 +1873,7 @@ class _AgendaEmptyFluid extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 6),
-                  Icon(
-                    Icons.arrow_forward_rounded,
-                    size: 16,
-                    color: color,
-                  ),
+                  Icon(Icons.arrow_forward_rounded, size: 16, color: color),
                 ],
               ),
             ],
@@ -1961,10 +1948,7 @@ class _TimelineRow extends StatelessWidget {
           Expanded(
             child: Padding(
               padding: EdgeInsets.only(bottom: isLast ? 0 : 10),
-              child: AppointmentCard(
-                appointment: appointment,
-                onTap: onTap,
-              ),
+              child: AppointmentCard(appointment: appointment, onTap: onTap),
             ),
           ),
         ],

@@ -9,32 +9,33 @@ import '../../../../core/routes/app_routes.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../../../../shared/services/profile_service.dart';
+import '../../../../shared/services/theme_service.dart';
 import '../../../../shared/utils/masks.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
+import '../../../../shared/widgets/brand_wordmark_logo.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
 import '../widgets/avatar_edit_modal.dart';
 import '../widgets/change_password_modal.dart';
-import '../widgets/sessions_modal.dart';
 
-// ─── Paleta editorial do Perfil (índigo como acento principal, igual ao DNA
-// da tela de Usuários — calmo, não "tudo vermelho"). Tons com significado. ───
+// ─── Paleta editorial do Perfil ─────────────────────────────────────────────
+// Mesmo DNA da tela de Configurações (referência): 1 cor de identidade por
+// seção, sem arco-íris. Vermelho da marca = conta/identidade; violeta =
+// aparência; índigo = segurança. Tons de apoio com significado no strip.
+Color _pBrand(bool d) =>
+    d ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
 Color _pIndigo(bool d) => d ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
 Color _pViolet(bool d) => d ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED);
-Color _pEmerald(bool d) => d ? const Color(0xFF34D399) : const Color(0xFF059669);
-Color _pAmber(bool d) => d ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
-Color _pBlue(bool d) => d ? const Color(0xFF60A5FA) : const Color(0xFF2563EB);
 
-/// Página de Perfil — identidade visual unificada com o resto do app.
-///
-/// Convenções:
-///   • Conteúdo flat (sem cards encapsulando), tudo flui no fundo da tela.
-///   • Eyebrows accent uppercase pequenos com barra tonal à esquerda.
-///   • Paleta editorial (mesmo DNA da tela de Usuários): **índigo** como acento
-///     principal + tons com significado — violet (cargo/segurança), emerald
-///     (ativo/site), amber (membro desde), blue (sessões). Calmo, não "tudo
-///     vermelho", sem virar rainbow.
-///   • Pull-to-refresh com pílula (mesmo idioma do Kanban CRM) — sem botão.
-///   • Mesmo layout para light e dark mode — sem wrapper "glass" exclusivo.
+/// Página de Perfil — reconstruída sobre o sistema editorial da tela de
+/// Configurações (a referência do app):
+///   • Masthead (eyebrow + headline w900 + subtítulo) sem hero-card.
+///   • Manchete de perfil (avatar editável + nome + email + meta pills).
+///   • Quick KPI strip de 4 colunas separadas por linhas finas.
+///   • Seções full-bleed com header editorial (barra tonal + eyebrow + título
+///     grande + subtítulo + hint), divisores finos e placas de ícone tom-on-tom.
+///   • **Aparência**: troca de tema do app (claro/escuro/sistema) via sheet.
+///   • Rodapé com assinatura da marca.
+/// Uma cor de identidade por seção — coerente, sem virar rainbow.
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
 
@@ -46,8 +47,6 @@ class _ProfilePageState extends State<ProfilePage> {
   Profile? _profile;
   bool _isLoading = true;
   String? _errorMessage;
-  bool _isUpdatingVisibility = false;
-  int? _sessionCount;
 
   // Toast do avatar fica pendente e só é exibido DEPOIS que o sheet fecha —
   // antes o SnackBar aparecia atrás do modal.
@@ -75,7 +74,6 @@ class _ProfilePageState extends State<ProfilePage> {
           _profile = response.data;
           _isLoading = false;
         });
-        _loadSessionCount();
       } else {
         setState(() {
           _errorMessage = response.message ?? 'Erro ao carregar perfil';
@@ -89,18 +87,6 @@ class _ProfilePageState extends State<ProfilePage> {
           _isLoading = false;
         });
       }
-    }
-  }
-
-  Future<void> _loadSessionCount() async {
-    try {
-      final r = await SessionService.instance.getSessions();
-      if (!mounted) return;
-      if (r.success && r.data != null) {
-        setState(() => _sessionCount = r.data!.length);
-      }
-    } catch (_) {
-      if (mounted) setState(() => _sessionCount = null);
     }
   }
 
@@ -169,47 +155,6 @@ class _ProfilePageState extends State<ProfilePage> {
     _flushPendingToast();
   }
 
-  Future<void> _togglePublicVisibility() async {
-    if (_profile == null) return;
-    setState(() => _isUpdatingVisibility = true);
-    try {
-      final response = await ProfileService.instance.updatePublicVisibility(
-        !_profile!.isAvailableForPublicSite,
-      );
-      if (!mounted) return;
-      if (response.success) {
-        final newVisibility = response.data ?? _profile!.isAvailableForPublicSite;
-        setState(() {
-          _profile = Profile(
-            id: _profile!.id,
-            name: _profile!.name,
-            email: _profile!.email,
-            phone: _profile!.phone,
-            cellphone: _profile!.cellphone,
-            avatar: _profile!.avatar,
-            role: _profile!.role,
-            companyId: _profile!.companyId,
-            companyName: _profile!.companyName,
-            isAvailableForPublicSite: newVisibility,
-            preferences: _profile!.preferences,
-            tagIds: _profile!.tagIds,
-            createdAt: _profile!.createdAt,
-            updatedAt: _profile!.updatedAt,
-          );
-        });
-      } else {
-        _toast(
-          response.message ?? 'Erro ao atualizar visibilidade',
-          success: false,
-        );
-      }
-    } catch (e) {
-      if (mounted) _toast('Erro: $e', success: false);
-    } finally {
-      if (mounted) setState(() => _isUpdatingVisibility = false);
-    }
-  }
-
   void _toast(String msg, {required bool success}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -224,14 +169,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
   // ─── Formatação ─────────────────────────────────────────────────────────
 
-  String _formatDate(String dateString) {
-    try {
-      return DateFormat('dd/MM/yyyy', 'pt_BR').format(DateTime.parse(dateString));
-    } catch (_) {
-      return dateString;
-    }
-  }
-
   String _getRoleLabel(String role) {
     switch (role.toLowerCase()) {
       case 'admin':
@@ -245,11 +182,39 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  String? _joinedSince(String iso) {
+    if (iso.isEmpty) return null;
+    try {
+      return DateFormat('MMM yyyy', 'pt_BR').format(DateTime.parse(iso));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _joinedYear(String iso) {
+    if (iso.isEmpty) return '—';
+    try {
+      return DateFormat('yyyy', 'pt_BR').format(DateTime.parse(iso));
+    } catch (_) {
+      return '—';
+    }
+  }
+
+  String _themeShort(ThemeMode m) => switch (m) {
+    ThemeMode.light => 'Claro',
+    ThemeMode.dark => 'Escuro',
+    ThemeMode.system => 'Auto',
+  };
+
+  Color _brand(BuildContext context) =>
+      _pBrand(Theme.of(context).brightness == Brightness.dark);
+
   // ─── Build ──────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final brand = _brand(context);
 
     return AppScaffold(
       title: 'Meu Perfil',
@@ -265,40 +230,49 @@ class _ProfilePageState extends State<ProfilePage> {
         child: _isLoading
             ? Padding(
                 key: const ValueKey('loading'),
-                padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
-                child: _buildSkeleton(),
+                padding: const EdgeInsets.only(top: 4),
+                child: _buildSkeleton(context, theme, brand),
               )
             : _errorMessage != null
-                ? Padding(
-                    key: ValueKey<String>('e-${_errorMessage.hashCode}'),
-                    padding: const EdgeInsets.all(24),
-                    child: _buildErrorState(context, theme),
-                  )
-                : CustomRefreshIndicator(
-                    key: const ValueKey('ok'),
-                    offsetToArmed: 96,
-                    onRefresh: () async {
-                      await _loadProfile();
-                      await _loadSessionCount();
-                    },
-                    builder: _pullRefreshBuilder,
-                    child: SingleChildScrollView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.only(bottom: 56),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _buildHero(context, theme),
-                          const SizedBox(height: 4),
-                          _buildActionsSection(context, theme),
-                          const SizedBox(height: 26),
-                          _buildDetailsSection(context, theme),
-                          const SizedBox(height: 26),
-                          _buildPrivacySection(context, theme),
-                        ],
-                      ),
-                    ),
+            ? Padding(
+                key: ValueKey<String>('e-${_errorMessage.hashCode}'),
+                padding: const EdgeInsets.all(24),
+                child: _buildErrorState(context, theme),
+              )
+            : CustomRefreshIndicator(
+                key: const ValueKey('ok'),
+                offsetToArmed: 96,
+                onRefresh: _loadProfile,
+                builder: _pullRefreshBuilder,
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.only(top: 4, bottom: 40),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildMasthead(context, theme, brand),
+                      const SizedBox(height: 18),
+                      _buildProfileManchete(context, theme, brand),
+                      const SizedBox(height: 14),
+                      _buildQuickStrip(context, theme, brand),
+                      const SizedBox(height: 14),
+                      _sectionSeparator(context),
+                      const SizedBox(height: 22),
+                      _buildAccountSection(context, theme, brand),
+                      const SizedBox(height: 28),
+                      _sectionSeparator(context),
+                      const SizedBox(height: 22),
+                      _buildAppearanceSection(context, theme),
+                      const SizedBox(height: 28),
+                      _sectionSeparator(context),
+                      const SizedBox(height: 22),
+                      _buildSecuritySection(context, theme),
+                      const SizedBox(height: 32),
+                      _buildFooterSignature(context, theme),
+                    ],
                   ),
+                ),
+              ),
       ),
     );
   }
@@ -311,13 +285,14 @@ class _ProfilePageState extends State<ProfilePage> {
     IndicatorController controller,
   ) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final accent = _pIndigo(isDark);
+    final accent = _pBrand(isDark);
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
         final dragPct = controller.value.clamp(0.0, 1.0);
         final shift = (controller.value * 64).clamp(0.0, 80.0);
-        final visible = controller.value > 0.02 ||
+        final visible =
+            controller.value > 0.02 ||
             controller.isLoading ||
             controller.isFinalizing;
         return Stack(
@@ -380,8 +355,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 ? _SpinningGlyph(color: accent)
                 : Transform.rotate(
                     angle: dragPct * math.pi,
-                    child:
-                        Icon(Icons.refresh_rounded, size: 18, color: accent),
+                    child: Icon(Icons.refresh_rounded, size: 18, color: accent),
                   ),
           ),
           const SizedBox(width: 8),
@@ -399,59 +373,90 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // ─── Hero ───────────────────────────────────────────────────────────────
+  // ─── Masthead ────────────────────────────────────────────────────────────
 
-  Widget _buildHero(BuildContext context, ThemeData theme) {
-    final isDark = theme.brightness == Brightness.dark;
-    final indigo = _pIndigo(isDark);
-    final violet = _pViolet(isDark);
-    final emerald = _pEmerald(isDark);
-    final amber = _pAmber(isDark);
-    final blue = _pBlue(isDark);
-    final p = _profile!;
-    final textColor = ThemeHelpers.textColor(context);
-    final secondaryColor = ThemeHelpers.textSecondaryColor(context);
-    final isPublic = p.isAvailableForPublicSite;
-
+  Widget _buildMasthead(BuildContext context, ThemeData theme, Color brand) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Eyebrow editorial — dot esmeralda + label (acento índigo).
           Row(
             children: [
+              Text(
+                'MINHA CONTA',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: brand,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 2.2,
+                  fontSize: 10,
+                ),
+              ),
+              const SizedBox(width: 8),
               Container(
-                width: 8,
-                height: 8,
+                width: 4,
+                height: 4,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: emerald,
-                  boxShadow: [
-                    BoxShadow(
-                      color: emerald.withValues(alpha: 0.5),
-                      blurRadius: 7,
-                      spreadRadius: 1,
-                    ),
-                  ],
+                  color: brand.withValues(alpha: 0.6),
                 ),
               ),
               const SizedBox(width: 8),
               Text(
-                'PERFIL DA CONTA',
+                'CONECTADO',
                 style: theme.textTheme.labelSmall?.copyWith(
-                  color: indigo,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2.0,
-                  fontSize: 10.5,
+                  color: ThemeHelpers.textSecondaryColor(
+                    context,
+                  ).withValues(alpha: 0.85),
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.8,
+                  fontSize: 9.5,
                 ),
               ),
-              const Spacer(),
-              _AvatarStatusDot(active: true),
             ],
           ),
-          const SizedBox(height: 14),
-          // Bloco principal: avatar + nome + email.
+          const SizedBox(height: 8),
+          Text(
+            'Meu perfil',
+            style: theme.textTheme.headlineMedium?.copyWith(
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.8,
+              color: ThemeHelpers.textColor(context),
+              height: 1.0,
+              fontSize: 30,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Seus dados, aparência do app e segurança da conta. Tudo o que te identifica na plataforma, em um lugar só.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: ThemeHelpers.textSecondaryColor(context),
+              height: 1.4,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Manchete de perfil ───────────────────────────────────────────────────
+
+  Widget _buildProfileManchete(
+    BuildContext context,
+    ThemeData theme,
+    Color brand,
+  ) {
+    final p = _profile!;
+    final isDark = theme.brightness == Brightness.dark;
+    final violet = _pViolet(isDark);
+    final indigo = _pIndigo(isDark);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -464,12 +469,12 @@ class _ProfilePageState extends State<ProfilePage> {
                   children: [
                     Text(
                       p.name.isEmpty ? 'Usuário' : p.name,
-                      style: theme.textTheme.headlineSmall?.copyWith(
+                      style: theme.textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.w900,
-                        color: textColor,
-                        letterSpacing: -0.5,
-                        height: 1.05,
-                        fontSize: 22,
+                        color: ThemeHelpers.textColor(context),
+                        height: 1.08,
+                        letterSpacing: -0.4,
+                        fontSize: 20,
                       ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -477,17 +482,19 @@ class _ProfilePageState extends State<ProfilePage> {
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        Icon(Icons.mail_outline_rounded,
-                            size: 13, color: secondaryColor),
+                        Icon(
+                          Icons.mail_outline_rounded,
+                          size: 13,
+                          color: ThemeHelpers.textSecondaryColor(context),
+                        ),
                         const SizedBox(width: 5),
                         Expanded(
                           child: Text(
                             p.email,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: secondaryColor,
-                              fontWeight: FontWeight.w500,
-                              height: 1.3,
-                              fontSize: 13,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: ThemeHelpers.textSecondaryColor(context),
+                              fontWeight: FontWeight.w600,
+                              height: 1.2,
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -498,11 +505,16 @@ class _ProfilePageState extends State<ProfilePage> {
                   ],
                 ),
               ),
+              const SizedBox(width: 8),
+              _GhostIconButton(
+                icon: Icons.edit_rounded,
+                tone: brand,
+                onTap: () =>
+                    Navigator.pushNamed(context, AppRoutes.profileEdit),
+              ),
             ],
           ),
-          const SizedBox(height: 14),
-          // Pills de meta — cores com significado (cargo, empresa, sessões,
-          // membro desde, visibilidade). Mais conteúdo, sem virar rainbow.
+          const SizedBox(height: 12),
           Wrap(
             spacing: 6,
             runSpacing: 6,
@@ -518,23 +530,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   label: p.companyName!.trim(),
                   tone: indigo,
                 ),
-              _MetaPill(
-                icon: Icons.devices_rounded,
-                label: _sessionCount != null
-                    ? '$_sessionCount sessã${_sessionCount == 1 ? "o" : "ões"}'
-                    : 'Sessões…',
-                tone: blue,
-              ),
-              _MetaPill(
-                icon: Icons.event_outlined,
-                label: 'Desde ${_formatDate(p.createdAt)}',
-                tone: amber,
-              ),
-              _MetaPill(
-                icon: isPublic ? Icons.public_rounded : Icons.lock_outline_rounded,
-                label: isPublic ? 'No site' : 'Perfil privado',
-                tone: isPublic ? emerald : secondaryColor,
-              ),
+              _AvatarStatusDot(active: true),
             ],
           ),
         ],
@@ -542,45 +538,57 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // ─── Ações ──────────────────────────────────────────────────────────────
+  // ─── Quick KPI strip ───────────────────────────────────────────────────────
 
-  Widget _buildActionsSection(BuildContext context, ThemeData theme) {
+  Widget _buildQuickStrip(BuildContext context, ThemeData theme, Color brand) {
+    final p = _profile!;
     final isDark = theme.brightness == Brightness.dark;
-    final indigo = _pIndigo(isDark);
-    // Azul para dispositivos/sessões — cor com significado, não rainbow.
-    final blue = _pBlue(isDark);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _SectionLabel(label: 'AÇÕES'),
-        const SizedBox(height: 6),
-        _FlatActionRow(
-          icon: Icons.tune_rounded,
-          tone: indigo,
-          title: 'Editar dados do perfil',
-          subtitle: 'Nome, telefone, foto e informações pessoais.',
-          onTap: () => Navigator.pushNamed(context, AppRoutes.profileEdit),
-        ),
-        _FlatActionRow(
-          icon: Icons.devices_outlined,
-          tone: blue,
-          title: 'Sessões e dispositivos',
-          subtitle: _sessionCount != null
-              ? '$_sessionCount sessã${_sessionCount == 1 ? "o" : "ões"} ativa${_sessionCount == 1 ? "" : "s"}.'
-              : 'Gerencie onde sua conta está conectada.',
-          trailing: _sessionCount != null
-              ? _OutlineCounterBadge(value: '$_sessionCount', tone: blue)
-              : null,
-          onTap: () => SessionsModal.show(context: context)
-              .then((_) => _loadSessionCount()),
-        ),
-      ],
+    final mode = ThemeService.instance.themeMode;
+
+    final items = <_QuickKpi>[
+      _QuickKpi(
+        accent: _pViolet(isDark),
+        label: 'TEMA',
+        value: _themeShort(mode),
+        sub: mode == ThemeMode.system ? 'sistema' : 'manual',
+      ),
+      _QuickKpi(
+        accent: _pIndigo(isDark),
+        label: 'CARGO',
+        value: _getRoleLabel(p.role),
+        sub: 'função',
+      ),
+      _QuickKpi(
+        accent: brand,
+        label: 'DESDE',
+        value: _joinedYear(p.createdAt),
+        sub: 'membro',
+      ),
+    ];
+
+    final divColor = ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          for (var i = 0; i < items.length; i++) ...[
+            if (i > 0) Container(width: 1, height: 44, color: divColor),
+            Expanded(child: items[i].render(context)),
+          ],
+        ],
+      ),
     );
   }
 
-  // ─── Detalhes ───────────────────────────────────────────────────────────
+  // ─── Seção: CONTA & DADOS (vermelho marca) ─────────────────────────────────
 
-  Widget _buildDetailsSection(BuildContext context, ThemeData theme) {
+  Widget _buildAccountSection(
+    BuildContext context,
+    ThemeData theme,
+    Color brand,
+  ) {
     final p = _profile!;
     final hasPhone = (p.phone ?? '').trim().isNotEmpty;
     final hasCell = (p.cellphone ?? '').trim().isNotEmpty;
@@ -589,119 +597,527 @@ class _ProfilePageState extends State<ProfilePage> {
     String? phoneLabel;
     String? phoneValue;
     if (hasPhone && hasCell) {
-      phoneLabel = 'TELEFONE / CELULAR';
+      phoneLabel = 'Telefone / celular';
       phoneValue =
           '${Masks.phone(p.phone!.trim())}  ·  ${Masks.phone(p.cellphone!.trim())}';
     } else if (hasPhone) {
-      phoneLabel = 'TELEFONE';
+      phoneLabel = 'Telefone';
       phoneValue = Masks.phone(p.phone!.trim());
     } else if (hasCell) {
-      phoneLabel = 'CELULAR';
+      phoneLabel = 'Celular';
       phoneValue = Masks.phone(p.cellphone!.trim());
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _SectionLabel(label: 'DETALHES DO CADASTRO'),
-        const SizedBox(height: 6),
-        _FlatInfoRow(
-          icon: Icons.person_outline_rounded,
-          label: 'Nome completo',
-          value: p.name,
+        _SectionHeader(
+          eyebrow: 'IDENTIDADE',
+          title: 'Conta & dados',
+          subtitle: 'Seus dados pessoais e de contato no sistema.',
+          tone: brand,
         ),
-        _FlatInfoRow(
+        const SizedBox(height: 16),
+        _InfoRow(
+          tone: brand,
+          icon: Icons.badge_outlined,
+          label: 'Nome completo',
+          value: p.name.isEmpty ? '—' : p.name,
+        ),
+        _rowDivider(context),
+        _InfoRow(
+          tone: brand,
           icon: Icons.mail_outline_rounded,
           label: 'E-mail',
           value: p.email,
         ),
-        if (phoneValue != null)
-          _FlatInfoRow(
+        if (phoneValue != null) ...[
+          _rowDivider(context),
+          _InfoRow(
+            tone: brand,
             icon: Icons.phone_iphone_rounded,
-            label: phoneLabel!.toLowerCase(),
+            label: phoneLabel!,
             value: phoneValue,
           ),
-        _FlatInfoRow(
+        ],
+        _rowDivider(context),
+        _InfoRow(
+          tone: brand,
           icon: Icons.workspace_premium_outlined,
           label: 'Cargo / função',
           value: _getRoleLabel(p.role),
         ),
-        if (hasCompany)
-          _FlatInfoRow(
+        if (hasCompany) ...[
+          _rowDivider(context),
+          _InfoRow(
+            tone: brand,
             icon: Icons.apartment_rounded,
             label: 'Empresa',
             value: p.companyName!.trim(),
           ),
+        ],
+        _rowDivider(context),
+        _NavigationRow(
+          tone: brand,
+          icon: Icons.edit_note_rounded,
+          title: 'Editar perfil',
+          subtitle: 'Altera nome, telefone e foto. Salva ao confirmar.',
+          trailing: Icon(
+            Icons.arrow_forward_rounded,
+            size: 18,
+            color: ThemeHelpers.textSecondaryColor(context),
+          ),
+          onTap: () => Navigator.pushNamed(context, AppRoutes.profileEdit),
+        ),
       ],
     );
   }
 
-  // ─── Segurança e privacidade ────────────────────────────────────────────
+  // ─── Seção: APARÊNCIA (violeta) — troca de tema ────────────────────────────
 
-  Widget _buildPrivacySection(BuildContext context, ThemeData theme) {
-    final isDark = theme.brightness == Brightness.dark;
-    final violet = _pViolet(isDark);
-    final green = _pEmerald(isDark);
+  Widget _buildAppearanceSection(BuildContext context, ThemeData theme) {
+    final tone = _pViolet(theme.brightness == Brightness.dark);
+    final themeService = ThemeService.instance;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _SectionLabel(label: 'SEGURANÇA E PRIVACIDADE'),
-        const SizedBox(height: 6),
-        _FlatActionRow(
-          icon: Icons.lock_outline_rounded,
-          tone: violet,
-          title: 'Alterar senha',
-          subtitle: 'Fluxo seguro · sessões antigas podem ser invalidadas.',
-          onTap: () => ChangePasswordModal.show(context: context),
+        _SectionHeader(
+          eyebrow: 'COMO VOCÊ VÊ',
+          title: 'Aparência',
+          subtitle: 'Tema visual do app — claro, escuro ou seguindo o sistema.',
+          tone: tone,
         ),
-        _FlatToggleRow(
-          icon: Icons.public_rounded,
-          tone: green,
-          title: 'Presença no site público',
-          hint: 'Aparecer na lista de corretores do site.',
-          value: _profile?.isAvailableForPublicSite ?? false,
-          isLoading: _isUpdatingVisibility,
-          onTap: _togglePublicVisibility,
+        const SizedBox(height: 16),
+        _NavigationRow(
+          tone: tone,
+          icon: themeService.getThemeIcon(),
+          title: 'Tema do app',
+          subtitle: 'Atualmente: ${themeService.getThemeName().toLowerCase()}',
+          trailing: _ValueChip(label: themeService.getThemeName(), tone: tone),
+          onTap: () => _showThemeSheet(context, tone),
         ),
       ],
+    );
+  }
+
+  // ─── Seção: SEGURANÇA & PRIVACIDADE (índigo) ───────────────────────────────
+
+  Widget _buildSecuritySection(BuildContext context, ThemeData theme) {
+    final tone = _pIndigo(theme.brightness == Brightness.dark);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _SectionHeader(
+          eyebrow: 'ACESSO & PRIVACIDADE',
+          title: 'Segurança',
+          subtitle: 'Gerencie a senha da sua conta.',
+          tone: tone,
+        ),
+        const SizedBox(height: 16),
+        _NavigationRow(
+          tone: tone,
+          icon: Icons.lock_outline_rounded,
+          title: 'Alterar senha',
+          subtitle: 'Fluxo seguro · sessões antigas podem ser invalidadas.',
+          trailing: Icon(
+            Icons.chevron_right_rounded,
+            size: 22,
+            color: ThemeHelpers.textSecondaryColor(context),
+          ),
+          onTap: () => ChangePasswordModal.show(context: context),
+        ),
+      ],
+    );
+  }
+
+  // ─── Rodapé — assinatura da marca ──────────────────────────────────────────
+
+  Widget _buildFooterSignature(BuildContext context, ThemeData theme) {
+    final p = _profile!;
+    final since = _joinedSince(p.createdAt);
+    final themeName = ThemeService.instance.getThemeName();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            height: 1,
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
+          ),
+          const SizedBox(height: 16),
+          const BrandWordmarkLogo(height: 26, alignment: Alignment.centerLeft),
+          const SizedBox(height: 6),
+          Text(
+            'Plataforma · CRM Imobiliário',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: ThemeHelpers.textSecondaryColor(context),
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.4,
+              fontSize: 10,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 14,
+            runSpacing: 6,
+            children: [
+              _FooterMeta(label: 'CARGO', value: _getRoleLabel(p.role)),
+              _FooterMeta(label: 'TEMA', value: themeName),
+              if (since != null) _FooterMeta(label: 'DESDE', value: since),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Theme sheet — troca de tema (mesma sheet da tela de Configurações) ────
+
+  Future<void> _showThemeSheet(BuildContext context, Color tone) async {
+    final themeService = ThemeService.instance;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.paddingOf(sheetContext).bottom,
+          ),
+          child: Container(
+            decoration: BoxDecoration(
+              color: ThemeHelpers.cardBackgroundColor(sheetContext),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(22),
+              ),
+              border: Border(
+                top: BorderSide(
+                  color: tone.withValues(alpha: 0.35),
+                  width: 1.2,
+                ),
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 10),
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: ThemeHelpers.textSecondaryColor(
+                        sheetContext,
+                      ).withValues(alpha: 0.35),
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 12, 0),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'APARÊNCIA',
+                              style: Theme.of(sheetContext).textTheme.labelSmall
+                                  ?.copyWith(
+                                    color: tone,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 2.0,
+                                    fontSize: 10,
+                                  ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Tema do app',
+                              style: Theme.of(sheetContext)
+                                  .textTheme
+                                  .headlineSmall
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: -0.6,
+                                    color: ThemeHelpers.textColor(sheetContext),
+                                    height: 1.05,
+                                  ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(sheetContext),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 6),
+                  child: Text(
+                    'Escolhe como queres ver o app. Pode mudar a qualquer momento.',
+                    style: Theme.of(sheetContext).textTheme.bodySmall?.copyWith(
+                      color: ThemeHelpers.textSecondaryColor(sheetContext),
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                _themeOptionTile(
+                  sheetContext,
+                  tone,
+                  ThemeMode.light,
+                  'Claro',
+                  'Melhor em ambientes luminosos e durante o dia.',
+                  Icons.light_mode_rounded,
+                  themeService,
+                ),
+                _themeOptionTile(
+                  sheetContext,
+                  tone,
+                  ThemeMode.dark,
+                  'Escuro',
+                  'Menos cansaço visual à noite, contraste reduzido.',
+                  Icons.dark_mode_rounded,
+                  themeService,
+                ),
+                _themeOptionTile(
+                  sheetContext,
+                  tone,
+                  ThemeMode.system,
+                  'Sistema',
+                  'Segue automaticamente o tema do telemóvel.',
+                  Icons.brightness_auto_rounded,
+                  themeService,
+                ),
+                const SizedBox(height: 14),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    // Atualiza chip/KPI de tema caso a seleção não dispare rebuild global.
+    if (mounted) setState(() {});
+  }
+
+  Widget _themeOptionTile(
+    BuildContext sheetContext,
+    Color tone,
+    ThemeMode mode,
+    String title,
+    String subtitle,
+    IconData icon,
+    ThemeService themeService,
+  ) {
+    final selected = themeService.themeMode == mode;
+    final theme = Theme.of(sheetContext);
+
+    return InkWell(
+      onTap: () async {
+        await themeService.setThemeMode(mode);
+        if (sheetContext.mounted) Navigator.pop(sheetContext);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                color: tone.withValues(alpha: selected ? 0.18 : 0.1),
+                border: Border.all(
+                  color: tone.withValues(alpha: selected ? 0.5 : 0.25),
+                ),
+              ),
+              alignment: Alignment.center,
+              child: Icon(icon, color: tone, size: 20),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: ThemeHelpers.textColor(sheetContext),
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: ThemeHelpers.textSecondaryColor(sheetContext),
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(
+              selected ? Icons.check_circle_rounded : Icons.circle_outlined,
+              color: selected
+                  ? tone
+                  : ThemeHelpers.textSecondaryColor(sheetContext),
+              size: 24,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── Helpers de layout ─────────────────────────────────────────────────────
+
+  Widget _rowDivider(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Divider(
+        height: 1,
+        thickness: 0.5,
+        color: ThemeHelpers.borderColor(context).withValues(alpha: 0.4),
+      ),
+    );
+  }
+
+  Widget _sectionSeparator(BuildContext context) {
+    return Container(
+      height: 1,
+      color: ThemeHelpers.borderColor(context).withValues(alpha: 0.3),
     );
   }
 
   // ─── Skeleton / Error ───────────────────────────────────────────────────
 
-  Widget _buildSkeleton() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: const [
-        Row(
-          children: [
-            SkeletonBox(width: 88, height: 88, borderRadius: 44),
-            SizedBox(width: 16),
-            Expanded(
+  Widget _buildSkeleton(BuildContext context, ThemeData theme, Color brand) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.only(top: 4, bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                SkeletonText(width: 90, height: 11),
+                SizedBox(height: 12),
+                SkeletonText(width: 200, height: 28),
+                SizedBox(height: 10),
+                SkeletonText(width: 280, height: 14),
+              ],
+            ),
+          ),
+          const SizedBox(height: 22),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: [
+                SkeletonBox(width: 88, height: 88, borderRadius: 44),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: const [
+                      SkeletonText(width: 170, height: 18),
+                      SizedBox(height: 8),
+                      SkeletonText(width: 210, height: 12),
+                      SizedBox(height: 12),
+                      SkeletonText(width: 120, height: 12),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 26),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: List.generate(
+                4,
+                (i) => Expanded(
+                  child: Column(
+                    children: const [
+                      SkeletonText(width: 40, height: 22),
+                      SizedBox(height: 6),
+                      SkeletonText(width: 50, height: 9),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 30),
+          for (var s = 0; s < 3; s++) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SkeletonBox(width: 180, height: 18, borderRadius: 5),
+                children: const [
+                  SkeletonText(width: 70, height: 10),
                   SizedBox(height: 8),
-                  SkeletonBox(width: 220, height: 13, borderRadius: 4),
+                  SkeletonText(width: 160, height: 22),
+                  SizedBox(height: 6),
+                  SkeletonText(width: 240, height: 12),
                 ],
               ),
             ),
+            const SizedBox(height: 14),
+            for (var i = 0; i < 2; i++) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
+                child: Row(
+                  children: [
+                    SkeletonBox(width: 42, height: 42, borderRadius: 12),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          SkeletonText(width: 120, height: 13),
+                          SizedBox(height: 6),
+                          SkeletonText(width: 200, height: 11),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (i < 1)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Divider(
+                    height: 1,
+                    color: ThemeHelpers.borderColor(
+                      context,
+                    ).withValues(alpha: 0.3),
+                  ),
+                ),
+            ],
+            const SizedBox(height: 22),
           ],
-        ),
-        SizedBox(height: 22),
-        SkeletonBox(width: 140, height: 11, borderRadius: 4),
-        SizedBox(height: 14),
-        SkeletonBox(width: double.infinity, height: 56, borderRadius: 12),
-        SizedBox(height: 8),
-        SkeletonBox(width: double.infinity, height: 56, borderRadius: 12),
-        SizedBox(height: 24),
-        SkeletonBox(width: 160, height: 11, borderRadius: 4),
-        SizedBox(height: 14),
-        SkeletonBox(width: double.infinity, height: 56, borderRadius: 12),
-        SizedBox(height: 8),
-        SkeletonBox(width: double.infinity, height: 56, borderRadius: 12),
-      ],
+        ],
+      ),
     );
   }
 
@@ -738,7 +1154,7 @@ class _ProfilePageState extends State<ProfilePage> {
           icon: const Icon(Icons.refresh),
           label: const Text('Tentar de novo'),
           style: TextButton.styleFrom(
-            foregroundColor: _pIndigo(theme.brightness == Brightness.dark),
+            foregroundColor: _pBrand(theme.brightness == Brightness.dark),
           ),
         ),
       ],
@@ -746,45 +1162,87 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-// Widgets de UI (todos flat, sem cards encapsulando)
-// ──────────────────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════
+// COMPONENTES INTERNOS — sistema editorial (mesmo DNA da tela de Configurações)
+// ════════════════════════════════════════════════════════════════════════
 
-/// Eyebrow accent uppercase pequeno — mesmo padrão dos atalhos do corretor,
-/// agora com uma pequena barra tonal à esquerda para dar estrutura/refino.
-class _SectionLabel extends StatelessWidget {
-  const _SectionLabel({required this.label});
-  final String label;
+/// Cabeçalho editorial de seção. Barra tonal + eyebrow uppercase colorido +
+/// título w900 grande + subtítulo opcional + hint à direita.
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({
+    required this.eyebrow,
+    required this.title,
+    required this.tone,
+    this.subtitle,
+  });
+
+  final String eyebrow;
+  final String title;
+  final String? subtitle;
+  final Color tone;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final accent = _pIndigo(isDark);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 3,
-            height: 12,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [accent, accent.withValues(alpha: 0.45)],
-              ),
-              borderRadius: BorderRadius.circular(999),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            label,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: accent,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 1.65,
-              fontSize: 10.5,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 18,
+                      height: 2,
+                      decoration: BoxDecoration(
+                        color: tone,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        eyebrow,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: tone,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.8,
+                          fontSize: 10,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  title,
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.6,
+                    color: ThemeHelpers.textColor(context),
+                    height: 1.05,
+                    fontSize: 22,
+                  ),
+                ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle!,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: ThemeHelpers.textSecondaryColor(context),
+                      fontWeight: FontWeight.w500,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],
@@ -793,15 +1251,17 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
-/// Linha de informação flat — ícone outline + label + valor selecionável.
-/// Sem chip 44x44 colorido, sem divisor pesado. Apenas hierarquia tipográfica.
-class _FlatInfoRow extends StatelessWidget {
-  const _FlatInfoRow({
+/// Linha de informação (read-only) — placa de ícone tom-on-tom + label
+/// uppercase pequeno + valor selecionável.
+class _InfoRow extends StatelessWidget {
+  const _InfoRow({
+    required this.tone,
     required this.icon,
     required this.label,
     required this.value,
   });
 
+  final Color tone;
   final IconData icon;
   final String label;
   final String value;
@@ -809,18 +1269,12 @@ class _FlatInfoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final textColor = ThemeHelpers.textColor(context);
-    final secondaryColor = ThemeHelpers.textSecondaryColor(context);
-
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Icon(icon, size: 18, color: secondaryColor),
-          ),
+          _ToneIconPlate(tone: tone, icon: icon, active: true),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
@@ -830,7 +1284,7 @@ class _FlatInfoRow extends StatelessWidget {
                 Text(
                   label.toUpperCase(),
                   style: theme.textTheme.labelSmall?.copyWith(
-                    color: secondaryColor,
+                    color: ThemeHelpers.textSecondaryColor(context),
                     fontWeight: FontWeight.w700,
                     fontSize: 10,
                     letterSpacing: 0.8,
@@ -840,7 +1294,7 @@ class _FlatInfoRow extends StatelessWidget {
                 SelectableText(
                   value,
                   style: theme.textTheme.bodyMedium?.copyWith(
-                    color: textColor,
+                    color: ThemeHelpers.textColor(context),
                     fontWeight: FontWeight.w700,
                     height: 1.25,
                     fontSize: 14,
@@ -855,31 +1309,27 @@ class _FlatInfoRow extends StatelessWidget {
   }
 }
 
-/// Linha de ação flat — ícone outline + título + subtítulo + chevron/trailing.
-/// Splash sutil no tap. Sem moldura, sem card.
-class _FlatActionRow extends StatelessWidget {
-  const _FlatActionRow({
-    required this.icon,
+/// Row de navegação — tap leva para outra tela / abre sheet. Sem moldura.
+class _NavigationRow extends StatelessWidget {
+  const _NavigationRow({
     required this.tone,
+    required this.icon,
     required this.title,
     required this.subtitle,
+    required this.trailing,
     required this.onTap,
-    this.trailing,
   });
 
-  final IconData icon;
   final Color tone;
+  final IconData icon;
   final String title;
   final String subtitle;
-  final VoidCallback onTap;
-  final Widget? trailing;
+  final Widget trailing;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final textColor = ThemeHelpers.textColor(context);
-    final secondaryColor = ThemeHelpers.textSecondaryColor(context);
-
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -887,11 +1337,11 @@ class _FlatActionRow extends StatelessWidget {
         splashColor: tone.withValues(alpha: 0.10),
         highlightColor: tone.withValues(alpha: 0.05),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Icon(icon, size: 22, color: tone),
+              _ToneIconPlate(tone: tone, icon: icon, active: true),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
@@ -901,19 +1351,18 @@ class _FlatActionRow extends StatelessWidget {
                     Text(
                       title,
                       style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: textColor,
-                        letterSpacing: -0.15,
-                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                        color: ThemeHelpers.textColor(context),
+                        letterSpacing: -0.2,
+                        height: 1.2,
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 3),
                     Text(
                       subtitle,
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: secondaryColor,
-                        height: 1.3,
-                        fontSize: 12,
+                        color: ThemeHelpers.textSecondaryColor(context),
+                        height: 1.35,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -921,12 +1370,7 @@ class _FlatActionRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 10),
-              trailing ??
-                  Icon(
-                    Icons.chevron_right_rounded,
-                    size: 22,
-                    color: secondaryColor.withValues(alpha: 0.55),
-                  ),
+              trailing,
             ],
           ),
         ),
@@ -935,187 +1379,194 @@ class _FlatActionRow extends StatelessWidget {
   }
 }
 
-/// Linha de toggle flat — ícone outline + título + hint + pill switch
-/// (mesmo padrão usado no painel de atalhos do corretor).
-class _FlatToggleRow extends StatelessWidget {
-  const _FlatToggleRow({
-    required this.icon,
+/// Placa de ícone tom-on-tom — mantém a identidade da seção.
+class _ToneIconPlate extends StatelessWidget {
+  const _ToneIconPlate({
     required this.tone,
-    required this.title,
-    required this.hint,
-    required this.value,
-    required this.isLoading,
-    required this.onTap,
+    required this.icon,
+    required this.active,
   });
 
-  final IconData icon;
   final Color tone;
-  final String title;
-  final String hint;
-  final bool value;
-  final bool isLoading;
-  final VoidCallback onTap;
+  final IconData icon;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 42,
+      height: 42,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        gradient: LinearGradient(
+          colors: [
+            tone.withValues(alpha: active ? 0.22 : 0.12),
+            tone.withValues(alpha: active ? 0.08 : 0.04),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: tone.withValues(alpha: active ? 0.42 : 0.22)),
+      ),
+      alignment: Alignment.center,
+      child: Icon(
+        icon,
+        color: tone.withValues(alpha: active ? 1.0 : 0.6),
+        size: 20,
+      ),
+    );
+  }
+}
+
+/// Chip de valor à direita de uma navigation row (ex. "Escuro").
+class _ValueChip extends StatelessWidget {
+  const _ValueChip({required this.label, required this.tone});
+
+  final String label;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: tone.withValues(alpha: 0.14),
+        border: Border.all(color: tone.withValues(alpha: 0.35)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w900,
+          color: tone,
+          letterSpacing: 0.2,
+        ),
+      ),
+    );
+  }
+}
+
+/// Coluna de KPI rápida — valor grande em accent + label uppercase +
+/// sub-rótulo sutil + traço accent fino.
+class _QuickKpi {
+  const _QuickKpi({
+    required this.accent,
+    required this.label,
+    required this.value,
+    required this.sub,
+  });
+
+  final Color accent;
+  final String label;
+  final String value;
+  final String sub;
+
+  Widget render(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w900,
+                color: accent,
+                letterSpacing: -0.6,
+                height: 1,
+                fontSize: 22,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontWeight: FontWeight.w900,
+              color: ThemeHelpers.textSecondaryColor(context),
+              letterSpacing: 1.4,
+              fontSize: 9.5,
+              height: 1,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 3),
+          Text(
+            sub,
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: ThemeHelpers.textSecondaryColor(
+                context,
+              ).withValues(alpha: 0.65),
+              letterSpacing: 0.3,
+              fontSize: 9,
+              height: 1,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 6),
+          Container(
+            height: 2,
+            width: 16,
+            decoration: BoxDecoration(
+              color: accent,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Bloco de meta no rodapé — label uppercase fino + valor compacto.
+class _FooterMeta extends StatelessWidget {
+  const _FooterMeta({required this.label, required this.value});
+
+  final String label;
+  final String value;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final textColor = ThemeHelpers.textColor(context);
-    final secondaryColor = ThemeHelpers.textSecondaryColor(context);
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: isLoading ? null : onTap,
-        splashColor: tone.withValues(alpha: 0.10),
-        highlightColor: tone.withValues(alpha: 0.05),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Icon(icon, size: 22, color: value ? tone : secondaryColor),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: value ? tone : textColor,
-                        letterSpacing: -0.15,
-                        fontSize: 14,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      hint,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: secondaryColor,
-                        height: 1.3,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              if (isLoading)
-                SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.4,
-                    color: tone,
-                  ),
-                )
-              else
-                _PillSwitch(active: value, tone: tone),
-            ],
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: ThemeHelpers.textSecondaryColor(
+              context,
+            ).withValues(alpha: 0.65),
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.2,
+            fontSize: 9,
           ),
         ),
-      ),
+        const SizedBox(width: 6),
+        Text(
+          value,
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: ThemeHelpers.textColor(context).withValues(alpha: 0.85),
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.2,
+            fontSize: 11,
+          ),
+        ),
+      ],
     );
   }
 }
 
-/// Switch tipo pill — gradient + glow quando on, neutro quando off.
-/// Mesma identidade do `_PillSwitch` da `PropertiesPage`.
-class _PillSwitch extends StatelessWidget {
-  const _PillSwitch({required this.active, required this.tone});
-  final bool active;
-  final Color tone;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final borderColor = ThemeHelpers.borderColor(context);
-    final toneDeep = HSLColor.fromColor(tone)
-        .withLightness(
-          (HSLColor.fromColor(tone).lightness * 0.78).clamp(0.0, 1.0),
-        )
-        .toColor();
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 260),
-      curve: Curves.easeOutCubic,
-      width: 48,
-      height: 28,
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        gradient: active
-            ? LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [tone, toneDeep],
-              )
-            : null,
-        color: active
-            ? null
-            : (isDark
-                ? Colors.white.withValues(alpha: 0.08)
-                : borderColor.withValues(alpha: 0.45)),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: active
-              ? toneDeep.withValues(alpha: 0.45)
-              : borderColor.withValues(alpha: isDark ? 0.30 : 0.30),
-          width: 1,
-        ),
-        boxShadow: active
-            ? [
-                BoxShadow(
-                  color: tone.withValues(alpha: isDark ? 0.45 : 0.30),
-                  blurRadius: 10,
-                  spreadRadius: 0.2,
-                  offset: const Offset(0, 2),
-                ),
-              ]
-            : null,
-      ),
-      child: AnimatedAlign(
-        duration: const Duration(milliseconds: 260),
-        curve: Curves.easeOutCubic,
-        alignment: active ? Alignment.centerRight : Alignment.centerLeft,
-        child: Container(
-          width: 20,
-          height: 20,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.16),
-                blurRadius: 5,
-                offset: const Offset(0, 1),
-              ),
-            ],
-          ),
-          alignment: Alignment.center,
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 180),
-            transitionBuilder: (child, anim) =>
-                FadeTransition(opacity: anim, child: child),
-            child: active
-                ? Icon(
-                    Icons.check_rounded,
-                    key: const ValueKey('on'),
-                    size: 13,
-                    color: toneDeep,
-                  )
-                : const SizedBox.shrink(key: ValueKey('off')),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Pill outline simples — ícone + label numa única cor (sem fill colorido
-/// agressivo). Cor neutra por padrão.
+/// Pill outline simples — ícone + label numa única cor.
 class _MetaPill extends StatelessWidget {
   const _MetaPill({
     required this.icon,
@@ -1135,9 +1586,7 @@ class _MetaPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: tone.withValues(alpha: isDark ? 0.14 : 0.08),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: tone.withValues(alpha: isDark ? 0.30 : 0.22),
-        ),
+        border: Border.all(color: tone.withValues(alpha: isDark ? 0.30 : 0.22)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1164,41 +1613,34 @@ class _MetaPill extends StatelessWidget {
   }
 }
 
-/// Badge outline pra contagem ao lado de um item (ex.: nº de sessões).
-class _OutlineCounterBadge extends StatelessWidget {
-  const _OutlineCounterBadge({required this.value, required this.tone});
-  final String value;
+/// Botão fantasma redondo — sem fundo. Atalho para editar o perfil no
+/// canto direito da manchete.
+class _GhostIconButton extends StatelessWidget {
+  const _GhostIconButton({
+    required this.icon,
+    required this.tone,
+    required this.onTap,
+  });
+
+  final IconData icon;
   final Color tone;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          decoration: BoxDecoration(
-            color: tone.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: tone.withValues(alpha: 0.32)),
-          ),
-          child: Text(
-            value,
-            style: TextStyle(
-              color: tone,
-              fontWeight: FontWeight.w900,
-              fontSize: 11,
-              letterSpacing: 0.2,
-            ),
-          ),
+    return InkResponse(
+      onTap: onTap,
+      radius: 24,
+      child: Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: tone.withValues(alpha: 0.32)),
         ),
-        const SizedBox(width: 6),
-        Icon(
-          Icons.chevron_right_rounded,
-          size: 22,
-          color: ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.55),
-        ),
-      ],
+        alignment: Alignment.center,
+        child: Icon(icon, color: tone, size: 17),
+      ),
     );
   }
 }
@@ -1216,8 +1658,8 @@ class _AvatarPlate extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final accent = _pIndigo(isDark);
-    const size = 88.0;
+    final accent = _pBrand(isDark);
+    const size = 84.0;
 
     return Semantics(
       label: 'Alterar foto de perfil',
@@ -1259,7 +1701,8 @@ class _AvatarPlate extends StatelessWidget {
                         ? Image.network(
                             profile.avatar!,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) => _fallback(context, isDark),
+                            errorBuilder: (_, _, _) =>
+                                _fallback(context, isDark),
                           )
                         : _fallback(context, isDark),
                   ),
@@ -1297,9 +1740,9 @@ class _AvatarPlate extends StatelessWidget {
     final initials = parts.isEmpty || parts.first.isEmpty
         ? '?'
         : parts.length == 1
-            ? parts.first[0].toUpperCase()
-            : (parts.first[0] + parts.last[0]).toUpperCase();
-    final accent = _pIndigo(isDark);
+        ? parts.first[0].toUpperCase()
+        : (parts.first[0] + parts.last[0]).toUpperCase();
+    final accent = _pBrand(isDark);
     final toneDeep = HSLColor.fromColor(accent)
         .withLightness(
           (HSLColor.fromColor(accent).lightness * 0.78).clamp(0.0, 1.0),
@@ -1320,7 +1763,7 @@ class _AvatarPlate extends StatelessWidget {
         style: const TextStyle(
           color: Colors.white,
           fontWeight: FontWeight.w900,
-          fontSize: 28,
+          fontSize: 26,
           letterSpacing: 0.5,
         ),
       ),
@@ -1328,6 +1771,7 @@ class _AvatarPlate extends StatelessWidget {
   }
 }
 
+/// Chip de status "Ativo/Inativo" — usado na manchete do perfil.
 class _AvatarStatusDot extends StatelessWidget {
   const _AvatarStatusDot({required this.active});
   final bool active;
@@ -1338,7 +1782,7 @@ class _AvatarStatusDot extends StatelessWidget {
         ? AppColors.status.success
         : ThemeHelpers.textSecondaryColor(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(999),
@@ -1369,7 +1813,7 @@ class _AvatarStatusDot extends StatelessWidget {
             style: TextStyle(
               color: color,
               fontWeight: FontWeight.w800,
-              fontSize: 10.5,
+              fontSize: 11,
               letterSpacing: 0.2,
               height: 1,
             ),
@@ -1381,7 +1825,7 @@ class _AvatarStatusDot extends StatelessWidget {
 }
 
 /// Glyph que gira continuamente enquanto recarrega — mesmo idioma do
-/// pull-to-refresh do Kanban (em vez do spinner circular padrão).
+/// pull-to-refresh do Kanban.
 class _SpinningGlyph extends StatefulWidget {
   const _SpinningGlyph({required this.color});
   final Color color;

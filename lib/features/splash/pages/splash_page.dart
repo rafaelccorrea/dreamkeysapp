@@ -3,7 +3,10 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../shared/widgets/brand_wordmark_logo.dart'
-    show BrandWordmarkLoadingDimensions, BrandWordmarkLogo, BrandWordmarkVariant;
+    show
+        BrandWordmarkLoadingDimensions,
+        BrandWordmarkLogo,
+        BrandWordmarkVariant;
 import '../../../../shared/services/auth_service.dart';
 import '../../../../shared/services/api_service.dart';
 import '../../../../shared/services/token_refresh_service.dart';
@@ -66,6 +69,22 @@ class _SplashPageState extends State<SplashPage> {
         await ModuleAccessService.instance.initialize();
         debugPrint('✅ [SPLASH] ModuleAccessService inicializado');
 
+        // Permissões AUTORITATIVAS (API) antes de abrir a home. O `initialize`
+        // acima é cache-first e pode vir defasado (ex.: permissão de aprovar
+        // imóveis concedida há pouco). Sem isso, a bottom nav abre em "Agenda"
+        // e só troca pra "Aprovações" quando o drawer refresca em background —
+        // exatamente o "flip" que o usuário via. Refrescando aqui, o primeiro
+        // frame da nav já sai correto. Tolerante a falha/offline (não lança).
+        debugPrint('🔄 [SPLASH] Refrescando permissões (autoritativo)...');
+        // Timeout curto: se a rede estiver lenta/offline, não trava o splash —
+        // cai no que o `initialize` já carregou (cache) e o drawer refresca
+        // depois. `onTimeout` retorna void, então nunca joga o usuário no login.
+        await ModuleAccessService.instance.refreshPermissions().timeout(
+          const Duration(seconds: 6),
+          onTimeout: () {},
+        );
+        debugPrint('✅ [SPLASH] Permissões autoritativas carregadas');
+
         debugPrint('🔄 [SPLASH] Inicializando ChatUnreadController...');
         await ChatUnreadController.instance.initialize();
         debugPrint('✅ [SPLASH] ChatUnreadController inicializado');
@@ -74,9 +93,9 @@ class _SplashPageState extends State<SplashPage> {
         await NotificationController.instance.initialize().catchError((e) {
           debugPrint('⚠️ [SPLASH] Erro ao iniciar NotificationController: $e');
         });
-        await AppPushService.instance.syncWithBackendIfAuthenticated().catchError(
-          (e) => debugPrint('⚠️ [SPLASH] Push/sync: $e'),
-        );
+        await AppPushService.instance
+            .syncWithBackendIfAuthenticated()
+            .catchError((e) => debugPrint('⚠️ [SPLASH] Push/sync: $e'));
 
         debugPrint(
           '✅ [SPLASH] Bootstrap completo, verificando gate biométrico...',
@@ -214,8 +233,9 @@ class _SplashPageState extends State<SplashPage> {
                   fontSize: 16,
                   fontWeight: FontWeight.w500,
                   color: isDark
-                      ? AppColors.text.textSecondaryDarkMode
-                          .withValues(alpha: 0.75)
+                      ? AppColors.text.textSecondaryDarkMode.withValues(
+                          alpha: 0.75,
+                        )
                       : AppColors.text.textSecondary.withValues(alpha: 0.75),
                   letterSpacing: 0.5,
                 ),

@@ -18,16 +18,19 @@ class AppPermissions {
   /// Aprovar disponibilidade (item sai da fila e fica `available`).
   static const String propertyApproveAvailability =
       'property:approve_availability';
+
   /// Recusar disponibilidade (item permanece em `pending_approval` com
   /// motivo + timestamp de recusa, aguardando reenvio para nova análise).
   static const String propertyRejectAvailability =
       'property:reject_availability';
+
   /// Aprovar publicação no site (item passa a `isAvailableForSite: true`).
   static const String propertyApprovePublication =
       'property:approve_publication';
+
   /// Recusar publicação no site (item permanece `available` mas privado).
-  static const String propertyRejectPublication =
-      'property:reject_publication';
+  static const String propertyRejectPublication = 'property:reject_publication';
+
   /// Acesso à tela de configurações da fila (regras da empresa, aprovadores).
   static const String propertyManageApprovalSettings =
       'property:manage_approval_settings';
@@ -35,8 +38,10 @@ class AppPermissions {
   // ─── Check-in por localização ──────────────────────────────────────────
   /// Permite fazer / desfazer o próprio check-in e check-out.
   static const String checkInDo = 'check_in:do';
+
   /// Permite ver o histórico (lista) de check-ins (próprios e da equipe).
   static const String checkInView = 'check_in:view';
+
   /// Permite editar configurações (raio, duração, localização da empresa)
   /// e desfazer check-in de outros usuários.
   static const String checkInManageSettings = 'check_in:manage_settings';
@@ -57,9 +62,20 @@ class AppPermissions {
   /// Permissões mínimas para conseguir abrir a tela em si (paridade com
   /// `<PermissionRoute permissions={['property:view', 'property:create']}>`
   /// do `App.tsx` web — `requireAll={false}`).
-  static const List<String> approvalQueueRoute = [
-    propertyView,
-    propertyCreate,
+  static const List<String> approvalQueueRoute = [propertyView, propertyCreate];
+
+  /// Quem é, de fato, um **aprovador** de imóveis: pode aprovar/recusar a
+  /// disponibilidade OU a publicação, ou gerir as regras da fila. Diferente
+  /// de [approvalQueueMenu] (que inclui `view`/`create` e libera o menu pra
+  /// quase todo mundo) — esta lista é só quem atua na fila. Usada para
+  /// decidir o slot da bottom nav (Aprovações vs. Agenda). Bypass
+  /// admin/master/manager continua valendo via `hasAnyPermission`.
+  static const List<String> propertyApprovalActions = [
+    propertyApproveAvailability,
+    propertyRejectAvailability,
+    propertyApprovePublication,
+    propertyRejectPublication,
+    propertyManageApprovalSettings,
   ];
 
   // ─── Users (Colaboradores → Usuários) ──────────────────────────────────
