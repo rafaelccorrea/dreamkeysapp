@@ -822,7 +822,7 @@ class _StatusChip extends StatelessWidget {
             border: Border.all(
               color: selected
                   ? tone.withValues(alpha: 0.55)
-                  : ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+                  : tone.withValues(alpha: 0.3),
               width: 1.4,
             ),
           ),
@@ -835,7 +835,7 @@ class _StatusChip extends StatelessWidget {
                 height: 8,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: selected ? tone : muted.withValues(alpha: 0.35),
+                  color: selected ? tone : tone.withValues(alpha: 0.6),
                 ),
               ),
               const SizedBox(width: 8),

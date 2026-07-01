@@ -246,8 +246,8 @@ class _AppDrawerState extends State<AppDrawer> {
       }
 
       // Fallback: DashboardService
-      final dashboardResponse =
-          await DashboardService.instance.getUserDashboard();
+      final dashboardResponse = await DashboardService.instance
+          .getUserDashboard();
       if (mounted &&
           dashboardResponse.success &&
           dashboardResponse.data != null) {
@@ -383,7 +383,10 @@ class _AppDrawerState extends State<AppDrawer> {
     );
   }
 
-  Future<void> _applyCompanySwitch(BuildContext parentContext, Company company) async {
+  Future<void> _applyCompanySwitch(
+    BuildContext parentContext,
+    Company company,
+  ) async {
     final messenger = ScaffoldMessenger.maybeOf(parentContext);
     final oldId = await SecureStorageService.instance.getCompanyId();
 
@@ -410,7 +413,9 @@ class _AppDrawerState extends State<AppDrawer> {
         });
       }
       messenger?.showSnackBar(
-        SnackBar(content: Text(res.message ?? 'Não foi possível trocar de empresa')),
+        SnackBar(
+          content: Text(res.message ?? 'Não foi possível trocar de empresa'),
+        ),
       );
       return;
     }
@@ -447,16 +452,20 @@ class _AppDrawerState extends State<AppDrawer> {
     // Importante: NÃO desligamos `_isSwitchingCompany` aqui — o drawer
     // permanece em skeleton até a Home assumir, evitando "flash" do
     // conteúdo antigo entre a troca e a navegação.
-    Navigator.of(parentContext).pushNamedAndRemoveUntil(
-      AppRoutes.home,
-      (route) => false,
-    );
+    Navigator.of(
+      parentContext,
+    ).pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
   }
 
-  Widget _buildCompanyBadgeForHeader(BuildContext context, ThemeData theme, Color accent) {
+  Widget _buildCompanyBadgeForHeader(
+    BuildContext context,
+    ThemeData theme,
+    Color accent,
+  ) {
     if (_companyName != null && _companyName!.isNotEmpty) {
-      final label =
-          _companyIsMatrix ? '${_companyName!} · Matriz' : _companyName!;
+      final label = _companyIsMatrix
+          ? '${_companyName!} · Matriz'
+          : _companyName!;
       final allowPicker = _isMasterUser && _masterCompanies.length > 1;
       final chip = _buildDrawerHeroChip(
         context,
@@ -477,11 +486,7 @@ class _AppDrawerState extends State<AppDrawer> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 chip,
-                Icon(
-                  Icons.arrow_drop_down_rounded,
-                  size: 22,
-                  color: accent,
-                ),
+                Icon(Icons.arrow_drop_down_rounded, size: 22, color: accent),
               ],
             ),
           ),
@@ -598,7 +603,11 @@ class _AppDrawerState extends State<AppDrawer> {
     );
   }
 
-  Widget _buildDrawerHeader(BuildContext context, ThemeData theme, Color accent) {
+  Widget _buildDrawerHeader(
+    BuildContext context,
+    ThemeData theme,
+    Color accent,
+  ) {
     final isDark = theme.brightness == Brightness.dark;
     final cool = isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
     final fullName = (_userName ?? 'Usuário').trim().isEmpty
@@ -613,232 +622,240 @@ class _AppDrawerState extends State<AppDrawer> {
     return Material(
       color: Colors.transparent,
       child: ClipRect(
-          child: Stack(
-            clipBehavior: Clip.hardEdge,
-            children: [
-              Positioned(
-                right: -36,
-                top: -28,
-                child: IgnorePointer(
-                  child: Container(
-                    width: 140,
-                    height: 140,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: [
-                          accent.withValues(alpha: isDark ? 0.28 : 0.18),
-                          accent.withValues(alpha: 0),
-                        ],
-                      ),
+        child: Stack(
+          clipBehavior: Clip.hardEdge,
+          children: [
+            Positioned(
+              right: -36,
+              top: -28,
+              child: IgnorePointer(
+                child: Container(
+                  width: 140,
+                  height: 140,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        accent.withValues(alpha: isDark ? 0.28 : 0.18),
+                        accent.withValues(alpha: 0),
+                      ],
                     ),
                   ),
                 ),
               ),
-              Positioned(
-                left: -50,
-                bottom: -40,
-                child: IgnorePointer(
-                  child: Container(
-                    width: 120,
-                    height: 120,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: [
-                          cool.withValues(alpha: isDark ? 0.2 : 0.1),
-                          cool.withValues(alpha: 0),
-                        ],
-                      ),
+            ),
+            Positioned(
+              left: -50,
+              bottom: -40,
+              child: IgnorePointer(
+                child: Container(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        cool.withValues(alpha: isDark ? 0.2 : 0.1),
+                        cool.withValues(alpha: 0),
+                      ],
                     ),
                   ),
                 ),
               ),
-              Container(
-                width: double.infinity,
-                padding: EdgeInsets.fromLTRB(
-                  20,
-                  MediaQuery.paddingOf(context).top + 12,
-                  20,
-                  18,
+            ),
+            Container(
+              width: double.infinity,
+              padding: EdgeInsets.fromLTRB(
+                20,
+                MediaQuery.paddingOf(context).top + 12,
+                20,
+                18,
+              ),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    accent.withValues(alpha: isDark ? 0.2 : 0.11),
+                    accent.withValues(alpha: isDark ? 0.06 : 0.03),
+                    Colors.transparent,
+                  ],
+                  stops: const [0.0, 0.38, 1.0],
                 ),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      accent.withValues(alpha: isDark ? 0.2 : 0.11),
-                      accent.withValues(alpha: isDark ? 0.06 : 0.03),
-                      Colors.transparent,
-                    ],
-                    stops: const [0.0, 0.38, 1.0],
-                  ),
-                  border: Border(
-                    bottom: BorderSide(
-                      color:
-                          ThemeHelpers.borderColor(context).withValues(alpha: 0.4),
-                    ),
+                border: Border(
+                  bottom: BorderSide(
+                    color: ThemeHelpers.borderColor(
+                      context,
+                    ).withValues(alpha: 0.4),
                   ),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    InkWell(
-                      onTap: _isInitializing ? null : openProfile,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'CONTA ATIVA',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: accent,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 2.4,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  InkWell(
+                    onTap: _isInitializing ? null : openProfile,
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Skeleton geral (`_isInitializing`) cobre essa
-                        // fase — quando renderizamos o header real, os
-                        // dados já estão disponíveis.
-                        Container(
-                            width: 72,
-                            height: 72,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.9),
-                                width: 2.5,
+                        Text(
+                          'CONTA ATIVA',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: accent,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 2.4,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Skeleton geral (`_isInitializing`) cobre essa
+                            // fase — quando renderizamos o header real, os
+                            // dados já estão disponíveis.
+                            Container(
+                              width: 72,
+                              height: 72,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.9),
+                                  width: 2.5,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: accent.withValues(alpha: 0.4),
+                                    blurRadius: 20,
+                                    offset: const Offset(0, 10),
+                                  ),
+                                  BoxShadow(
+                                    color: cool.withValues(
+                                      alpha: isDark ? 0.15 : 0.12,
+                                    ),
+                                    blurRadius: 24,
+                                    spreadRadius: -4,
+                                  ),
+                                ],
                               ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: accent.withValues(alpha: 0.4),
-                                  blurRadius: 20,
-                                  offset: const Offset(0, 10),
-                                ),
-                                BoxShadow(
-                                  color: cool.withValues(alpha: isDark ? 0.15 : 0.12),
-                                  blurRadius: 24,
-                                  spreadRadius: -4,
-                                ),
-                              ],
+                              child: CircleAvatar(
+                                radius: 33,
+                                backgroundColor:
+                                    ThemeHelpers.cardBackgroundColor(context),
+                                backgroundImage: _userAvatar != null
+                                    ? NetworkImage(
+                                        AvatarUrlResolver.resolve(
+                                              _userAvatar,
+                                            ) ??
+                                            _userAvatar!,
+                                      )
+                                    : null,
+                                child: _userAvatar == null
+                                    ? Text(
+                                        (_userName ?? 'U')[0].toUpperCase(),
+                                        style: TextStyle(
+                                          color: accent,
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 28,
+                                        ),
+                                      )
+                                    : null,
+                              ),
                             ),
-                            child: CircleAvatar(
-                              radius: 33,
-                              backgroundColor:
-                                  ThemeHelpers.cardBackgroundColor(context),
-                              backgroundImage: _userAvatar != null
-                                  ? NetworkImage(
-                                      AvatarUrlResolver.resolve(_userAvatar) ??
-                                          _userAvatar!,
-                                    )
-                                  : null,
-                              child: _userAvatar == null
-                                  ? Text(
-                                      (_userName ?? 'U')[0].toUpperCase(),
-                                      style: TextStyle(
-                                        color: accent,
-                                        fontWeight: FontWeight.w800,
-                                        fontSize: 28,
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    fullName,
+                                    style: theme.textTheme.titleLarge?.copyWith(
+                                      fontWeight: FontWeight.w900,
+                                      color: ThemeHelpers.textColor(context),
+                                      height: 1.05,
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _userEmail ?? '—',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: ThemeHelpers.textSecondaryColor(
+                                        context,
                                       ),
-                                    )
-                                  : null,
+                                      height: 1.35,
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    _heroDateLine(),
+                                    style: theme.textTheme.labelSmall?.copyWith(
+                                      color: ThemeHelpers.textSecondaryColor(
+                                        context,
+                                      ),
+                                      fontWeight: FontWeight.w500,
+                                      letterSpacing: 0.2,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                  fullName,
-                                  style: theme.textTheme.titleLarge?.copyWith(
-                                    fontWeight: FontWeight.w900,
-                                    color: ThemeHelpers.textColor(context),
-                                    height: 1.05,
-                                  ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  _userEmail ?? '—',
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: ThemeHelpers.textSecondaryColor(context),
-                                    height: 1.35,
-                                  ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  _heroDateLine(),
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color:
-                                        ThemeHelpers.textSecondaryColor(context),
-                                    fontWeight: FontWeight.w500,
-                                    letterSpacing: 0.2,
-                                  ),
-                                ),
-                            ],
-                          ),
+                          ],
                         ),
                       ],
                     ),
-                  ],
-                ),
-                    ),
-                    const SizedBox(height: 14),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                  ),
+                  const SizedBox(height: 14),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _buildCompanyBadgeForHeader(context, theme, accent),
+                      if (roleLabel.isNotEmpty)
+                        _buildDrawerHeroChip(
+                          context,
+                          icon: LucideIcons.briefcase,
+                          label: roleLabel,
+                          accent: accent,
+                        ),
+                      if (_heroPhone != null && _heroPhone!.isNotEmpty)
+                        _buildDrawerHeroChip(
+                          context,
+                          icon: LucideIcons.phone,
+                          label: _heroPhone!,
+                          accent: accent,
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  InkWell(
+                    onTap: _isInitializing ? null : openProfile,
+                    child: Row(
                       children: [
-                        _buildCompanyBadgeForHeader(context, theme, accent),
-                        if (roleLabel.isNotEmpty)
-                          _buildDrawerHeroChip(
-                            context,
-                            icon: LucideIcons.briefcase,
-                            label: roleLabel,
-                            accent: accent,
+                        Text(
+                          'Ver perfil completo',
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: accent,
+                            fontWeight: FontWeight.w800,
                           ),
-                        if (_heroPhone != null && _heroPhone!.isNotEmpty)
-                          _buildDrawerHeroChip(
-                            context,
-                            icon: LucideIcons.phone,
-                            label: _heroPhone!,
-                            accent: accent,
-                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(
+                          Icons.arrow_forward_rounded,
+                          size: 18,
+                          color: accent,
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 10),
-                    InkWell(
-                      onTap: _isInitializing ? null : openProfile,
-                      child: Row(
-                        children: [
-                          Text(
-                            'Ver perfil completo',
-                            style: theme.textTheme.labelMedium?.copyWith(
-                              color: accent,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          Icon(
-                            Icons.arrow_forward_rounded,
-                            size: 18,
-                            color: accent,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
+      ),
     );
   }
 
@@ -904,52 +921,58 @@ class _AppDrawerState extends State<AppDrawer> {
     // Paridade com `Drawer.tsx` do web: item "Aprovações" só aparece se o
     // usuário tem `view`, `create`, `approve_*` ou `manage_approval_settings`
     // — com bypass admin/master/manager via `hasAnyPermission`.
-    final canSeeApprovalsMenu = ModuleAccessService.instance
-        .hasAnyPermission(AppPermissions.approvalQueueMenu);
+    final canSeeApprovalsMenu = ModuleAccessService.instance.hasAnyPermission(
+      AppPermissions.approvalQueueMenu,
+    );
 
     final canSeeProperties =
         ModuleAccessService.instance.hasCompanyModule('property_management') &&
-            ModuleAccessService.instance.hasPermission('property:view');
+        ModuleAccessService.instance.hasPermission('property:view');
     final canSeeKanban =
         ModuleAccessService.instance.hasCompanyModule('kanban_management') &&
-            ModuleAccessService.instance.hasPermission('kanban:view');
+        ModuleAccessService.instance.hasPermission('kanban:view');
     final canSeeClients =
         ModuleAccessService.instance.hasCompanyModule('client_management') &&
-            ModuleAccessService.instance.hasPermission('client:view');
+        ModuleAccessService.instance.hasPermission('client:view');
     final canSeeCalendar =
         ModuleAccessService.instance.hasCompanyModule('calendar_management') &&
-            ModuleAccessService.instance.hasPermission('calendar:view');
+        ModuleAccessService.instance.hasPermission('calendar:view');
 
     final canSeeNotes =
         ModuleAccessService.instance.hasCompanyModule('notes') &&
-            ModuleAccessService.instance.hasPermission('note:view');
+        ModuleAccessService.instance.hasPermission('note:view');
     final canSeeProposals =
         ModuleAccessService.instance.hasCompanyModule('sale_forms') &&
-            (ModuleAccessService.instance.hasPermission('proposal:view') ||
-                ModuleAccessService.instance.hasPermission('proposal:view_team') ||
-                ModuleAccessService.instance.hasPermission('proposal:view_all'));
+        (ModuleAccessService.instance.hasPermission('proposal:view') ||
+            ModuleAccessService.instance.hasPermission('proposal:view_team') ||
+            ModuleAccessService.instance.hasPermission('proposal:view_all'));
     final canSeeSaleForms =
         ModuleAccessService.instance.hasCompanyModule('sale_forms') &&
-            ModuleAccessService.instance
-                .hasAnyPermission(AppPermissions.saleFormMenu);
+        ModuleAccessService.instance.hasAnyPermission(
+          AppPermissions.saleFormMenu,
+        );
     // Comissões: módulo da empresa + permissão de visualização (corretor vê só
     // as próprias; master/admin/manager têm bypass no ModuleAccessService).
-    final canSeeCommissions = ModuleAccessService.instance
-            .hasCompanyModule(AppPermissions.moduleCommissionManagement) &&
-        ModuleAccessService.instance
-            .hasPermission(AppPermissions.commissionView);
+    final canSeeCommissions =
+        ModuleAccessService.instance.hasCompanyModule(
+          AppPermissions.moduleCommissionManagement,
+        ) &&
+        ModuleAccessService.instance.hasPermission(
+          AppPermissions.commissionView,
+        );
     // Colaboradores → Usuários (drawer item).
     // Paridade com web: `user:view` AND (`create` OR `update` OR `delete`),
     // com bypass admin/master/manager via `hasAnyPermission`.
     final canSeeUsers =
         ModuleAccessService.instance.hasCompanyModule('user_management') &&
-            ModuleAccessService.instance.hasPermission(AppPermissions.userView) &&
-            ModuleAccessService.instance
-                .hasAnyPermission(AppPermissions.userManageMenu);
+        ModuleAccessService.instance.hasPermission(AppPermissions.userView) &&
+        ModuleAccessService.instance.hasAnyPermission(
+          AppPermissions.userManageMenu,
+        );
     // Colaboradores → Equipes (drawer item).
     final canSeeTeams =
         ModuleAccessService.instance.hasCompanyModule('team_management') &&
-            ModuleAccessService.instance.hasPermission(AppPermissions.teamView);
+        ModuleAccessService.instance.hasPermission(AppPermissions.teamView);
     final canSeeWorkspace = canSeeUsers || canSeeTeams;
 
     /// Visibilidade do item "Check-in": liberado pra master/admin/manager
@@ -957,13 +980,14 @@ class _AppDrawerState extends State<AppDrawer> {
     /// O backend bate as permissões finais; aqui é só gating de menu.
     final checkInRole =
         ModuleAccessService.instance.userRole?.toLowerCase().trim() ?? '';
-    final isCheckInPrivileged = checkInRole == 'master' ||
+    final isCheckInPrivileged =
+        checkInRole == 'master' ||
         checkInRole == 'admin' ||
         checkInRole == 'manager';
-    final canSeeCheckIn = isCheckInPrivileged ||
+    final canSeeCheckIn =
+        isCheckInPrivileged ||
         ModuleAccessService.instance.hasPermission(AppPermissions.checkInDo) ||
-        ModuleAccessService.instance
-            .hasPermission(AppPermissions.checkInView);
+        ModuleAccessService.instance.hasPermission(AppPermissions.checkInView);
 
     final showImoveisGroup = canSeeProperties || canSeeApprovalsMenu;
     final showVendasCrmGroup = canSeeKanban || canSeeClients;
@@ -996,389 +1020,386 @@ class _AppDrawerState extends State<AppDrawer> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          _buildDrawerItem(
+                            context: context,
+                            currentRoute: activeRoute,
+                            route: AppRoutes.home,
+                            icon: LucideIcons.layoutDashboard,
+                            activeIcon: LucideIcons.layoutDashboard,
+                            title: 'Dashboard',
+                            accent: accent,
+                            showLeadingTile: true,
+                            onTap: () {
+                              Navigator.pop(context);
+                              if (activeRoute == AppRoutes.home) return;
+                              Navigator.of(context).pushNamedAndRemoveUntil(
+                                AppRoutes.home,
+                                (route) => false,
+                              );
+                            },
+                          ),
+                          Divider(
+                            height: 1,
+                            thickness: 1,
+                            color: ThemeHelpers.borderLightColor(
+                              context,
+                            ).withValues(alpha: 0.5),
+                          ),
+                          if (showImoveisGroup) ...[
+                            _buildExpansionTile(
+                              context: context,
+                              title: 'Imóveis',
+                              icon: LucideIcons.home,
+                              activeIcon: LucideIcons.home,
+                              isExpanded: _imoveisExpanded,
+                              groupActive: imoveisGroupActive,
+                              accent: accent,
+                              onExpansionChanged: (expanded) {
+                                setState(() {
+                                  _imoveisExpanded = expanded;
+                                });
+                              },
+                              children: [
+                                if (canSeeProperties)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.properties,
+                                    icon: LucideIcons.building2,
+                                    activeIcon: LucideIcons.building2,
+                                    title: 'Propriedades',
+                                    accent: accent,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.properties) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamedAndRemoveUntil(
+                                        AppRoutes.properties,
+                                        (route) => false,
+                                      );
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeApprovalsMenu)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.propertyApprovals,
+                                    icon: LucideIcons.shieldCheck,
+                                    activeIcon: LucideIcons.shieldCheck,
+                                    title: 'Aprovações',
+                                    accent: accent,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute ==
+                                          AppRoutes.propertyApprovals) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.propertyApprovals);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                              ],
+                            ),
+                          ],
+                          if (showVendasCrmGroup) ...[
+                            _buildExpansionTile(
+                              context: context,
+                              title: 'Vendas & CRM',
+                              icon: LucideIcons.target,
+                              activeIcon: LucideIcons.target,
+                              isExpanded: _vendasCrmExpanded,
+                              groupActive: vendasCrmGroupActive,
+                              accent: accent,
+                              onExpansionChanged: (expanded) {
+                                setState(() {
+                                  _vendasCrmExpanded = expanded;
+                                });
+                              },
+                              children: [
+                                if (canSeeKanban)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.kanban,
+                                    icon: LucideIcons.layoutGrid,
+                                    activeIcon: LucideIcons.layoutGrid,
+                                    title: 'CRM',
+                                    accent: accent,
+                                    isActive:
+                                        activeRoute == AppRoutes.kanban ||
+                                        activeRoute.startsWith('/kanban/task'),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.kanban ||
+                                          activeRoute.startsWith(
+                                            '/kanban/task',
+                                          )) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamedAndRemoveUntil(
+                                        AppRoutes.kanban,
+                                        (route) => false,
+                                      );
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeClients)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.clients,
+                                    icon: LucideIcons.users,
+                                    activeIcon: LucideIcons.users,
+                                    title: 'Clientes',
+                                    accent: accent,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.clients ||
+                                          activeRoute.startsWith('/clients')) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamedAndRemoveUntil(
+                                        AppRoutes.clients,
+                                        (route) => false,
+                                      );
+                                    },
+                                    isSubItem: true,
+                                  ),
+                              ],
+                            ),
+                          ],
+                          if (canSeeCalendar)
                             _buildDrawerItem(
                               context: context,
                               currentRoute: activeRoute,
-                              route: AppRoutes.home,
-                              icon: LucideIcons.layoutDashboard,
-                              activeIcon: LucideIcons.layoutDashboard,
-                              title: 'Dashboard',
+                              route: AppRoutes.calendar,
+                              icon: LucideIcons.calendar,
+                              activeIcon: LucideIcons.calendar,
+                              title: 'Calendário',
                               accent: accent,
                               showLeadingTile: true,
                               onTap: () {
                                 Navigator.pop(context);
-                                if (activeRoute == AppRoutes.home) return;
-                                Navigator.of(context).pushNamedAndRemoveUntil(
-                                  AppRoutes.home,
-                                  (route) => false,
-                                );
+                                if (activeRoute == AppRoutes.calendar) return;
+                                Navigator.of(
+                                  context,
+                                ).pushNamed(AppRoutes.calendar);
                               },
                             ),
-                            Divider(
-                              height: 1,
-                              thickness: 1,
-                              color: ThemeHelpers.borderLightColor(context)
-                                  .withValues(alpha: 0.5),
-                            ),
-                            if (showImoveisGroup) ...[
-                              _buildExpansionTile(
-                                context: context,
-                                title: 'Imóveis',
-                                icon: LucideIcons.home,
-                                activeIcon: LucideIcons.home,
-                                isExpanded: _imoveisExpanded,
-                                groupActive: imoveisGroupActive,
-                                accent: accent,
-                                onExpansionChanged: (expanded) {
-                                  setState(() {
-                                    _imoveisExpanded = expanded;
-                                  });
-                                },
-                                children: [
-                                  if (canSeeProperties)
-                                    _buildDrawerItem(
-                                      context: context,
-                                      currentRoute: activeRoute,
-                                      route: AppRoutes.properties,
-                                      icon: LucideIcons.building2,
-                                      activeIcon: LucideIcons.building2,
-                                      title: 'Propriedades',
-                                      accent: accent,
-                                      onTap: () {
-                                        Navigator.pop(context);
-                                        if (activeRoute == AppRoutes.properties) {
-                                          return;
-                                        }
-                                        Navigator.of(context)
-                                            .pushNamedAndRemoveUntil(
-                                          AppRoutes.properties,
-                                          (route) => false,
-                                        );
-                                      },
-                                      isSubItem: true,
-                                    ),
-                                  if (canSeeApprovalsMenu)
-                                    _buildDrawerItem(
-                                      context: context,
-                                      currentRoute: activeRoute,
-                                      route: AppRoutes.propertyApprovals,
-                                      icon: LucideIcons.shieldCheck,
-                                      activeIcon: LucideIcons.shieldCheck,
-                                      title: 'Aprovações',
-                                      accent: accent,
-                                      onTap: () {
-                                        Navigator.pop(context);
-                                        if (activeRoute ==
-                                            AppRoutes.propertyApprovals) {
-                                          return;
-                                        }
-                                        Navigator.of(context)
-                                            .pushNamedAndRemoveUntil(
-                                          AppRoutes.propertyApprovals,
-                                          (route) => false,
-                                        );
-                                      },
-                                      isSubItem: true,
-                                    ),
-                                ],
-                              ),
-                            ],
-                            if (showVendasCrmGroup) ...[
-                              _buildExpansionTile(
-                                context: context,
-                                title: 'Vendas & CRM',
-                                icon: LucideIcons.target,
-                                activeIcon: LucideIcons.target,
-                                isExpanded: _vendasCrmExpanded,
-                                groupActive: vendasCrmGroupActive,
-                                accent: accent,
-                                onExpansionChanged: (expanded) {
-                                  setState(() {
-                                    _vendasCrmExpanded = expanded;
-                                  });
-                                },
-                                children: [
-                                  if (canSeeKanban)
-                                    _buildDrawerItem(
-                                      context: context,
-                                      currentRoute: activeRoute,
-                                      route: AppRoutes.kanban,
-                                      icon: LucideIcons.layoutGrid,
-                                      activeIcon: LucideIcons.layoutGrid,
-                                      title: 'CRM',
-                                      accent: accent,
-                                      isActive: activeRoute == AppRoutes.kanban ||
-                                          activeRoute
-                                              .startsWith('/kanban/task'),
-                                      onTap: () {
-                                        Navigator.pop(context);
-                                        if (activeRoute == AppRoutes.kanban ||
-                                            activeRoute.startsWith(
-                                                '/kanban/task')) {
-                                          return;
-                                        }
-                                        Navigator.of(context)
-                                            .pushNamedAndRemoveUntil(
-                                          AppRoutes.kanban,
-                                          (route) => false,
-                                        );
-                                      },
-                                      isSubItem: true,
-                                    ),
-                                  if (canSeeClients)
-                                    _buildDrawerItem(
-                                      context: context,
-                                      currentRoute: activeRoute,
-                                      route: AppRoutes.clients,
-                                      icon: LucideIcons.users,
-                                      activeIcon: LucideIcons.users,
-                                      title: 'Clientes',
-                                      accent: accent,
-                                      onTap: () {
-                                        Navigator.pop(context);
-                                        if (activeRoute == AppRoutes.clients ||
-                                            activeRoute
-                                                .startsWith('/clients')) {
-                                          return;
-                                        }
-                                        Navigator.of(context)
-                                            .pushNamedAndRemoveUntil(
-                                          AppRoutes.clients,
-                                          (route) => false,
-                                        );
-                                      },
-                                      isSubItem: true,
-                                    ),
-                                ],
-                              ),
-                            ],
-                            if (canSeeCalendar)
-                              _buildDrawerItem(
-                                context: context,
-                                currentRoute: activeRoute,
-                                route: AppRoutes.calendar,
-                                icon: LucideIcons.calendar,
-                                activeIcon: LucideIcons.calendar,
-                                title: 'Calendário',
-                                accent: accent,
-                                showLeadingTile: true,
-                                onTap: () {
-                                  Navigator.pop(context);
-                                  if (activeRoute == AppRoutes.calendar) return;
-                                  Navigator.of(context).pushNamedAndRemoveUntil(
-                                    AppRoutes.calendar,
-                                    (route) => false,
-                                  );
-                                },
-                              ),
-                            if (canSeeNotes)
-                              _buildDrawerItem(
-                                context: context,
-                                currentRoute: activeRoute,
-                                route: AppRoutes.notes,
-                                icon: LucideIcons.scrollText,
-                                activeIcon: LucideIcons.scrollText,
-                                title: 'Anotações',
-                                accent: accent,
-                                showLeadingTile: true,
-                                onTap: () {
-                                  Navigator.pop(context);
-                                  if (activeRoute == AppRoutes.notes) return;
-                                  Navigator.of(context).pushNamedAndRemoveUntil(
-                                    AppRoutes.notes,
-                                    (route) => false,
-                                  );
-                                },
-                              ),
-                            if (canSeeProposals)
-                              _buildDrawerItem(
-                                context: context,
-                                currentRoute: activeRoute,
-                                route: AppRoutes.proposals,
-                                icon: LucideIcons.fileSignature,
-                                activeIcon: LucideIcons.fileSignature,
-                                title: 'Fichas de proposta',
-                                accent: accent,
-                                showLeadingTile: true,
-                                onTap: () {
-                                  Navigator.pop(context);
-                                  if (activeRoute == AppRoutes.proposals) {
-                                    return;
-                                  }
-                                  Navigator.of(context).pushNamedAndRemoveUntil(
-                                    AppRoutes.proposals,
-                                    (route) => false,
-                                  );
-                                },
-                              ),
-                            if (canSeeSaleForms)
-                              _buildDrawerItem(
-                                context: context,
-                                currentRoute: activeRoute,
-                                route: AppRoutes.saleForms,
-                                icon: LucideIcons.handshake,
-                                activeIcon: LucideIcons.handshake,
-                                title: 'Fichas de venda',
-                                accent: accent,
-                                showLeadingTile: true,
-                                onTap: () {
-                                  Navigator.pop(context);
-                                  if (activeRoute == AppRoutes.saleForms) {
-                                    return;
-                                  }
-                                  Navigator.of(context).pushNamedAndRemoveUntil(
-                                    AppRoutes.saleForms,
-                                    (route) => false,
-                                  );
-                                },
-                              ),
-                            if (canSeeCheckIn)
-                              if (canSeeCommissions)
-                                _buildDrawerItem(
-                                  context: context,
-                                  currentRoute: activeRoute,
-                                  route: AppRoutes.commissions,
-                                  icon: LucideIcons.percent,
-                                  activeIcon: LucideIcons.percent,
-                                  title: 'Comissões',
-                                  accent: accent,
-                                  showLeadingTile: true,
-                                  onTap: () {
-                                    Navigator.pop(context);
-                                    if (activeRoute == AppRoutes.commissions) {
-                                      return;
-                                    }
-                                    Navigator.of(context)
-                                        .pushNamedAndRemoveUntil(
-                                      AppRoutes.commissions,
-                                      (route) => false,
-                                    );
-                                  },
-                                ),
-                              _buildDrawerItem(
-                                context: context,
-                                currentRoute: activeRoute,
-                                route: AppRoutes.checkIn,
-                                icon: LucideIcons.mapPin,
-                                activeIcon: LucideIcons.mapPin,
-                                title: 'Check-in',
-                                accent: accent,
-                                showLeadingTile: true,
-                                onTap: () {
-                                  Navigator.pop(context);
-                                  if (activeRoute == AppRoutes.checkIn) {
-                                    return;
-                                  }
-                                  Navigator.of(context).pushNamed(
-                                    AppRoutes.checkIn,
-                                  );
-                                },
-                              ),
-                            if (canSeeWorkspace)
-                              _buildExpansionTile(
-                                context: context,
-                                title: 'Colaboradores',
-                                icon: LucideIcons.users2,
-                                activeIcon: LucideIcons.users2,
-                                isExpanded: _colaboradoresExpanded,
-                                groupActive: activeRoute == AppRoutes.users ||
-                                    activeRoute == AppRoutes.teams ||
-                                    activeRoute == AppRoutes.workspace,
-                                accent: accent,
-                                onExpansionChanged: (expanded) {
-                                  setState(() {
-                                    _colaboradoresExpanded = expanded;
-                                  });
-                                },
-                                children: [
-                                  if (canSeeUsers)
-                                    _buildDrawerItem(
-                                      context: context,
-                                      currentRoute: activeRoute,
-                                      route: AppRoutes.users,
-                                      icon: LucideIcons.users,
-                                      activeIcon: LucideIcons.users,
-                                      title: 'Usuários',
-                                      accent: accent,
-                                      onTap: () {
-                                        Navigator.pop(context);
-                                        if (activeRoute == AppRoutes.users) {
-                                          return;
-                                        }
-                                        Navigator.of(context)
-                                            .pushNamedAndRemoveUntil(
-                                          AppRoutes.users,
-                                          (route) => false,
-                                        );
-                                      },
-                                      isSubItem: true,
-                                    ),
-                                  if (canSeeTeams)
-                                    _buildDrawerItem(
-                                      context: context,
-                                      currentRoute: activeRoute,
-                                      route: AppRoutes.teams,
-                                      icon: LucideIcons.users2,
-                                      activeIcon: LucideIcons.users2,
-                                      title: 'Equipes',
-                                      accent: accent,
-                                      onTap: () {
-                                        Navigator.pop(context);
-                                        if (activeRoute == AppRoutes.teams) {
-                                          return;
-                                        }
-                                        Navigator.of(context)
-                                            .pushNamedAndRemoveUntil(
-                                          AppRoutes.teams,
-                                          (route) => false,
-                                        );
-                                      },
-                                      isSubItem: true,
-                                    ),
-                                ],
-                              ),
-                            Divider(
-                              height: 1,
-                              thickness: 1,
-                              color: ThemeHelpers.borderLightColor(context)
-                                  .withValues(alpha: 0.5),
-                            ),
+                          if (canSeeNotes)
                             _buildDrawerItem(
                               context: context,
                               currentRoute: activeRoute,
-                              route: AppRoutes.settings,
-                              icon: LucideIcons.settings,
-                              activeIcon: LucideIcons.settings,
-                              title: 'Configurações',
+                              route: AppRoutes.notes,
+                              icon: LucideIcons.scrollText,
+                              activeIcon: LucideIcons.scrollText,
+                              title: 'Anotações',
                               accent: accent,
+                              showLeadingTile: true,
                               onTap: () {
                                 Navigator.pop(context);
-                                if (activeRoute == AppRoutes.settings) return;
-                                Navigator.of(context).pushNamed(AppRoutes.settings);
+                                if (activeRoute == AppRoutes.notes) return;
+                                Navigator.of(
+                                  context,
+                                ).pushNamed(AppRoutes.notes);
                               },
                             ),
-                            Divider(
-                              height: 1,
-                              thickness: 1,
-                              color: ThemeHelpers.borderLightColor(context)
-                                  .withValues(alpha: 0.5),
-                            ),
+                          if (canSeeProposals)
                             _buildDrawerItem(
                               context: context,
                               currentRoute: activeRoute,
-                              route: '',
-                              icon: LucideIcons.logOut,
-                              activeIcon: LucideIcons.logOut,
-                              title: 'Sair',
+                              route: AppRoutes.proposals,
+                              icon: LucideIcons.fileSignature,
+                              activeIcon: LucideIcons.fileSignature,
+                              title: 'Fichas de proposta',
                               accent: accent,
+                              showLeadingTile: true,
                               onTap: () {
-                                _handleLogout(context);
+                                Navigator.pop(context);
+                                if (activeRoute == AppRoutes.proposals) {
+                                  return;
+                                }
+                                Navigator.of(
+                                  context,
+                                ).pushNamed(AppRoutes.proposals);
                               },
-                              isDestructive: true,
                             ),
-                          ],
-                        ),
+                          if (canSeeSaleForms)
+                            _buildDrawerItem(
+                              context: context,
+                              currentRoute: activeRoute,
+                              route: AppRoutes.saleForms,
+                              icon: LucideIcons.handshake,
+                              activeIcon: LucideIcons.handshake,
+                              title: 'Fichas de venda',
+                              accent: accent,
+                              showLeadingTile: true,
+                              onTap: () {
+                                Navigator.pop(context);
+                                if (activeRoute == AppRoutes.saleForms) {
+                                  return;
+                                }
+                                Navigator.of(
+                                  context,
+                                ).pushNamed(AppRoutes.saleForms);
+                              },
+                            ),
+                          if (canSeeCheckIn)
+                            if (canSeeCommissions)
+                              _buildDrawerItem(
+                                context: context,
+                                currentRoute: activeRoute,
+                                route: AppRoutes.commissions,
+                                icon: LucideIcons.percent,
+                                activeIcon: LucideIcons.percent,
+                                title: 'Comissões',
+                                accent: accent,
+                                showLeadingTile: true,
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  if (activeRoute == AppRoutes.commissions) {
+                                    return;
+                                  }
+                                  Navigator.of(
+                                    context,
+                                  ).pushNamed(AppRoutes.commissions);
+                                },
+                              ),
+                          _buildDrawerItem(
+                            context: context,
+                            currentRoute: activeRoute,
+                            route: AppRoutes.checkIn,
+                            icon: LucideIcons.mapPin,
+                            activeIcon: LucideIcons.mapPin,
+                            title: 'Check-in',
+                            accent: accent,
+                            showLeadingTile: true,
+                            onTap: () {
+                              Navigator.pop(context);
+                              if (activeRoute == AppRoutes.checkIn) {
+                                return;
+                              }
+                              Navigator.of(
+                                context,
+                              ).pushNamed(AppRoutes.checkIn);
+                            },
+                          ),
+                          if (canSeeWorkspace)
+                            _buildExpansionTile(
+                              context: context,
+                              title: 'Colaboradores',
+                              icon: LucideIcons.users2,
+                              activeIcon: LucideIcons.users2,
+                              isExpanded: _colaboradoresExpanded,
+                              groupActive:
+                                  activeRoute == AppRoutes.users ||
+                                  activeRoute == AppRoutes.teams ||
+                                  activeRoute == AppRoutes.workspace,
+                              accent: accent,
+                              onExpansionChanged: (expanded) {
+                                setState(() {
+                                  _colaboradoresExpanded = expanded;
+                                });
+                              },
+                              children: [
+                                if (canSeeUsers)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.users,
+                                    icon: LucideIcons.users,
+                                    activeIcon: LucideIcons.users,
+                                    title: 'Usuários',
+                                    accent: accent,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.users) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.users);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeTeams)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.teams,
+                                    icon: LucideIcons.users2,
+                                    activeIcon: LucideIcons.users2,
+                                    title: 'Equipes',
+                                    accent: accent,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.teams) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.teams);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                              ],
+                            ),
+                          Divider(
+                            height: 1,
+                            thickness: 1,
+                            color: ThemeHelpers.borderLightColor(
+                              context,
+                            ).withValues(alpha: 0.5),
+                          ),
+                          _buildDrawerItem(
+                            context: context,
+                            currentRoute: activeRoute,
+                            route: AppRoutes.settings,
+                            icon: LucideIcons.settings,
+                            activeIcon: LucideIcons.settings,
+                            title: 'Configurações',
+                            accent: accent,
+                            onTap: () {
+                              Navigator.pop(context);
+                              if (activeRoute == AppRoutes.settings) return;
+                              Navigator.of(
+                                context,
+                              ).pushNamed(AppRoutes.settings);
+                            },
+                          ),
+                          Divider(
+                            height: 1,
+                            thickness: 1,
+                            color: ThemeHelpers.borderLightColor(
+                              context,
+                            ).withValues(alpha: 0.5),
+                          ),
+                          _buildDrawerItem(
+                            context: context,
+                            currentRoute: activeRoute,
+                            route: '',
+                            icon: LucideIcons.logOut,
+                            activeIcon: LucideIcons.logOut,
+                            title: 'Sair',
+                            accent: accent,
+                            onTap: () {
+                              _handleLogout(context);
+                            },
+                            isDestructive: true,
+                          ),
+                        ],
                       ),
+                    ),
                   ],
                 ),
               ),
@@ -1482,8 +1503,8 @@ class _AppDrawerState extends State<AppDrawer> {
     final color = isDestructive
         ? theme.colorScheme.error
         : active
-            ? accent
-            : ThemeHelpers.textColor(context);
+        ? accent
+        : ThemeHelpers.textColor(context);
 
     final iconToShow = active ? activeIcon : icon;
 
@@ -1494,8 +1515,8 @@ class _AppDrawerState extends State<AppDrawer> {
           final chatController = context.watch<ChatUnreadController>();
           notificationCount = chatController.totalUnreadCount;
         } else {
-          final notificationController =
-              context.watch<NotificationController>();
+          final notificationController = context
+              .watch<NotificationController>();
           notificationCount = notificationController.getCountForRoute(route);
         }
       } catch (e) {
@@ -1503,8 +1524,9 @@ class _AppDrawerState extends State<AppDrawer> {
       }
     }
 
-    final borderColor =
-        active ? accent.withValues(alpha: 0.35) : Colors.transparent;
+    final borderColor = active
+        ? accent.withValues(alpha: 0.35)
+        : Colors.transparent;
 
     final isDark = theme.brightness == Brightness.dark;
     final tileBgIdle = isDark
@@ -1561,9 +1583,7 @@ class _AppDrawerState extends State<AppDrawer> {
                     ],
                   )
                 : null,
-            color: active
-                ? null
-                : tileBgIdle,
+            color: active ? null : tileBgIdle,
           ),
           child: Center(child: leadingIcon),
         ),
@@ -1754,9 +1774,10 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet>
       vsync: this,
       duration: const Duration(milliseconds: 1300),
     )..repeat(reverse: true);
-    _pulse = Tween<double>(begin: 0.5, end: 1.0).animate(
-      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
-    );
+    _pulse = Tween<double>(
+      begin: 0.5,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
   }
 
   @override
@@ -1814,9 +1835,11 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet>
     final filteredOthers = _query.isEmpty
         ? others
         : others
-            .where((c) =>
-                c.name.toLowerCase().contains(_query.toLowerCase().trim()))
-            .toList();
+              .where(
+                (c) =>
+                    c.name.toLowerCase().contains(_query.toLowerCase().trim()),
+              )
+              .toList();
 
     final showSearch = others.length >= 6;
     final matrixCount = widget.companies.where((c) => c.isMatrix).length;
@@ -2028,11 +2051,7 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet>
                 ),
                 const SizedBox(height: 8),
                 // Stats line — texto rico
-                _buildStatsLine(
-                  theme,
-                  matrixCount,
-                  totalModules,
-                ),
+                _buildStatsLine(theme, matrixCount, totalModules),
               ],
             ),
           ),
@@ -2122,8 +2141,7 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet>
             width: _query.isNotEmpty ? 1.4 : 1,
           ),
         ),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
         child: Row(
           children: [
             Icon(
@@ -2145,13 +2163,11 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet>
                 decoration: InputDecoration(
                   hintText: 'Buscar empresa…',
                   hintStyle: theme.textTheme.bodyMedium?.copyWith(
-                    color:
-                        ThemeHelpers.textSecondaryColor(context),
+                    color: ThemeHelpers.textSecondaryColor(context),
                   ),
                   border: InputBorder.none,
                   isDense: true,
-                  contentPadding:
-                      const EdgeInsets.symmetric(vertical: 12),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
                 ),
               ),
             ),
@@ -2164,11 +2180,7 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet>
                 borderRadius: BorderRadius.circular(999),
                 child: Padding(
                   padding: const EdgeInsets.all(4),
-                  child: Icon(
-                    Icons.close_rounded,
-                    size: 16,
-                    color: accent,
-                  ),
+                  child: Icon(Icons.close_rounded, size: 16, color: accent),
                 ),
               ),
           ],
@@ -2206,8 +2218,9 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet>
             Icon(
               Icons.search_off_rounded,
               size: 36,
-              color: ThemeHelpers.textSecondaryColor(context)
-                  .withValues(alpha: 0.5),
+              color: ThemeHelpers.textSecondaryColor(
+                context,
+              ).withValues(alpha: 0.5),
             ),
             const SizedBox(height: 10),
             Text(
@@ -2221,8 +2234,9 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet>
             Text(
               'Tente outro termo de busca',
               style: theme.textTheme.bodySmall?.copyWith(
-                color: ThemeHelpers.textSecondaryColor(context)
-                    .withValues(alpha: 0.7),
+                color: ThemeHelpers.textSecondaryColor(
+                  context,
+                ).withValues(alpha: 0.7),
               ),
             ),
           ],
@@ -2331,12 +2345,14 @@ class _CompanyActiveCard extends StatelessWidget {
                         height: 6,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: const Color(0xFF22C55E)
-                              .withValues(alpha: pulse.value),
+                          color: const Color(
+                            0xFF22C55E,
+                          ).withValues(alpha: pulse.value),
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xFF22C55E)
-                                  .withValues(alpha: pulse.value * 0.6),
+                              color: const Color(
+                                0xFF22C55E,
+                              ).withValues(alpha: pulse.value * 0.6),
                               blurRadius: 5,
                             ),
                           ],
@@ -2453,8 +2469,9 @@ class _CompanyOptionTile extends StatelessWidget {
             borderRadius: BorderRadius.circular(18),
             color: Colors.transparent,
             border: Border.all(
-              color: ThemeHelpers.borderLightColor(context)
-                  .withValues(alpha: isDark ? 0.5 : 0.6),
+              color: ThemeHelpers.borderLightColor(
+                context,
+              ).withValues(alpha: isDark ? 0.5 : 0.6),
             ),
           ),
           child: Row(
@@ -2535,8 +2552,9 @@ class _CompanyOptionTile extends StatelessWidget {
                           Text(
                             '·',
                             style: theme.textTheme.labelSmall?.copyWith(
-                              color: ThemeHelpers.textSecondaryColor(context)
-                                  .withValues(alpha: 0.5),
+                              color: ThemeHelpers.textSecondaryColor(
+                                context,
+                              ).withValues(alpha: 0.5),
                               fontWeight: FontWeight.w900,
                             ),
                           ),
@@ -2548,12 +2566,11 @@ class _CompanyOptionTile extends StatelessWidget {
                                 ? '$modulesCount ${modulesCount == 1 ? "módulo" : "módulos"}'
                                 : 'Sem módulos',
                             style: theme.textTheme.labelSmall?.copyWith(
-                              color:
-                                  ThemeHelpers.textSecondaryColor(context),
+                              color: ThemeHelpers.textSecondaryColor(context),
                               fontWeight: FontWeight.w600,
                               letterSpacing: 0.2,
                               fontFeatures: const [
-                                FontFeature.tabularFigures()
+                                FontFeature.tabularFigures(),
                               ],
                             ),
                             maxLines: 1,
@@ -2604,10 +2621,7 @@ class _CompanyOptionTile extends StatelessWidget {
 /// (eyebrow + avatar + linhas de identidade) + uma única linha de chip
 /// (badge da empresa) + lista compacta de itens de menu.
 class _DrawerSkeletonShell extends StatelessWidget {
-  const _DrawerSkeletonShell({
-    required this.accent,
-    this.switchingMessage,
-  });
+  const _DrawerSkeletonShell({required this.accent, this.switchingMessage});
 
   final Color accent;
   final String? switchingMessage;
@@ -2674,8 +2688,7 @@ class _DrawerSkeletonShell extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(13),
                 color: accent.withValues(alpha: isDark ? 0.10 : 0.06),
@@ -2715,9 +2728,9 @@ class _DrawerSkeletonShell extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: Container(
             height: 1,
-            color: ThemeHelpers.borderLightColor(context).withValues(
-              alpha: 0.5,
-            ),
+            color: ThemeHelpers.borderLightColor(
+              context,
+            ).withValues(alpha: 0.5),
           ),
         ),
 
