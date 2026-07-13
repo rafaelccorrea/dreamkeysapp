@@ -1000,7 +1000,6 @@ class _UserCard extends StatelessWidget {
             'pt_BR',
           ).format(user.createdAt!.toLocal())
         : null;
-    final isAppRoleUser = user.role.toLowerCase() == 'user';
 
     return Material(
       color: Colors.transparent,
@@ -1147,10 +1146,6 @@ class _UserCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              if (isAppRoleUser) ...[
-                const SizedBox(height: 10),
-                _AppAccessRow(active: user.hasAppAccess),
-              ],
               const SizedBox(height: 12),
               Container(height: 1, color: borderColor.withValues(alpha: 0.4)),
               const SizedBox(height: 10),
@@ -1686,72 +1681,8 @@ class _MetaCell extends StatelessWidget {
   }
 }
 
-/// Linha de status do acesso ao app móvel — só aparece para `role = user`.
-/// Indica se o colaborador tem permissão pra usar o app, igual ao bloco
-/// `App móvel` do `UserCardMeta` no web.
-class _AppAccessRow extends StatelessWidget {
-  const _AppAccessRow({required this.active});
-
-  final bool active;
-
-  @override
-  Widget build(BuildContext context) {
-    final secondaryColor = ThemeHelpers.textSecondaryColor(context);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final tone = active
-        ? const Color(0xFF1E88E5)
-        : (isDark
-              ? Colors.white.withValues(alpha: 0.5)
-              : Colors.black.withValues(alpha: 0.45));
-    return Row(
-      children: [
-        Icon(LucideIcons.smartphone, size: 10, color: secondaryColor),
-        const SizedBox(width: 5),
-        Text(
-          'APP MÓVEL',
-          style: TextStyle(
-            fontSize: 9,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1.2,
-            color: secondaryColor,
-            height: 1.0,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          decoration: BoxDecoration(
-            color: tone.withValues(alpha: isDark ? 0.18 : 0.10),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(
-              color: tone.withValues(alpha: isDark ? 0.35 : 0.25),
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                active ? LucideIcons.check : LucideIcons.minus,
-                size: 10,
-                color: tone,
-              ),
-              const SizedBox(width: 4),
-              Text(
-                active ? 'Ativado' : 'Desativado',
-                style: TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w800,
-                  color: tone,
-                  letterSpacing: 0.2,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
+// Acesso ao app móvel é controlado por empresa (mobile_app_access_for_all),
+// sem status/toggle individual por usuário.
 
 // ──────────────────────────────────────────────────────────────────────────
 // Shimmer / Empty / Error / Denied

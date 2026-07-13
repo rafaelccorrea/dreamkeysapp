@@ -639,7 +639,6 @@ class ApiConstants {
   static String adminUserActivate(String id) => '/admin/users/$id/activate';
   static String adminUserDeactivate(String id) =>
       '/admin/users/$id/deactivate';
-  static String adminUserAppAccess(String id) => '/admin/users/$id/app-access';
 
   // Endpoints de Equipes (módulo `team_management`)
   static const String teamsFiltered = '/teams/filtered';

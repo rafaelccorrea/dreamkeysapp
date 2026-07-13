@@ -169,7 +169,7 @@ class _BrokerGlobalSearchSheetState extends State<BrokerGlobalSearchSheet> {
                     (p) => ListTile(
                       leading: const Icon(Icons.home_outlined),
                       title: Text(p.title),
-                      subtitle: Text(p.code ?? p.city ?? ''),
+                      subtitle: Text(p.code ?? p.city),
                       onTap: () {
                         Navigator.pop(context);
                         Navigator.of(context)
@@ -184,7 +184,7 @@ class _BrokerGlobalSearchSheetState extends State<BrokerGlobalSearchSheet> {
                     (c) => ListTile(
                       leading: const Icon(Icons.person_outline),
                       title: Text(c.name),
-                      subtitle: Text(c.phone ?? c.email ?? ''),
+                      subtitle: Text(c.phone),
                       onTap: () {
                         Navigator.pop(context);
                         Navigator.of(context)

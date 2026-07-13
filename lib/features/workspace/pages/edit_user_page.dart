@@ -73,13 +73,11 @@ class _EditUserPageState extends State<EditUserPage> {
   late AdminUser _user;
 
   late String _role;
-  late bool _hasAppAccess;
   Set<String> _selectedPerms = {};
   Set<String> _selectedManagers = {};
 
   // Snapshot inicial p/ detectar alterações.
   late String _role0;
-  late bool _app0;
   Set<String> _perms0 = {};
   Set<String> _managers0 = {};
 
@@ -95,7 +93,6 @@ class _EditUserPageState extends State<EditUserPage> {
     super.initState();
     _user = widget.user;
     _role = widget.user.role.toLowerCase();
-    _hasAppAccess = widget.user.hasAppAccess;
     _bootstrap();
   }
 
@@ -134,7 +131,6 @@ class _EditUserPageState extends State<EditUserPage> {
       final u = detailRes.data! as AdminUser;
       _user = u;
       _role = u.role.toLowerCase();
-      _hasAppAccess = u.hasAppAccess;
       _selectedPerms = {...u.permissionIds};
       _selectedManagers = {...u.managerIds};
     } else {
@@ -143,7 +139,6 @@ class _EditUserPageState extends State<EditUserPage> {
     }
 
     _role0 = _role;
-    _app0 = _hasAppAccess;
     _perms0 = {..._selectedPerms};
     _managers0 = {..._selectedManagers};
 
@@ -161,7 +156,6 @@ class _EditUserPageState extends State<EditUserPage> {
 
   bool get _dirty =>
       _role != _role0 ||
-      _hasAppAccess != _app0 ||
       (_isUser && !_setEquals(_selectedManagers, _managers0)) ||
       !_setEquals(_selectedPerms, _perms0);
 
@@ -178,20 +172,8 @@ class _EditUserPageState extends State<EditUserPage> {
     if (!_dirty) return;
     setState(() => _saving = true);
 
-    // 1) Acesso ao app via endpoint dedicado (espelha o web), se mudou.
-    //    Disponível para qualquer papel (corretor/gestor/admin/master).
-    if (_hasAppAccess != _app0) {
-      final r = await AdminUsersService.instance
-          .updateAppAccess(widget.user.id, _hasAppAccess);
-      if (!mounted) return;
-      if (!r.success) {
-        setState(() => _saving = false);
-        _snack(r.message ?? 'Falha ao atualizar acesso ao app.', error: true);
-        return;
-      }
-    }
-
-    // 2) Papel / gestores / permissões.
+    // Acesso ao app é controlado por empresa (mobile_app_access_for_all),
+    // sem toggle individual. Papel / gestores / permissões:
     final res = await AdminUsersService.instance.updateUser(
       widget.user.id,
       role: _role != _role0 ? _role : null,
@@ -252,9 +234,6 @@ class _EditUserPageState extends State<EditUserPage> {
           const SizedBox(height: 14),
           _buildManagerSelector(),
         ],
-        // Acesso ao app móvel: disponível para todos os papéis.
-        const SizedBox(height: 14),
-        _buildAppAccessRow(),
         const SizedBox(height: _gap),
         _SectionLabel(
           icon: LucideIcons.shieldCheck,
@@ -409,79 +388,6 @@ class _EditUserPageState extends State<EditUserPage> {
       },
     );
     searchCtrl.dispose();
-  }
-
-  // ─── Acesso ao app ───────────────────────────────────────────────────────
-
-  Widget _buildAppAccessRow() {
-    final on = _hasAppAccess;
-    final textColor = ThemeHelpers.textColor(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return GestureDetector(
-      onTap: () => setState(() => _hasAppAccess = !on),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
-        decoration: BoxDecoration(
-          color: on ? _accent.withValues(alpha: 0.06) : Colors.transparent,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: on
-                ? _accent.withValues(alpha: 0.4)
-                : ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: on
-                    ? _accent.withValues(alpha: 0.16)
-                    : ThemeHelpers.borderColor(context).withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(LucideIcons.smartphone,
-                  size: 17, color: on ? _accent : secondary),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Permitir uso do app móvel',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      color: textColor,
-                      letterSpacing: -0.2,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    on
-                        ? 'Pode entrar e usar o aplicativo.'
-                        : 'Acesso ao aplicativo bloqueado.',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: on ? _accent : secondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Switch(
-              value: on,
-              onChanged: (v) => setState(() => _hasAppAccess = v),
-              activeTrackColor: _accent,
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   // ─── Permissões (grade → painel focado) ───────────────────────────────────

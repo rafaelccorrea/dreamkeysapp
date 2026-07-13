@@ -211,29 +211,8 @@ class AdminUsersService {
     }
   }
 
-  /// Ativa/desativa o acesso ao app móvel (`PATCH /admin/users/:id/app-access`)
-  /// — mesmo endpoint do web (`usersApi.updateUserAppAccess`).
-  Future<ApiResponse<void>> updateAppAccess(
-    String id,
-    bool hasAppAccess,
-  ) async {
-    try {
-      final res = await _api.patch<Map<String, dynamic>>(
-        ApiConstants.adminUserAppAccess(id),
-        body: {'hasAppAccess': hasAppAccess},
-      );
-      if (!res.success) {
-        return ApiResponse.error(
-          message: res.message ?? 'Erro ao atualizar acesso ao app',
-          statusCode: res.statusCode,
-        );
-      }
-      return ApiResponse.success(data: null, statusCode: res.statusCode);
-    } catch (e) {
-      debugPrint('❌ [ADMIN_USERS] updateAppAccess: $e');
-      return ApiResponse.error(message: e.toString(), statusCode: 0);
-    }
-  }
+  // Acesso ao app móvel é controlado por empresa (mobile_app_access_for_all)
+  // no painel web — sem toggle individual por usuário no app.
 
   /// Lista gestores elegíveis (papéis manager + admin) para vincular a um
   /// corretor. Espelha o `ManagerMultiSelector` do web.
