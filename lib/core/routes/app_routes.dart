@@ -55,6 +55,28 @@ import '../../features/workspace/pages/users_page.dart';
 import '../../features/workspace/pages/teams_page.dart';
 import '../../features/check_in/pages/check_in_page.dart';
 import '../../features/check_in/pages/check_in_list_page.dart';
+import '../../features/visit_reports/pages/visits_page.dart';
+import '../../features/visit_reports/pages/visit_report_form_page.dart';
+import '../../features/visit_reports/pages/visit_report_detail_page.dart';
+import '../../features/condominiums/pages/condominiums_page.dart';
+import '../../features/condominiums/pages/condominium_form_page.dart';
+import '../../features/condominiums/pages/developments_page.dart';
+import '../../features/condominiums/pages/development_detail_page.dart';
+import '../../features/condominiums/pages/development_form_page.dart';
+import '../../features/mcmv/models/mcmv_models.dart';
+import '../../features/mcmv/pages/mcmv_blacklist_page.dart';
+import '../../features/mcmv/pages/mcmv_lead_details_page.dart';
+import '../../features/mcmv/pages/mcmv_leads_page.dart';
+import '../../features/mcmv/pages/mcmv_templates_page.dart';
+import '../../features/goals/pages/goals_page.dart';
+import '../../features/goals/pages/goal_form_page.dart';
+import '../../features/goals/pages/goal_analytics_page.dart';
+import '../../features/checklists/pages/checklists_page.dart';
+import '../../features/checklists/pages/create_checklist_page.dart';
+import '../../features/checklists/pages/checklist_details_page.dart';
+import '../../features/assets/pages/assets_page.dart';
+import '../../features/assets/pages/create_asset_page.dart';
+import '../../features/assets/pages/asset_details_page.dart';
 import '../../shared/services/property_service.dart';
 
 /// Rotas da aplicação com transições customizadas
@@ -156,6 +178,45 @@ class AppRoutes {
   static String proposalEdit(String id) => '/proposals/$id/edit';
 
   static const String saleForms = '/sale-forms';
+
+  // Relatórios de Visita (módulo `visit_report`)
+  static const String visits = '/visits';
+  static const String visitCreate = '/visits/create';
+  static String visitDetails(String id) => '/visits/$id';
+  static String visitEdit(String id) => '/visits/$id/edit';
+
+  // Condomínios & Empreendimentos
+  static const String condominiums = '/condominiums';
+  static const String condominiumCreate = '/condominiums/create';
+  static String condominiumEdit(String id) => '/condominiums/$id/edit';
+  static const String developments = '/developments';
+  static const String developmentCreate = '/developments/create';
+  static String developmentDetails(String id) => '/developments/$id';
+  static String developmentEdit(String id) => '/developments/$id/edit';
+
+  // MCMV (Minha Casa Minha Vida)
+  static const String mcmvLeads = '/mcmv/leads';
+  static const String mcmvBlacklist = '/mcmv/blacklist';
+  static const String mcmvTemplates = '/mcmv/templates';
+  static String mcmvLeadDetails(String id) => '/mcmv/leads/$id';
+
+  // Metas (acesso admin/master — espelha o AdminRoute do web)
+  static const String goals = '/goals';
+  static const String goalCreate = '/goals/create';
+  static String goalEdit(String id) => '/goals/$id/edit';
+  static String goalAnalytics(String id) => '/goals/$id/analytics';
+
+  // Checklists standalone
+  static const String checklists = '/checklists';
+  static const String checklistCreate = '/checklists/create';
+  static String checklistDetails(String id) => '/checklists/$id';
+  static String checklistEdit(String id) => '/checklists/$id/edit';
+
+  // Patrimônio (assets)
+  static const String assets = '/assets';
+  static const String assetCreate = '/assets/create';
+  static String assetDetails(String id) => '/assets/$id';
+  static String assetEdit(String id) => '/assets/$id/edit';
 
   static String propertyOfferDetails(String offerId) =>
       '/properties/offers/$offerId';
@@ -427,6 +488,115 @@ class AppRoutes {
       return _buildRoute(const CheckInPage(), settings);
     } else if (routeName == AppRoutes.checkInList) {
       return _buildRoute(const CheckInListPage(), settings);
+    } else if (routeName == AppRoutes.visits) {
+      return _buildRoute(const VisitsPage(), settings);
+    } else if (routeName == AppRoutes.visitCreate) {
+      // Deve vir ANTES do prefixo genérico de /visits/, senão "create" vira id.
+      return _buildRoute(const VisitReportFormPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/visits/')) {
+      final segments = routeName.split('/');
+      if (segments.length >= 3) {
+        final id = segments[2];
+        if (segments.length == 3 && id.isNotEmpty) {
+          return _buildRoute(VisitReportDetailPage(reportId: id), settings);
+        } else if (segments.length == 4 && segments[3] == 'edit') {
+          return _buildRoute(VisitReportFormPage(reportId: id), settings);
+        }
+      }
+    } else if (routeName == AppRoutes.condominiums) {
+      return _buildRoute(const CondominiumsPage(), settings);
+    } else if (routeName == AppRoutes.condominiumCreate) {
+      return _buildRoute(const CondominiumFormPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/condominiums/')) {
+      // Edição: /condominiums/:id/edit
+      final segments = routeName.split('/');
+      if (segments.length == 4 && segments[3] == 'edit') {
+        final id = segments[2];
+        if (id.isNotEmpty) {
+          return _buildRoute(CondominiumFormPage(condominiumId: id), settings);
+        }
+      }
+    } else if (routeName == AppRoutes.developments) {
+      return _buildRoute(const DevelopmentsPage(), settings);
+    } else if (routeName == AppRoutes.developmentCreate) {
+      return _buildRoute(const DevelopmentFormPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/developments/')) {
+      // Detalhe (/developments/:id) e edição (/developments/:id/edit)
+      final segments = routeName.split('/');
+      if (segments.length >= 3) {
+        final id = segments[2];
+        if (id.isNotEmpty) {
+          if (segments.length == 3) {
+            return _buildRoute(
+                DevelopmentDetailPage(developmentId: id), settings);
+          } else if (segments.length == 4 && segments[3] == 'edit') {
+            return _buildRoute(
+                DevelopmentFormPage(developmentId: id), settings);
+          }
+        }
+      }
+    } else if (routeName == AppRoutes.mcmvLeads) {
+      return _buildRoute(const McmvLeadsPage(), settings);
+    } else if (routeName == AppRoutes.mcmvBlacklist) {
+      return _buildRoute(const McmvBlacklistPage(), settings);
+    } else if (routeName == AppRoutes.mcmvTemplates) {
+      return _buildRoute(const McmvTemplatesPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/mcmv/leads/')) {
+      // Detalhe: /mcmv/leads/:id — o backend não expõe GET por id; a página
+      // aceita o McmvLead da listagem via settings.arguments.
+      final segments = routeName.split('/');
+      if (segments.length == 4 && segments[3].isNotEmpty) {
+        final lead = settings.arguments is McmvLead
+            ? settings.arguments as McmvLead
+            : null;
+        return _buildRoute(
+          McmvLeadDetailsPage(leadId: segments[3], initialLead: lead),
+          settings,
+        );
+      }
+    } else if (routeName == AppRoutes.goals) {
+      return _buildRoute(const GoalsPage(), settings);
+    } else if (routeName == AppRoutes.goalCreate) {
+      return _buildRoute(const GoalFormPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/goals/')) {
+      // /goals/:id/edit e /goals/:id/analytics
+      final segments = routeName.split('/');
+      if (segments.length == 4 && segments[2].isNotEmpty) {
+        final id = segments[2];
+        if (segments[3] == 'edit') {
+          return _buildRoute(GoalFormPage(goalId: id), settings);
+        } else if (segments[3] == 'analytics') {
+          return _buildRoute(GoalAnalyticsPage(goalId: id), settings);
+        }
+      }
+    } else if (routeName == AppRoutes.checklists) {
+      return _buildRoute(const ChecklistsPage(), settings);
+    } else if (routeName == AppRoutes.checklistCreate) {
+      return _buildRoute(const CreateChecklistPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/checklists/')) {
+      final segments = routeName.split('/');
+      if (segments.length >= 3) {
+        final id = segments[2];
+        if (segments.length == 3 && id.isNotEmpty) {
+          return _buildRoute(ChecklistDetailsPage(checklistId: id), settings);
+        } else if (segments.length == 4 && segments[3] == 'edit') {
+          return _buildRoute(CreateChecklistPage(checklistId: id), settings);
+        }
+      }
+    } else if (routeName == AppRoutes.assets) {
+      return _buildRoute(const AssetsPage(), settings);
+    } else if (routeName == AppRoutes.assetCreate) {
+      return _buildRoute(const CreateAssetPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/assets/')) {
+      final segments = routeName.split('/');
+      if (segments.length >= 3) {
+        final id = segments[2];
+        if (segments.length == 3 && id.isNotEmpty) {
+          return _buildRoute(AssetDetailsPage(assetId: id), settings);
+        } else if (segments.length == 4 && segments[3] == 'edit') {
+          return _buildRoute(CreateAssetPage(assetId: id), settings);
+        }
+      }
     }
 
     // Rota não encontrada

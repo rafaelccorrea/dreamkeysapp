@@ -57,6 +57,7 @@ class _AppDrawerState extends State<AppDrawer> {
   bool _imoveisExpanded = false;
   bool _vendasCrmExpanded = false;
   bool _colaboradoresExpanded = false;
+  bool _produtividadeExpanded = false;
 
   /// Lista para o seletor de empresa (Master)
   List<Company> _masterCompanies = [];
@@ -162,7 +163,9 @@ class _AppDrawerState extends State<AppDrawer> {
 
     if (activeRoute == AppRoutes.properties ||
         activeRoute == AppRoutes.propertyApprovals ||
-        activeRoute.startsWith('/properties')) {
+        activeRoute.startsWith('/properties') ||
+        activeRoute.startsWith('/condominiums') ||
+        activeRoute.startsWith('/developments')) {
       expandImoveis = true;
     }
 
@@ -170,7 +173,9 @@ class _AppDrawerState extends State<AppDrawer> {
         activeRoute == AppRoutes.kanbanSubtasks ||
         activeRoute.startsWith('/kanban/task') ||
         activeRoute == AppRoutes.clients ||
-        activeRoute.startsWith('/clients')) {
+        activeRoute.startsWith('/clients') ||
+        activeRoute.startsWith('/visits') ||
+        activeRoute.startsWith('/mcmv')) {
       expandVendasCrm = true;
     }
 
@@ -180,11 +185,20 @@ class _AppDrawerState extends State<AppDrawer> {
       expandColaboradores = true;
     }
 
-    if (expandImoveis || expandVendasCrm || expandColaboradores) {
+    final expandProdutividade =
+        activeRoute.startsWith('/goals') ||
+        activeRoute.startsWith('/checklists') ||
+        activeRoute.startsWith('/assets');
+
+    if (expandImoveis ||
+        expandVendasCrm ||
+        expandColaboradores ||
+        expandProdutividade) {
       setState(() {
         if (expandImoveis) _imoveisExpanded = true;
         if (expandVendasCrm) _vendasCrmExpanded = true;
         if (expandColaboradores) _colaboradoresExpanded = true;
+        if (expandProdutividade) _produtividadeExpanded = true;
       });
     }
   }
@@ -916,7 +930,14 @@ class _AppDrawerState extends State<AppDrawer> {
         activeRoute == AppRoutes.kanbanSubtasks ||
         activeRoute.startsWith('/kanban/task') ||
         activeRoute == AppRoutes.clients ||
-        activeRoute.startsWith('/clients');
+        activeRoute.startsWith('/clients') ||
+        activeRoute.startsWith('/visits') ||
+        activeRoute.startsWith('/mcmv');
+
+    final produtividadeGroupActive =
+        activeRoute.startsWith('/goals') ||
+        activeRoute.startsWith('/checklists') ||
+        activeRoute.startsWith('/assets');
 
     // Paridade com `Drawer.tsx` do web: item "Aprovações" só aparece se o
     // usuário tem `view`, `create`, `approve_*` ou `manage_approval_settings`
@@ -989,8 +1010,56 @@ class _AppDrawerState extends State<AppDrawer> {
         ModuleAccessService.instance.hasPermission(AppPermissions.checkInDo) ||
         ModuleAccessService.instance.hasPermission(AppPermissions.checkInView);
 
-    final showImoveisGroup = canSeeProperties || canSeeApprovalsMenu;
-    final showVendasCrmGroup = canSeeKanban || canSeeClients;
+    // Relatórios de Visita (paridade com o web: módulo visit_report + visit:view).
+    final canSeeVisits =
+        ModuleAccessService.instance.hasCompanyModule('visit_report') &&
+        ModuleAccessService.instance.hasPermission('visit:view');
+
+    // Condomínios & Empreendimentos (gate do web: property_management +
+    // condominium:view para ambos).
+    final canSeeCondominiums =
+        ModuleAccessService.instance.hasCompanyModule('property_management') &&
+        ModuleAccessService.instance.hasPermission('condominium:view');
+
+    // MCMV: o backend usa o módulo 'mcmv'; o web aceita o alias
+    // 'mcmv_management' — checamos os dois.
+    final hasMcmvModule =
+        ModuleAccessService.instance.hasCompanyModule('mcmv') ||
+        ModuleAccessService.instance.hasCompanyModule('mcmv_management');
+    final canSeeMcmvLeads =
+        hasMcmvModule &&
+        ModuleAccessService.instance.hasPermission('mcmv:lead:view');
+    final canSeeMcmvBlacklist =
+        hasMcmvModule &&
+        ModuleAccessService.instance.hasPermission('mcmv:blacklist:view');
+    final canSeeMcmvTemplates =
+        hasMcmvModule &&
+        ModuleAccessService.instance.hasPermission('mcmv:template:view');
+    final canSeeMcmv =
+        canSeeMcmvLeads || canSeeMcmvBlacklist || canSeeMcmvTemplates;
+
+    // Metas: espelha o AdminRoute do web (só role admin/master, sem módulo).
+    final goalsRole =
+        ModuleAccessService.instance.userRole?.toLowerCase().trim() ?? '';
+    final canSeeGoals = goalsRole == 'admin' || goalsRole == 'master';
+
+    // Checklists standalone (gate do Drawer.tsx: checklist_management +
+    // property:view).
+    final canSeeChecklists =
+        ModuleAccessService.instance.hasCompanyModule('checklist_management') &&
+        ModuleAccessService.instance.hasPermission('property:view');
+
+    // Patrimônio (assets).
+    final canSeeAssets =
+        ModuleAccessService.instance.hasCompanyModule('asset_management') &&
+        ModuleAccessService.instance.hasPermission('asset:view');
+
+    final showImoveisGroup =
+        canSeeProperties || canSeeApprovalsMenu || canSeeCondominiums;
+    final showVendasCrmGroup =
+        canSeeKanban || canSeeClients || canSeeVisits || canSeeMcmv;
+    final showProdutividadeGroup =
+        canSeeGoals || canSeeChecklists || canSeeAssets;
 
     return Drawer(
       backgroundColor: Colors.transparent,
@@ -1104,6 +1173,54 @@ class _AppDrawerState extends State<AppDrawer> {
                                     },
                                     isSubItem: true,
                                   ),
+                                if (canSeeCondominiums) ...[
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.condominiums,
+                                    icon: LucideIcons.building,
+                                    activeIcon: LucideIcons.building,
+                                    title: 'Condomínios',
+                                    accent: accent,
+                                    isActive: activeRoute.startsWith(
+                                      '/condominiums',
+                                    ),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute ==
+                                          AppRoutes.condominiums) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.condominiums);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.developments,
+                                    icon: LucideIcons.blocks,
+                                    activeIcon: LucideIcons.blocks,
+                                    title: 'Empreendimentos',
+                                    accent: accent,
+                                    isActive: activeRoute.startsWith(
+                                      '/developments',
+                                    ),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute ==
+                                          AppRoutes.developments) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.developments);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                ],
                               ],
                             ),
                           ],
@@ -1172,6 +1289,92 @@ class _AppDrawerState extends State<AppDrawer> {
                                         AppRoutes.clients,
                                         (route) => false,
                                       );
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeVisits)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.visits,
+                                    icon: LucideIcons.clipboardList,
+                                    activeIcon: LucideIcons.clipboardList,
+                                    title: 'Visitas',
+                                    accent: accent,
+                                    isActive: activeRoute.startsWith('/visits'),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.visits) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.visits);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeMcmvLeads)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.mcmvLeads,
+                                    icon: LucideIcons.contact,
+                                    activeIcon: LucideIcons.contact,
+                                    title: 'Leads MCMV',
+                                    accent: accent,
+                                    isActive: activeRoute.startsWith(
+                                      '/mcmv/leads',
+                                    ),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.mcmvLeads) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.mcmvLeads);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeMcmvBlacklist)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.mcmvBlacklist,
+                                    icon: LucideIcons.userMinus,
+                                    activeIcon: LucideIcons.userMinus,
+                                    title: 'Blacklist MCMV',
+                                    accent: accent,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute ==
+                                          AppRoutes.mcmvBlacklist) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.mcmvBlacklist);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeMcmvTemplates)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.mcmvTemplates,
+                                    icon: LucideIcons.fileText,
+                                    activeIcon: LucideIcons.fileText,
+                                    title: 'Templates MCMV',
+                                    accent: accent,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute ==
+                                          AppRoutes.mcmvTemplates) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.mcmvTemplates);
                                     },
                                     isSubItem: true,
                                   ),
@@ -1294,6 +1497,89 @@ class _AppDrawerState extends State<AppDrawer> {
                               ).pushNamed(AppRoutes.checkIn);
                             },
                           ),
+                          if (showProdutividadeGroup) ...[
+                            _buildExpansionTile(
+                              context: context,
+                              title: 'Produtividade',
+                              icon: LucideIcons.listTodo,
+                              activeIcon: LucideIcons.listTodo,
+                              isExpanded: _produtividadeExpanded,
+                              groupActive: produtividadeGroupActive,
+                              accent: accent,
+                              onExpansionChanged: (expanded) {
+                                setState(() {
+                                  _produtividadeExpanded = expanded;
+                                });
+                              },
+                              children: [
+                                if (canSeeGoals)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.goals,
+                                    icon: LucideIcons.goal,
+                                    activeIcon: LucideIcons.goal,
+                                    title: 'Metas',
+                                    accent: accent,
+                                    isActive: activeRoute.startsWith('/goals'),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.goals) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.goals);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeChecklists)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.checklists,
+                                    icon: LucideIcons.listChecks,
+                                    activeIcon: LucideIcons.listChecks,
+                                    title: 'Checklists',
+                                    accent: accent,
+                                    isActive: activeRoute.startsWith(
+                                      '/checklists',
+                                    ),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.checklists) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.checklists);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeAssets)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.assets,
+                                    icon: LucideIcons.package,
+                                    activeIcon: LucideIcons.package,
+                                    title: 'Patrimônio',
+                                    accent: accent,
+                                    isActive: activeRoute.startsWith('/assets'),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.assets) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.assets);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                              ],
+                            ),
+                          ],
                           if (canSeeWorkspace)
                             _buildExpansionTile(
                               context: context,

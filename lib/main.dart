@@ -76,7 +76,7 @@ class _MyAppState extends State<MyApp> {
         ),
       ],
       child: MaterialApp(
-        title: 'Intellisys',
+        title: 'Intellisys CRM',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
@@ -84,10 +84,6 @@ class _MyAppState extends State<MyApp> {
         navigatorKey: appNavigatorKey,
         initialRoute: AppRoutes.splash,
         onGenerateRoute: AppRoutes.generateRoute,
-        // Localização pt-BR — sem isso, `showDatePicker(locale: pt_BR)`
-        // não consegue carregar traduções e o popup do calendário
-        // simplesmente não abre. Era exatamente o que estava acontecendo
-        // no filtro do dashboard.
         localizationsDelegates: const [
           GlobalMaterialLocalizations.delegate,
           GlobalWidgetsLocalizations.delegate,

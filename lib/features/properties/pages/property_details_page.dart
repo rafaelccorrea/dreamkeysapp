@@ -4975,13 +4975,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
                 return InkWell(
                   onTap: () {
-                    // TODO: Navegar para detalhes do checklist quando a página existir
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Visualizar checklist: $checklistId'),
-                        backgroundColor: AppColors.status.info,
-                      ),
-                    );
+                    if (checklistId.isEmpty) return;
+                    Navigator.of(context).pushNamed('/checklists/$checklistId');
                   },
                   child: Container(
                     margin: const EdgeInsets.only(bottom: 12),
