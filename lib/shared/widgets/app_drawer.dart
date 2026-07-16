@@ -177,8 +177,7 @@ class _AppDrawerState extends State<AppDrawer> {
         activeRoute.startsWith('/kanban/task') ||
         activeRoute == AppRoutes.clients ||
         activeRoute.startsWith('/clients') ||
-        activeRoute.startsWith('/visits') ||
-        activeRoute.startsWith('/mcmv')) {
+        activeRoute.startsWith('/visits')) {
       expandVendasCrm = true;
     }
 
@@ -189,10 +188,8 @@ class _AppDrawerState extends State<AppDrawer> {
     }
 
     final expandProdutividade =
-        activeRoute.startsWith('/goals') ||
         activeRoute.startsWith('/checklists') ||
-        activeRoute.startsWith('/assets') ||
-        activeRoute.startsWith('/automations');
+        activeRoute.startsWith('/assets');
 
     final expandOperacional =
         activeRoute.startsWith('/rentals') ||
@@ -963,14 +960,11 @@ class _AppDrawerState extends State<AppDrawer> {
         activeRoute.startsWith('/kanban/task') ||
         activeRoute == AppRoutes.clients ||
         activeRoute.startsWith('/clients') ||
-        activeRoute.startsWith('/visits') ||
-        activeRoute.startsWith('/mcmv');
+        activeRoute.startsWith('/visits');
 
     final produtividadeGroupActive =
-        activeRoute.startsWith('/goals') ||
         activeRoute.startsWith('/checklists') ||
-        activeRoute.startsWith('/assets') ||
-        activeRoute.startsWith('/automations');
+        activeRoute.startsWith('/assets');
 
     final operacionalGroupActive =
         activeRoute.startsWith('/rentals') ||
@@ -1069,27 +1063,8 @@ class _AppDrawerState extends State<AppDrawer> {
         ModuleAccessService.instance.hasCompanyModule('property_management') &&
         ModuleAccessService.instance.hasPermission('condominium:view');
 
-    // MCMV: o backend usa o módulo 'mcmv'; o web aceita o alias
-    // 'mcmv_management' — checamos os dois.
-    final hasMcmvModule =
-        ModuleAccessService.instance.hasCompanyModule('mcmv') ||
-        ModuleAccessService.instance.hasCompanyModule('mcmv_management');
-    final canSeeMcmvLeads =
-        hasMcmvModule &&
-        ModuleAccessService.instance.hasPermission('mcmv:lead:view');
-    final canSeeMcmvBlacklist =
-        hasMcmvModule &&
-        ModuleAccessService.instance.hasPermission('mcmv:blacklist:view');
-    final canSeeMcmvTemplates =
-        hasMcmvModule &&
-        ModuleAccessService.instance.hasPermission('mcmv:template:view');
-    final canSeeMcmv =
-        canSeeMcmvLeads || canSeeMcmvBlacklist || canSeeMcmvTemplates;
-
-    // Metas: espelha o AdminRoute do web (só role admin/master, sem módulo).
-    final goalsRole =
-        ModuleAccessService.instance.userRole?.toLowerCase().trim() ?? '';
-    final canSeeGoals = goalsRole == 'admin' || goalsRole == 'master';
+    // MCMV (/mcmv/*) e Metas (/goals): rotas vivas, itens OCULTOS do menu
+    // (decisão de produto — "não vamos usar por enquanto").
 
     // Checklists standalone (gate do Drawer.tsx: checklist_management +
     // property:view).
@@ -1167,9 +1142,8 @@ class _AppDrawerState extends State<AppDrawer> {
     final showImoveisGroup =
         canSeeProperties || canSeeApprovalsMenu || canSeeCondominiums;
     final showVendasCrmGroup =
-        canSeeKanban || canSeeClients || canSeeVisits || canSeeMcmv;
-    final showProdutividadeGroup =
-        canSeeGoals || canSeeChecklists || canSeeAssets;
+        canSeeKanban || canSeeClients || canSeeVisits || canSeeWhatsapp;
+    final showProdutividadeGroup = canSeeChecklists || canSeeAssets;
     final showIntegracoesGroup =
         canSeeIntegrations || canSeePublicSite;
     final showOperacionalGroup = canSeeRentals ||
@@ -1477,71 +1451,7 @@ class _AppDrawerState extends State<AppDrawer> {
                                     },
                                     isSubItem: true,
                                   ),
-                                if (canSeeMcmvLeads)
-                                  _buildDrawerItem(
-                                    context: context,
-                                    currentRoute: activeRoute,
-                                    route: AppRoutes.mcmvLeads,
-                                    icon: LucideIcons.contact,
-                                    activeIcon: LucideIcons.contact,
-                                    title: 'Leads MCMV',
-                                    accent: accent,
-                                    isActive: activeRoute.startsWith(
-                                      '/mcmv/leads',
-                                    ),
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      if (activeRoute == AppRoutes.mcmvLeads) {
-                                        return;
-                                      }
-                                      Navigator.of(
-                                        context,
-                                      ).pushNamed(AppRoutes.mcmvLeads);
-                                    },
-                                    isSubItem: true,
-                                  ),
-                                if (canSeeMcmvBlacklist)
-                                  _buildDrawerItem(
-                                    context: context,
-                                    currentRoute: activeRoute,
-                                    route: AppRoutes.mcmvBlacklist,
-                                    icon: LucideIcons.userMinus,
-                                    activeIcon: LucideIcons.userMinus,
-                                    title: 'Blacklist MCMV',
-                                    accent: accent,
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      if (activeRoute ==
-                                          AppRoutes.mcmvBlacklist) {
-                                        return;
-                                      }
-                                      Navigator.of(
-                                        context,
-                                      ).pushNamed(AppRoutes.mcmvBlacklist);
-                                    },
-                                    isSubItem: true,
-                                  ),
-                                if (canSeeMcmvTemplates)
-                                  _buildDrawerItem(
-                                    context: context,
-                                    currentRoute: activeRoute,
-                                    route: AppRoutes.mcmvTemplates,
-                                    icon: LucideIcons.fileText,
-                                    activeIcon: LucideIcons.fileText,
-                                    title: 'Templates MCMV',
-                                    accent: accent,
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      if (activeRoute ==
-                                          AppRoutes.mcmvTemplates) {
-                                        return;
-                                      }
-                                      Navigator.of(
-                                        context,
-                                      ).pushNamed(AppRoutes.mcmvTemplates);
-                                    },
-                                    isSubItem: true,
-                                  ),
+                                // MCMV: itens ocultos (rotas /mcmv/* vivas).
                               ],
                             ),
                           ],
@@ -1676,27 +1586,7 @@ class _AppDrawerState extends State<AppDrawer> {
                                 });
                               },
                               children: [
-                                if (canSeeGoals)
-                                  _buildDrawerItem(
-                                    context: context,
-                                    currentRoute: activeRoute,
-                                    route: AppRoutes.goals,
-                                    icon: LucideIcons.goal,
-                                    activeIcon: LucideIcons.goal,
-                                    title: 'Metas',
-                                    accent: accent,
-                                    isActive: activeRoute.startsWith('/goals'),
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      if (activeRoute == AppRoutes.goals) {
-                                        return;
-                                      }
-                                      Navigator.of(
-                                        context,
-                                      ).pushNamed(AppRoutes.goals);
-                                    },
-                                    isSubItem: true,
-                                  ),
+                                // Metas: item oculto (rota /goals viva).
                                 if (canSeeChecklists)
                                   _buildDrawerItem(
                                     context: context,
