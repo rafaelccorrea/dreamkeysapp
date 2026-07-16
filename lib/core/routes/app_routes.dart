@@ -111,6 +111,22 @@ import '../../features/automations/pages/automations_page.dart';
 import '../../features/automations/pages/create_automation_page.dart';
 import '../../features/automations/pages/automation_details_page.dart';
 import '../../features/automations/pages/automation_history_page.dart';
+import '../../features/whatsapp/models/whatsapp_models.dart';
+import '../../features/whatsapp/pages/whatsapp_conversation_page.dart';
+import '../../features/whatsapp/pages/whatsapp_inbox_page.dart';
+import '../../features/sdr/pages/sdr_dashboard_page.dart';
+import '../../features/sdr/pages/sdr_settings_page.dart';
+import '../../features/integrations/pages/integrations_page.dart';
+import '../../features/integrations/pages/integration_details_page.dart';
+import '../../features/zezin/pages/zezin_ask_page.dart';
+import '../../features/zezin/pages/zezin_config_page.dart';
+import '../../features/public_site/pages/public_site_page.dart';
+import '../../features/public_site/pages/bio_link_page.dart';
+import '../../features/analytics/pages/multichannel_analytics_page.dart';
+import '../../features/analytics/pages/advanced_analytics_page.dart';
+import '../../features/analytics/pages/property_analytics_page.dart';
+import '../../features/analytics/pages/compare_users_page.dart';
+import '../../features/analytics/pages/compare_teams_page.dart';
 import '../../shared/services/property_service.dart';
 
 /// Rotas da aplicação com transições customizadas
@@ -310,6 +326,35 @@ class AppRoutes {
   static const String automationCreate = '/automations/create';
   static String automationDetails(String id) => '/automations/$id';
   static String automationHistory(String id) => '/automations/$id/history';
+
+  // WhatsApp inbox (módulo api_integrations)
+  static const String whatsapp = '/whatsapp';
+  static String whatsappConversation(String phoneNumber) =>
+      '/whatsapp/${Uri.encodeComponent(phoneNumber)}';
+
+  // SDR IA (módulo whatsapp_ai)
+  static const String sdr = '/sdr';
+  static const String sdrSettings = '/sdr/settings';
+
+  // Central de Integrações
+  static const String integrations = '/integrations';
+  static String integrationDetails(String key) => '/integrations/$key';
+
+  // Zezin (assistente IA — módulo ai_assistant; oculto do drawer como no web)
+  static const String zezin = '/zezin';
+  static const String zezinConfig = '/zezin/config';
+
+  // Meu Site + Link in Bio (módulo public_site_hosting)
+  static const String mySite = '/my-site';
+  static const String bioLink = '/bio-link';
+
+  // Analytics (só Multicanal aparece no menu — demais são rotas diretas,
+  // paridade com o web que mantém as comparações ocultas)
+  static const String analyticsMultichannel = '/analytics/multichannel';
+  static const String analyticsAdvanced = '/analytics/advanced';
+  static const String analyticsProperties = '/analytics/properties';
+  static const String analyticsCompareUsers = '/analytics/compare-users';
+  static const String analyticsCompareTeams = '/analytics/compare-teams';
 
   static String propertyOfferDetails(String offerId) =>
       '/properties/offers/$offerId';
@@ -846,6 +891,54 @@ class AppRoutes {
           settings,
         );
       }
+    } else if (routeName == AppRoutes.whatsapp) {
+      return _buildRoute(const WhatsAppInboxPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/whatsapp/')) {
+      final segments = routeName.split('/');
+      if (segments.length == 3 && segments[2].isNotEmpty) {
+        final phone = Uri.decodeComponent(segments[2]);
+        final args = settings.arguments;
+        return _buildRoute(
+          WhatsAppConversationPage(
+            phoneNumber: phone,
+            conversation: args is WhatsAppConversation ? args : null,
+          ),
+          settings,
+        );
+      }
+    } else if (routeName == AppRoutes.sdr) {
+      return _buildRoute(const SdrDashboardPage(), settings);
+    } else if (routeName == AppRoutes.sdrSettings) {
+      return _buildRoute(const SdrSettingsPage(), settings);
+    } else if (routeName == AppRoutes.integrations) {
+      return _buildRoute(const IntegrationsPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/integrations/')) {
+      // Detalhe da integração: /integrations/:key
+      final segments = routeName.split('/');
+      if (segments.length == 3 && segments[2].isNotEmpty) {
+        return _buildRoute(
+          IntegrationDetailsPage(integrationKey: segments[2]),
+          settings,
+        );
+      }
+    } else if (routeName == AppRoutes.zezin) {
+      return _buildRoute(const ZezinAskPage(), settings);
+    } else if (routeName == AppRoutes.zezinConfig) {
+      return _buildRoute(const ZezinConfigPage(), settings);
+    } else if (routeName == AppRoutes.mySite) {
+      return _buildRoute(const PublicSitePage(), settings);
+    } else if (routeName == AppRoutes.bioLink) {
+      return _buildRoute(const BioLinkPage(), settings);
+    } else if (routeName == AppRoutes.analyticsMultichannel) {
+      return _buildRoute(const MultichannelAnalyticsPage(), settings);
+    } else if (routeName == AppRoutes.analyticsAdvanced) {
+      return _buildRoute(const AdvancedAnalyticsPage(), settings);
+    } else if (routeName == AppRoutes.analyticsProperties) {
+      return _buildRoute(const PropertyAnalyticsPage(), settings);
+    } else if (routeName == AppRoutes.analyticsCompareUsers) {
+      return _buildRoute(const CompareUsersPage(), settings);
+    } else if (routeName == AppRoutes.analyticsCompareTeams) {
+      return _buildRoute(const CompareTeamsPage(), settings);
     }
 
     // Rota não encontrada

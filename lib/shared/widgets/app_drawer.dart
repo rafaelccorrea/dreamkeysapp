@@ -60,6 +60,7 @@ class _AppDrawerState extends State<AppDrawer> {
   bool _produtividadeExpanded = false;
   bool _operacionalExpanded = false;
   bool _suporteExpanded = false;
+  bool _integracoesExpanded = false;
 
   /// Lista para o seletor de empresa (Master)
   List<Company> _masterCompanies = [];
@@ -203,12 +204,18 @@ class _AppDrawerState extends State<AppDrawer> {
     final expandSuporte =
         activeRoute.startsWith('/tickets') || activeRoute == AppRoutes.help;
 
+    final expandIntegracoes =
+        activeRoute.startsWith('/integrations') ||
+        activeRoute == AppRoutes.mySite ||
+        activeRoute == AppRoutes.bioLink;
+
     if (expandImoveis ||
         expandVendasCrm ||
         expandColaboradores ||
         expandProdutividade ||
         expandOperacional ||
-        expandSuporte) {
+        expandSuporte ||
+        expandIntegracoes) {
       setState(() {
         if (expandImoveis) _imoveisExpanded = true;
         if (expandVendasCrm) _vendasCrmExpanded = true;
@@ -216,6 +223,7 @@ class _AppDrawerState extends State<AppDrawer> {
         if (expandProdutividade) _produtividadeExpanded = true;
         if (expandOperacional) _operacionalExpanded = true;
         if (expandSuporte) _suporteExpanded = true;
+        if (expandIntegracoes) _integracoesExpanded = true;
       });
     }
   }
@@ -974,6 +982,11 @@ class _AppDrawerState extends State<AppDrawer> {
     final suporteGroupActive =
         activeRoute.startsWith('/tickets') || activeRoute == AppRoutes.help;
 
+    final integracoesGroupActive =
+        activeRoute.startsWith('/integrations') ||
+        activeRoute == AppRoutes.mySite ||
+        activeRoute == AppRoutes.bioLink;
+
     // Paridade com `Drawer.tsx` do web: item "Aprovações" só aparece se o
     // usuário tem `view`, `create`, `approve_*` ou `manage_approval_settings`
     // — com bypass admin/master/manager via `hasAnyPermission`.
@@ -1089,10 +1102,44 @@ class _AppDrawerState extends State<AppDrawer> {
         ModuleAccessService.instance.hasCompanyModule('asset_management') &&
         ModuleAccessService.instance.hasPermission('asset:view');
 
-    // Automações: espelha o web (AdminRoute + módulo `automations`).
-    final canSeeAutomations =
-        (goalsRole == 'admin' || goalsRole == 'master') &&
-        ModuleAccessService.instance.hasCompanyModule('automations');
+    // WhatsApp inbox (paridade com /whatsapp do web: módulo api_integrations
+    // + ANY-OF whatsapp:view / whatsapp:view_messages).
+    final canSeeWhatsapp =
+        ModuleAccessService.instance.hasCompanyModule('api_integrations') &&
+        (ModuleAccessService.instance.hasPermission('whatsapp:view') ||
+            ModuleAccessService.instance
+                .hasPermission('whatsapp:view_messages'));
+
+    // SDR IA (módulo whatsapp_ai + whatsapp:manage_config).
+    final canSeeSdr =
+        ModuleAccessService.instance.hasCompanyModule('whatsapp_ai') &&
+        ModuleAccessService.instance.hasPermission('whatsapp:manage_config');
+
+    // Central de Integrações (any-of dos módulos/permissões do web).
+    final canSeeIntegrations = (ModuleAccessService.instance
+                .hasCompanyModule('api_integrations') ||
+            ModuleAccessService.instance
+                .hasCompanyModule('third_party_integrations') ||
+            ModuleAccessService.instance
+                .hasCompanyModule('lead_distribution')) &&
+        ModuleAccessService.instance.hasAnyPermission(const [
+          'whatsapp:view',
+          'whatsapp:manage_config',
+          'meta_campaign:manage_config',
+          'grupo_zap:manage_config',
+          'lead_distribution:manage_config',
+          'kanban:manage_users',
+        ]);
+
+    // Meu Site + Link in Bio (módulo public_site_hosting).
+    final canSeePublicSite =
+        ModuleAccessService.instance.hasCompanyModule('public_site_hosting') &&
+        ModuleAccessService.instance.hasPermission('public_site:view');
+
+    // Análise Multicanal (único analytics visível no menu — como no web).
+    final canSeeMultichannel = ModuleAccessService.instance
+            .hasCompanyModule('public_site_analytics') &&
+        ModuleAccessService.instance.hasPermission('public_analytics:view');
 
     // Operacional — Locações e crédito/cobrança (gates exatos do web).
     final hasRentalModule =
@@ -1122,7 +1169,9 @@ class _AppDrawerState extends State<AppDrawer> {
     final showVendasCrmGroup =
         canSeeKanban || canSeeClients || canSeeVisits || canSeeMcmv;
     final showProdutividadeGroup =
-        canSeeGoals || canSeeChecklists || canSeeAssets || canSeeAutomations;
+        canSeeGoals || canSeeChecklists || canSeeAssets;
+    final showIntegracoesGroup =
+        canSeeIntegrations || canSeePublicSite;
     final showOperacionalGroup = canSeeRentals ||
         canSeeRentalsDashboard ||
         canSeeRentalForms ||
@@ -1360,6 +1409,50 @@ class _AppDrawerState extends State<AppDrawer> {
                                         AppRoutes.clients,
                                         (route) => false,
                                       );
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeWhatsapp)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.whatsapp,
+                                    icon: LucideIcons.messageCircle,
+                                    activeIcon: LucideIcons.messageCircle,
+                                    title: 'WhatsApp',
+                                    accent: accent,
+                                    isActive: activeRoute.startsWith(
+                                      '/whatsapp',
+                                    ),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.whatsapp) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.whatsapp);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeSdr)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.sdr,
+                                    icon: LucideIcons.botMessageSquare,
+                                    activeIcon: LucideIcons.botMessageSquare,
+                                    title: 'SDR com IA',
+                                    accent: accent,
+                                    isActive: activeRoute.startsWith('/sdr'),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.sdr) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.sdr);
                                     },
                                     isSubItem: true,
                                   ),
@@ -1648,30 +1741,9 @@ class _AppDrawerState extends State<AppDrawer> {
                                     },
                                     isSubItem: true,
                                   ),
-                                if (canSeeAutomations)
-                                  _buildDrawerItem(
-                                    context: context,
-                                    currentRoute: activeRoute,
-                                    route: AppRoutes.automations,
-                                    icon: LucideIcons.zap,
-                                    activeIcon: LucideIcons.zap,
-                                    title: 'Automações',
-                                    accent: accent,
-                                    isActive: activeRoute.startsWith(
-                                      '/automations',
-                                    ),
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      if (activeRoute ==
-                                          AppRoutes.automations) {
-                                        return;
-                                      }
-                                      Navigator.of(
-                                        context,
-                                      ).pushNamed(AppRoutes.automations);
-                                    },
-                                    isSubItem: true,
-                                  ),
+                                // Automações: rota existe (/automations) mas o
+                                // item fica OCULTO — espelha o web, que mantém
+                                // Automações e Zezin fora do menu.
                               ],
                             ),
                           ],
@@ -1889,6 +1961,108 @@ class _AppDrawerState extends State<AppDrawer> {
                                   ),
                               ],
                             ),
+                          if (canSeeMultichannel)
+                            _buildDrawerItem(
+                              context: context,
+                              currentRoute: activeRoute,
+                              route: AppRoutes.analyticsMultichannel,
+                              icon: LucideIcons.radar,
+                              activeIcon: LucideIcons.radar,
+                              title: 'Análise Multicanal',
+                              accent: accent,
+                              showLeadingTile: true,
+                              onTap: () {
+                                Navigator.pop(context);
+                                if (activeRoute ==
+                                    AppRoutes.analyticsMultichannel) {
+                                  return;
+                                }
+                                Navigator.of(context)
+                                    .pushNamed(AppRoutes.analyticsMultichannel);
+                              },
+                            ),
+                          if (showIntegracoesGroup) ...[
+                            _buildExpansionTile(
+                              context: context,
+                              title: 'Integrações',
+                              icon: LucideIcons.plugZap,
+                              activeIcon: LucideIcons.plugZap,
+                              isExpanded: _integracoesExpanded,
+                              groupActive: integracoesGroupActive,
+                              accent: accent,
+                              onExpansionChanged: (expanded) {
+                                setState(() {
+                                  _integracoesExpanded = expanded;
+                                });
+                              },
+                              children: [
+                                if (canSeeIntegrations)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.integrations,
+                                    icon: LucideIcons.plugZap,
+                                    activeIcon: LucideIcons.plugZap,
+                                    title: 'Central de Integrações',
+                                    accent: accent,
+                                    isActive: activeRoute.startsWith(
+                                      '/integrations',
+                                    ),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute ==
+                                          AppRoutes.integrations) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.integrations);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeePublicSite) ...[
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.mySite,
+                                    icon: LucideIcons.globe,
+                                    activeIcon: LucideIcons.globe,
+                                    title: 'Meu Site',
+                                    accent: accent,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.mySite) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.mySite);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.bioLink,
+                                    icon: LucideIcons.link,
+                                    activeIcon: LucideIcons.link,
+                                    title: 'Link in Bio',
+                                    accent: accent,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.bioLink) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.bioLink);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
                           _buildExpansionTile(
                             context: context,
                             title: 'Suporte',
