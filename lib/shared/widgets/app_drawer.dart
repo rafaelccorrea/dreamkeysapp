@@ -58,6 +58,8 @@ class _AppDrawerState extends State<AppDrawer> {
   bool _vendasCrmExpanded = false;
   bool _colaboradoresExpanded = false;
   bool _produtividadeExpanded = false;
+  bool _operacionalExpanded = false;
+  bool _suporteExpanded = false;
 
   /// Lista para o seletor de empresa (Master)
   List<Company> _masterCompanies = [];
@@ -188,17 +190,32 @@ class _AppDrawerState extends State<AppDrawer> {
     final expandProdutividade =
         activeRoute.startsWith('/goals') ||
         activeRoute.startsWith('/checklists') ||
-        activeRoute.startsWith('/assets');
+        activeRoute.startsWith('/assets') ||
+        activeRoute.startsWith('/automations');
+
+    final expandOperacional =
+        activeRoute.startsWith('/rentals') ||
+        activeRoute.startsWith('/rental-forms') ||
+        activeRoute.startsWith('/insurance') ||
+        activeRoute.startsWith('/credit-analysis') ||
+        activeRoute.startsWith('/collection');
+
+    final expandSuporte =
+        activeRoute.startsWith('/tickets') || activeRoute == AppRoutes.help;
 
     if (expandImoveis ||
         expandVendasCrm ||
         expandColaboradores ||
-        expandProdutividade) {
+        expandProdutividade ||
+        expandOperacional ||
+        expandSuporte) {
       setState(() {
         if (expandImoveis) _imoveisExpanded = true;
         if (expandVendasCrm) _vendasCrmExpanded = true;
         if (expandColaboradores) _colaboradoresExpanded = true;
         if (expandProdutividade) _produtividadeExpanded = true;
+        if (expandOperacional) _operacionalExpanded = true;
+        if (expandSuporte) _suporteExpanded = true;
       });
     }
   }
@@ -338,8 +355,13 @@ class _AppDrawerState extends State<AppDrawer> {
     return r == 'master';
   }
 
+  /// Carrega as empresas do usuário para o seletor. O backend escopa a lista
+  /// por usuário (master vê todas; admin/gestor/corretor só as suas), então o
+  /// picker vale para QUALQUER papel multi-empresa — paridade com o
+  /// CompanySelector do header web. Para master pré-carregamos no init; para
+  /// os demais a carga é lazy (ao tocar no chip da empresa).
   Future<void> _loadCompaniesForMaster() async {
-    if (!_isMasterUser || !mounted) return;
+    if (!mounted) return;
     final res = await CompanyService.instance.getCompanies();
     if (!mounted) return;
     setState(() {
@@ -354,8 +376,6 @@ class _AppDrawerState extends State<AppDrawer> {
   }
 
   Future<void> _showCompanyPickerSheet(BuildContext parentContext) async {
-    if (!_isMasterUser) return;
-
     if (_masterCompanies.isEmpty) {
       await _loadCompaniesForMaster();
     }
@@ -480,7 +500,11 @@ class _AppDrawerState extends State<AppDrawer> {
       final label = _companyIsMatrix
           ? '${_companyName!} · Matriz'
           : _companyName!;
-      final allowPicker = _isMasterUser && _masterCompanies.length > 1;
+      // Master: só é clicável quando há 2+ empresas (lista pré-carregada).
+      // Demais papéis: sempre clicável — a lista é carregada ao tocar e, se
+      // houver só uma empresa, o sheet avisa (paridade com o web).
+      final allowPicker =
+          _isMasterUser ? _masterCompanies.length > 1 : true;
       final chip = _buildDrawerHeroChip(
         context,
         icon: LucideIcons.building2,
@@ -937,7 +961,18 @@ class _AppDrawerState extends State<AppDrawer> {
     final produtividadeGroupActive =
         activeRoute.startsWith('/goals') ||
         activeRoute.startsWith('/checklists') ||
-        activeRoute.startsWith('/assets');
+        activeRoute.startsWith('/assets') ||
+        activeRoute.startsWith('/automations');
+
+    final operacionalGroupActive =
+        activeRoute.startsWith('/rentals') ||
+        activeRoute.startsWith('/rental-forms') ||
+        activeRoute.startsWith('/insurance') ||
+        activeRoute.startsWith('/credit-analysis') ||
+        activeRoute.startsWith('/collection');
+
+    final suporteGroupActive =
+        activeRoute.startsWith('/tickets') || activeRoute == AppRoutes.help;
 
     // Paridade com `Drawer.tsx` do web: item "Aprovações" só aparece se o
     // usuário tem `view`, `create`, `approve_*` ou `manage_approval_settings`
@@ -1054,12 +1089,48 @@ class _AppDrawerState extends State<AppDrawer> {
         ModuleAccessService.instance.hasCompanyModule('asset_management') &&
         ModuleAccessService.instance.hasPermission('asset:view');
 
+    // Automações: espelha o web (AdminRoute + módulo `automations`).
+    final canSeeAutomations =
+        (goalsRole == 'admin' || goalsRole == 'master') &&
+        ModuleAccessService.instance.hasCompanyModule('automations');
+
+    // Operacional — Locações e crédito/cobrança (gates exatos do web).
+    final hasRentalModule =
+        ModuleAccessService.instance.hasCompanyModule('rental_management');
+    final canSeeRentals = hasRentalModule &&
+        ModuleAccessService.instance.hasPermission('rental:view');
+    final canSeeRentalsDashboard = hasRentalModule &&
+        ModuleAccessService.instance.hasPermission('rental:view_dashboard');
+    final canSeeRentalForms = hasRentalModule &&
+        ModuleAccessService.instance.hasPermission('rental_form:view');
+    final canSeeInsurance = hasRentalModule &&
+        ModuleAccessService.instance.hasPermission('insurance:create_quote');
+    final hasCreditModule = ModuleAccessService.instance
+        .hasCompanyModule('credit_and_collection');
+    final canSeeCreditAnalysis = hasCreditModule &&
+        ModuleAccessService.instance.hasPermission('credit_analysis:view');
+    final canSeeCollection = hasCreditModule &&
+        ModuleAccessService.instance.hasPermission('collection:view');
+
+    // Suporte — Central de Ajuda é aberta a todos; tickets exigem criar/ver.
+    final canSeeTickets =
+        ModuleAccessService.instance.hasPermission('ticket:create') ||
+        ModuleAccessService.instance.hasPermission('ticket:view');
+
     final showImoveisGroup =
         canSeeProperties || canSeeApprovalsMenu || canSeeCondominiums;
     final showVendasCrmGroup =
         canSeeKanban || canSeeClients || canSeeVisits || canSeeMcmv;
     final showProdutividadeGroup =
-        canSeeGoals || canSeeChecklists || canSeeAssets;
+        canSeeGoals || canSeeChecklists || canSeeAssets || canSeeAutomations;
+    final showOperacionalGroup = canSeeRentals ||
+        canSeeRentalsDashboard ||
+        canSeeRentalForms ||
+        canSeeInsurance ||
+        canSeeCreditAnalysis ||
+        canSeeCollection;
+    // Gamificação/Prêmios: telas e rotas existem, mas SEM itens de menu
+    // (decisão de produto — oculto também no web).
 
     return Drawer(
       backgroundColor: Colors.transparent,
@@ -1577,6 +1648,184 @@ class _AppDrawerState extends State<AppDrawer> {
                                     },
                                     isSubItem: true,
                                   ),
+                                if (canSeeAutomations)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.automations,
+                                    icon: LucideIcons.zap,
+                                    activeIcon: LucideIcons.zap,
+                                    title: 'Automações',
+                                    accent: accent,
+                                    isActive: activeRoute.startsWith(
+                                      '/automations',
+                                    ),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute ==
+                                          AppRoutes.automations) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.automations);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                              ],
+                            ),
+                          ],
+                          if (showOperacionalGroup) ...[
+                            _buildExpansionTile(
+                              context: context,
+                              title: 'Operacional',
+                              icon: LucideIcons.keyRound,
+                              activeIcon: LucideIcons.keyRound,
+                              isExpanded: _operacionalExpanded,
+                              groupActive: operacionalGroupActive,
+                              accent: accent,
+                              onExpansionChanged: (expanded) {
+                                setState(() {
+                                  _operacionalExpanded = expanded;
+                                });
+                              },
+                              children: [
+                                if (canSeeRentals)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.rentals,
+                                    icon: LucideIcons.keyRound,
+                                    activeIcon: LucideIcons.keyRound,
+                                    title: 'Locações',
+                                    accent: accent,
+                                    isActive:
+                                        activeRoute.startsWith('/rentals') &&
+                                        activeRoute != AppRoutes.rentalsDashboard,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.rentals) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.rentals);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeRentalsDashboard)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.rentalsDashboard,
+                                    icon: LucideIcons.chartNoAxesColumn,
+                                    activeIcon: LucideIcons.chartNoAxesColumn,
+                                    title: 'Dashboard de Locações',
+                                    accent: accent,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute ==
+                                          AppRoutes.rentalsDashboard) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.rentalsDashboard);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeRentalForms)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.rentalForms,
+                                    icon: LucideIcons.clipboardList,
+                                    activeIcon: LucideIcons.clipboardList,
+                                    title: 'Fichas de locação',
+                                    accent: accent,
+                                    isActive: activeRoute.startsWith(
+                                      '/rental-forms',
+                                    ),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute ==
+                                          AppRoutes.rentalForms) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.rentalForms);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeInsurance)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.insuranceQuote,
+                                    icon: LucideIcons.shield,
+                                    activeIcon: LucideIcons.shield,
+                                    title: 'Seguros',
+                                    accent: accent,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute ==
+                                          AppRoutes.insuranceQuote) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.insuranceQuote);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeCreditAnalysis)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.creditAnalysis,
+                                    icon: LucideIcons.scanSearch,
+                                    activeIcon: LucideIcons.scanSearch,
+                                    title: 'Análise de Crédito',
+                                    accent: accent,
+                                    isActive: activeRoute.startsWith(
+                                      '/credit-analysis',
+                                    ),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute ==
+                                          AppRoutes.creditAnalysis) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.creditAnalysis);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeCollection)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.collection,
+                                    icon: LucideIcons.bellRing,
+                                    activeIcon: LucideIcons.bellRing,
+                                    title: 'Régua de Cobrança',
+                                    accent: accent,
+                                    isActive: activeRoute.startsWith(
+                                      '/collection',
+                                    ),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.collection) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.collection);
+                                    },
+                                    isSubItem: true,
+                                  ),
                               ],
                             ),
                           ],
@@ -1640,6 +1889,60 @@ class _AppDrawerState extends State<AppDrawer> {
                                   ),
                               ],
                             ),
+                          _buildExpansionTile(
+                            context: context,
+                            title: 'Suporte',
+                            icon: LucideIcons.lifeBuoy,
+                            activeIcon: LucideIcons.lifeBuoy,
+                            isExpanded: _suporteExpanded,
+                            groupActive: suporteGroupActive,
+                            accent: accent,
+                            onExpansionChanged: (expanded) {
+                              setState(() {
+                                _suporteExpanded = expanded;
+                              });
+                            },
+                            children: [
+                              _buildDrawerItem(
+                                context: context,
+                                currentRoute: activeRoute,
+                                route: AppRoutes.help,
+                                icon: LucideIcons.circleHelp,
+                                activeIcon: LucideIcons.circleHelp,
+                                title: 'Central de Ajuda',
+                                accent: accent,
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  if (activeRoute == AppRoutes.help) return;
+                                  Navigator.of(
+                                    context,
+                                  ).pushNamed(AppRoutes.help);
+                                },
+                                isSubItem: true,
+                              ),
+                              if (canSeeTickets)
+                                _buildDrawerItem(
+                                  context: context,
+                                  currentRoute: activeRoute,
+                                  route: AppRoutes.tickets,
+                                  icon: LucideIcons.lifeBuoy,
+                                  activeIcon: LucideIcons.lifeBuoy,
+                                  title: 'Meus tickets',
+                                  accent: accent,
+                                  isActive: activeRoute.startsWith('/tickets'),
+                                  onTap: () {
+                                    Navigator.pop(context);
+                                    if (activeRoute == AppRoutes.tickets) {
+                                      return;
+                                    }
+                                    Navigator.of(
+                                      context,
+                                    ).pushNamed(AppRoutes.tickets);
+                                  },
+                                  isSubItem: true,
+                                ),
+                            ],
+                          ),
                           Divider(
                             height: 1,
                             thickness: 1,

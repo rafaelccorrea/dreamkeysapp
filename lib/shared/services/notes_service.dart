@@ -376,6 +376,39 @@ class NotesService {
     }
   }
 
+  /// Atualiza uma anotação (`PATCH /notes/:id` — paridade com
+  /// `notesApi.updateNote` do web). Envia apenas os campos alterados.
+  Future<ApiResponse<NoteListItem>> updateNote(
+    String id,
+    Map<String, dynamic> changes,
+  ) async {
+    try {
+      if (changes.isEmpty) {
+        return ApiResponse.error(
+          message: 'Nada para atualizar.',
+          statusCode: 0,
+        );
+      }
+      final res = await _api.patch<Map<String, dynamic>>(
+        ApiConstants.noteById(id),
+        body: changes,
+      );
+      if (!res.success || res.data == null) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao atualizar anotação',
+          statusCode: res.statusCode,
+        );
+      }
+      return ApiResponse.success(
+        data: NoteListItem.fromJson(_unwrapNoteMap(res.data!)),
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [NOTES] updateNote: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
   Future<ApiResponse<NoteListItem>> togglePin(String id) async {
     try {
       final res = await _api.patch<Map<String, dynamic>>(

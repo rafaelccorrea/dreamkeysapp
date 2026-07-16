@@ -322,10 +322,7 @@ class IntegrationCatalog {
         IntegrationPermissions.googleAdsView,
         IntegrationPermissions.googleAdsManageConfig,
       ],
-      managePermissions: [
-        IntegrationPermissions.googleAdsManageConfig,
-        IntegrationPermissions.metaCampaignManageConfig,
-      ],
+      managePermissions: [IntegrationPermissions.googleAdsManageConfig],
       supportsTest: true,
     ),
     IntegrationDef(
@@ -342,10 +339,7 @@ class IntegrationCatalog {
         IntegrationPermissions.googleAdsView,
         IntegrationPermissions.googleAdsManageConfig,
       ],
-      managePermissions: [
-        IntegrationPermissions.googleAdsManageConfig,
-        IntegrationPermissions.metaCampaignManageConfig,
-      ],
+      managePermissions: [IntegrationPermissions.googleAdsManageConfig],
       supportsTest: true,
     ),
 

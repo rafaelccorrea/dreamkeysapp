@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/api_service.dart';
 import '../../../shared/services/notes_service.dart';
+import '../pages/create_note_page.dart';
 import 'note_paper_card.dart';
 
 /// Abre detalhe da nota como popup elevado (paridade com modal do CRM web).
@@ -165,6 +166,24 @@ class _NoteDetailOverlayState extends State<_NoteDetailOverlay> {
                           canDelete: widget.canDelete,
                           archived: widget.archived,
                           onClose: () => Navigator.of(context).pop(),
+                          onEdit: widget.canUpdate && !widget.archived
+                              ? () async {
+                                  if (_busy) return;
+                                  final saved = await showCreateNoteSheet(
+                                    context,
+                                    accent: widget.accent,
+                                    initial: _note,
+                                  );
+                                  if (saved == true && mounted) {
+                                    widget.onChanged?.call();
+                                    // Recarrega a nota exibida com os dados novos.
+                                    await _mutate(
+                                      () =>
+                                          NotesService.instance.getNote(_note.id),
+                                    );
+                                  }
+                                }
+                              : null,
                           onPin: widget.canUpdate
                               ? () => _mutate(
                                     () => NotesService.instance.togglePin(_note.id),
@@ -254,6 +273,7 @@ class _DetailTopBar extends StatelessWidget {
     required this.canDelete,
     required this.archived,
     required this.onClose,
+    this.onEdit,
     this.onPin,
     this.onArchive,
     this.onRestore,
@@ -268,6 +288,7 @@ class _DetailTopBar extends StatelessWidget {
   final bool canDelete;
   final bool archived;
   final VoidCallback onClose;
+  final VoidCallback? onEdit;
   final VoidCallback? onPin;
   final VoidCallback? onArchive;
   final VoidCallback? onRestore;
@@ -315,6 +336,12 @@ class _DetailTopBar extends StatelessWidget {
                 height: 20,
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
+            ),
+          if (onEdit != null)
+            IconButton(
+              onPressed: busy ? null : onEdit,
+              tooltip: 'Editar anotação',
+              icon: Icon(Icons.edit_outlined, color: muted),
             ),
           if (onPin != null)
             IconButton(

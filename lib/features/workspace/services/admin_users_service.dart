@@ -18,6 +18,70 @@ class AdminUsersService {
   static final AdminUsersService instance = AdminUsersService._();
   final ApiService _api = ApiService.instance;
 
+  /// Valida disponibilidade de email (`GET /admin/users/validate/email`).
+  Future<bool?> validateEmailAvailable(String email) async {
+    try {
+      final res = await _api.get<Map<String, dynamic>>(
+        '${ApiConstants.adminUsers}/validate/email',
+        queryParameters: {'email': email.trim()},
+      );
+      if (!res.success || res.data == null) return null;
+      final root = res.data!['data'] is Map
+          ? Map<String, dynamic>.from(res.data!['data'] as Map)
+          : res.data!;
+      return root['available'] == true;
+    } catch (e) {
+      debugPrint('❌ [ADMIN_USERS] validateEmail: $e');
+      return null;
+    }
+  }
+
+  /// Valida disponibilidade de CPF/CNPJ (`GET /admin/users/validate/document`).
+  Future<bool?> validateDocumentAvailable(String document) async {
+    try {
+      final res = await _api.get<Map<String, dynamic>>(
+        '${ApiConstants.adminUsers}/validate/document',
+        queryParameters: {'document': document.trim()},
+      );
+      if (!res.success || res.data == null) return null;
+      final root = res.data!['data'] is Map
+          ? Map<String, dynamic>.from(res.data!['data'] as Map)
+          : res.data!;
+      return root['available'] == true;
+    } catch (e) {
+      debugPrint('❌ [ADMIN_USERS] validateDocument: $e');
+      return null;
+    }
+  }
+
+  /// Cria usuário (`POST /admin/users` — paridade com `usersApi.createUser`).
+  /// `body` segue o `CreateUserData` do web: name, email, password, document,
+  /// phone (só dígitos), role, permissionIds?, tagIds?, managerIds?.
+  Future<ApiResponse<AdminUser>> createUser(Map<String, dynamic> body) async {
+    try {
+      final res = await _api.post<Map<String, dynamic>>(
+        ApiConstants.adminUsers,
+        body: body,
+      );
+      if (!res.success || res.data == null) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao criar usuário',
+          statusCode: res.statusCode,
+        );
+      }
+      final root = res.data!['data'] is Map
+          ? Map<String, dynamic>.from(res.data!['data'] as Map)
+          : res.data!;
+      return ApiResponse.success(
+        data: AdminUser.fromJson(root),
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [ADMIN_USERS] createUser: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
   Future<ApiResponse<AdminUsersPage>> listUsers({
     int page = 1,
     int limit = 20,

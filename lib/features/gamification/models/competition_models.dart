@@ -281,7 +281,9 @@ class Prize {
   final String competitionId;
   final String competitionName;
   final int position;
+  final String? winnerUserId;
   final String? winnerUserName;
+  final String? winnerTeamId;
   final String? winnerTeamName;
   final DateTime? deliveredAt;
   final DateTime? createdAt;
@@ -295,11 +297,24 @@ class Prize {
     required this.competitionId,
     required this.competitionName,
     required this.position,
+    this.winnerUserId,
     this.winnerUserName,
+    this.winnerTeamId,
     this.winnerTeamName,
     this.deliveredAt,
     this.createdAt,
   });
+
+  bool get hasWinner =>
+      (winnerUserId != null && winnerUserId!.isNotEmpty) ||
+      (winnerTeamId != null && winnerTeamId!.isNotEmpty) ||
+      (winnerUserName != null && winnerUserName!.isNotEmpty) ||
+      (winnerTeamName != null && winnerTeamName!.isNotEmpty);
+
+  /// Regras de ação (paridade `PrizesPage.tsx`).
+  bool get canEdit => status != PrizeStatus.delivered && !hasWinner;
+  bool get canDeliver => status == PrizeStatus.pending && hasWinner;
+  bool get canDelete => status == PrizeStatus.available;
 
   factory Prize.fromJson(Map<String, dynamic> j) {
     return Prize(
@@ -311,7 +326,9 @@ class Prize {
       competitionId: j['competitionId']?.toString() ?? '',
       competitionName: j['competitionName']?.toString() ?? '',
       position: gamToInt(j['position']),
+      winnerUserId: j['winnerUserId']?.toString(),
       winnerUserName: j['winnerUserName']?.toString(),
+      winnerTeamId: j['winnerTeamId']?.toString(),
       winnerTeamName: j['winnerTeamName']?.toString(),
       deliveredAt: gamToDate(j['deliveredAt']),
       createdAt: gamToDate(j['createdAt']),

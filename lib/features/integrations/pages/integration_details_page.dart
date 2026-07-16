@@ -286,7 +286,12 @@ class _IntegrationDetailsPageState extends State<IntegrationDetailsPage> {
         IntegrationStatusData(key: def.key, configured: false);
     final configured = st.configured;
     final infoRows = buildIntegrationInfoRows(def, st);
-    final showToggle = def.supportsToggle && _canManage;
+    // Toggle leve só quando já EXISTE config salva no backend (evita criar
+    // configuração vazia pelo app); Autentique exige a API key já salva.
+    final showToggle = def.supportsToggle &&
+        _canManage &&
+        st.raw.isNotEmpty &&
+        (def.key != 'autentique' || asBool(st.raw['hasApiKey']));
     final showTest = def.supportsTest && _canManage;
 
     return Column(

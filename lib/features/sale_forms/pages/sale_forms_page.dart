@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/constants/app_permissions.dart';
+import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
@@ -290,6 +292,18 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
       title: 'Fichas de venda',
       currentBottomNavIndex: -1,
       showBottomNavigation: false,
+      actions: [
+        // Painel de fichas (paridade com "Dash Fichas Venda" do web —
+        // permissão sale_form:view_dashboard; backend valida o escopo).
+        if (ModuleAccessService.instance
+            .hasPermission('sale_form:view_dashboard'))
+          IconButton(
+            tooltip: 'Dashboard de fichas',
+            icon: const Icon(LucideIcons.chartColumn, size: 19),
+            onPressed: () =>
+                Navigator.of(context).pushNamed(AppRoutes.saleFormsDashboard),
+          ),
+      ],
       body: Stack(
         children: [
           RefreshIndicator(

@@ -10,11 +10,14 @@ import 'rewards_ui.dart';
 final DateFormat _dateFull = DateFormat("dd/MM/yyyy 'às' HH:mm", 'pt_BR');
 
 /// Card de solicitação na tela **Aprovar Resgates** — quem pediu, o quê e as
-/// ações **Aprovar / Rejeitar no próprio item** (somente pendentes).
+/// ações **Aprovar / Rejeitar no próprio item** (somente pendentes). Para
+/// solicitações aprovadas, exibe **Marcar como entregue** quando [onDeliver]
+/// for fornecido (gated `reward:deliver` na página).
 class PendingRedemptionCard extends StatelessWidget {
   final RewardRedemption redemption;
   final VoidCallback? onApprove;
   final VoidCallback? onReject;
+  final VoidCallback? onDeliver;
   final bool busy;
 
   const PendingRedemptionCard({
@@ -22,6 +25,7 @@ class PendingRedemptionCard extends StatelessWidget {
     required this.redemption,
     this.onApprove,
     this.onReject,
+    this.onDeliver,
     this.busy = false,
   });
 
@@ -278,6 +282,43 @@ class PendingRedemptionCard extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+          ],
+          // Entrega — apenas aprovados e quando a página fornece a ação.
+          if (redemption.canDeliver && onDeliver != null) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              height: 40,
+              child: OutlinedButton.icon(
+                onPressed: busy ? null : onDeliver,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: isDark
+                      ? AppColors.status.infoDarkMode
+                      : AppColors.status.info,
+                  side: BorderSide(
+                    color: (isDark
+                            ? AppColors.status.infoDarkMode
+                            : AppColors.status.info)
+                        .withValues(alpha: 0.45),
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  textStyle: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13.5,
+                  ),
+                ),
+                icon: busy
+                    ? const SizedBox(
+                        width: 15,
+                        height: 15,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(LucideIcons.packageCheck, size: 16),
+                label: const Text('Marcar como entregue'),
+              ),
             ),
           ],
         ],

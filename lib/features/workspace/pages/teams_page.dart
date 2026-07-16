@@ -259,6 +259,19 @@ class _TeamsPageState extends State<TeamsPage> {
     return AppScaffold(
       title: 'Equipes',
       showBottomNavigation: false,
+      actions: [
+        if (ModuleAccessService.instance
+            .hasPermission(AppPermissions.teamCreate))
+          IconButton(
+            tooltip: 'Nova equipe',
+            icon: const Icon(LucideIcons.plus, size: 20),
+            onPressed: () async {
+              final created = await Navigator.of(context)
+                  .pushNamed('/teams/create');
+              if (created == true && mounted) _reload();
+            },
+          ),
+      ],
       body: RefreshIndicator(
         onRefresh: _reload,
         child: ListView(
@@ -290,6 +303,11 @@ class _TeamsPageState extends State<TeamsPage> {
               _TeamsList(
                 teams: _teams,
                 onDelete: _confirmDelete,
+                onEdit: (t) async {
+                  final changed = await Navigator.of(context)
+                      .pushNamed('/teams/${t.id}/edit');
+                  if (changed == true && mounted) _reload();
+                },
               ),
             if (_loadingMore)
               const Padding(
@@ -868,10 +886,12 @@ class _TeamsList extends StatelessWidget {
   const _TeamsList({
     required this.teams,
     required this.onDelete,
+    required this.onEdit,
   });
 
   final List<CompanyTeam> teams;
   final Future<void> Function(CompanyTeam) onDelete;
+  final Future<void> Function(CompanyTeam) onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -880,7 +900,11 @@ class _TeamsList extends StatelessWidget {
       child: Column(
         children: [
           for (final t in teams) ...[
-            _TeamCard(team: t, onDelete: () => onDelete(t)),
+            _TeamCard(
+              team: t,
+              onDelete: () => onDelete(t),
+              onEdit: () => onEdit(t),
+            ),
             const SizedBox(height: 10),
           ],
         ],
@@ -890,10 +914,15 @@ class _TeamsList extends StatelessWidget {
 }
 
 class _TeamCard extends StatelessWidget {
-  const _TeamCard({required this.team, required this.onDelete});
+  const _TeamCard({
+    required this.team,
+    required this.onDelete,
+    required this.onEdit,
+  });
 
   final CompanyTeam team;
   final Future<void> Function() onDelete;
+  final Future<void> Function() onEdit;
 
   Color _teamColor() {
     final hex = (team.color ?? '#888888').replaceFirst('#', '');
@@ -1045,16 +1074,7 @@ class _TeamCard extends StatelessWidget {
                 _IconAction(
                   icon: LucideIcons.pencil,
                   tooltip: 'Editar',
-                  onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Edição completa disponível em breve no app. Use a versão web por enquanto.',
-                        ),
-                        duration: Duration(seconds: 2),
-                      ),
-                    );
-                  },
+                  onTap: () => onEdit(),
                 ),
               if (canDelete) ...[
                 const SizedBox(width: 6),

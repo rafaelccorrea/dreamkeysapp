@@ -23,8 +23,10 @@ class CompetitionService {
   static String _prizeDeliver(String prizeId) =>
       '/competitions/prizes/$prizeId/deliver';
 
-  // Fontes para o seletor de participantes (mesmas listas usadas no web).
-  static const String _adminUsers = '/admin/users';
+  // Fontes para o seletor de participantes (mesmas listas usadas no web:
+  // `UserMultiSelect` → companyMembersApi.getMembersSimple(),
+  // `TeamMultiSelect` → GET /teams).
+  static const String _companyMembersSimple = '/users/company-members/simple';
   static const String _teams = '/teams';
 
   Map<String, dynamic>? _unwrap(dynamic raw) {
@@ -339,14 +341,12 @@ class CompetitionService {
 
   // ─── Fontes do seletor de participantes ───────────────────────────────────
 
-  /// `GET /admin/users?compact=true` — corretores da empresa para o seletor
-  /// de participantes (mesma fonte do web).
+  /// `GET /users/company-members/simple` — membros da empresa para o seletor
+  /// de participantes (mesma fonte do `UserMultiSelect` do web; acessível a
+  /// qualquer usuário autenticado).
   Future<ApiResponse<List<ParticipantUser>>> getSelectableUsers() async {
     try {
-      final response = await _api.get<dynamic>(
-        _adminUsers,
-        queryParameters: {'page': '1', 'limit': '200', 'compact': 'true'},
-      );
+      final response = await _api.get<dynamic>(_companyMembersSimple);
       if (response.success) {
         final list = _unwrapList(response.data)
             .whereType<Map>()

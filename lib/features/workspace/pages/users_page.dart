@@ -290,6 +290,19 @@ class _UsersPageState extends State<UsersPage> {
     return AppScaffold(
       title: 'Usuários',
       showBottomNavigation: false,
+      actions: [
+        if (ModuleAccessService.instance
+            .hasPermission(AppPermissions.userCreate))
+          IconButton(
+            tooltip: 'Novo usuário',
+            icon: const Icon(LucideIcons.userPlus, size: 19),
+            onPressed: () async {
+              final created =
+                  await Navigator.of(context).pushNamed('/users/create');
+              if (created == true && mounted) _reload();
+            },
+          ),
+      ],
       body: RefreshIndicator(
         onRefresh: () async {
           await _reload();

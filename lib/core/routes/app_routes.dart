@@ -49,10 +49,13 @@ import '../../features/notes/pages/notes_page.dart';
 import '../../features/proposals/pages/create_proposal_page.dart';
 import '../../features/proposals/pages/proposals_page.dart';
 import '../../features/sale_forms/pages/sale_forms_page.dart';
+import '../../features/sale_forms/pages/sale_forms_dashboard_page.dart';
 import '../../features/commissions/pages/commissions_page.dart';
 import '../../features/workspace/pages/workspace_page.dart';
 import '../../features/workspace/pages/users_page.dart';
+import '../../features/workspace/pages/create_user_page.dart';
 import '../../features/workspace/pages/teams_page.dart';
+import '../../features/workspace/pages/team_form_page.dart';
 import '../../features/check_in/pages/check_in_page.dart';
 import '../../features/check_in/pages/check_in_list_page.dart';
 import '../../features/visit_reports/pages/visits_page.dart';
@@ -77,6 +80,37 @@ import '../../features/checklists/pages/checklist_details_page.dart';
 import '../../features/assets/pages/assets_page.dart';
 import '../../features/assets/pages/create_asset_page.dart';
 import '../../features/assets/pages/asset_details_page.dart';
+import '../../features/rentals/pages/rentals_page.dart';
+import '../../features/rentals/pages/rental_form_page.dart';
+import '../../features/rentals/pages/rental_details_page.dart';
+import '../../features/rentals/pages/rental_dashboard_page.dart';
+import '../../features/rental_forms/pages/rental_form_editor_page.dart';
+import '../../features/rental_forms/pages/rental_forms_page.dart';
+import '../../features/insurance/pages/insurance_quote_page.dart';
+import '../../features/credit_analysis/pages/credit_analysis_page.dart';
+import '../../features/credit_analysis/pages/credit_analysis_settings_page.dart';
+import '../../features/collection/pages/collection_page.dart';
+import '../../features/collection/pages/collection_rules_page.dart';
+import '../../features/collection/pages/collection_rule_form_page.dart';
+import '../../features/gamification/pages/gamification_page.dart';
+import '../../features/gamification/pages/gamification_settings_page.dart';
+import '../../features/gamification/pages/competitions_page.dart';
+import '../../features/gamification/pages/competition_form_page.dart';
+import '../../features/gamification/pages/add_prizes_page.dart';
+import '../../features/gamification/pages/prizes_page.dart';
+import '../../features/rewards/pages/approve_redemptions_page.dart';
+import '../../features/rewards/pages/manage_rewards_page.dart';
+import '../../features/rewards/pages/my_redemptions_page.dart';
+import '../../features/rewards/pages/reward_form_page.dart';
+import '../../features/rewards/pages/rewards_page.dart';
+import '../../features/tickets/pages/tickets_page.dart';
+import '../../features/tickets/pages/ticket_create_page.dart';
+import '../../features/tickets/pages/ticket_detail_page.dart';
+import '../../features/help/pages/help_page.dart';
+import '../../features/automations/pages/automations_page.dart';
+import '../../features/automations/pages/create_automation_page.dart';
+import '../../features/automations/pages/automation_details_page.dart';
+import '../../features/automations/pages/automation_history_page.dart';
 import '../../shared/services/property_service.dart';
 
 /// Rotas da aplicação com transições customizadas
@@ -161,7 +195,10 @@ class AppRoutes {
 
   // Colaboradores → sub-rotas
   static const String users = '/users';
+  static const String userCreate = '/users/create';
   static const String teams = '/teams';
+  static const String teamCreate = '/teams/create';
+  static String teamEdit(String id) => '/teams/$id/edit';
 
   // Check-in (presença na imobiliária por geolocalização)
   /// Tela principal — fazer check-in / check-out + estado atual.
@@ -178,6 +215,9 @@ class AppRoutes {
   static String proposalEdit(String id) => '/proposals/$id/edit';
 
   static const String saleForms = '/sale-forms';
+
+  /// Painel de fichas de venda (paridade com `/fichas-venda/dashboard` do web).
+  static const String saleFormsDashboard = '/sale-forms/dashboard';
 
   // Relatórios de Visita (módulo `visit_report`)
   static const String visits = '/visits';
@@ -217,6 +257,59 @@ class AppRoutes {
   static const String assetCreate = '/assets/create';
   static String assetDetails(String id) => '/assets/$id';
   static String assetEdit(String id) => '/assets/$id/edit';
+
+  // Locações (módulo rental_management)
+  static const String rentals = '/rentals';
+  static const String rentalCreate = '/rentals/create';
+  static const String rentalsDashboard = '/rentals/dashboard';
+  static String rentalDetails(String id) => '/rentals/$id';
+  static String rentalEdit(String id) => '/rentals/$id/edit';
+
+  // Fichas de locação (módulo rental_management)
+  static const String rentalForms = '/rental-forms';
+  static String rentalFormEditor(String id) => '/rental-forms/$id';
+
+  // Seguros — cotação de seguro fiança (módulo rental_management)
+  static const String insuranceQuote = '/insurance/quote';
+
+  // Análise de crédito (módulo credit_and_collection)
+  static const String creditAnalysis = '/credit-analysis';
+  static const String creditAnalysisSettings = '/credit-analysis/settings';
+
+  // Régua de Cobrança (módulo credit_and_collection)
+  static const String collection = '/collection';
+  static const String collectionRules = '/collection/rules';
+  static const String collectionRuleCreate = '/collection/rules/new';
+  static String collectionRuleEdit(String id) => '/collection/rules/$id';
+
+  // Gamificação & Competições (módulo gamification — OCULTO do drawer)
+  static const String gamification = '/gamification';
+  static const String gamificationSettings = '/gamification/settings';
+  static const String competitions = '/competitions';
+  static const String competitionCreate = '/competitions/new';
+  static String competitionEdit(String id) => '/competitions/$id/edit';
+  static String competitionPrizes(String id) => '/competitions/$id/prizes';
+  static const String prizes = '/prizes';
+
+  // Prêmios & Resgates (módulo gamification — OCULTO do drawer)
+  static const String rewards = '/rewards';
+  static const String rewardsMine = '/rewards/mine';
+  static const String rewardsApprove = '/rewards/approve';
+  static const String rewardsManage = '/rewards/manage';
+  static const String rewardCreate = '/rewards/create';
+  static String rewardEdit(String id) => '/rewards/$id/edit';
+
+  // Suporte (Tickets) + Central de Ajuda
+  static const String tickets = '/tickets';
+  static const String ticketCreate = '/tickets/new';
+  static const String ticketDetail = '/tickets/detail';
+  static const String help = '/help';
+
+  // Automações (role admin/master + módulo `automations`)
+  static const String automations = '/automations';
+  static const String automationCreate = '/automations/create';
+  static String automationDetails(String id) => '/automations/$id';
+  static String automationHistory(String id) => '/automations/$id/history';
 
   static String propertyOfferDetails(String offerId) =>
       '/properties/offers/$offerId';
@@ -465,6 +558,8 @@ class AppRoutes {
       return _buildRoute(const CommissionsPage(), settings);
     } else if (routeName == AppRoutes.saleForms) {
       return _buildRoute(const SaleFormsPage(), settings);
+    } else if (routeName == AppRoutes.saleFormsDashboard) {
+      return _buildRoute(const SaleFormsDashboardPage(), settings);
     } else if (routeName == AppRoutes.proposals) {
       return _buildRoute(const ProposalsPage(), settings);
     } else if (routeName == AppRoutes.proposalCreate) {
@@ -482,8 +577,21 @@ class AppRoutes {
       return _buildRoute(const WorkspacePage(), settings);
     } else if (routeName == AppRoutes.users) {
       return _buildRoute(const UsersPage(), settings);
+    } else if (routeName == AppRoutes.userCreate) {
+      return _buildRoute(const CreateUserPage(), settings);
     } else if (routeName == AppRoutes.teams) {
       return _buildRoute(const TeamsPage(), settings);
+    } else if (routeName == AppRoutes.teamCreate) {
+      return _buildRoute(const TeamFormPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/teams/')) {
+      // Edição: /teams/:id/edit
+      final segments = routeName.split('/');
+      if (segments.length == 4 && segments[3] == 'edit') {
+        final id = segments[2];
+        if (id.isNotEmpty) {
+          return _buildRoute(TeamFormPage(teamId: id), settings);
+        }
+      }
     } else if (routeName == AppRoutes.checkIn) {
       return _buildRoute(const CheckInPage(), settings);
     } else if (routeName == AppRoutes.checkInList) {
@@ -596,6 +704,147 @@ class AppRoutes {
         } else if (segments.length == 4 && segments[3] == 'edit') {
           return _buildRoute(CreateAssetPage(assetId: id), settings);
         }
+      }
+    } else if (routeName == AppRoutes.rentals) {
+      return _buildRoute(const RentalsPage(), settings);
+    } else if (routeName == AppRoutes.rentalCreate) {
+      return _buildRoute(const RentalFormPage(), settings);
+    } else if (routeName == AppRoutes.rentalsDashboard) {
+      return _buildRoute(const RentalDashboardPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/rentals/')) {
+      // Detalhe (/rentals/:id) e edição (/rentals/:id/edit)
+      final segments = routeName.split('/');
+      if (segments.length >= 3 && segments[2].isNotEmpty) {
+        final id = segments[2];
+        if (segments.length == 3) {
+          // A lista passa arguments: {'tab': 'payments'} para abrir direto
+          // na aba de parcelas (ação "Pagamentos" do item).
+          final args = settings.arguments;
+          final tab =
+              args is Map<String, dynamic> ? args['tab'] as String? : null;
+          return _buildRoute(
+            RentalDetailsPage(rentalId: id, initialTab: tab),
+            settings,
+          );
+        } else if (segments.length == 4 && segments[3] == 'edit') {
+          return _buildRoute(RentalFormPage(rentalId: id), settings);
+        }
+      }
+    } else if (routeName == AppRoutes.rentalForms) {
+      return _buildRoute(const RentalFormsPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/rental-forms/')) {
+      // Editor: /rental-forms/:id
+      final segments = routeName.split('/');
+      if (segments.length == 3 && segments[2].isNotEmpty) {
+        return _buildRoute(
+            RentalFormEditorPage(formId: segments[2]), settings);
+      }
+    } else if (routeName == AppRoutes.insuranceQuote) {
+      // `rentalId` opcional via arguments — habilita a contratação da
+      // apólice (sem ele a tela cota mas não contrata, paridade com o web).
+      final args = settings.arguments as Map<String, dynamic>?;
+      return _buildRoute(
+        InsuranceQuotePage(rentalId: args?['rentalId'] as String?),
+        settings,
+      );
+    } else if (routeName == AppRoutes.creditAnalysisSettings) {
+      return _buildRoute(const CreditAnalysisSettingsPage(), settings);
+    } else if (routeName == AppRoutes.creditAnalysis) {
+      return _buildRoute(const CreditAnalysisPage(), settings);
+    } else if (routeName == AppRoutes.collection) {
+      return _buildRoute(const CollectionPage(), settings);
+    } else if (routeName == AppRoutes.collectionRules) {
+      return _buildRoute(const CollectionRulesPage(), settings);
+    } else if (routeName == AppRoutes.collectionRuleCreate) {
+      return _buildRoute(const CollectionRuleFormPage(), settings);
+    } else if (routeName != null &&
+        routeName.startsWith('/collection/rules/')) {
+      // /collection/rules/:id — edição de régua
+      final segments = routeName.split('/');
+      if (segments.length == 4 && segments[3].isNotEmpty) {
+        return _buildRoute(
+            CollectionRuleFormPage(ruleId: segments[3]), settings);
+      }
+    } else if (routeName == AppRoutes.gamification) {
+      return _buildRoute(const GamificationPage(), settings);
+    } else if (routeName == AppRoutes.gamificationSettings) {
+      return _buildRoute(const GamificationSettingsPage(), settings);
+    } else if (routeName == AppRoutes.competitions) {
+      return _buildRoute(const CompetitionsPage(), settings);
+    } else if (routeName == AppRoutes.competitionCreate) {
+      return _buildRoute(const CompetitionFormPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/competitions/')) {
+      // /competitions/:id/edit e /competitions/:id/prizes
+      final segments = routeName.split('/');
+      if (segments.length == 4 && segments[2].isNotEmpty) {
+        final id = segments[2];
+        if (segments[3] == 'edit') {
+          return _buildRoute(CompetitionFormPage(competitionId: id), settings);
+        } else if (segments[3] == 'prizes') {
+          return _buildRoute(AddPrizesPage(competitionId: id), settings);
+        }
+      }
+    } else if (routeName == AppRoutes.prizes) {
+      return _buildRoute(const PrizesPage(), settings);
+    } else if (routeName == AppRoutes.rewards) {
+      return _buildRoute(const RewardsPage(), settings);
+    } else if (routeName == AppRoutes.rewardsMine) {
+      return _buildRoute(const MyRedemptionsPage(), settings);
+    } else if (routeName == AppRoutes.rewardsApprove) {
+      return _buildRoute(const ApproveRedemptionsPage(), settings);
+    } else if (routeName == AppRoutes.rewardsManage) {
+      return _buildRoute(const ManageRewardsPage(), settings);
+    } else if (routeName == AppRoutes.rewardCreate) {
+      // Deve vir ANTES do prefixo genérico de /rewards/, senão "create" vira id.
+      return _buildRoute(const RewardFormPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/rewards/')) {
+      // Edição: /rewards/:id/edit
+      final segments = routeName.split('/');
+      if (segments.length == 4 && segments[3] == 'edit') {
+        final id = segments[2];
+        if (id.isNotEmpty) {
+          return _buildRoute(RewardFormPage(rewardId: id), settings);
+        }
+      }
+    } else if (routeName == AppRoutes.tickets) {
+      return _buildRoute(const TicketsPage(), settings);
+    } else if (routeName == AppRoutes.ticketCreate) {
+      return _buildRoute(const TicketCreatePage(), settings);
+    } else if (routeName == AppRoutes.ticketDetail) {
+      // Recebe o id do ticket via settings.arguments (String ou Map).
+      final args = settings.arguments;
+      final ticketId = args is String
+          ? args
+          : args is Map<String, dynamic>
+              ? (args['ticketId']?.toString() ?? args['id']?.toString() ?? '')
+              : '';
+      return _buildRoute(TicketDetailPage(ticketId: ticketId), settings);
+    } else if (routeName == AppRoutes.help) {
+      return _buildRoute(const HelpPage(), settings);
+    } else if (routeName == AppRoutes.automations) {
+      return _buildRoute(const AutomationsPage(), settings);
+    } else if (routeName == AppRoutes.automationCreate) {
+      // IMPORTANTE: deve vir ANTES da verificação genérica de /automations/
+      return _buildRoute(const CreateAutomationPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/automations/')) {
+      final segments = routeName.split('/');
+      if (segments.length == 4 && segments[3] == 'history') {
+        // /automations/:id/history — o detalhe passa o nome via arguments
+        // pra evitar flash sem título (a página busca sozinha se faltar).
+        final args = settings.arguments as Map<String, dynamic>?;
+        return _buildRoute(
+          AutomationHistoryPage(
+            automationId: segments[2],
+            automationName: args?['automationName'] as String?,
+          ),
+          settings,
+        );
+      } else if (segments.length == 3) {
+        // /automations/:id
+        return _buildRoute(
+          AutomationDetailsPage(automationId: segments[2]),
+          settings,
+        );
       }
     }
 

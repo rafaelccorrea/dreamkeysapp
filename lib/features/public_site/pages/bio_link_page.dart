@@ -1391,14 +1391,15 @@ class _BioLinkPageState extends State<BioLinkPage> {
     if (u.contains('wa.me') || u.contains('whatsapp')) {
       return LucideIcons.messageCircle;
     }
-    if (u.contains('instagram.com')) return LucideIcons.instagram;
+    // Lucide removeu os ícones de marca — usamos equivalentes semânticos.
+    if (u.contains('instagram.com')) return LucideIcons.camera;
     if (u.contains('youtube.com') || u.contains('youtu.be')) {
-      return LucideIcons.youtube;
+      return LucideIcons.circlePlay;
     }
     if (u.contains('facebook.com') || u.contains('fb.com')) {
-      return LucideIcons.facebook;
+      return LucideIcons.thumbsUp;
     }
-    if (u.contains('linkedin.com')) return LucideIcons.linkedin;
+    if (u.contains('linkedin.com')) return LucideIcons.briefcaseBusiness;
     if (u.contains('tiktok.com')) return LucideIcons.music2;
     if (u.contains('t.me') || u.contains('telegram')) return LucideIcons.send;
     if (u.startsWith('mailto:')) return LucideIcons.mail;
@@ -1666,7 +1667,7 @@ class _BioLinkPageState extends State<BioLinkPage> {
       Row(
         children: [
           Expanded(
-            child: _statTile(context, LucideIcons.instagram, 'Instagram',
+            child: _statTile(context, LucideIcons.camera, 'Instagram',
                 numberFmt.format(data.instagramClicks), rose),
           ),
           const SizedBox(width: 10),

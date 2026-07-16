@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/services/api_service.dart';
 import '../../../shared/services/notes_service.dart';
 
 const _noteColors = [
@@ -27,9 +28,11 @@ const _priorities = <String, ({String label, Color tone})>{
 };
 
 /// Abre formulário de criação como popup elevado (paridade com detalhe da nota).
+/// Com [initial], o mesmo formulário vira edição (`PATCH /notes/:id`).
 Future<bool?> showCreateNoteSheet(
   BuildContext context, {
   required Color accent,
+  NoteListItem? initial,
 }) {
   return showGeneralDialog<bool>(
     context: context,
@@ -38,7 +41,7 @@ Future<bool?> showCreateNoteSheet(
     barrierColor: Colors.black.withValues(alpha: 0.58),
     transitionDuration: const Duration(milliseconds: 340),
     pageBuilder: (context, animation, secondaryAnimation) {
-      return _CreateNoteOverlay(accent: accent);
+      return _CreateNoteOverlay(accent: accent, initial: initial);
     },
     transitionBuilder: (context, animation, secondaryAnimation, child) {
       final curved = CurvedAnimation(
@@ -90,9 +93,12 @@ class CreateNotePage extends StatelessWidget {
 }
 
 class _CreateNoteOverlay extends StatefulWidget {
-  const _CreateNoteOverlay({required this.accent});
+  const _CreateNoteOverlay({required this.accent, this.initial});
 
   final Color accent;
+
+  /// Quando presente, o formulário abre pré-preenchido em modo edição.
+  final NoteListItem? initial;
 
   @override
   State<_CreateNoteOverlay> createState() => _CreateNoteOverlayState();
@@ -116,6 +122,31 @@ class _CreateNoteOverlayState extends State<_CreateNoteOverlay> {
   bool _submitting = false;
 
   Color get _noteColor => _parseHex(_color);
+
+  bool get _isEditing => widget.initial != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final n = widget.initial;
+    if (n != null) {
+      _title.text = n.title;
+      _content.text = n.content ?? '';
+      _priority = n.priority.isEmpty ? 'medium' : n.priority;
+      if (n.color != null && n.color!.trim().isNotEmpty) _color = n.color!;
+      _pinned = n.isPinned;
+      _hasReminder = n.hasReminder;
+      _reminderAt =
+          n.reminderDate == null ? null : DateTime.tryParse(n.reminderDate!);
+      _tags.addAll(n.tags);
+      _clientName.text = n.clientName ?? '';
+      _clientPhone.text = n.clientPhone ?? '';
+      _clientEmail.text = n.clientEmail ?? '';
+      _clientExpanded = (n.clientName ?? '').isNotEmpty ||
+          (n.clientPhone ?? '').isNotEmpty ||
+          (n.clientEmail ?? '').isNotEmpty;
+    }
+  }
 
   @override
   void dispose() {
@@ -189,31 +220,61 @@ class _CreateNoteOverlayState extends State<_CreateNoteOverlay> {
     }
 
     setState(() => _submitting = true);
-    final res = await NotesService.instance.createNote(
-      CreateNoteRequest(
-        title: t,
-        content: _content.text.trim().isEmpty ? null : _content.text.trim(),
-        priority: _priority,
-        isPinned: _pinned,
-        hasReminder: _hasReminder,
-        reminderDate: _hasReminder ? _reminderAt : null,
-        color: _color,
-        tags: List.unmodifiable(_tags),
-        clientName:
+    final ApiResponse<NoteListItem> res;
+    if (_isEditing) {
+      // Paridade com `notesApi.updateNote` do web (PATCH parcial — enviamos o
+      // estado atual completo dos campos editáveis).
+      res = await NotesService.instance.updateNote(widget.initial!.id, {
+        'title': t,
+        'content': _content.text.trim().isEmpty ? null : _content.text.trim(),
+        'priority': _priority,
+        'isPinned': _pinned,
+        'hasReminder': _hasReminder,
+        'reminderDate':
+            _hasReminder ? _reminderAt?.toIso8601String() : null,
+        'color': _color,
+        'tags': List<String>.from(_tags),
+        'clientName':
             _clientName.text.trim().isEmpty ? null : _clientName.text.trim(),
-        clientPhone:
+        'clientPhone':
             _clientPhone.text.trim().isEmpty ? null : _clientPhone.text.trim(),
-        clientEmail:
+        'clientEmail':
             _clientEmail.text.trim().isEmpty ? null : _clientEmail.text.trim(),
-      ),
-    );
+      });
+    } else {
+      res = await NotesService.instance.createNote(
+        CreateNoteRequest(
+          title: t,
+          content: _content.text.trim().isEmpty ? null : _content.text.trim(),
+          priority: _priority,
+          isPinned: _pinned,
+          hasReminder: _hasReminder,
+          reminderDate: _hasReminder ? _reminderAt : null,
+          color: _color,
+          tags: List.unmodifiable(_tags),
+          clientName:
+              _clientName.text.trim().isEmpty ? null : _clientName.text.trim(),
+          clientPhone:
+              _clientPhone.text.trim().isEmpty ? null : _clientPhone.text.trim(),
+          clientEmail:
+              _clientEmail.text.trim().isEmpty ? null : _clientEmail.text.trim(),
+        ),
+      );
+    }
     if (!mounted) return;
     setState(() => _submitting = false);
     if (res.success) {
       Navigator.of(context).pop(true);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res.message ?? 'Não foi possível criar.')),
+        SnackBar(
+          content: Text(
+            res.message ??
+                (_isEditing
+                    ? 'Não foi possível salvar.'
+                    : 'Não foi possível criar.'),
+          ),
+        ),
       );
     }
   }
@@ -310,6 +371,7 @@ class _CreateNoteOverlayState extends State<_CreateNoteOverlay> {
                           noteColor: _noteColor,
                           pinned: _pinned,
                           submitting: _submitting,
+                          isEditing: _isEditing,
                           onClose: () => Navigator.of(context).pop(),
                           onTogglePin: _submitting
                               ? null
@@ -719,6 +781,7 @@ class _CreateHeader extends StatelessWidget {
     required this.pinned,
     required this.submitting,
     required this.onClose,
+    this.isEditing = false,
     this.onTogglePin,
   });
 
@@ -726,6 +789,7 @@ class _CreateHeader extends StatelessWidget {
   final Color noteColor;
   final bool pinned;
   final bool submitting;
+  final bool isEditing;
   final VoidCallback onClose;
   final VoidCallback? onTogglePin;
 
@@ -775,7 +839,7 @@ class _CreateHeader extends StatelessWidget {
                 Row(
                   children: [
                     Text(
-                      'NOVA ANOTAÇÃO',
+                      isEditing ? 'EDITAR ANOTAÇÃO' : 'NOVA ANOTAÇÃO',
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: noteColor,
                         fontWeight: FontWeight.w900,

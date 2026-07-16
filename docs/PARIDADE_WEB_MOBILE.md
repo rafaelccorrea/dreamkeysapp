@@ -36,7 +36,7 @@
 - CRUD de empreendimentos + página de detalhe
 - (no app hoje só existem como *seletor* dentro do cadastro de imóvel)
 
-### A5. Gamificação / Prêmios / Competições [GAP]
+### A5. Gamificação / Prêmios / Competições [GAP] [OCULTAR DO MENU — Edson (16/07/2026): Gamificação E Prêmios/Resgates ocultos como no web; implementar telas + rotas, mas SEM itens no drawer]
 - Dashboard de gamificação (+ settings [config])
 - Catálogo de resgates, Meus resgates, Aprovar resgates, Gerenciar/criar/editar recompensas
 - Competições (CRUD) + prêmios de competições
