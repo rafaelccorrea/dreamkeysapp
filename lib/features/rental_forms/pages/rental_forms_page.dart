@@ -21,8 +21,8 @@ Color _accent(BuildContext context) {
 }
 
 /// Listagem de fichas de locação — espelha `FichasLocacaoPage.tsx` (web) com a
-/// gramática flush do app: hero editorial + busca + chips de status + cards
-/// com ações no próprio item.
+/// gramática flush do app: masthead documental (headline + fluxo de etapas
+/// estilo razão) + busca + chips de status + cards com ações no próprio item.
 class RentalFormsPage extends StatefulWidget {
   const RentalFormsPage({super.key});
 
@@ -298,6 +298,7 @@ class _RentalFormsPageState extends State<RentalFormsPage> {
                           accent: accent,
                           total: _total,
                           loaded: _items,
+                          loading: _loading,
                           hasFilter: _statusFilter != null ||
                               _search.text.trim().isNotEmpty,
                           filteredCount: visible.length,
@@ -448,13 +449,16 @@ class _CreateFab extends StatelessWidget {
   }
 }
 
-/// Hero editorial — eyebrow com dot + número grande + subtítulo + faixa de
-/// KPIs por status (mesma gramática das fichas de venda).
+/// Masthead documental — DNA da página de perfil: eyebrow tipográfico,
+/// headline w900 e subtítulo editorial, seguido do **fluxo da ficha** em
+/// linhas de razão (etapa → leader → contagem) com barra de distribuição.
+/// Nada de número gigante nem fileira de KPIs sublinhados.
 class _Hero extends StatelessWidget {
   const _Hero({
     required this.accent,
     required this.total,
     required this.loaded,
+    required this.loading,
     required this.hasFilter,
     required this.filteredCount,
   });
@@ -462,21 +466,22 @@ class _Hero extends StatelessWidget {
   final Color accent;
   final int total;
   final List<RentalForm> loaded;
+  final bool loading;
   final bool hasFilter;
   final int filteredCount;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final textColor = ThemeHelpers.textColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final emerald = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
 
-    final dotColor = hasFilter ? accent : emerald;
     final subtitle = hasFilter
         ? 'Filtro aplicado · $filteredCount no resultado.'
-        : 'Preencha pelo sistema ou envie o link para o cliente preencher.';
+        : total == 0 && !loading
+            ? 'Preencha pelo sistema ou envie o link para o cliente preencher.'
+            : 'Sua carteira tem ${total == 1 ? '1 ficha' : '$total fichas'} — '
+                'preencha pelo sistema ou envie o link para o cliente.';
 
     final pending =
         loaded.where((f) => f.status == RentalFormStatus.pending).length;
@@ -485,6 +490,8 @@ class _Hero extends StatelessWidget {
         .length;
     final finalized =
         loaded.where((f) => f.status == RentalFormStatus.finalized).length;
+    final canceled =
+        loaded.where((f) => f.status == RentalFormStatus.canceled).length;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(0, 8, 0, 0),
@@ -493,75 +500,63 @@ class _Hero extends StatelessWidget {
         children: [
           Row(
             children: [
-              Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: dotColor,
-                  boxShadow: [
-                    BoxShadow(
-                      color: dotColor.withValues(alpha: 0.55),
-                      blurRadius: 8,
-                      spreadRadius: 1,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 9),
               Text(
                 'FICHAS DE LOCAÇÃO',
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: accent,
                   fontWeight: FontWeight.w900,
                   letterSpacing: 2.2,
-                  fontSize: 11,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '$total',
-                style: theme.textTheme.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: textColor,
-                  height: 1.0,
-                  letterSpacing: -1.0,
+                  fontSize: 10,
                 ),
               ),
               const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 5),
-                child: Text(
-                  total == 1 ? 'ficha' : 'fichas',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: secondary,
-                    fontWeight: FontWeight.w800,
-                    height: 1.0,
-                    letterSpacing: -0.2,
-                  ),
+              Container(
+                width: 4,
+                height: 4,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: accent.withValues(alpha: 0.6),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'DOCUMENTOS',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: secondary.withValues(alpha: 0.85),
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.8,
+                  fontSize: 9.5,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
+          Text(
+            'Fichas de locação',
+            style: theme.textTheme.headlineMedium?.copyWith(
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.8,
+              color: textColor,
+              height: 1.0,
+              fontSize: 27,
+            ),
+          ),
+          const SizedBox(height: 8),
           Text(
             subtitle,
             style: theme.textTheme.bodyMedium?.copyWith(
               color: secondary,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w500,
               height: 1.4,
             ),
           ),
           const SizedBox(height: 16),
-          _StatsStrip(
+          _StageLedger(
+            loading: loading,
             pending: pending,
             awaiting: awaiting,
             finalized: finalized,
+            canceled: canceled,
           ),
         ],
       ),
@@ -569,114 +564,133 @@ class _Hero extends StatelessWidget {
   }
 }
 
-/// Faixa de KPIs por status — valores da página carregada (paridade com os
-/// contadores da lista no web).
-class _StatsStrip extends StatelessWidget {
-  const _StatsStrip({
+/// Fluxo da ficha em formato de razão documental: barra de distribuição por
+/// etapa + linhas "etapa … contagem" com leader pontilhado por traços.
+class _StageLedger extends StatelessWidget {
+  const _StageLedger({
+    required this.loading,
     required this.pending,
     required this.awaiting,
     required this.finalized,
+    required this.canceled,
   });
+
+  final bool loading;
   final int pending;
   final int awaiting;
   final int finalized;
+  final int canceled;
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final divider = ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
-    final info = isDark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB);
-    final warn = isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
-    final green = isDark ? const Color(0xFF4ADE80) : const Color(0xFF16A34A);
-    final blocks = <Widget>[
-      _StatBlock(label: 'PENDENTES', value: pending, tone: info),
-      _StatBlock(label: 'AGUARDANDO', value: awaiting, tone: warn),
-      _StatBlock(label: 'FINALIZADAS', value: finalized, tone: green),
+    final info = isDark ? AppColors.status.infoDarkMode : AppColors.status.info;
+    final warn =
+        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
+    final green =
+        isDark ? AppColors.status.successDarkMode : AppColors.status.success;
+    final danger =
+        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+
+    final sum = pending + awaiting + finalized + canceled;
+    final stages = <(IconData, String, int, Color)>[
+      (LucideIcons.filePen, 'Em preenchimento', pending, info),
+      (LucideIcons.signature, 'Aguardando assinatura', awaiting, warn),
+      (LucideIcons.fileCheck2, 'Finalizadas', finalized, green),
+      if (canceled > 0)
+        (LucideIcons.fileX2, 'Canceladas', canceled, danger),
     ];
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (var i = 0; i < blocks.length; i++) ...[
-            if (i > 0)
-              Container(
-                width: 1,
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                color: divider,
-              ),
-            Expanded(child: blocks[i]),
-          ],
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Barra de distribuição por etapa (trilho neutro quando vazio).
+        ClipRRect(
+          borderRadius: BorderRadius.circular(99),
+          child: SizedBox(
+            height: 8,
+            child: loading || sum == 0
+                ? Container(
+                    color:
+                        ThemeHelpers.borderColor(context).withValues(alpha: 0.4),
+                  )
+                : Row(
+                    children: [
+                      for (final (_, _, count, tone) in stages)
+                        if (count > 0)
+                          Expanded(
+                            flex: count,
+                            child: Container(color: tone),
+                          ),
+                    ],
+                  ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        for (var i = 0; i < stages.length; i++) ...[
+          if (i > 0) const SizedBox(height: 9),
+          _ledgerRow(
+            context,
+            icon: stages[i].$1,
+            label: stages[i].$2,
+            count: stages[i].$3,
+            tone: stages[i].$4,
+          ),
         ],
-      ),
+      ],
     );
   }
-}
 
-class _StatBlock extends StatelessWidget {
-  const _StatBlock({
-    required this.label,
-    required this.value,
-    required this.tone,
-  });
-  final String label;
-  final int value;
-  final Color tone;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _ledgerRow(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required int count,
+    required Color tone,
+  }) {
     final theme = Theme.of(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 9,
-              fontWeight: FontWeight.w900,
-              color: tone,
-              letterSpacing: 1.0,
-              height: 1.0,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+    final isDark = theme.brightness == Brightness.dark;
+    return Row(
+      children: [
+        Container(
+          width: 26,
+          height: 26,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            color: tone.withValues(alpha: isDark ? 0.18 : 0.1),
           ),
-          const SizedBox(height: 8),
-          Text(
-            '$value',
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w900,
-              color: tone,
-              letterSpacing: -0.6,
-              height: 1.0,
-              fontSize: 22,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
+          child: Icon(icon, size: 14, color: tone),
+        ),
+        const SizedBox(width: 9),
+        Text(
+          label,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: ThemeHelpers.textColor(context),
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.1,
           ),
-          const SizedBox(height: 6),
-          Text(
-            'fichas',
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: secondary,
-              height: 1.0,
-            ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Container(
+            height: 1,
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
           ),
-          const SizedBox(height: 7),
-          Container(
-            height: 2,
-            width: 18,
-            decoration: BoxDecoration(
-              color: tone,
-              borderRadius: BorderRadius.circular(2),
-            ),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          loading ? '—' : '$count',
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w900,
+            color: count > 0 || loading
+                ? tone
+                : ThemeHelpers.textSecondaryColor(context)
+                    .withValues(alpha: 0.7),
+            letterSpacing: -0.3,
+            fontFeatures: const [FontFeature.tabularFigures()],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

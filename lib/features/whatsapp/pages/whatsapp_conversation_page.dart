@@ -11,7 +11,7 @@ import '../../../shared/widgets/skeleton_box.dart';
 import '../models/whatsapp_models.dart';
 import '../services/whatsapp_service.dart';
 import '../widgets/whatsapp_conversation_card.dart'
-    show whatsAppSourceIcon;
+    show WhatsAppAvatar, whatsAppSourceIcon;
 import '../widgets/whatsapp_message_bubble.dart';
 import '../widgets/whatsapp_send_template_sheet.dart';
 
@@ -326,7 +326,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
   @override
   Widget build(BuildContext context) {
     return AppScaffold(
-      title: _displayName,
+      title: 'WhatsApp',
       showBottomNavigation: false,
       body: Column(
         children: [
@@ -338,26 +338,15 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     );
   }
 
-  // ─── Cabeçalho do contato (flush) ────────────────────────────────────────
+  // ─── Cabeçalho do contato (compacto, estilo iOS) ─────────────────────────
 
   Widget _buildContactHeader(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final accent =
-        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final green =
-        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
-    final blue = isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
-    final purple =
-        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
 
     final last = _messages.isNotEmpty ? _messages.last : null;
     final avatarUrl = widget.conversation?.lastMessage?.contactAvatarUrl ??
         last?.contactAvatarUrl;
-    final initial = _displayName.trim().isNotEmpty
-        ? _displayName.trim()[0].toUpperCase()
-        : '?';
 
     // Origem do canal — resolve pela última mensagem; cai no status global.
     var source = last?.integrationSource ?? WhatsAppIntegrationSource.unknown;
@@ -371,37 +360,16 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
             widget.conversation?.lastMessage?.assignedToName ??
             '')
         .trim();
-    final hasTask = widget.conversation?.hasTask == true ||
-        _messages.any((m) => m.kanbanTaskId != null);
 
-    final chips = <Widget>[];
+    // Linha de status compacta: telefone · canal · atendente.
+    final statusParts = <String>[formatWhatsAppPhone(widget.phoneNumber)];
     if (source != WhatsAppIntegrationSource.unknown) {
-      chips.add(_headerChip(
-        context,
-        icon: whatsAppSourceIcon(source),
-        label: source.label,
-        color: source == WhatsAppIntegrationSource.official ? blue : purple,
-      ));
+      statusParts.add(source.label);
     }
-    if (assigned.isNotEmpty) {
-      chips.add(_headerChip(
-        context,
-        icon: LucideIcons.headset,
-        label: assigned.split(' ').first,
-        color: green,
-      ));
-    }
-    if (hasTask) {
-      chips.add(_headerChip(
-        context,
-        icon: LucideIcons.clipboardList,
-        label: 'Negociação',
-        color: secondary,
-      ));
-    }
+    if (assigned.isNotEmpty) statusParts.add(assigned.split(' ').first);
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+      padding: const EdgeInsets.fromLTRB(16, 9, 8, 9),
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
@@ -409,21 +377,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
       ),
       child: Row(
         children: [
-          CircleAvatar(
-            radius: 21,
-            backgroundColor: accent.withValues(alpha: isDark ? 0.2 : 0.1),
-            backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
-            child: avatarUrl == null
-                ? Text(
-                    initial,
-                    style: TextStyle(
-                      color: accent,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 16,
-                    ),
-                  )
-                : null,
-          ),
+          WhatsAppAvatar(name: _displayName, imageUrl: avatarUrl, size: 40),
           const SizedBox(width: 11),
           Expanded(
             child: Column(
@@ -432,26 +386,41 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                 Text(
                   _displayName,
                   style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w800,
                     color: ThemeHelpers.textColor(context),
-                    letterSpacing: -0.2,
+                    letterSpacing: -0.3,
+                    fontSize: 16,
+                    height: 1.15,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  formatWhatsAppPhone(widget.phoneNumber),
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: secondary,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 11,
-                  ),
+                Row(
+                  children: [
+                    if (source != WhatsAppIntegrationSource.unknown) ...[
+                      Icon(
+                        whatsAppSourceIcon(source),
+                        size: 11,
+                        color: secondary.withValues(alpha: 0.85),
+                      ),
+                      const SizedBox(width: 3.5),
+                    ],
+                    Flexible(
+                      child: Text(
+                        statusParts.join(' · '),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: secondary,
+                          fontWeight: FontWeight.w500,
+                          fontSize: 11.5,
+                          height: 1.2,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
                 ),
-                if (chips.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Wrap(spacing: 6, runSpacing: 4, children: chips),
-                ],
               ],
             ),
           ),
@@ -514,62 +483,63 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     );
   }
 
-  Widget _headerChip(
-    BuildContext context, {
-    required IconData icon,
-    required String label,
-    required Color color,
-  }) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: isDark ? 0.14 : 0.08),
-        borderRadius: BorderRadius.circular(999),
-        border:
-            Border.all(color: color.withValues(alpha: isDark ? 0.35 : 0.25)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 10.5, color: color),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w800,
-              fontSize: 10,
-              height: 1.2,
-              letterSpacing: -0.1,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   // ─── Thread ──────────────────────────────────────────────────────────────
+
+  /// Chave de "remetente" para agrupamento de bolhas sequenciais — contato,
+  /// IA ou usuário do sistema.
+  static String _authorKey(WhatsAppMessage m) {
+    if (!m.isOutbound) return 'in';
+    if (m.isAiResponse) return 'out-ai';
+    return 'out-${m.userId ?? m.userName ?? ''}';
+  }
 
   Widget _buildThread(BuildContext context) {
     if (_loading && _messages.isEmpty) return _buildSkeleton(context);
     if (_error != null && _messages.isEmpty) return _buildError(context);
     if (_messages.isEmpty) return _buildEmpty(context);
 
-    // Monta em ordem cronológica com separadores de dia e inverte — com
+    // Monta em ordem cronológica com separadores de dia e agrupamento de
+    // mensagens sequenciais do mesmo remetente; inverte no final — com
     // `reverse: true` a mensagem mais recente fica colada no composer.
     final children = <Widget>[];
     DateTime? currentDay;
-    for (final m in _messages) {
+    for (var i = 0; i < _messages.length; i++) {
+      final m = _messages[i];
       final created = m.createdAt?.toLocal();
+      var dayChanged = false;
       if (created != null) {
         final day = DateTime(created.year, created.month, created.day);
         if (currentDay == null || day != currentDay) {
           currentDay = day;
+          dayChanged = true;
           children.add(WhatsAppDaySeparator(date: day));
         }
       }
-      children.add(WhatsAppMessageBubble(message: m));
+
+      final prev = i > 0 ? _messages[i - 1] : null;
+      final isFirst =
+          dayChanged || prev == null || _authorKey(prev) != _authorKey(m);
+
+      // Última do grupo: a próxima não existe, muda de remetente ou de dia.
+      var isLast = true;
+      if (i < _messages.length - 1) {
+        final next = _messages[i + 1];
+        if (_authorKey(next) == _authorKey(m)) {
+          final nc = next.createdAt?.toLocal();
+          final sameDay = nc != null &&
+              created != null &&
+              nc.year == created.year &&
+              nc.month == created.month &&
+              nc.day == created.day;
+          isLast = !(sameDay || (nc == null && created == null));
+        }
+      }
+
+      children.add(WhatsAppMessageBubble(
+        message: m,
+        isFirstInGroup: isFirst,
+        isLastInGroup: isLast,
+      ));
     }
 
     if (_hasOlder || _loadingOlder) {
@@ -621,12 +591,18 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
   }
 
   Widget _buildSkeleton(BuildContext context) {
-    Widget bubble({required bool own, required double width}) {
+    // Fiel à thread nova: bolhas agrupadas (margem menor dentro do grupo).
+    Widget bubble({
+      required bool own,
+      required double width,
+      bool grouped = false,
+      double height = 46,
+    }) {
       return Align(
         alignment: own ? Alignment.centerRight : Alignment.centerLeft,
         child: Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: SkeletonBox(width: width, height: 54, borderRadius: 18),
+          padding: EdgeInsets.only(bottom: grouped ? 2 : 10),
+          child: SkeletonBox(width: width, height: height, borderRadius: 18),
         ),
       );
     }
@@ -635,11 +611,12 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
       physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
       children: [
-        bubble(own: false, width: 210),
-        bubble(own: true, width: 180),
-        bubble(own: false, width: 240),
+        bubble(own: false, width: 210, height: 56),
+        bubble(own: true, width: 180, grouped: true),
+        bubble(own: true, width: 140),
+        bubble(own: false, width: 240, grouped: true, height: 64),
         bubble(own: false, width: 150),
-        bubble(own: true, width: 220),
+        bubble(own: true, width: 220, height: 56),
         bubble(own: false, width: 190),
       ],
     );
@@ -833,23 +810,23 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     );
   }
 
+  /// Composer estilo iOS: campo arredondado em superfície clara + botão de
+  /// enviar circular VERDE (identidade WhatsApp), seta pra cima.
   Widget _buildComposer(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final accent =
-        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    final green =
+        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final fill = isDark
-        ? AppColors.background.backgroundTertiaryDarkMode
-        : AppColors.background.backgroundTertiary;
+    final fieldFill = ThemeHelpers.cardBackgroundColor(context);
+    final hairline = ThemeHelpers.borderLightColor(context);
+    final hasText = _composerController.text.trim().isNotEmpty;
 
     return Container(
       decoration: BoxDecoration(
         color: ThemeHelpers.backgroundColor(context),
-        border: Border(
-          top: BorderSide(color: ThemeHelpers.borderLightColor(context)),
-        ),
+        border: Border(top: BorderSide(color: hairline)),
       ),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
       child: SafeArea(
         top: false,
         child: Row(
@@ -858,18 +835,17 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
             // Atalho de template (sempre disponível no canal oficial).
             if (!_usesUnofficial)
               Padding(
-                padding: const EdgeInsets.only(right: 8, bottom: 4),
+                padding: const EdgeInsets.only(right: 7, bottom: 3),
                 child: InkResponse(
-                  radius: 22,
+                  radius: 21,
                   onTap: _openTemplateSheet,
                   child: Container(
-                    width: 40,
-                    height: 40,
+                    width: 38,
+                    height: 38,
                     decoration: BoxDecoration(
-                      color: fill,
+                      color: fieldFill,
                       shape: BoxShape.circle,
-                      border: Border.all(
-                          color: ThemeHelpers.borderLightColor(context)),
+                      border: Border.all(color: hairline),
                     ),
                     child:
                         Icon(LucideIcons.badgeCheck, size: 18, color: secondary),
@@ -878,13 +854,17 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
               ),
             Expanded(
               child: Container(
-                constraints: const BoxConstraints(minHeight: 48),
+                constraints: const BoxConstraints(minHeight: 44),
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 decoration: BoxDecoration(
-                  color: fill,
-                  borderRadius: BorderRadius.circular(24),
+                  color: fieldFill,
+                  borderRadius: BorderRadius.circular(22),
                   border: Border.all(
-                      color: ThemeHelpers.borderLightColor(context)),
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.10)
+                        : Colors.black.withValues(alpha: 0.08),
+                    width: 0.8,
+                  ),
                 ),
                 child: TextField(
                   controller: _composerController,
@@ -892,50 +872,53 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                   minLines: 1,
                   maxLines: 5,
                   textCapitalization: TextCapitalization.sentences,
-                  cursorColor: accent,
+                  cursorColor: green,
                   style: TextStyle(
                     color: ThemeHelpers.textColor(context),
-                    fontSize: 14.5,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
                     height: 1.35,
+                    letterSpacing: -0.1,
                   ),
                   decoration: InputDecoration(
-                    hintText: 'Mensagem…',
+                    hintText: 'Mensagem',
                     hintStyle: TextStyle(
-                      color: secondary.withValues(alpha: 0.75),
-                      fontWeight: FontWeight.w500,
-                      fontSize: 14,
+                      color: secondary.withValues(alpha: 0.7),
+                      fontWeight: FontWeight.w400,
+                      fontSize: 15,
                     ),
                     border: InputBorder.none,
                     enabledBorder: InputBorder.none,
                     focusedBorder: InputBorder.none,
                     isDense: true,
                     contentPadding:
-                        const EdgeInsets.symmetric(vertical: 13),
+                        const EdgeInsets.symmetric(vertical: 11.5),
                   ),
                   onChanged: (_) => setState(() {}),
                 ),
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 7),
             Padding(
-              padding: const EdgeInsets.only(bottom: 2),
+              padding: const EdgeInsets.only(bottom: 1),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
-                width: 46,
-                height: 46,
+                curve: Curves.easeOut,
+                width: 42,
+                height: 42,
                 decoration: BoxDecoration(
-                  color: _composerController.text.trim().isEmpty || _sending
-                      ? accent.withValues(alpha: 0.4)
-                      : accent,
+                  color: !hasText || _sending
+                      ? green.withValues(alpha: isDark ? 0.35 : 0.4)
+                      : green,
                   shape: BoxShape.circle,
-                  boxShadow: _composerController.text.trim().isEmpty
+                  boxShadow: !hasText || _sending
                       ? null
                       : [
                           BoxShadow(
-                            color: accent.withValues(alpha: 0.35),
+                            color: green.withValues(alpha: 0.35),
                             blurRadius: 10,
                             offset: const Offset(0, 4),
+                            spreadRadius: -2,
                           ),
                         ],
                 ),
@@ -948,16 +931,16 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                     child: Center(
                       child: _sending
                           ? const SizedBox(
-                              width: 18,
-                              height: 18,
+                              width: 17,
+                              height: 17,
                               child: CircularProgressIndicator(
                                 strokeWidth: 2,
                                 color: Colors.white,
                               ),
                             )
                           : const Icon(
-                              LucideIcons.sendHorizontal,
-                              size: 19,
+                              LucideIcons.arrowUp,
+                              size: 21,
                               color: Colors.white,
                             ),
                     ),

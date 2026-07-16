@@ -205,7 +205,11 @@ class _RentalDashboardPageState extends State<RentalDashboardPage> {
     );
   }
 
-  // ─── Hero ────────────────────────────────────────────────────────────────
+  // ─── Hero: manchete financeira ───────────────────────────────────────────
+  //
+  // DNA do painel de performance do dashboard geral: a receita mensal da
+  // carteira como manchete, medidor de ocupação e leituras operacionais em
+  // linha — irmão (não gêmeo) do painel da lista de locações.
 
   Widget _buildHero(BuildContext context, RentalDashboardData data) {
     final theme = Theme.of(context);
@@ -218,9 +222,9 @@ class _RentalDashboardPageState extends State<RentalDashboardPage> {
         isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
     final danger =
         isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    final blue = isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
 
     final hasAlert = data.overduePayments > 0 || data.expiringContracts > 0;
-    final dot = hasAlert ? amber : emerald;
     final subtitle = hasAlert
         ? [
             if (data.overduePayments > 0)
@@ -230,68 +234,90 @@ class _RentalDashboardPageState extends State<RentalDashboardPage> {
           ].join(' · ')
         : 'Carteira em dia — nenhum alerta no momento.';
 
-    final blocks = <Widget>[
-      _heroKpiBlock(
-        context,
-        LucideIcons.circleCheckBig,
-        'ATIVAS',
-        '${data.activeRentals}',
-        '${data.occupancyRate.toStringAsFixed(1).replaceAll('.', ',')}% de ocupação',
-        emerald,
-      ),
-      if (_canViewFinancials)
-        _heroKpiBlock(
-          context,
-          LucideIcons.banknote,
-          'RECEITA/MÊS',
-          _compact.format(data.totalMonthlyRevenue),
-          'média ${_compact.format(data.averageRentalValue)}',
-          amber,
-        ),
-      _heroKpiBlock(
-        context,
-        LucideIcons.triangleAlert,
-        'ATRASADOS',
-        '${data.overduePayments}',
-        '${data.expiringContracts} vencendo em 30d',
-        danger,
-      ),
-    ];
-    final divider = ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
+    final occupancy = (data.occupancyRate / 100).clamp(0.0, 1.0);
+    final occupancyLabel =
+        '${data.occupancyRate.toStringAsFixed(data.occupancyRate % 1 == 0 ? 0 : 1).replaceAll('.', ',')}%';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 9,
-              height: 9,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: dot,
-                boxShadow: [
-                  BoxShadow(
-                    color: dot.withValues(alpha: 0.55),
-                    blurRadius: 8,
-                    spreadRadius: 1,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'DASHBOARD · LOCAÇÕES',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: accent,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 2.2,
+                      fontSize: 10,
+                    ),
                   ),
+                  const SizedBox(height: 12),
+                  if (_canViewFinancials) ...[
+                    Text(
+                      'RECEITA MENSAL DA CARTEIRA',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: secondary,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.4,
+                        fontSize: 9.5,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        _money.format(data.totalMonthlyRevenue),
+                        style: theme.textTheme.displaySmall?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          color: ThemeHelpers.textColor(context),
+                          height: 1.0,
+                          letterSpacing: -1.2,
+                          fontSize: 32,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      'média de ${_compact.format(data.averageRentalValue)} por contrato',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: secondary,
+                        fontWeight: FontWeight.w600,
+                        height: 1.3,
+                      ),
+                    ),
+                  ] else ...[
+                    Text(
+                      'CARTEIRA SOB GESTÃO',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: secondary,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.4,
+                        fontSize: 9.5,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    Text(
+                      '${data.activeRentals} contrato${data.activeRentals == 1 ? '' : 's'} ativo${data.activeRentals == 1 ? '' : 's'}',
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: ThemeHelpers.textColor(context),
+                        letterSpacing: -0.7,
+                        height: 1.0,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
-            const SizedBox(width: 9),
-            Expanded(
-              child: Text(
-                'DASHBOARD DE LOCAÇÕES',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: accent,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2.2,
-                  fontSize: 11,
-                ),
-              ),
-            ),
-            if (_canCreate)
+            if (_canCreate) ...[
+              const SizedBox(width: 10),
               InkWell(
                 onTap: () => Navigator.of(context)
                     .pushNamed('/rentals/create')
@@ -323,135 +349,122 @@ class _RentalDashboardPageState extends State<RentalDashboardPage> {
                   ),
                 ),
               ),
+            ],
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 16),
         Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text(
-              '${data.totalRentals}',
-              style: theme.textTheme.displaySmall?.copyWith(
+              'OCUPAÇÃO',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: secondary,
                 fontWeight: FontWeight.w900,
-                color: ThemeHelpers.textColor(context),
-                height: 1.0,
-                letterSpacing: -1.0,
+                letterSpacing: 1.4,
+                fontSize: 9.5,
               ),
             ),
-            const SizedBox(width: 8),
-            Padding(
-              padding: const EdgeInsets.only(bottom: 5),
-              child: Text(
-                data.totalRentals == 1 ? 'locação' : 'locações',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  color: secondary,
-                  fontWeight: FontWeight.w800,
-                  height: 1.0,
-                  letterSpacing: -0.2,
+            const SizedBox(width: 10),
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(99),
+                child: SizedBox(
+                  height: 6,
+                  child: LayoutBuilder(
+                    builder: (context, c) => Stack(
+                      children: [
+                        Container(
+                          color: ThemeHelpers.borderColor(context)
+                              .withValues(alpha: 0.4),
+                        ),
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 500),
+                          curve: Curves.easeOutCubic,
+                          width: c.maxWidth * occupancy,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(99),
+                            gradient: LinearGradient(
+                              colors: [
+                                emerald.withValues(alpha: 0.7),
+                                emerald,
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
+            const SizedBox(width: 10),
+            Text(
+              occupancyLabel,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: emerald,
+                fontWeight: FontWeight.w900,
+                fontSize: 12,
+                letterSpacing: -0.2,
+              ),
+            ),
           ],
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 11),
+        Wrap(
+          spacing: 14,
+          runSpacing: 8,
+          children: [
+            _heroReading(context, emerald, '${data.activeRentals} ativas'),
+            _heroReading(context, blue, '${data.pendingRentals} pendentes'),
+            _heroReading(
+              context,
+              amber,
+              '${data.expiringContracts} vencendo em 30d',
+            ),
+            _heroReading(
+              context,
+              danger,
+              '${data.overduePayments} atrasado${data.overduePayments == 1 ? '' : 's'}',
+            ),
+          ],
+        ),
+        const SizedBox(height: 11),
         Text(
           subtitle,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: secondary,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: data.overduePayments > 0
+                ? danger
+                : hasAlert
+                    ? amber
+                    : secondary,
             fontWeight: FontWeight.w600,
-            height: 1.4,
-          ),
-        ),
-        const SizedBox(height: 18),
-        IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (var i = 0; i < blocks.length; i++) ...[
-                if (i > 0)
-                  Container(
-                    width: 1,
-                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                    color: divider,
-                  ),
-                Expanded(child: blocks[i]),
-              ],
-            ],
+            height: 1.35,
           ),
         ),
       ],
     );
   }
 
-  Widget _heroKpiBlock(BuildContext context, IconData icon, String label,
-      String value, String sub, Color tone) {
-    final theme = Theme.of(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 11, color: tone),
-              const SizedBox(width: 5),
-              Flexible(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w900,
-                    color: tone,
-                    letterSpacing: 1.2,
-                    height: 1.0,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
+  Widget _heroReading(BuildContext context, Color tone, String text) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(shape: BoxShape.circle, color: tone),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          text,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w700,
+            color: ThemeHelpers.textColor(context).withValues(alpha: 0.85),
+            height: 1.0,
           ),
-          const SizedBox(height: 8),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              _loading && _data == null ? '—' : value,
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: tone,
-                letterSpacing: -0.6,
-                height: 1.0,
-                fontSize: 22,
-              ),
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            sub,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: secondary,
-              height: 1.0,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 7),
-          Container(
-            height: 2,
-            width: 18,
-            decoration: BoxDecoration(
-              color: tone,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -1078,32 +1091,37 @@ class _RentalDashboardPageState extends State<RentalDashboardPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SkeletonText(width: 190, height: 11),
+          // Espelha o hero de manchete financeira: eyebrow, rótulo, valor
+          // grande, linha de média, medidor de ocupação e leituras.
+          const SkeletonText(width: 150, height: 10),
           const SizedBox(height: 12),
-          const SkeletonText(width: 130, height: 34),
-          const SizedBox(height: 10),
-          const SkeletonText(width: 220, height: 13),
-          const SizedBox(height: 20),
+          const SkeletonText(width: 176, height: 9),
+          const SizedBox(height: 8),
+          const SkeletonText(width: 210, height: 30),
+          const SizedBox(height: 7),
+          const SkeletonText(width: 190, height: 11),
+          const SizedBox(height: 16),
+          Row(
+            children: const [
+              SkeletonText(width: 62, height: 9),
+              SizedBox(width: 10),
+              Expanded(child: SkeletonBox(height: 6, borderRadius: 99)),
+              SizedBox(width: 10),
+              SkeletonText(width: 34, height: 11),
+            ],
+          ),
+          const SizedBox(height: 12),
           Row(
             children: [
-              for (var i = 0; i < 3; i++) ...[
+              for (var i = 0; i < 4; i++) ...[
                 if (i > 0) const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
-                      SkeletonText(width: 60, height: 9),
-                      SizedBox(height: 8),
-                      SkeletonText(width: 80, height: 20),
-                      SizedBox(height: 6),
-                      SkeletonText(width: 70, height: 9),
-                    ],
-                  ),
-                ),
+                const SkeletonText(width: 62, height: 10),
               ],
             ],
           ),
-          const SizedBox(height: 22),
+          const SizedBox(height: 12),
+          const SkeletonText(width: 220, height: 12),
+          const SizedBox(height: 18),
           Row(
             children: [
               for (var i = 0; i < 4; i++) ...[

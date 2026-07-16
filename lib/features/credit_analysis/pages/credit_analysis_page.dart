@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' show pi;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -25,8 +26,9 @@ final NumberFormat _money = NumberFormat.currency(
 );
 
 /// Tela **Análise de Crédito** — porta do `CreditAnalysisPage.tsx` do painel
-/// web. Hero editorial com KPIs, busca flush, abas flush com sublinhado,
-/// lista de pareceres e ações no próprio item (detalhe + refazer). Módulo
+/// web. O hero traz o gauge do score médio como protagonista + medidor da
+/// taxa de aprovação; busca flush, abas flush com sublinhado, lista de
+/// pareceres e ações no próprio item (detalhe + refazer). Módulo
 /// `credit_and_collection`, permissões `credit_analysis:view|create|review`.
 class CreditAnalysisPage extends StatefulWidget {
   const CreditAnalysisPage({super.key});
@@ -330,28 +332,41 @@ class _CreditAnalysisPageState extends State<CreditAnalysisPage> {
     );
   }
 
-  // ─── Hero editorial ──────────────────────────────────────────────────────
+  // ─── Hero: o score como protagonista ─────────────────────────────────────
+  //
+  // Meio-gauge do score médio (0–1000) à esquerda, com o tom da faixa de
+  // risco; título e leitura contextual à direita; embaixo, medidor da taxa
+  // de aprovação com legenda de pareceres. Sem eyebrow com dot nem fileira
+  // de KPIs sublinhados.
+
+  /// Tom semântico da faixa de score: ≥700 saudável, ≥400 atenção, <400 risco.
+  Color _scoreTone(BuildContext context, double score) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    if (score >= 700) {
+      return isDark ? AppColors.status.successDarkMode : AppColors.status.success;
+    }
+    if (score >= 400) {
+      return isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
+    }
+    return isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+  }
 
   Widget _buildHero(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final accent = _accentColor(context);
-    final textColor = ThemeHelpers.textColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final emerald =
-        isDark ? AppColors.status.successDarkMode : AppColors.status.success;
-    final amber =
-        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
-    final blue = isDark ? AppColors.status.infoDarkMode : AppColors.status.info;
 
     final total = _stats.total;
     final hasReview = _stats.manualReview > 0;
-    final dot = hasReview ? amber : emerald;
     final subtitle = total == 0
         ? 'Consulte o crédito de inquilinos antes de fechar a locação.'
         : hasReview
-            ? '${_stats.manualReview} parecer${_stats.manualReview == 1 ? '' : 'es'} aguardando revisão manual'
-            : 'Nenhum parecer pendente de revisão no momento.';
+            ? '${total == 1 ? '1 análise' : '$total análises'} na carteira · '
+                '${_stats.manualReview} aguardando revisão manual.'
+            : '${total == 1 ? '1 análise' : '$total análises'} na carteira · '
+                'nenhum parecer pendente de revisão.';
+
+    final hasScore = !_statsLoading && _stats.averageScore > 0;
+    final score = _stats.averageScore.clamp(0, 1000).toDouble();
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(0, 4, 0, 0),
@@ -359,199 +374,181 @@ class _CreditAnalysisPageState extends State<CreditAnalysisPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: dot,
-                  boxShadow: [
-                    BoxShadow(
-                      color: dot.withValues(alpha: 0.55),
-                      blurRadius: 8,
-                      spreadRadius: 1,
+              _ScoreGauge(
+                score: hasScore ? score : null,
+                tone: hasScore
+                    ? _scoreTone(context, score)
+                    : ThemeHelpers.textSecondaryColor(context),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Análise de crédito',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: ThemeHelpers.textColor(context),
+                        letterSpacing: -0.5,
+                        height: 1.05,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      subtitle,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: secondary,
+                        fontWeight: FontWeight.w600,
+                        height: 1.35,
+                      ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 9),
-              Text(
-                'ANÁLISE DE CRÉDITO',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: accent,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2.2,
-                  fontSize: 11,
-                ),
-              ),
             ],
           ),
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '$total',
-                style: theme.textTheme.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: textColor,
-                  height: 1.0,
-                  letterSpacing: -1.0,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 5),
-                child: Text(
-                  total == 1 ? 'análise' : 'análises',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: secondary,
-                    fontWeight: FontWeight.w800,
-                    height: 1.0,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            subtitle,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: secondary,
-              fontWeight: FontWeight.w600,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 18),
-          _buildKpiStrip(context, blue, emerald, amber),
+          const SizedBox(height: 16),
+          _buildApprovalMeter(context),
         ],
       ),
     );
   }
 
-  Widget _buildKpiStrip(
-      BuildContext context, Color blue, Color emerald, Color amber) {
-    final divider = ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
+  /// Medidor da taxa de aprovação + legenda dos pareceres.
+  Widget _buildApprovalMeter(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final emerald =
+        isDark ? AppColors.status.successDarkMode : AppColors.status.success;
+    final amber =
+        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
+    final danger =
+        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+
+    final frac =
+        _statsLoading ? 0.0 : _stats.approvalRate.clamp(0.0, 1.0).toDouble();
     final rate = (_stats.approvalRate * 100).clamp(0, 100).toDouble();
     final rateLabel =
-        rate % 1 == 0 ? rate.toStringAsFixed(0) : rate.toStringAsFixed(1);
-    final blocks = <Widget>[
-      _heroKpiBlock(
-        context,
-        LucideIcons.gauge,
-        'SCORE MÉDIO',
-        _stats.averageScore <= 0
-            ? '—'
-            : _stats.averageScore.toStringAsFixed(0),
-        'de 0 a 1000',
-        blue,
-      ),
-      _heroKpiBlock(
-        context,
-        LucideIcons.badgeCheck,
-        'APROVAÇÃO',
-        '${rateLabel.replaceAll('.', ',')}%',
-        '${_stats.approved} aprovada${_stats.approved == 1 ? '' : 's'}',
-        emerald,
-      ),
-      _heroKpiBlock(
-        context,
-        LucideIcons.shieldQuestionMark,
-        'REVISÃO',
-        '${_stats.manualReview}',
-        'aguardando parecer',
-        amber,
-      ),
-    ];
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (var i = 0; i < blocks.length; i++) ...[
-            if (i > 0)
-              Container(
-                width: 1,
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                color: divider,
+        (rate % 1 == 0 ? rate.toStringAsFixed(0) : rate.toStringAsFixed(1))
+            .replaceAll('.', ',');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Text(
+              'TAXA DE APROVAÇÃO',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: secondary,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.4,
+                fontSize: 9.5,
               ),
-            Expanded(child: blocks[i]),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(99),
+                child: SizedBox(
+                  height: 6,
+                  child: LayoutBuilder(
+                    builder: (context, c) => Stack(
+                      children: [
+                        Container(
+                          color: ThemeHelpers.borderColor(context)
+                              .withValues(alpha: 0.4),
+                        ),
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 500),
+                          curve: Curves.easeOutCubic,
+                          width: c.maxWidth * frac,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(99),
+                            gradient: LinearGradient(
+                              colors: [
+                                emerald.withValues(alpha: 0.7),
+                                emerald,
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              _statsLoading ? '—' : '$rateLabel%',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: emerald,
+                fontWeight: FontWeight.w900,
+                fontSize: 12,
+                letterSpacing: -0.2,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
           ],
-        ],
-      ),
+        ),
+        const SizedBox(height: 9),
+        Wrap(
+          spacing: 14,
+          runSpacing: 6,
+          children: [
+            _verdictReading(
+              context,
+              emerald,
+              _statsLoading
+                  ? '— aprovadas'
+                  : '${_stats.approved} aprovada${_stats.approved == 1 ? '' : 's'}',
+            ),
+            _verdictReading(
+              context,
+              amber,
+              _statsLoading
+                  ? '— em revisão'
+                  : '${_stats.manualReview} em revisão',
+            ),
+            _verdictReading(
+              context,
+              danger,
+              _statsLoading
+                  ? '— recusadas'
+                  : '${_stats.rejected} recusada${_stats.rejected == 1 ? '' : 's'}',
+            ),
+          ],
+        ),
+      ],
     );
   }
 
-  Widget _heroKpiBlock(BuildContext context, IconData icon, String label,
-      String value, String sub, Color tone) {
-    final theme = Theme.of(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 11, color: tone),
-              const SizedBox(width: 5),
-              Flexible(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w900,
-                    color: tone,
-                    letterSpacing: 1.2,
-                    height: 1.0,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
+  Widget _verdictReading(BuildContext context, Color tone, String text) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(shape: BoxShape.circle, color: tone),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          text,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: ThemeHelpers.textSecondaryColor(context),
+            height: 1.0,
           ),
-          const SizedBox(height: 8),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              _statsLoading ? '—' : value,
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: tone,
-                letterSpacing: -0.6,
-                height: 1.0,
-                fontSize: 22,
-              ),
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            sub,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: secondary,
-              height: 1.0,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 7),
-          Container(
-            height: 2,
-            width: 18,
-            decoration: BoxDecoration(
-              color: tone,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -1071,6 +1068,118 @@ class _CreditAnalysisPageState extends State<CreditAnalysisPage> {
 }
 
 // ─── Aba flush (ícone + rótulo + contagem + sublinhado) ──────────────────────
+
+// ─── Gauge do score (hero) ───────────────────────────────────────────────────
+
+/// Meio-gauge do score médio (0–1000). `score == null` desenha só o trilho
+/// com “—” no centro (carregando ou sem consultas).
+class _ScoreGauge extends StatelessWidget {
+  final double? score;
+  final Color tone;
+
+  const _ScoreGauge({required this.score, required this.tone});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final track = ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
+    final frac = score == null ? 0.0 : (score! / 1000).clamp(0.0, 1.0);
+
+    return SizedBox(
+      width: 116,
+      height: 74,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: frac),
+        duration: const Duration(milliseconds: 700),
+        curve: Curves.easeOutCubic,
+        builder: (context, value, _) => CustomPaint(
+          painter: _ScoreGaugePainter(
+            fraction: value,
+            tone: tone,
+            track: track,
+          ),
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  score == null ? '—' : score!.round().toString(),
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: tone,
+                    letterSpacing: -0.8,
+                    height: 1.0,
+                    fontSize: 25,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  'SCORE MÉDIO',
+                  style: TextStyle(
+                    fontSize: 7.5,
+                    fontWeight: FontWeight.w900,
+                    color: secondary,
+                    letterSpacing: 1.3,
+                    height: 1.0,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ScoreGaugePainter extends CustomPainter {
+  final double fraction;
+  final Color tone;
+  final Color track;
+
+  const _ScoreGaugePainter({
+    required this.fraction,
+    required this.tone,
+    required this.track,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const stroke = 9.0;
+    final center = Offset(size.width / 2, size.height - 2);
+    final radius = size.width / 2 - stroke / 2;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+
+    final trackPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round
+      ..color = track;
+    canvas.drawArc(rect, pi, pi, false, trackPaint);
+
+    if (fraction > 0) {
+      final valuePaint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..strokeCap = StrokeCap.round
+        ..shader = SweepGradient(
+          startAngle: pi,
+          endAngle: 2 * pi,
+          colors: [tone.withValues(alpha: 0.55), tone],
+        ).createShader(rect);
+      canvas.drawArc(rect, pi, pi * fraction, false, valuePaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ScoreGaugePainter oldDelegate) =>
+      oldDelegate.fraction != fraction ||
+      oldDelegate.tone != tone ||
+      oldDelegate.track != track;
+}
 
 class _FlushTab extends StatelessWidget {
   final IconData icon;

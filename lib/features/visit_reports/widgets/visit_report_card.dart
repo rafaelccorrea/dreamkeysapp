@@ -36,9 +36,107 @@ IconData visitStatusIcon(VisitSignatureStatus status) {
   }
 }
 
-/// Item da lista de visitas — **linha flush** (sem card/sombra), mesmo DNA do
-/// `CommissionCard`: glyph tonal do status, informação no meio, data à
-/// direita e AÇÕES no próprio item (WhatsApp / link / editar / excluir).
+/// Folhinha de calendário — assinatura visual da feature Visitas (agenda).
+/// Faixa superior sólida com o mês, dia grande no corpo e dia da semana
+/// abaixo. Sem data → ícone de calendário no mesmo invólucro tonal.
+class VisitDateLeaf extends StatelessWidget {
+  final DateTime? date;
+  final Color tone;
+  final double width;
+
+  const VisitDateLeaf({
+    super.key,
+    required this.date,
+    required this.tone,
+    this.width = 56,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final d = date;
+
+    return Container(
+      width: width,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: tone.withValues(alpha: isDark ? 0.12 : 0.06),
+        border: Border.all(color: tone.withValues(alpha: isDark ? 0.4 : 0.3)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: d == null
+          ? SizedBox(
+              height: width * 1.12,
+              child: Center(
+                child: Icon(LucideIcons.calendarDays, color: tone, size: 20),
+              ),
+            )
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Faixa do mês — sólida na cor de acento (folhinha clássica).
+                Container(
+                  width: double.infinity,
+                  color: tone,
+                  padding: const EdgeInsets.symmetric(vertical: 3.5),
+                  child: Text(
+                    DateFormat('MMM', 'pt_BR')
+                        .format(d)
+                        .replaceAll('.', '')
+                        .toUpperCase(),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 8.5,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.6,
+                      height: 1.0,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 7, 4, 7),
+                  child: Column(
+                    children: [
+                      Text(
+                        '${d.day}',
+                        style: TextStyle(
+                          color: textColor,
+                          fontSize: 21,
+                          fontWeight: FontWeight.w900,
+                          height: 1.0,
+                          letterSpacing: -0.6,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        DateFormat('E', 'pt_BR')
+                            .format(d)
+                            .replaceAll('.', '')
+                            .toLowerCase(),
+                        style: TextStyle(
+                          color: secondary,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.8,
+                          height: 1.0,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+/// Item da lista de visitas — **linha de agenda**: nó do status sobre um
+/// trilho vertical (timeline), conteúdo ao lado e AÇÕES no próprio item
+/// (WhatsApp / link / editar / excluir). A data fica no cabeçalho do dia,
+/// não no item — a lista é agrupada por dia na `VisitsPage`.
 class VisitReportCard extends StatelessWidget {
   final VisitReport report;
 
@@ -121,38 +219,60 @@ class VisitReportCard extends StatelessWidget {
           onTap: onEdit!,
         ),
     ];
+    final hasFooter = actions.isNotEmpty || (canDelete && onDelete != null);
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        child: Container(
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
-            ),
-          ),
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Glyph tonal do status da assinatura.
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(13),
-                      color: tone.withValues(alpha: isDark ? 0.16 : 0.1),
-                      border: Border.all(color: tone.withValues(alpha: 0.28)),
-                    ),
-                    child: Icon(visitStatusIcon(report.signatureStatus),
-                        color: tone, size: 21),
+        child: Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Trilho de agenda: nó do status + linha vertical que conecta
+                // os itens do mesmo dia.
+                SizedBox(
+                  width: 28,
+                  child: Column(
+                    children: [
+                      Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: tone.withValues(alpha: isDark ? 0.16 : 0.1),
+                          border: Border.all(
+                            color: tone.withValues(alpha: 0.35),
+                            width: 1.2,
+                          ),
+                        ),
+                        child: Icon(
+                          visitStatusIcon(report.signatureStatus),
+                          color: tone,
+                          size: 14,
+                        ),
+                      ),
+                      Expanded(
+                        child: Center(
+                          child: Container(
+                            width: 2,
+                            margin: const EdgeInsets.only(top: 6),
+                            decoration: BoxDecoration(
+                              color: ThemeHelpers.borderLightColor(context),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -182,7 +302,7 @@ class VisitReportCard extends StatelessWidget {
                             ],
                           ],
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 7),
                         Text(
                           report.clientLabel,
                           style: theme.textTheme.titleSmall?.copyWith(
@@ -239,63 +359,39 @@ class VisitReportCard extends StatelessWidget {
                             ],
                           ),
                         ],
+                        if (hasFooter) ...[
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Wrap(
+                                  spacing: 14,
+                                  runSpacing: 6,
+                                  children: actions,
+                                ),
+                              ),
+                              if (canDelete && onDelete != null)
+                                InkResponse(
+                                  radius: 18,
+                                  onTap: onDelete,
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(4),
+                                    child: Icon(
+                                      LucideIcons.trash2,
+                                      size: 16,
+                                      color: danger.withValues(alpha: 0.85),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  // Data da visita + contagem de imóveis.
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        report.visitDate != null
-                            ? dateFmt.format(report.visitDate!)
-                            : '—',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          color: ThemeHelpers.textColor(context),
-                          letterSpacing: -0.3,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '$propsCount imóve${propsCount == 1 ? 'l' : 'is'}',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: neutral,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 10.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              if (actions.isNotEmpty || (canDelete && onDelete != null)) ...[
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    const SizedBox(width: 56),
-                    Expanded(
-                      child: Wrap(
-                        spacing: 14,
-                        runSpacing: 6,
-                        children: actions,
-                      ),
-                    ),
-                    if (canDelete && onDelete != null)
-                      InkResponse(
-                        radius: 18,
-                        onTap: onDelete,
-                        child: Padding(
-                          padding: const EdgeInsets.all(4),
-                          child: Icon(LucideIcons.trash2,
-                              size: 16, color: danger.withValues(alpha: 0.85)),
-                        ),
-                      ),
-                  ],
                 ),
               ],
-            ],
+            ),
           ),
         ),
       ),

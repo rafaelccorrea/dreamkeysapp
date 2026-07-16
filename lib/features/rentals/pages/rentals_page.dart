@@ -23,7 +23,8 @@ final NumberFormat _compact = NumberFormat.compactCurrency(
 );
 
 /// Tela **Locações** — lista dos contratos de aluguel (paridade com
-/// `RentalsPage.tsx`): hero editorial com KPIs, busca flush, chips de status,
+/// `RentalsPage.tsx`): painel operacional no topo (spotlight do próximo
+/// vencimento + faixa de receita do mês), busca flush, chips de status,
 /// filtros avançados no modal padrão, paginação e ações no próprio item
 /// (aprovar/rejeitar, editar, excluir).
 class RentalsPage extends StatefulWidget {
@@ -482,7 +483,11 @@ class _RentalsPageState extends State<RentalsPage> {
     );
   }
 
-  // ─── Hero editorial ──────────────────────────────────────────────────────
+  // ─── Painel operacional (hero) ───────────────────────────────────────────
+  //
+  // DNA do dashboard: cabeçalho com placa de ícone + leitura contextual,
+  // spotlight do PRÓXIMO VENCIMENTO e faixa de receita do mês com barra de
+  // progresso — nada de fileira de KPIs sublinhados.
 
   Widget _buildHero(BuildContext context) {
     final theme = Theme.of(context);
@@ -490,17 +495,11 @@ class _RentalsPageState extends State<RentalsPage> {
     final accent = _accentColor(context);
     final textColor = ThemeHelpers.textColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final emerald =
-        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
-    final amber =
-        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
 
     final stats = _stats;
-    final hasAlert =
-        stats != null && (stats.overduePayments > 0 || stats.expiringContracts > 0);
-    final dot = hasAlert ? amber : emerald;
-
-    final subtitle = stats == null
+    final hasAlert = stats != null &&
+        (stats.overduePayments > 0 || stats.expiringContracts > 0);
+    final statusLine = stats == null
         ? 'Contratos de aluguel e pagamentos da sua carteira.'
         : hasAlert
             ? [
@@ -517,215 +516,528 @@ class _RentalsPageState extends State<RentalsPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
-                width: 9,
-                height: 9,
+                width: 44,
+                height: 44,
                 decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: dot,
-                  boxShadow: [
-                    BoxShadow(
-                      color: dot.withValues(alpha: 0.55),
-                      blurRadius: 8,
-                      spreadRadius: 1,
+                  borderRadius: BorderRadius.circular(15),
+                  color: accent.withValues(alpha: isDark ? 0.18 : 0.1),
+                  border: Border.all(color: accent.withValues(alpha: 0.28)),
+                ),
+                child: Icon(LucideIcons.keyRound, color: accent, size: 21),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Locações',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: textColor,
+                        letterSpacing: -0.5,
+                        height: 1.05,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(
+                            text: '$_total ',
+                            style: TextStyle(
+                              color: accent,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          TextSpan(
+                            text: _total == 1
+                                ? 'contrato na carteira'
+                                : 'contratos na carteira',
+                          ),
+                        ],
+                      ),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: secondary,
+                        fontWeight: FontWeight.w700,
+                        height: 1.2,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Text(
-                  'GESTÃO DE LOCAÇÕES',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: accent,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 2.2,
-                    fontSize: 11,
-                  ),
-                ),
-              ),
-              if (_canCreate)
+              if (_canCreate) ...[
+                const SizedBox(width: 8),
                 _HeroActionButton(
                   icon: LucideIcons.plus,
                   label: 'Nova',
                   accent: accent,
                   onTap: _openCreate,
                 ),
+              ],
             ],
           ),
           const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '$_total',
-                style: theme.textTheme.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: textColor,
-                  height: 1.0,
-                  letterSpacing: -1.0,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 5),
-                child: Text(
-                  _total == 1 ? 'contrato' : 'contratos',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: secondary,
-                    fontWeight: FontWeight.w800,
-                    height: 1.0,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
           Text(
-            subtitle,
-            style: theme.textTheme.bodyMedium?.copyWith(
+            statusLine,
+            style: theme.textTheme.bodySmall?.copyWith(
               color: secondary,
               fontWeight: FontWeight.w600,
-              height: 1.4,
+              height: 1.35,
             ),
           ),
+          const SizedBox(height: 14),
+          _buildDueSpotlight(context),
           if (_canViewDashboard) ...[
-            const SizedBox(height: 18),
-            _buildKpiStrip(context),
+            const SizedBox(height: 14),
+            _buildRevenueBand(context),
           ],
         ],
       ),
     );
   }
 
-  Widget _buildKpiStrip(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+  /// Próximo vencimento entre os contratos carregados: primeiro procura uma
+  /// parcela pendente com data futura; sem parcelas no payload, projeta o
+  /// `dueDay` do contrato ativo para a próxima ocorrência.
+  ({Rental rental, DateTime due})? get _nextDue {
+    final now = DateTime.now();
+    final base = DateTime(now.year, now.month, now.day);
+
+    DateTime withDay(int year, int month, int day) {
+      final lastDay = DateTime(year, month + 1, 0).day;
+      return DateTime(year, month, day > lastDay ? lastDay : day);
+    }
+
+    ({Rental rental, DateTime due})? best;
+    for (final r in _items) {
+      if (r.status != RentalStatus.active) continue;
+      DateTime? due;
+      for (final p in r.payments) {
+        if (p.isPaid) continue;
+        final d = p.dueDate;
+        if (d == null) continue;
+        final dd = DateTime(d.year, d.month, d.day);
+        if (dd.isBefore(base)) continue;
+        if (due == null || dd.isBefore(due)) due = dd;
+      }
+      if (due == null && r.dueDay > 0) {
+        var candidate = withDay(base.year, base.month, r.dueDay);
+        if (candidate.isBefore(base)) {
+          candidate = withDay(base.year, base.month + 1, r.dueDay);
+        }
+        due = candidate;
+      }
+      if (due == null) continue;
+      if (best == null || due.isBefore(best.due)) {
+        best = (rental: r, due: due);
+      }
+    }
+    return best;
+  }
+
+  /// Spotlight do próximo aluguel a vencer — mesma pegada do spotlight de
+  /// agenda do dashboard: data grande à esquerda, contexto no meio, valor à
+  /// direita. Âmbar quando falta pouco (≤ 3 dias).
+  Widget _buildDueSpotlight(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+
+    if (_loading && _items.isEmpty) {
+      // Skeleton fiel ao spotlight carregado.
+      return Container(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: ThemeHelpers.borderLightColor(context)),
+        ),
+        child: Row(
+          children: [
+            const SkeletonBox(width: 52, height: 40, borderRadius: 10),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  SkeletonText(width: 132, height: 10, borderRadius: 4),
+                  SizedBox(height: 7),
+                  SkeletonText(width: double.infinity, height: 13),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            const SkeletonText(width: 66, height: 16),
+          ],
+        ),
+      );
+    }
+
+    final next = _nextDue;
+    if (next == null) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.04)
+              : Colors.black.withValues(alpha: 0.03),
+          border: Border.all(color: ThemeHelpers.borderLightColor(context)),
+        ),
+        child: Row(
+          children: [
+            Icon(LucideIcons.calendarCheck2, size: 18, color: secondary),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Nenhum vencimento programado — sem contratos ativos na carteira.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: secondary,
+                  fontWeight: FontWeight.w600,
+                  height: 1.3,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final rental = next.rental;
+    final due = next.due;
+    final now = DateTime.now();
+    final base = DateTime(now.year, now.month, now.day);
+    final days = due.difference(base).inDays;
+    final urgent = days <= 3;
+    final tone = urgent
+        ? (isDark ? AppColors.status.warningDarkMode : AppColors.status.warning)
+        : _accentColor(context);
+    final relative = days == 0
+        ? 'HOJE'
+        : days == 1
+            ? 'AMANHÃ'
+            : 'EM $days DIAS';
+    final property = rental.property?.title.trim().isNotEmpty == true
+        ? rental.property!.title.trim()
+        : 'Imóvel não especificado';
+
+    return InkWell(
+      onTap: () => _openDetails(rental, focusPayments: _canManagePayments),
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: tone.withValues(alpha: isDark ? 0.10 : 0.06),
+          border: Border.all(color: tone.withValues(alpha: 0.32)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: 52,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '${due.day}'.padLeft(2, '0'),
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: tone,
+                      letterSpacing: -0.6,
+                      height: 1.0,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    DateFormat('MMM', 'pt_BR').format(due).toUpperCase(),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: tone.withValues(alpha: 0.85),
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.4,
+                      fontSize: 9.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              width: 1,
+              height: 36,
+              margin: const EdgeInsets.symmetric(horizontal: 12),
+              color: tone.withValues(alpha: 0.25),
+            ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Icon(LucideIcons.calendarClock, size: 12, color: tone),
+                      const SizedBox(width: 5),
+                      Flexible(
+                        child: Text(
+                          'PRÓXIMO VENCIMENTO · $relative',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: tone,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.6,
+                            fontSize: 10,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    rental.tenantName.trim().isNotEmpty
+                        ? rental.tenantName.trim()
+                        : 'Inquilino não especificado',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: ThemeHelpers.textColor(context),
+                      letterSpacing: -0.2,
+                      height: 1.2,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    property,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: secondary,
+                      fontWeight: FontWeight.w600,
+                      height: 1.2,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _compact.format(rental.monthlyValue),
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: tone,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                Text(
+                  '/mês',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: secondary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 10,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Faixa de receita do mês — barra recebido × a receber (com permissão
+  /// financeira) ou leitura operacional compacta (sem ela).
+  Widget _buildRevenueBand(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
     final emerald =
         isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
     final amber =
         isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
     final danger =
         isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-    final divider = ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
     final stats = _stats ?? RentalDashboardData.zero;
     final canSeeMoney = _access.hasPermission(RentalPermissions.viewFinancials);
 
-    final blocks = <Widget>[
-      _heroKpiBlock(
-        context,
-        LucideIcons.circleCheckBig,
-        'ATIVAS',
-        _statsLoading ? '—' : '${stats.activeRentals}',
-        '${stats.occupancyRate.toStringAsFixed(0)}% de ocupação',
-        emerald,
-      ),
-      if (canSeeMoney)
-        _heroKpiBlock(
-          context,
-          LucideIcons.banknote,
-          'RECEITA/MÊS',
-          _statsLoading ? '—' : _compact.format(stats.totalMonthlyRevenue),
-          'média ${_compact.format(stats.averageRentalValue)}',
-          amber,
-        ),
-      _heroKpiBlock(
-        context,
-        LucideIcons.triangleAlert,
-        'ATRASADOS',
-        _statsLoading ? '—' : '${stats.overduePayments}',
-        '${stats.expiringContracts} vencendo em 30d',
-        danger,
-      ),
-    ];
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+    final occupancy = '${stats.occupancyRate.toStringAsFixed(0)}%';
+    final overdue = stats.overduePayments;
+
+    if (!canSeeMoney) {
+      return Wrap(
+        spacing: 14,
+        runSpacing: 8,
         children: [
-          for (var i = 0; i < blocks.length; i++) ...[
-            if (i > 0)
-              Container(
-                width: 1,
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                color: divider,
-              ),
-            Expanded(child: blocks[i]),
-          ],
+          _opsReading(context, emerald,
+              _statsLoading ? '— ativas' : '${stats.activeRentals} ativas'),
+          _opsReading(context, emerald.withValues(alpha: 0.8),
+              _statsLoading ? '—% ocupação' : '$occupancy ocupação'),
+          _opsReading(
+              context,
+              amber,
+              _statsLoading
+                  ? '— vencendo em 30d'
+                  : '${stats.expiringContracts} vencendo em 30d'),
+          _opsReading(
+              context,
+              danger,
+              _statsLoading
+                  ? '— atrasados'
+                  : '$overdue atrasado${overdue == 1 ? '' : 's'}'),
         ],
-      ),
+      );
+    }
+
+    final paid = stats.paidThisMonth;
+    final pending = stats.pendingThisMonth;
+    final denom = paid + pending;
+    final frac = denom <= 0 ? 0.0 : (paid / denom).clamp(0.0, 1.0);
+    final month = DateFormat('MMMM', 'pt_BR').format(DateTime.now());
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'RECEITA DE ${month.toUpperCase()}',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: secondary,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.4,
+                  fontSize: 9.5,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Text(
+              _statsLoading
+                  ? '—'
+                  : '${_compact.format(paid)} de ${_compact.format(denom)}',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: emerald,
+                fontWeight: FontWeight.w900,
+                fontSize: 11,
+                letterSpacing: -0.1,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(99),
+          child: SizedBox(
+            height: 8,
+            width: double.infinity,
+            child: LayoutBuilder(
+              builder: (context, c) => Stack(
+                children: [
+                  Container(color: amber.withValues(alpha: 0.22)),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 500),
+                    curve: Curves.easeOutCubic,
+                    width: c.maxWidth * (_statsLoading ? 0 : frac),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(99),
+                      gradient: LinearGradient(
+                        colors: [
+                          emerald.withValues(alpha: 0.75),
+                          emerald,
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _legendDot(context, emerald, 'Recebido'),
+            const SizedBox(width: 12),
+            _legendDot(context, amber, 'A receber'),
+            const Spacer(),
+            Flexible(
+              child: Text(
+                _statsLoading
+                    ? '—'
+                    : overdue > 0
+                        ? '$occupancy ocupação · $overdue atrasado${overdue == 1 ? '' : 's'}'
+                        : '$occupancy ocupação',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: overdue > 0 && !_statsLoading ? danger : secondary,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 10.5,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
-  Widget _heroKpiBlock(BuildContext context, IconData icon, String label,
-      String value, String sub, Color tone) {
-    final theme = Theme.of(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 11, color: tone),
-              const SizedBox(width: 5),
-              Flexible(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w900,
-                    color: tone,
-                    letterSpacing: 1.2,
-                    height: 1.0,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
+  Widget _opsReading(BuildContext context, Color tone, String text) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(shape: BoxShape.circle, color: tone),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          text,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w700,
+            color: ThemeHelpers.textColor(context).withValues(alpha: 0.85),
+            height: 1.0,
           ),
-          const SizedBox(height: 8),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              value,
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: tone,
-                letterSpacing: -0.6,
-                height: 1.0,
-                fontSize: 22,
-              ),
-            ),
+        ),
+      ],
+    );
+  }
+
+  Widget _legendDot(BuildContext context, Color tone, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(shape: BoxShape.circle, color: tone),
+        ),
+        const SizedBox(width: 5),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10.5,
+            fontWeight: FontWeight.w700,
+            color: ThemeHelpers.textSecondaryColor(context),
+            height: 1.0,
           ),
-          const SizedBox(height: 5),
-          Text(
-            sub,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: secondary,
-              height: 1.0,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 7),
-          Container(
-            height: 2,
-            width: 18,
-            decoration: BoxDecoration(
-              color: tone,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 

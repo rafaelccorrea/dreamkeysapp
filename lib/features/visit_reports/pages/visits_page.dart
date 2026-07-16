@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
@@ -31,9 +32,10 @@ class _ScopeState {
   int visible = _VisitsPageState._pageSize;
 }
 
-/// Tela **Relatórios de Visita** — mesmo DNA refinado de Comissões/Aprovações:
-/// hero editorial com KPIs, busca flush, abas flush (Minhas · Gestão), chips
-/// de status e cards com ações no próprio item (WhatsApp / link / editar).
+/// Tela **Visitas** com personalidade de AGENDA: spotlight da próxima visita
+/// (folhinha de calendário + faixa de assinaturas pendentes clicável) no topo
+/// e lista agrupada por dia, com cabeçalhos de data pt-BR e itens em trilho
+/// de timeline. Sem hero editorial — a identidade aqui é o calendário.
 class VisitsPage extends StatefulWidget {
   const VisitsPage({super.key});
 
@@ -110,7 +112,33 @@ class _VisitsPageState extends State<VisitsPage> {
     }
   }
 
+  /// Tom do cabeçalho de dia: hoje/futuro na cor do escopo, passado e "sem
+  /// data" neutros — leitura temporal da agenda.
+  Color _dayTone(BuildContext context, DateTime? d) {
+    if (d == null) return ThemeHelpers.textSecondaryColor(context);
+    return d.isBefore(_todayStart)
+        ? ThemeHelpers.textSecondaryColor(context)
+        : _scopeColor(context, _activeScope);
+  }
+
   // ─── Dados ───────────────────────────────────────────────────────────────
+
+  DateTime get _todayStart {
+    final n = DateTime.now();
+    return DateTime(n.year, n.month, n.day);
+  }
+
+  /// Próxima visita (hoje ou à frente) — a mais próxima no tempo.
+  VisitReport? _nextUpcoming(List<VisitReport> items) {
+    VisitReport? best;
+    final today = _todayStart;
+    for (final r in items) {
+      final d = r.visitDate;
+      if (d == null || d.isBefore(today)) continue;
+      if (best == null || d.isBefore(best.visitDate!)) best = r;
+    }
+    return best;
+  }
 
   Future<void> _loadScope(_VisitScope scope, {bool refresh = false}) async {
     final st = _state[scope]!;
@@ -370,38 +398,30 @@ class _VisitsPageState extends State<VisitsPage> {
           RefreshIndicator(
             color: _accentColor(context),
             onRefresh: _refresh,
-            child: LayoutBuilder(
-              builder: (context, constraints) => SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                child: ConstrainedBox(
-                  constraints:
-                      BoxConstraints(minHeight: constraints.maxHeight),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                            _kPagePadH, _kPagePadTop, _kPagePadH, 0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildHero(context),
-                            const SizedBox(height: _kSectionGap),
-                            _buildSearchRow(context),
-                            const SizedBox(height: _kSectionGap),
-                          ],
-                        ),
-                      ),
-                      if (_canManage) _buildScopeRail(context),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(_kPagePadH,
-                            _kSectionGap, _kPagePadH, _kPagePadBottom),
-                        child: _buildActivePanel(context),
-                      ),
-                    ],
-                  ),
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.only(
+                  top: _kPagePadTop, bottom: _kPagePadBottom),
+              children: [
+                Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: _kPagePadH),
+                  child: _buildSpotlight(context),
                 ),
-              ),
+                const SizedBox(height: _kSectionGap),
+                Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: _kPagePadH),
+                  child: _buildSearchRow(context),
+                ),
+                const SizedBox(height: _kSectionGap),
+                if (_canManage) _buildScopeRail(context),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                      _kPagePadH, _kSectionGap, _kPagePadH, 0),
+                  child: _buildActivePanel(context),
+                ),
+              ],
             ),
           ),
           if (_canCreate)
@@ -420,225 +440,64 @@ class _VisitsPageState extends State<VisitsPage> {
     );
   }
 
-  // ─── Hero editorial ──────────────────────────────────────────────────────
+  // ─── Spotlight de agenda (próxima visita + pendências) ──────────────────
 
-  Widget _buildHero(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final accent = _accentColor(context);
-    final textColor = ThemeHelpers.textColor(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final emerald =
-        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
-    final amber =
-        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
-
+  Widget _buildSpotlight(BuildContext context) {
     final st = _state[_activeScope]!;
-    final items = st.items;
-    final total = items.length;
-    final pending = items
+    if (!st.loaded) return _buildSpotlightSkeleton(context);
+    if (st.error != null && st.items.isEmpty) return const SizedBox.shrink();
+
+    final next = _nextUpcoming(st.items);
+    final pending = st.items
         .where((r) => r.signatureStatus == VisitSignatureStatus.pending)
         .length;
-    final signed = items
-        .where((r) => r.signatureStatus == VisitSignatureStatus.signed)
-        .length;
-    final expired = items
-        .where((r) => r.signatureStatus == VisitSignatureStatus.expired)
-        .length;
 
-    final dot = pending > 0 ? amber : emerald;
-    final subtitle = total == 0
-        ? 'Registre as visitas e envie o link de assinatura ao cliente.'
-        : pending > 0
-            ? '$pending aguardando assinatura · $signed assinado${signed == 1 ? '' : 's'}'
-            : 'Tudo assinado — nenhuma pendência de assinatura.';
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(0, 4, 0, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: dot,
-                  boxShadow: [
-                    BoxShadow(
-                      color: dot.withValues(alpha: 0.55),
-                      blurRadius: 8,
-                      spreadRadius: 1,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 9),
-              Text(
-                'RELATÓRIOS DE VISITA',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: accent,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2.2,
-                  fontSize: 11,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                st.loaded ? '$total' : '—',
-                style: theme.textTheme.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: textColor,
-                  height: 1.0,
-                  letterSpacing: -1.0,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 5),
-                child: Text(
-                  total == 1 ? 'visita' : 'visitas',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: secondary,
-                    fontWeight: FontWeight.w800,
-                    height: 1.0,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            subtitle,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: secondary,
-              fontWeight: FontWeight.w600,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 18),
-          _buildKpiStrip(context,
-              pending: pending,
-              signed: signed,
-              expired: expired,
-              amber: amber,
-              emerald: emerald,
-              loading: !st.loaded),
-        ],
-      ),
-    );
+    return _AgendaSpotlight(
+      tone: _scopeColor(context, _activeScope),
+      next: next,
+      pendingCount: pending,
+      onOpenNext: next == null ? null : () => _openDetail(next),
+      onFilterPending: () => _setStatusChip(VisitSignatureStatus.pending),
+    )
+        .animate(key: ValueKey('spotlight-${_activeScope.name}'))
+        .fadeIn(duration: 260.ms)
+        .slideY(
+          begin: 0.03,
+          end: 0,
+          duration: 280.ms,
+          curve: Curves.easeOutCubic,
+        );
   }
 
-  Widget _buildKpiStrip(
-    BuildContext context, {
-    required int pending,
-    required int signed,
-    required int expired,
-    required Color amber,
-    required Color emerald,
-    required bool loading,
-  }) {
-    final neutral = ThemeHelpers.textSecondaryColor(context);
-    final divider = ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
-    final blocks = <Widget>[
-      _heroKpiBlock(context, LucideIcons.clock3, 'AGUARDANDO',
-          loading ? '—' : '$pending', 'assinatura pendente', amber),
-      _heroKpiBlock(context, LucideIcons.circleCheckBig, 'ASSINADOS',
-          loading ? '—' : '$signed', 'confirmados pelo cliente', emerald),
-      _heroKpiBlock(context, LucideIcons.circleAlert, 'EXPIRADOS',
-          loading ? '—' : '$expired', 'link vencido', neutral),
-    ];
-    return IntrinsicHeight(
+  Widget _buildSpotlightSkeleton(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: ThemeHelpers.cardBackgroundColor(context),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.06)
+              : Colors.black.withValues(alpha: 0.05),
+        ),
+        boxShadow: ThemeHelpers.cardShadow(context),
+      ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (var i = 0; i < blocks.length; i++) ...[
-            if (i > 0)
-              Container(
-                width: 1,
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                color: divider,
-              ),
-            Expanded(child: blocks[i]),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _heroKpiBlock(BuildContext context, IconData icon, String label,
-      String value, String sub, Color tone) {
-    final theme = Theme.of(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 11, color: tone),
-              const SizedBox(width: 5),
-              Flexible(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w900,
-                    color: tone,
-                    letterSpacing: 1.2,
-                    height: 1.0,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              value,
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: tone,
-                letterSpacing: -0.6,
-                height: 1.0,
-                fontSize: 22,
-              ),
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            sub,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: secondary,
-              height: 1.0,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 7),
-          Container(
-            height: 2,
-            width: 18,
-            decoration: BoxDecoration(
-              color: tone,
-              borderRadius: BorderRadius.circular(2),
+        children: const [
+          SkeletonBox(width: 56, height: 62, borderRadius: 14),
+          SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SkeletonText(width: 92, height: 10),
+                SizedBox(height: 9),
+                SkeletonText(width: 170, height: 16),
+                SizedBox(height: 8),
+                SkeletonText(width: double.infinity, height: 11),
+              ],
             ),
           ),
         ],
@@ -890,17 +749,14 @@ class _VisitsPageState extends State<VisitsPage> {
     } else if (refined.isEmpty) {
       child = _buildEmpty(context);
     } else {
-      child = _buildList(context, st, refined);
+      child = _buildAgenda(context, st, refined);
     }
 
     return Column(
       key: ValueKey('panel-${_activeScope.name}'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _buildPanelHeader(context),
-        const SizedBox(height: 12),
         _buildStatusChips(context),
-        const SizedBox(height: 14),
         child,
       ],
     ).animate(key: ValueKey('panel-${_activeScope.name}')).fadeIn(
@@ -908,205 +764,160 @@ class _VisitsPageState extends State<VisitsPage> {
         );
   }
 
-  Widget _buildPanelHeader(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final tone = _scopeColor(context, _activeScope);
-    final meta = _activeScope == _VisitScope.mine
-        ? (
-            icon: LucideIcons.clipboardList,
-            eyebrow: 'MINHAS VISITAS',
-            title: 'Relatórios que você criou',
-            hint:
-                'Registre a visita, gere o link e envie ao cliente para assinar.',
-          )
-        : (
-            icon: LucideIcons.users,
-            eyebrow: 'GESTÃO',
-            title: 'Todas as visitas da empresa',
-            hint: 'Visão completa dos relatórios de todos os corretores.',
-          );
+  // ─── Lista em formato de agenda (agrupada por dia) ───────────────────────
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            color: tone.withValues(alpha: isDark ? 0.2 : 0.12),
-          ),
-          child: Icon(meta.icon, color: tone, size: 20),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      color: tone,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: tone.withValues(alpha: 0.5),
-                          blurRadius: 6,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 7),
-                  Text(
-                    meta.eyebrow,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: tone,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 1.2,
-                      fontSize: 10.5,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 3),
-              Text(
-                meta.title,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: ThemeHelpers.textColor(context),
-                  letterSpacing: -0.2,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                meta.hint,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                  height: 1.32,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
+  String _dayKey(DateTime? d) =>
+      d == null ? 'sem-data' : '${d.year}-${d.month}-${d.day}';
 
-  Widget _buildList(
+  Widget _buildAgenda(
     BuildContext context,
     _ScopeState st,
     List<VisitReport> refined,
   ) {
-    final visible = refined.take(st.visible).toList();
-    final showBroker = _activeScope == _VisitScope.all;
-    var animIndex = 0;
+    // Visitas sem data iriam parar no meio da ordenação (fallback por
+    // createdAt) — agrupa todas no fim, sob o cabeçalho "Sem data definida".
+    final dated = <VisitReport>[];
+    final undated = <VisitReport>[];
+    for (final r in refined) {
+      (r.visitDate == null ? undated : dated).add(r);
+    }
+    final ordered = [...dated, ...undated];
+    final visible = ordered.take(st.visible).toList();
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        for (final r in visible)
-          VisitReportCard(
-            report: r,
-            showBroker: showBroker,
-            canEdit: _canUpdate,
-            canDelete: _canDelete,
-            linkBusy: _linkBusyId == r.id,
-            onTap: () => _openDetail(r),
-            onShareWhatsApp: () => _shareWhatsApp(r),
-            onCopyLink: () => _copyLink(r),
-            onGenerateLink: _canUpdate ? () => _generateLink(r) : null,
-            onEdit: () => _openEdit(r),
-            onDelete: () => _confirmDelete(r),
-          ).animate(key: ValueKey('v-${r.id}')).fadeIn(
-                delay: Duration(milliseconds: 30 * (animIndex++).clamp(0, 12)),
-                duration: 220.ms,
+    final counts = <String, int>{};
+    for (final r in ordered) {
+      counts.update(_dayKey(r.visitDate), (v) => v + 1, ifAbsent: () => 1);
+    }
+
+    final showBroker = _activeScope == _VisitScope.all;
+    final children = <Widget>[];
+    String? lastKey;
+    var animIndex = 0;
+    var firstHeader = true;
+
+    for (final r in visible) {
+      final key = _dayKey(r.visitDate);
+      if (key != lastKey) {
+        children.add(_DayHeader(
+          date: r.visitDate,
+          count: counts[key] ?? 0,
+          tone: _dayTone(context, r.visitDate),
+          first: firstHeader,
+        ));
+        firstHeader = false;
+        lastKey = key;
+      }
+      children.add(
+        VisitReportCard(
+          report: r,
+          showBroker: showBroker,
+          canEdit: _canUpdate,
+          canDelete: _canDelete,
+          linkBusy: _linkBusyId == r.id,
+          onTap: () => _openDetail(r),
+          onShareWhatsApp: () => _shareWhatsApp(r),
+          onCopyLink: () => _copyLink(r),
+          onGenerateLink: _canUpdate ? () => _generateLink(r) : null,
+          onEdit: () => _openEdit(r),
+          onDelete: () => _confirmDelete(r),
+        ).animate(key: ValueKey('v-${r.id}')).fadeIn(
+              delay: Duration(milliseconds: 30 * (animIndex++).clamp(0, 12)),
+              duration: 220.ms,
+            ),
+      );
+    }
+
+    if (ordered.length > st.visible) {
+      children.add(
+        Padding(
+          padding: const EdgeInsets.only(top: 16),
+          child: Center(
+            child: OutlinedButton.icon(
+              onPressed: () => setState(() => st.visible += _pageSize),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _accentColor(context),
+                side: BorderSide(
+                  color: _accentColor(context).withValues(alpha: 0.45),
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
-        if (refined.length > st.visible)
-          Padding(
-            padding: const EdgeInsets.only(top: 16),
-            child: Center(
-              child: OutlinedButton.icon(
-                onPressed: () =>
-                    setState(() => st.visible += _pageSize),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: _accentColor(context),
-                  side: BorderSide(
-                    color: _accentColor(context).withValues(alpha: 0.45),
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                icon: const Icon(LucideIcons.chevronDown, size: 16),
-                label: Text(
-                  'Carregar mais (${refined.length - st.visible})',
-                ),
+              icon: const Icon(LucideIcons.chevronDown, size: 16),
+              label: Text(
+                'Carregar mais (${ordered.length - st.visible})',
               ),
             ),
           ),
-      ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: children,
     );
   }
 
   // ─── Estados ─────────────────────────────────────────────────────────────
 
-  /// Skeleton fiel ao layout do `VisitReportCard` (glyph + pill + duas linhas
-  /// + coluna de data + faixa de ações).
+  /// Skeleton fiel à agenda nova: cabeçalho de dia (bolha de data + linha)
+  /// seguido de itens em trilho (nó circular + conteúdo).
   Widget _buildSkeleton() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: List.generate(
-        5,
-        (_) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SkeletonBox(width: 44, height: 44, borderRadius: 13),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: const [
-                        SkeletonText(width: 96, height: 16, borderRadius: 999),
-                        SizedBox(height: 9),
-                        SkeletonText(width: double.infinity, height: 14),
-                        SizedBox(height: 6),
-                        SkeletonText(width: 150, height: 12),
+    Widget header({bool first = false}) => Padding(
+          padding: EdgeInsets.only(top: first ? 16 : 22, bottom: 12),
+          child: Row(
+            children: const [
+              SkeletonBox(width: 30, height: 30, borderRadius: 10),
+              SizedBox(width: 10),
+              SkeletonText(width: 140, height: 13),
+              Spacer(),
+              SkeletonText(width: 48, height: 10),
+            ],
+          ),
+        );
+
+    Widget row() => Padding(
+          padding: const EdgeInsets.only(bottom: 18, top: 4),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: const [
+              SkeletonBox(width: 28, height: 28, borderRadius: 999),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonText(width: 88, height: 16, borderRadius: 999),
+                    SizedBox(height: 9),
+                    SkeletonText(width: double.infinity, height: 14),
+                    SizedBox(height: 6),
+                    SkeletonText(width: 150, height: 12),
+                    SizedBox(height: 10),
+                    Row(
+                      children: [
+                        SkeletonText(width: 72, height: 12),
+                        SizedBox(width: 14),
+                        SkeletonText(width: 72, height: 12),
                       ],
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: const [
-                      SkeletonText(width: 58, height: 16),
-                      SizedBox(height: 6),
-                      SkeletonText(width: 44, height: 10),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: const [
-                  SizedBox(width: 56),
-                  SkeletonText(width: 74, height: 12),
-                  SizedBox(width: 14),
-                  SkeletonText(width: 74, height: 12),
-                ],
+                  ],
+                ),
               ),
             ],
           ),
-        ),
-      ),
+        );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        header(first: true),
+        row(),
+        row(),
+        header(),
+        row(),
+        row(),
+      ],
     );
   }
 
@@ -1129,12 +940,12 @@ class _VisitsPageState extends State<VisitsPage> {
                 'Ajuste ou limpe os filtros para ver mais visitas.',
               )
             : (
-                LucideIcons.clipboardList,
-                'Nenhuma visita ainda',
+                LucideIcons.calendarDays,
+                'Agenda vazia',
                 'Registre a primeira visita e envie o link de assinatura ao cliente.',
               );
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 4),
+      padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 4),
       child: Column(
         children: [
           Container(
@@ -1196,7 +1007,7 @@ class _VisitsPageState extends State<VisitsPage> {
     final danger =
         isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 4),
+      padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 4),
       child: Column(
         children: [
           Container(
@@ -1223,6 +1034,388 @@ class _VisitsPageState extends State<VisitsPage> {
             onPressed: () => _loadScope(_activeScope, refresh: true),
             icon: const Icon(LucideIcons.refreshCw, size: 16),
             label: const Text('Tentar novamente'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Spotlight de agenda (próxima visita + faixa de pendências) ──────────────
+
+class _AgendaSpotlight extends StatelessWidget {
+  final Color tone;
+  final VisitReport? next;
+  final int pendingCount;
+  final VoidCallback? onOpenNext;
+  final VoidCallback onFilterPending;
+
+  const _AgendaSpotlight({
+    required this.tone,
+    required this.next,
+    required this.pendingCount,
+    required this.onOpenNext,
+    required this.onFilterPending,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final amber =
+        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
+    final amberText = isDark
+        ? AppColors.message.warningTextDarkMode
+        : AppColors.message.warningText;
+    final blue =
+        isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
+
+    final n = next;
+    final d = n?.visitDate;
+
+    // Proximidade da próxima visita — hoje pede atenção (âmbar), o resto é
+    // informação (azul).
+    String? proximity;
+    var proximityTone = blue;
+    if (d != null) {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final diff =
+          DateTime(d.year, d.month, d.day).difference(today).inDays;
+      if (diff <= 0) {
+        proximity = 'Hoje';
+        proximityTone = amberText;
+      } else if (diff == 1) {
+        proximity = 'Amanhã';
+      } else {
+        proximity = 'Em $diff dias';
+      }
+    }
+
+    final String subtitle;
+    if (n == null) {
+      subtitle = 'As próximas visitas agendadas aparecem aqui.';
+    } else {
+      final addr = n.firstAddress ?? 'Endereço não informado';
+      final extra = n.properties.length - 1;
+      subtitle = extra > 0
+          ? '$addr · +$extra imóve${extra == 1 ? 'l' : 'is'}'
+          : addr;
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: ThemeHelpers.cardBackgroundColor(context),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.06)
+              : Colors.black.withValues(alpha: 0.05),
+        ),
+        boxShadow: ThemeHelpers.cardShadow(context),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onOpenNext,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // Folhinha: a data da próxima visita (ou o dia de hoje,
+                    // quando a agenda está livre à frente).
+                    VisitDateLeaf(
+                      date: d ?? DateTime.now(),
+                      tone: tone,
+                      width: 56,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  n != null
+                                      ? 'Próxima visita'
+                                      : 'Agenda de visitas',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: tone,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 0.2,
+                                  ),
+                                ),
+                              ),
+                              if (proximity != null) ...[
+                                const SizedBox(width: 7),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 7, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: proximityTone.withValues(
+                                        alpha: isDark ? 0.16 : 0.1),
+                                    borderRadius:
+                                        BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    proximity,
+                                    style: TextStyle(
+                                      color: proximityTone,
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 0.2,
+                                      height: 1.0,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            n?.clientLabel ?? 'Nenhuma visita à frente',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              color: textColor,
+                              letterSpacing: -0.3,
+                              fontSize: 15.5,
+                              height: 1.15,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              if (n != null) ...[
+                                Icon(LucideIcons.mapPin,
+                                    size: 12, color: secondary),
+                                const SizedBox(width: 5),
+                              ],
+                              Expanded(
+                                child: Text(
+                                  subtitle,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style:
+                                      theme.textTheme.bodySmall?.copyWith(
+                                    color: secondary,
+                                    fontWeight: FontWeight.w600,
+                                    height: 1.2,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (onOpenNext != null) ...[
+                      const SizedBox(width: 6),
+                      Icon(LucideIcons.chevronRight,
+                          size: 18, color: secondary),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+          // Faixa fina de pendências — âmbar (atenção), aplica o filtro
+          // "Aguardando" da própria lista.
+          if (pendingCount > 0)
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onFilterPending,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: amber.withValues(alpha: isDark ? 0.12 : 0.1),
+                    border: Border(
+                      top: BorderSide(
+                        color:
+                            amber.withValues(alpha: isDark ? 0.3 : 0.25),
+                      ),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(LucideIcons.signature,
+                          size: 14, color: amberText),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          pendingCount == 1
+                              ? '1 assinatura pendente'
+                              : '$pendingCount assinaturas pendentes',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: amberText,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.1,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        'Filtrar',
+                        style: TextStyle(
+                          color: amberText,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                      const SizedBox(width: 3),
+                      Icon(LucideIcons.chevronRight,
+                          size: 13, color: amberText),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Cabeçalho de dia da agenda (data pt-BR + divisor + contagem) ────────────
+
+class _DayHeader extends StatelessWidget {
+  final DateTime? date;
+  final int count;
+  final Color tone;
+  final bool first;
+
+  const _DayHeader({
+    required this.date,
+    required this.count,
+    required this.tone,
+    this.first = false,
+  });
+
+  String _sentence(String s) =>
+      s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+
+    String main;
+    String? sub;
+    final d = date;
+    if (d == null) {
+      main = 'Sem data definida';
+    } else {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final diff = DateTime(d.year, d.month, d.day).difference(today).inDays;
+      final dayFmt = DateFormat(
+        d.year == now.year ? "d 'de' MMMM" : "d 'de' MMMM 'de' y",
+        'pt_BR',
+      );
+      final weekday = DateFormat('EEEE', 'pt_BR').format(d);
+      if (diff == 0) {
+        main = 'Hoje';
+        sub = '$weekday, ${dayFmt.format(d)}';
+      } else if (diff == 1) {
+        main = 'Amanhã';
+        sub = '$weekday, ${dayFmt.format(d)}';
+      } else if (diff == -1) {
+        main = 'Ontem';
+        sub = '$weekday, ${dayFmt.format(d)}';
+      } else {
+        main = _sentence(weekday);
+        sub = dayFmt.format(d);
+      }
+    }
+
+    return Padding(
+      padding: EdgeInsets.only(top: first ? 16 : 22, bottom: 12),
+      child: Row(
+        children: [
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              color: tone.withValues(alpha: isDark ? 0.18 : 0.1),
+            ),
+            child: Center(
+              child: d == null
+                  ? Icon(LucideIcons.calendarDays, size: 14, color: tone)
+                  : Text(
+                      '${d.day}',
+                      style: TextStyle(
+                        color: tone,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 13,
+                        height: 1.0,
+                      ),
+                    ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: main,
+                    style: TextStyle(
+                      color: textColor,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 13.5,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                  if (sub != null)
+                    TextSpan(
+                      text: '  ·  $sub',
+                      style: TextStyle(
+                        color: secondary,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 11.5,
+                      ),
+                    ),
+                ],
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Expanded(
+            child: Container(
+              height: 1,
+              margin: const EdgeInsets.symmetric(horizontal: 10),
+              color: ThemeHelpers.borderLightColor(context),
+            ),
+          ),
+          Text(
+            count == 1 ? '1 visita' : '$count visitas',
+            style: TextStyle(
+              color: secondary,
+              fontWeight: FontWeight.w800,
+              fontSize: 10.5,
+            ),
           ),
         ],
       ),

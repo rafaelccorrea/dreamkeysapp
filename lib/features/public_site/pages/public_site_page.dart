@@ -17,11 +17,13 @@ import '../widgets/public_site_shared.dart';
 
 enum _SiteTab { overview, sections, content, domain }
 
-/// Tela **Meu Site** — status do site público hospedado, seções da home,
-/// conteúdo/SEO e domínio próprio. Mesma gramática flush das telas de
-/// referência: hero editorial com KPIs, abas com sublinhado, conteúdo nas
-/// margens e ações no próprio item. Paridade com `PublicSiteConfigPage.tsx`
-/// (as etapas viáveis em mobile — template/preview ficam no painel web).
+/// Tela **Meu Site** — aqui o PREVIEW do site é o herói: uma moldura de
+/// navegador (três pontinhos + campo de URL com o domínio real) emoldura um
+/// mini-mock da identidade configurada — logo, cores da marca, tagline, CTA
+/// e as seções ativas da home. Abaixo, as configurações seguem sóbrias em
+/// abas com sublinhado, conteúdo flush nas margens e ações no próprio item.
+/// Paridade com `PublicSiteConfigPage.tsx` (as etapas viáveis em mobile —
+/// template/preview completos ficam no painel web).
 class PublicSitePage extends StatefulWidget {
   const PublicSitePage({super.key});
 
@@ -124,9 +126,7 @@ class _PublicSitePageState extends State<PublicSitePage> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     switch (st) {
       case PublicSiteDomainStatus.active:
-        return isDark
-            ? AppColors.status.greenDarkMode
-            : AppColors.status.green;
+        return isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
       case PublicSiteDomainStatus.pendingDns:
         return isDark
             ? AppColors.status.warningDarkMode
@@ -134,9 +134,7 @@ class _PublicSitePageState extends State<PublicSitePage> {
       case PublicSiteDomainStatus.pendingReview:
         return isDark ? AppColors.status.infoDarkMode : AppColors.status.info;
       case PublicSiteDomainStatus.disabled:
-        return isDark
-            ? AppColors.status.errorDarkMode
-            : AppColors.status.error;
+        return isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
     }
   }
 
@@ -245,8 +243,9 @@ class _PublicSitePageState extends State<PublicSitePage> {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           title: const Text('Despublicar site?'),
           content: const Text(
             'Seu site sai do ar imediatamente e os visitantes deixam de '
@@ -282,9 +281,7 @@ class _PublicSitePageState extends State<PublicSitePage> {
       if (res.success && res.data != null) _applyConfig(res.data!);
     });
     if (res.success) {
-      _showSnack(
-        res.data!.isPublished ? 'Site no ar' : 'Site despublicado',
-      );
+      _showSnack(res.data!.isPublished ? 'Site no ar' : 'Site despublicado');
     } else {
       _showSnack(res.message ?? 'Erro ao alterar publicação');
     }
@@ -306,9 +303,9 @@ class _PublicSitePageState extends State<PublicSitePage> {
         _blocksDraft = List.of(res.data!.editorHomeBlocks);
       }
     });
-    _showSnack(res.success
-        ? 'Seções salvas'
-        : (res.message ?? 'Erro ao salvar seções'));
+    _showSnack(
+      res.success ? 'Seções salvas' : (res.message ?? 'Erro ao salvar seções'),
+    );
   }
 
   Future<void> _saveContent() async {
@@ -344,7 +341,8 @@ class _PublicSitePageState extends State<PublicSitePage> {
       }
     });
     _showSnack(
-        res.success ? 'Conteúdo salvo' : (res.message ?? 'Erro ao salvar'));
+      res.success ? 'Conteúdo salvo' : (res.message ?? 'Erro ao salvar'),
+    );
   }
 
   Future<void> _saveDomain() async {
@@ -361,9 +359,11 @@ class _PublicSitePageState extends State<PublicSitePage> {
       _domainSaving = false;
       if (res.success && res.data != null) _applyConfig(res.data!);
     });
-    _showSnack(res.success
-        ? 'Domínio salvo — configure o CNAME e verifique a propagação'
-        : (res.message ?? 'Erro ao salvar domínio'));
+    _showSnack(
+      res.success
+          ? 'Domínio salvo — configure o CNAME e verifique a propagação'
+          : (res.message ?? 'Erro ao salvar domínio'),
+    );
   }
 
   Future<void> _verifyDns() async {
@@ -375,11 +375,13 @@ class _PublicSitePageState extends State<PublicSitePage> {
       await _refresh();
       if (!mounted) return;
       setState(() => _dnsVerifying = false);
-      _showSnack(res.data!.message.isNotEmpty
-          ? res.data!.message
-          : (res.data!.verified
-              ? 'Domínio verificado e ativo'
-              : 'CNAME ainda não propagou — tente de novo em alguns minutos'));
+      _showSnack(
+        res.data!.message.isNotEmpty
+            ? res.data!.message
+            : (res.data!.verified
+                  ? 'Domínio verificado e ativo'
+                  : 'CNAME ainda não propagou — tente de novo em alguns minutos'),
+      );
     } else {
       setState(() => _dnsVerifying = false);
       _showSnack(res.message ?? 'Erro ao verificar DNS');
@@ -408,205 +410,498 @@ class _PublicSitePageState extends State<PublicSitePage> {
         onRefresh: () async {
           await _load();
         },
-        child: LayoutBuilder(
-          builder: (context, constraints) => SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: constraints.maxHeight),
-              child: _loading
-                  ? _buildPageSkeleton(context)
-                  : _error != null
-                      ? Padding(
-                          padding: const EdgeInsets.fromLTRB(
-                              _kPagePadH, 48, _kPagePadH, _kPagePadBottom),
-                          child:
-                              SiteErrorState(message: _error!, onRetry: _load),
-                        )
-                      : Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(
-                                  _kPagePadH, _kPagePadTop, _kPagePadH, 0),
-                              child: _buildHero(context),
-                            ),
-                            const SizedBox(height: _kSectionGap),
-                            _buildTabsRail(context),
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(_kPagePadH,
-                                  _kSectionGap, _kPagePadH, _kPagePadBottom),
-                              child: _buildActivePanel(context),
-                            ),
-                          ],
-                        ),
-            ),
-          ),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: EdgeInsets.zero,
+          children: _loading
+              ? [_buildPageSkeleton(context)]
+              : _error != null
+              ? [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      _kPagePadH,
+                      48,
+                      _kPagePadH,
+                      _kPagePadBottom,
+                    ),
+                    child: SiteErrorState(message: _error!, onRetry: _load),
+                  ),
+                ]
+              : [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      _kPagePadH,
+                      _kPagePadTop,
+                      _kPagePadH,
+                      0,
+                    ),
+                    child: _buildBrowserHero(context),
+                  ),
+                  const SizedBox(height: _kSectionGap + 2),
+                  _buildTabsRail(context),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      _kPagePadH,
+                      _kSectionGap,
+                      _kPagePadH,
+                      _kPagePadBottom,
+                    ),
+                    child: _buildActivePanel(context),
+                  ),
+                ],
         ),
       ),
     );
   }
 
-  // ─── Hero editorial ───────────────────────────────────────────────────────
+  // ─── Hero: o site é o protagonista (moldura de navegador) ────────────────
 
-  Widget _buildHero(BuildContext context) {
+  Widget _buildBrowserHero(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final accent = _accentColor(context);
-    final textColor = ThemeHelpers.textColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final emerald =
-        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
-    final amber =
-        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
-    final violet =
-        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
+    final emerald = isDark
+        ? AppColors.status.greenDarkMode
+        : AppColors.status.green;
+    final amber = isDark
+        ? AppColors.status.warningDarkMode
+        : AppColors.status.warning;
 
     final cfg = _config!;
     final published = cfg.isPublished;
-    final dot = published ? emerald : amber;
-    final domain = cfg.customDomain?.trim();
-    final subtitle = published
-        ? (domain != null && domain.isNotEmpty
-            ? 'Seu site está no ar em $domain.'
-            : 'Seu site está publicado.')
-        : 'O site ainda não foi publicado — revise as seções e o domínio '
-            'antes de colocar no ar.';
+    final statusTone = published ? emerald : amber;
+    final url = cfg.bestPublicUrl;
+    final hasUrl = url != null;
+    final hasDomain = (cfg.customDomain ?? '').trim().isNotEmpty;
+    final domainTone = _domainStatusColor(context, cfg.domainStatus);
 
-    final templateName = _templates
+    final domainLabel = hasDomain
+        ? cfg.customDomain!.trim()
+        : (hasUrl
+              ? url
+                    .replaceFirst(RegExp(r'^https?://'), '')
+                    .replaceFirst(RegExp(r'/+$'), '')
+              : 'domínio ainda não definido');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildBrowserFrame(
+          context,
+          domainLabel: domainLabel,
+          hasAddress: hasUrl || hasDomain,
+          published: published,
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            SiteMiniPill(
+              label: published ? 'No ar' : 'Rascunho',
+              tone: statusTone,
+              icon: published
+                  ? LucideIcons.circleCheckBig
+                  : LucideIcons.circleDashed,
+            ),
+            if (hasDomain) ...[
+              const SizedBox(width: 7),
+              Flexible(
+                child: SiteMiniPill(
+                  label: cfg.domainStatus.label,
+                  tone: domainTone,
+                  icon: cfg.domainStatus == PublicSiteDomainStatus.active
+                      ? LucideIcons.check
+                      : LucideIcons.clock3,
+                ),
+              ),
+            ],
+            const Spacer(),
+            SiteRowAction(
+              icon: LucideIcons.externalLink,
+              tooltip: 'Ver site',
+              tone: accent,
+              onTap: hasUrl ? _openSite : null,
+            ),
+            SiteRowAction(
+              icon: LucideIcons.copy,
+              tooltip: 'Copiar URL',
+              tone: secondary,
+              onTap: hasUrl ? _copyUrl : null,
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          published
+              ? 'É assim que os visitantes encontram seu site agora.'
+              : 'Só você vê este preview — publique na aba Visão geral para '
+                    'colocar o site no ar.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: secondary,
+            height: 1.35,
+            fontSize: 11.5,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Moldura de "navegador": barra com três pontinhos + campo de URL com o
+  /// domínio real, emoldurando um mini-preview da identidade do site montado
+  /// só com dados reais (logo, cores da marca, tagline, CTA e seções ativas).
+  Widget _buildBrowserFrame(
+    BuildContext context, {
+    required String domainLabel,
+    required bool hasAddress,
+    required bool published,
+  }) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final emerald = isDark
+        ? AppColors.status.greenDarkMode
+        : AppColors.status.green;
+    final amber = isDark
+        ? AppColors.status.warningDarkMode
+        : AppColors.status.warning;
+    final rose = isDark
+        ? AppColors.status.errorDarkMode
+        : AppColors.status.error;
+
+    final cfg = _config!;
+    final brand =
+        siteParseHexColor(cfg.branding.primaryColor) ?? _accentColor(context);
+    final swatches = [
+      cfg.branding.primaryColor,
+      cfg.branding.secondaryColor,
+      cfg.branding.accentColor,
+    ].map(siteParseHexColor).whereType<Color>().toList(growable: false);
+
+    final templateName =
+        _templates
             .where((t) => t.id == cfg.templateId)
             .map((t) => t.name)
             .firstOrNull ??
         _fallbackTemplateLabel(cfg.templateId);
-    final enabledBlocks = _blocksDraft.where((b) => b.enabled).length;
-    final domainTone = _domainStatusColor(context, cfg.domainStatus);
-    final hasUrl = cfg.bestPublicUrl != null;
+    final siteTitle = (cfg.seo.title ?? '').trim();
+    final tagline = (cfg.content.tagline ?? '').trim();
+    final cta = (cfg.content.ctaText ?? '').trim();
+    final enabledBlocks = _blocksDraft
+        .where((b) => b.enabled)
+        .toList(growable: false);
+    final onBrand =
+        ThemeData.estimateBrightnessForColor(brand) == Brightness.dark
+        ? Colors.white
+        : const Color(0xFF1F2937);
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(0, 4, 0, 0),
+    Widget browserDot(Color tone) => Container(
+      width: 8,
+      height: 8,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: tone.withValues(alpha: 0.8),
+      ),
+    );
+
+    return Container(
+      decoration: BoxDecoration(
+        color: ThemeHelpers.cardBackgroundColor(context),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.06),
+        ),
+        boxShadow: ThemeHelpers.cardShadow(context),
+      ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: dot,
-                  boxShadow: [
-                    BoxShadow(
-                      color: dot.withValues(alpha: 0.55),
-                      blurRadius: 8,
-                      spreadRadius: 1,
+          // Barra do navegador — três pontinhos + campo de URL real.
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: ThemeHelpers.borderLightColor(context),
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                browserDot(rose),
+                const SizedBox(width: 5),
+                browserDot(amber),
+                const SizedBox(width: 5),
+                browserDot(emerald),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 9),
-              Text(
-                'MEU SITE',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: accent,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2.2,
-                  fontSize: 11,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                published ? 'No ar' : 'Rascunho',
-                style: theme.textTheme.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: textColor,
-                  height: 1.0,
-                  letterSpacing: -1.0,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 5),
-                child: Text(
-                  'status do site',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: secondary,
-                    fontWeight: FontWeight.w800,
-                    height: 1.0,
-                    letterSpacing: -0.2,
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.05)
+                          : Colors.black.withValues(alpha: 0.04),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          published
+                              ? LucideIcons.lock
+                              : LucideIcons.circleDashed,
+                          size: 10,
+                          color: published ? emerald : secondary,
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            domainLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -0.1,
+                              color: hasAddress
+                                  ? ThemeHelpers.textColor(context)
+                                  : secondary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            subtitle,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: secondary,
-              fontWeight: FontWeight.w600,
-              height: 1.4,
+              ],
             ),
           ),
-          const SizedBox(height: 18),
-          _buildKpiStrip(
-            context,
-            domainTone: domainTone,
-            templateTone: accent,
-            sectionsTone: violet,
-            templateName: templateName,
-            enabledBlocks: enabledBlocks,
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: hasUrl ? _openSite : null,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: accent,
-                    side: BorderSide(color: accent.withValues(alpha: 0.45)),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+          // Mini-preview da identidade — somente dados reais configurados.
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    _previewLogo(context, brand),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            siteTitle.isNotEmpty
+                                ? siteTitle
+                                : 'Seu site imobiliário',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.2,
+                              color: siteTitle.isNotEmpty
+                                  ? ThemeHelpers.textColor(context)
+                                  : secondary,
+                            ),
+                          ),
+                          const SizedBox(height: 1),
+                          Text(
+                            'Template $templateName'
+                            '${cfg.premiumTemplateUnlocked ? ' · Premium' : ''}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w600,
+                              color: secondary,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    padding: const EdgeInsets.symmetric(vertical: 11),
+                    if (swatches.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      for (var i = 0; i < swatches.length; i++)
+                        Container(
+                          width: 14,
+                          height: 14,
+                          margin: EdgeInsets.only(left: i == 0 ? 0 : 4),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: swatches[i],
+                            border: Border.all(
+                              color: ThemeHelpers.cardBackgroundColor(context),
+                              width: 1.5,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 12),
+                // "Banner" do site — tagline + CTA nas cores da marca.
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
                   ),
-                  icon: const Icon(LucideIcons.externalLink, size: 15),
-                  label: const Text(
-                    'Ver site',
-                    style: TextStyle(fontWeight: FontWeight.w800),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    gradient: LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: [
+                        brand.withValues(alpha: isDark ? 0.22 : 0.14),
+                        brand.withValues(alpha: isDark ? 0.08 : 0.05),
+                      ],
+                    ),
+                    border: Border.all(color: brand.withValues(alpha: 0.22)),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          tagline.isNotEmpty
+                              ? tagline
+                              : 'Sua frase de destaque aparece aqui',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.1,
+                            height: 1.25,
+                            color: tagline.isNotEmpty
+                                ? ThemeHelpers.textColor(context)
+                                : secondary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: brand,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          cta.isNotEmpty ? cta : 'Fale conosco',
+                          maxLines: 1,
+                          style: TextStyle(
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.2,
+                            color: onBrand,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: hasUrl ? _copyUrl : null,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: secondary,
-                    side: BorderSide(
-                      color: ThemeHelpers.borderColor(context),
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 11),
+                if (enabledBlocks.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      for (
+                        var i = 0;
+                        i < enabledBlocks.length && i < 4;
+                        i++
+                      ) ...[
+                        if (i > 0) const SizedBox(width: 6),
+                        Expanded(
+                          child: Tooltip(
+                            message: PublicSiteBlockCatalog.labelOf(
+                              enabledBlocks[i].type,
+                            ),
+                            child: Container(
+                              height: 30,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(9),
+                                color: isDark
+                                    ? Colors.white.withValues(alpha: 0.05)
+                                    : Colors.black.withValues(alpha: 0.04),
+                              ),
+                              child: Icon(
+                                PublicSiteBlockCatalog.iconOf(
+                                  enabledBlocks[i].type,
+                                ),
+                                size: 13,
+                                color: secondary,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (enabledBlocks.length > 4) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          height: 30,
+                          padding: const EdgeInsets.symmetric(horizontal: 9),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(9),
+                            color: brand.withValues(
+                              alpha: isDark ? 0.16 : 0.09,
+                            ),
+                          ),
+                          child: Center(
+                            child: Text(
+                              '+${enabledBlocks.length - 4}',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w900,
+                                color: brand,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                  icon: const Icon(LucideIcons.copy, size: 15),
-                  label: const Text(
-                    'Copiar URL',
-                    style: TextStyle(fontWeight: FontWeight.w800),
+                  const SizedBox(height: 6),
+                  Text(
+                    '${enabledBlocks.length} '
+                    '${enabledBlocks.length == 1 ? 'seção ativa' : 'seções ativas'} na home',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: secondary,
+                    ),
                   ),
-                ),
-              ),
-            ],
+                ],
+              ],
+            ),
           ),
         ],
       ),
+    ).animate().fadeIn(duration: 300.ms).moveY(begin: 8, end: 0, curve: Curves.easeOut);
+  }
+
+  Widget _previewLogo(BuildContext context, Color brand) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final logo = (_config!.branding.logoUrl ?? '').trim();
+    return Container(
+      width: 38,
+      height: 38,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        color: brand.withValues(alpha: isDark ? 0.2 : 0.12),
+        border: Border.all(color: brand.withValues(alpha: 0.3)),
+      ),
+      child: logo.isNotEmpty
+          ? Image.network(
+              logo,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) =>
+                  Icon(LucideIcons.building2, size: 18, color: brand),
+            )
+          : Icon(LucideIcons.building2, size: 18, color: brand),
     );
   }
 
@@ -627,133 +922,6 @@ class _PublicSitePageState extends State<PublicSitePage> {
       default:
         return id;
     }
-  }
-
-  Widget _buildKpiStrip(
-    BuildContext context, {
-    required Color domainTone,
-    required Color templateTone,
-    required Color sectionsTone,
-    required String templateName,
-    required int enabledBlocks,
-  }) {
-    final cfg = _config!;
-    final divider = ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
-    final hasDomain = (cfg.customDomain ?? '').trim().isNotEmpty;
-    final blocks = <Widget>[
-      _heroKpiBlock(
-        context,
-        LucideIcons.globe,
-        'DOMÍNIO',
-        hasDomain ? cfg.domainStatus.label : 'Não definido',
-        hasDomain ? cfg.customDomain!.trim() : 'configure na aba Domínio',
-        hasDomain ? domainTone : ThemeHelpers.textSecondaryColor(context),
-      ),
-      _heroKpiBlock(
-        context,
-        LucideIcons.paintbrush,
-        'TEMPLATE',
-        templateName,
-        cfg.premiumTemplateUnlocked ? 'Premium ativo' : 'definido no painel',
-        templateTone,
-      ),
-      _heroKpiBlock(
-        context,
-        LucideIcons.layoutList,
-        'SEÇÕES',
-        '$enabledBlocks/${_blocksDraft.length}',
-        'ativas na home',
-        sectionsTone,
-      ),
-    ];
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (var i = 0; i < blocks.length; i++) ...[
-            if (i > 0)
-              Container(
-                width: 1,
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                color: divider,
-              ),
-            Expanded(child: blocks[i]),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _heroKpiBlock(BuildContext context, IconData icon, String label,
-      String value, String sub, Color tone) {
-    final theme = Theme.of(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 11, color: tone),
-              const SizedBox(width: 5),
-              Flexible(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w900,
-                    color: tone,
-                    letterSpacing: 1.2,
-                    height: 1.0,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              value,
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: tone,
-                letterSpacing: -0.4,
-                height: 1.0,
-                fontSize: 17,
-              ),
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            sub,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: secondary,
-              height: 1.0,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 7),
-          Container(
-            height: 2,
-            width: 18,
-            decoration: BoxDecoration(
-              color: tone,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   // ─── Abas flush ───────────────────────────────────────────────────────────
@@ -833,20 +1001,17 @@ class _PublicSitePageState extends State<PublicSitePage> {
     );
   }
 
-  ({IconData icon, String eyebrow, String title, String hint}) _panelMeta(
-      _SiteTab tab) {
+  ({IconData icon, String title, String hint}) _panelMeta(_SiteTab tab) {
     switch (tab) {
       case _SiteTab.overview:
         return (
           icon: LucideIcons.panelsTopLeft,
-          eyebrow: 'VISÃO GERAL',
           title: 'Status do seu site',
           hint: 'Publicação, endereço e um resumo do que está configurado.',
         );
       case _SiteTab.sections:
         return (
           icon: LucideIcons.layoutList,
-          eyebrow: 'SEÇÕES DA HOME',
           title: 'Monte a página inicial',
           hint:
               'Ative, desative e reordene os blocos que aparecem no seu site.',
@@ -854,14 +1019,12 @@ class _PublicSitePageState extends State<PublicSitePage> {
       case _SiteTab.content:
         return (
           icon: LucideIcons.penLine,
-          eyebrow: 'CONTEÚDO & SEO',
           title: 'Textos e contato',
           hint: 'O que os visitantes leem — e como o Google encontra o site.',
         );
       case _SiteTab.domain:
         return (
           icon: LucideIcons.globe,
-          eyebrow: 'DOMÍNIO PRÓPRIO',
           title: 'Endereço do site',
           hint: 'Aponte o seu domínio com um CNAME e ative automaticamente.',
         );
@@ -875,7 +1038,6 @@ class _PublicSitePageState extends State<PublicSitePage> {
       children: [
         SitePanelHeader(
           icon: meta.icon,
-          eyebrow: meta.eyebrow,
           title: meta.title,
           hint: meta.hint,
           tone: _tone(context, tab),
@@ -892,12 +1054,15 @@ class _PublicSitePageState extends State<PublicSitePage> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final cfg = _config!;
-    final emerald =
-        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
-    final amber =
-        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
-    final danger =
-        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    final emerald = isDark
+        ? AppColors.status.greenDarkMode
+        : AppColors.status.green;
+    final amber = isDark
+        ? AppColors.status.warningDarkMode
+        : AppColors.status.warning;
+    final danger = isDark
+        ? AppColors.status.errorDarkMode
+        : AppColors.status.error;
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final statusTone = cfg.isPublished ? emerald : amber;
     final domainTone = _domainStatusColor(context, cfg.domainStatus);
@@ -942,10 +1107,10 @@ class _PublicSitePageState extends State<PublicSitePage> {
             Text(
               cfg.isPublished
                   ? (cfg.publishedAt != null
-                      ? 'Publicado em ${dateFmt.format(cfg.publishedAt!.toLocal())}.'
-                      : 'Seu site está visível para qualquer visitante.')
+                        ? 'Publicado em ${dateFmt.format(cfg.publishedAt!.toLocal())}.'
+                        : 'Seu site está visível para qualquer visitante.')
                   : 'Quando estiver satisfeito com as seções, conteúdo e '
-                      'domínio, publique para colocar o site no ar.',
+                        'domínio, publique para colocar o site no ar.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: secondary,
                 height: 1.4,
@@ -984,8 +1149,8 @@ class _PublicSitePageState extends State<PublicSitePage> {
                     _publishing
                         ? 'Aguarde…'
                         : (cfg.isPublished
-                            ? 'Despublicar site'
-                            : 'Publicar site'),
+                              ? 'Despublicar site'
+                              : 'Publicar site'),
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ),
@@ -1019,8 +1184,7 @@ class _PublicSitePageState extends State<PublicSitePage> {
                 ),
               ],
             ),
-            Divider(
-                height: 1, color: ThemeHelpers.borderLightColor(context)),
+            Divider(height: 1, color: ThemeHelpers.borderLightColor(context)),
             SiteInfoRow(
               icon: LucideIcons.globe,
               label: 'Domínio próprio',
@@ -1041,12 +1205,12 @@ class _PublicSitePageState extends State<PublicSitePage> {
                   ),
               ],
             ),
-            Divider(
-                height: 1, color: ThemeHelpers.borderLightColor(context)),
+            Divider(height: 1, color: ThemeHelpers.borderLightColor(context)),
             SiteInfoRow(
               icon: LucideIcons.paintbrush,
               label: 'Template',
-              value: _templates
+              value:
+                  _templates
                       .where((t) => t.id == cfg.templateId)
                       .map((t) => t.name)
                       .firstOrNull ??
@@ -1099,7 +1263,8 @@ class _PublicSitePageState extends State<PublicSitePage> {
         SiteEmptyState(
           icon: LucideIcons.layoutList,
           title: 'Sem seções configuradas',
-          body: 'As seções padrão do template aparecem aqui assim que o site '
+          body:
+              'As seções padrão do template aparecem aqui assim que o site '
               'for configurado no painel.',
           tone: tone,
         ),
@@ -1117,10 +1282,8 @@ class _PublicSitePageState extends State<PublicSitePage> {
         physics: const NeverScrollableScrollPhysics(),
         buildDefaultDragHandles: false,
         itemCount: _blocksDraft.length,
-        proxyDecorator: (child, index, animation) => Material(
-          color: Colors.transparent,
-          child: child,
-        ),
+        proxyDecorator: (child, index, animation) =>
+            Material(color: Colors.transparent, child: child),
         onReorder: !_canManage
             ? (_, __) {}
             : (oldIndex, newIndex) {
@@ -1177,7 +1340,11 @@ class _PublicSitePageState extends State<PublicSitePage> {
   }
 
   Widget _buildBlockTile(
-      BuildContext context, PublicSiteHomeBlock block, int index, Color tone) {
+    BuildContext context,
+    PublicSiteHomeBlock block,
+    int index,
+    Color tone,
+  ) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
@@ -1193,8 +1360,8 @@ class _PublicSitePageState extends State<PublicSitePage> {
           color: enabled
               ? tone.withValues(alpha: isDark ? 0.28 : 0.2)
               : (isDark
-                  ? Colors.white.withValues(alpha: 0.06)
-                  : Colors.black.withValues(alpha: 0.05)),
+                    ? Colors.white.withValues(alpha: 0.06)
+                    : Colors.black.withValues(alpha: 0.05)),
         ),
         boxShadow: ThemeHelpers.cardShadow(context, strength: 0.7),
       ),
@@ -1219,8 +1386,11 @@ class _PublicSitePageState extends State<PublicSitePage> {
               borderRadius: BorderRadius.circular(11),
               color: fg.withValues(alpha: isDark ? 0.16 : 0.1),
             ),
-            child: Icon(PublicSiteBlockCatalog.iconOf(block.type),
-                size: 17, color: fg),
+            child: Icon(
+              PublicSiteBlockCatalog.iconOf(block.type),
+              size: 17,
+              color: fg,
+            ),
           ),
           const SizedBox(width: 11),
           Expanded(
@@ -1313,10 +1483,7 @@ class _PublicSitePageState extends State<PublicSitePage> {
         onChanged: markDirty,
       ),
       const SizedBox(height: 18),
-      const SiteSubsectionHeader(
-        label: 'Contato',
-        icon: LucideIcons.phone,
-      ),
+      const SiteSubsectionHeader(label: 'Contato', icon: LucideIcons.phone),
       const SizedBox(height: 12),
       Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1402,8 +1569,9 @@ class _PublicSitePageState extends State<PublicSitePage> {
     final cfg = _config!;
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final tone = _tone(context, _SiteTab.domain);
-    final emerald =
-        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
+    final emerald = isDark
+        ? AppColors.status.greenDarkMode
+        : AppColors.status.green;
     final hasDomain = (cfg.customDomain ?? '').trim().isNotEmpty;
     final domainTone = _domainStatusColor(context, cfg.domainStatus);
     final dns = _dns ?? PublicSiteDnsInstructions.fromJson(null);
@@ -1456,10 +1624,9 @@ class _PublicSitePageState extends State<PublicSitePage> {
           const SizedBox(width: 10),
           Expanded(
             child: OutlinedButton.icon(
-              onPressed:
-                  _canManage && hasDomain && !_dnsVerifying && !isActive
-                      ? _verifyDns
-                      : null,
+              onPressed: _canManage && hasDomain && !_dnsVerifying && !isActive
+                  ? _verifyDns
+                  : null,
               style: OutlinedButton.styleFrom(
                 foregroundColor: emerald,
                 side: BorderSide(color: emerald.withValues(alpha: 0.45)),
@@ -1520,9 +1687,9 @@ class _PublicSitePageState extends State<PublicSitePage> {
                     Text(
                       isActive
                           ? 'Domínio ativo — o site responde em '
-                              '${cfg.customDomain!.trim()}.'
+                                '${cfg.customDomain!.trim()}.'
                           : 'Aguardando o CNAME propagar. Salve o registro no '
-                              'seu provedor e toque em "Verificar DNS".',
+                                'seu provedor e toque em "Verificar DNS".',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: secondary,
                         height: 1.35,
@@ -1545,11 +1712,7 @@ class _PublicSitePageState extends State<PublicSitePage> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         child: Column(
           children: [
-            SiteInfoRow(
-              icon: LucideIcons.tag,
-              label: 'Tipo',
-              value: 'CNAME',
-            ),
+            SiteInfoRow(icon: LucideIcons.tag, label: 'Tipo', value: 'CNAME'),
             Divider(height: 1, color: ThemeHelpers.borderLightColor(context)),
             SiteInfoRow(
               icon: LucideIcons.atSign,
@@ -1574,8 +1737,8 @@ class _PublicSitePageState extends State<PublicSitePage> {
                   icon: LucideIcons.copy,
                   tooltip: 'Copiar destino',
                   tone: tone,
-                  onTap: () => _copyText(dns.cnameTarget,
-                      feedback: 'Destino copiado'),
+                  onTap: () =>
+                      _copyText(dns.cnameTarget, feedback: 'Destino copiado'),
                 ),
               ],
             ),
@@ -1617,7 +1780,10 @@ class _PublicSitePageState extends State<PublicSitePage> {
   }
 
   Widget _buildDnsStep(
-      BuildContext context, PublicSiteDnsStep step, Color tone) {
+    BuildContext context,
+    PublicSiteDnsStep step,
+    Color tone,
+  ) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
@@ -1679,8 +1845,9 @@ class _PublicSitePageState extends State<PublicSitePage> {
   Widget _readOnlyNotice(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final amber =
-        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
+    final amber = isDark
+        ? AppColors.status.warningDarkMode
+        : AppColors.status.warning;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
@@ -1708,47 +1875,133 @@ class _PublicSitePageState extends State<PublicSitePage> {
     );
   }
 
-  // ─── Skeleton (fiel ao layout real) ──────────────────────────────────────
+  // ─── Skeleton (fiel ao layout novo: moldura de navegador + abas) ─────────
 
   Widget _buildPageSkeleton(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-          _kPagePadH, _kPagePadTop + 4, _kPagePadH, _kPagePadBottom),
+        _kPagePadH,
+        _kPagePadTop + 4,
+        _kPagePadH,
+        _kPagePadBottom,
+      ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SkeletonText(width: 110, height: 11, borderRadius: 999),
-          const SizedBox(height: 12),
-          const SkeletonText(width: 170, height: 34, borderRadius: 8),
-          const SizedBox(height: 10),
-          const SkeletonText(width: double.infinity, height: 13),
-          const SizedBox(height: 20),
-          Row(
-            children: const [
-              Expanded(child: SkeletonBox(height: 64, borderRadius: 10)),
-              SizedBox(width: 12),
-              Expanded(child: SkeletonBox(height: 64, borderRadius: 10)),
-              SizedBox(width: 12),
-              Expanded(child: SkeletonBox(height: 64, borderRadius: 10)),
-            ],
+          // Moldura de navegador
+          Container(
+            decoration: BoxDecoration(
+              color: ThemeHelpers.cardBackgroundColor(context),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : Colors.black.withValues(alpha: 0.06),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                  child: Row(
+                    children: const [
+                      SkeletonBox(width: 8, height: 8, borderRadius: 999),
+                      SizedBox(width: 5),
+                      SkeletonBox(width: 8, height: 8, borderRadius: 999),
+                      SizedBox(width: 5),
+                      SkeletonBox(width: 8, height: 8, borderRadius: 999),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: SkeletonBox(height: 25, borderRadius: 999),
+                      ),
+                    ],
+                  ),
+                ),
+                Divider(
+                  height: 1,
+                  color: ThemeHelpers.borderLightColor(context),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: const [
+                          SkeletonBox(width: 38, height: 38, borderRadius: 12),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                SkeletonText(width: 150, height: 12),
+                                SizedBox(height: 6),
+                                SkeletonText(width: 100, height: 10),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      const SkeletonBox(height: 52, borderRadius: 12),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: const [
+                          Expanded(
+                            child: SkeletonBox(height: 30, borderRadius: 9),
+                          ),
+                          SizedBox(width: 6),
+                          Expanded(
+                            child: SkeletonBox(height: 30, borderRadius: 9),
+                          ),
+                          SizedBox(width: 6),
+                          Expanded(
+                            child: SkeletonBox(height: 30, borderRadius: 9),
+                          ),
+                          SizedBox(width: 6),
+                          Expanded(
+                            child: SkeletonBox(height: 30, borderRadius: 9),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           Row(
             children: const [
-              Expanded(child: SkeletonBox(height: 42, borderRadius: 12)),
-              SizedBox(width: 10),
-              Expanded(child: SkeletonBox(height: 42, borderRadius: 12)),
+              SkeletonBox(width: 84, height: 24, borderRadius: 999),
+              SizedBox(width: 7),
+              SkeletonBox(width: 110, height: 24, borderRadius: 999),
+              Spacer(),
+              SkeletonBox(width: 34, height: 34, borderRadius: 11),
+              SizedBox(width: 6),
+              SkeletonBox(width: 34, height: 34, borderRadius: 11),
             ],
           ),
           const SizedBox(height: 22),
-          const SkeletonBox(
-              width: double.infinity, height: 44, borderRadius: 12),
-          const SizedBox(height: 18),
-          const SkeletonBox(
-              width: double.infinity, height: 130, borderRadius: 16),
+          Row(
+            children: const [
+              Expanded(child: SkeletonText(height: 14)),
+              SizedBox(width: 14),
+              Expanded(child: SkeletonText(height: 14)),
+              SizedBox(width: 14),
+              Expanded(child: SkeletonText(height: 14)),
+              SizedBox(width: 14),
+              Expanded(child: SkeletonText(height: 14)),
+            ],
+          ),
+          const SizedBox(height: 22),
+          const SkeletonBox(height: 44, borderRadius: 12),
+          const SizedBox(height: 14),
+          const SkeletonBox(height: 130, borderRadius: 16),
           const SizedBox(height: 12),
-          const SkeletonBox(
-              width: double.infinity, height: 180, borderRadius: 16),
+          const SkeletonBox(height: 180, borderRadius: 16),
         ],
       ),
     );

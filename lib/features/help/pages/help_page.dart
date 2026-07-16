@@ -2,15 +2,109 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../models/help_content.dart';
 
-/// Tela **Central de Ajuda** — porte do `FaqPage.tsx` web: busca, acesso
-/// rápido, guias passo a passo e perguntas frequentes por categoria
-/// expansível. Conteúdo estático (sem endpoint), disponível para qualquer
-/// usuário autenticado. No rodapé, o caminho para abrir um chamado.
+// ─── Paleta tonal da Central de Ajuda ────────────────────────────────────────
+// Cor por significado (variedade controlada, sem arco-íris gratuito):
+// sky = primeiros passos · violet = CRM · vermelho da marca = imóveis ·
+// amber = agenda · rose = documentos/assinatura · emerald = WhatsApp ·
+// slate = relatórios · indigo = conta/segurança (mesmo tom do Perfil).
+Color _toneBrand(bool d) =>
+    d ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+Color _toneSky(bool d) => d ? const Color(0xFF38BDF8) : const Color(0xFF0284C7);
+Color _toneViolet(bool d) =>
+    d ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED);
+Color _toneEmerald(bool d) =>
+    d ? const Color(0xFF34D399) : const Color(0xFF059669);
+Color _toneRose(bool d) =>
+    d ? const Color(0xFFFB7185) : const Color(0xFFE11D48);
+Color _toneAmber(bool d) =>
+    d ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
+Color _toneSlate(bool d) =>
+    d ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+Color _toneIndigo(bool d) =>
+    d ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
+
+/// Identidade visual de uma categoria do FAQ: acento + ícone tonal.
+class _HelpTone {
+  final Color color;
+  final IconData icon;
+  const _HelpTone(this.color, this.icon);
+}
+
+_HelpTone _categoryTone(String id, bool d) {
+  switch (id) {
+    case 'geral':
+      return _HelpTone(_toneSky(d), LucideIcons.rocket);
+    case 'crm':
+      return _HelpTone(_toneViolet(d), LucideIcons.squareKanban);
+    case 'imoveis':
+      return _HelpTone(_toneBrand(d), LucideIcons.home);
+    case 'agenda':
+      return _HelpTone(_toneAmber(d), LucideIcons.calendarDays);
+    case 'documentos':
+      return _HelpTone(_toneRose(d), LucideIcons.fileSignature);
+    case 'whatsapp':
+      return _HelpTone(_toneEmerald(d), LucideIcons.messageCircle);
+    case 'relatorios':
+      return _HelpTone(_toneSlate(d), LucideIcons.chartColumn);
+    case 'conta':
+      return _HelpTone(_toneIndigo(d), LucideIcons.userRound);
+    default:
+      return _HelpTone(_toneBrand(d), LucideIcons.circleHelp);
+  }
+}
+
+/// Acento de cada guia passo a passo, herdado do tema a que pertence.
+Color _guideAccent(String id, bool d) {
+  switch (id) {
+    case 'novo-lead':
+      return _toneViolet(d);
+    case 'novo-imovel':
+      return _toneBrand(d);
+    case 'ficha-venda':
+      return _toneRose(d);
+    case 'agendar-visita':
+      return _toneAmber(d);
+    case 'abrir-chamado':
+      return _toneSky(d);
+    default:
+      return _toneBrand(d);
+  }
+}
+
+/// Acento de cada atalho ("ir direto para a tela"), pela rota de destino.
+Color _quickLinkAccent(String route, bool d) {
+  switch (route) {
+    case AppRoutes.kanban:
+      return _toneViolet(d);
+    case AppRoutes.properties:
+      return _toneBrand(d);
+    case AppRoutes.saleForms:
+      return _toneRose(d);
+    case AppRoutes.clients:
+      return _toneSky(d);
+    case AppRoutes.calendar:
+      return _toneAmber(d);
+    case kHelpTicketsRoute:
+      return _toneEmerald(d);
+    default:
+      return _toneBrand(d);
+  }
+}
+
+/// Tela **Central de Ajuda** — porte do `FaqPage.tsx` web com personalidade
+/// própria: a BUSCA é a protagonista. O topo é um convite ("Como podemos
+/// ajudar?") com um campo de busca grande; abaixo, os temas viram um grid de
+/// cartões tonais (ícone + nome + contagem de artigos, cada um com seu acento
+/// de cor por significado), seguidos das perguntas do tema ativo, dos guias
+/// passo a passo e dos atalhos de navegação. Conteúdo estático (sem endpoint),
+/// disponível para qualquer usuário autenticado. No rodapé, o caminho para
+/// abrir um chamado.
 class HelpPage extends StatefulWidget {
   const HelpPage({super.key});
 
@@ -19,6 +113,15 @@ class HelpPage extends StatefulWidget {
 }
 
 class _HelpPageState extends State<HelpPage> {
+  static const List<String> _suggestions = [
+    'senha',
+    'lead',
+    'assinatura',
+    'check-in',
+    'PDF',
+    'empresa',
+  ];
+
   final TextEditingController _searchController = TextEditingController();
   bool _searchFocused = false;
   String _search = '';
@@ -33,11 +136,14 @@ class _HelpPageState extends State<HelpPage> {
     super.dispose();
   }
 
-  Color get _accent => Theme.of(context).brightness == Brightness.dark
-      ? AppColors.primary.primaryDarkMode
-      : AppColors.primary.primary;
+  bool get _isDark => Theme.of(context).brightness == Brightness.dark;
+
+  Color get _accent => _toneBrand(_isDark);
 
   bool get _isSearching => helpNormalize(_search.trim()).isNotEmpty;
+
+  int get _totalFaqCount =>
+      faqCategories.fold<int>(0, (sum, c) => sum + c.items.length);
 
   /// Durante a busca, todas as categorias com itens correspondentes; sem
   /// busca, apenas a categoria selecionada (paridade com o web).
@@ -69,6 +175,23 @@ class _HelpPageState extends State<HelpPage> {
     Navigator.of(context).pushNamed(route);
   }
 
+  void _applySearch(String term) {
+    _searchController.text = term;
+    _searchController.selection = TextSelection.collapsed(offset: term.length);
+    setState(() {
+      _search = term;
+      _openFaqKey = null;
+    });
+  }
+
+  void _clearSearch() {
+    _searchController.clear();
+    setState(() {
+      _search = '';
+      _openFaqKey = null;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final categories = _visibleCategories;
@@ -78,40 +201,43 @@ class _HelpPageState extends State<HelpPage> {
       showBottomNavigation: false,
       body: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
+        padding: const EdgeInsets.fromLTRB(16, 18, 16, 32),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _buildHero(context),
-            const SizedBox(height: 12),
+            _buildInvite(context),
+            const SizedBox(height: 16),
             _buildSearchField(context),
             if (!_isSearching) ...[
-              const SizedBox(height: 22),
-              _sectionLabel(context, LucideIcons.rocket, 'ACESSO RÁPIDO'),
               const SizedBox(height: 12),
-              _buildQuickGrid(context),
-              const SizedBox(height: 22),
-              _sectionLabel(context, LucideIcons.listChecks, 'PASSO A PASSO'),
+              _buildSuggestionChips(context),
+              const SizedBox(height: 26),
+              _sectionHeading(context, 'EXPLORAR POR TEMA'),
               const SizedBox(height: 12),
-              _buildGuides(context),
-            ],
-            const SizedBox(height: 22),
-            _sectionLabel(
-              context,
-              LucideIcons.circleHelp,
-              'PERGUNTAS FREQUENTES',
-            ),
-            const SizedBox(height: 12),
-            if (!_isSearching) ...[
-              _buildCategoryChips(context),
-              const SizedBox(height: 14),
-            ],
-            if (categories.isEmpty)
-              _buildEmptySearch(context)
-            else
+              _buildCategoryGrid(context),
+              const SizedBox(height: 20),
               for (final category in categories)
                 _buildCategoryBlock(context, category),
-            const SizedBox(height: 10),
+              const SizedBox(height: 16),
+              _sectionHeading(context, 'GUIAS PASSO A PASSO'),
+              const SizedBox(height: 12),
+              _buildGuides(context),
+              const SizedBox(height: 16),
+              _sectionHeading(context, 'IR DIRETO PARA A TELA'),
+              const SizedBox(height: 12),
+              _buildQuickStrip(context),
+            ] else ...[
+              const SizedBox(height: 18),
+              if (categories.isEmpty)
+                _buildEmptySearch(context)
+              else ...[
+                _buildResultsSummary(context, categories),
+                const SizedBox(height: 14),
+                for (final category in categories)
+                  _buildCategoryBlock(context, category),
+              ],
+            ],
+            const SizedBox(height: 22),
             _buildSupportCta(context),
           ],
         ),
@@ -119,76 +245,56 @@ class _HelpPageState extends State<HelpPage> {
     );
   }
 
-  // ─── Hero flush ──────────────────────────────────────────────────────────
+  // ─── Convite (título acolhedor, sem eyebrow/pills) ───────────────────────
 
-  Widget _buildHero(BuildContext context) {
+  Widget _buildInvite(BuildContext context) {
     final theme = Theme.of(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Container(
-              width: 9,
-              height: 9,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _accent,
-                boxShadow: [
-                  BoxShadow(
-                    color: _accent.withValues(alpha: 0.55),
-                    blurRadius: 8,
-                    spreadRadius: 1,
-                  ),
-                ],
+        Text.rich(
+          TextSpan(
+            text: 'Como podemos\n',
+            children: [
+              TextSpan(
+                text: 'ajudar',
+                style: TextStyle(color: _accent),
               ),
-            ),
-            const SizedBox(width: 9),
-            Text(
-              'SUPORTE · CENTRAL DE AJUDA',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: _accent,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 2.2,
-                fontSize: 11,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Text(
-          'Como podemos ajudar?',
-          style: theme.textTheme.headlineSmall?.copyWith(
+              const TextSpan(text: '?'),
+            ],
+          ),
+          style: theme.textTheme.headlineMedium?.copyWith(
             fontWeight: FontWeight.w900,
             color: ThemeHelpers.textColor(context),
-            letterSpacing: -0.6,
+            letterSpacing: -1.0,
             height: 1.05,
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         Text(
-          'Encontre respostas rápidas para as dúvidas mais comuns e vá direto para a tela que você precisa.',
+          'Busque em $_totalFaqCount respostas rápidas, siga um guia passo a '
+          'passo ou fale direto com o suporte.',
           style: theme.textTheme.bodyMedium?.copyWith(
             color: secondary,
             fontWeight: FontWeight.w600,
-            height: 1.4,
+            height: 1.45,
           ),
         ),
       ],
-    );
+    )
+        .animate()
+        .fadeIn(duration: 280.ms, curve: Curves.easeOut)
+        .slideY(begin: 0.05, end: 0, duration: 320.ms, curve: Curves.easeOutCubic);
   }
 
-  // ─── Busca flush ─────────────────────────────────────────────────────────
+  // ─── Busca protagonista ──────────────────────────────────────────────────
 
   Widget _buildSearchField(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isDark = _isDark;
     final textColor = ThemeHelpers.textColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final cardColor = ThemeHelpers.cardBackgroundColor(context);
-    final borderColor = isDark
-        ? Colors.white.withValues(alpha: 0.08)
-        : Colors.black.withValues(alpha: 0.06);
     final hasText = _searchController.text.isNotEmpty;
     final showAccent = _searchFocused || hasText;
 
@@ -197,36 +303,45 @@ class _HelpPageState extends State<HelpPage> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeOutCubic,
-        height: 50,
+        height: 58,
         decoration: BoxDecoration(
           color: cardColor,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(
             color: showAccent
-                ? _accent.withValues(alpha: isDark ? 0.5 : 0.42)
-                : borderColor,
-            width: showAccent ? 1.4 : 1,
+                ? _accent.withValues(alpha: isDark ? 0.55 : 0.45)
+                : ThemeHelpers.borderColor(context),
+            width: showAccent ? 1.5 : 1,
           ),
-          boxShadow: showAccent
-              ? [
-                  BoxShadow(
-                    color: _accent.withValues(alpha: isDark ? 0.18 : 0.12),
-                    blurRadius: 14,
-                    offset: const Offset(0, 5),
-                    spreadRadius: -4,
-                  ),
-                ]
-              : null,
+          boxShadow: [
+            ...ThemeHelpers.cardShadow(context),
+            if (showAccent)
+              BoxShadow(
+                color: _accent.withValues(alpha: isDark ? 0.20 : 0.14),
+                blurRadius: 18,
+                offset: const Offset(0, 6),
+                spreadRadius: -4,
+              ),
+          ],
         ),
         child: Row(
           children: [
-            const SizedBox(width: 14),
-            Icon(
-              LucideIcons.search,
-              size: 18,
-              color: showAccent ? _accent : secondary,
+            const SizedBox(width: 11),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(11),
+                color: _accent.withValues(
+                  alpha: showAccent
+                      ? (isDark ? 0.24 : 0.14)
+                      : (isDark ? 0.16 : 0.08),
+                ),
+              ),
+              child: Icon(LucideIcons.search, size: 17, color: _accent),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 11),
             Expanded(
               child: TextField(
                 controller: _searchController,
@@ -234,12 +349,12 @@ class _HelpPageState extends State<HelpPage> {
                 cursorColor: _accent,
                 style: TextStyle(
                   color: textColor,
-                  fontSize: 14.5,
+                  fontSize: 15,
                   fontWeight: FontWeight.w700,
                   letterSpacing: -0.1,
                 ),
                 decoration: InputDecoration(
-                  hintText: 'Buscar dúvida (ex.: senha, lead, ficha)…',
+                  hintText: 'Busque por senha, lead, ficha, check-in…',
                   hintStyle: TextStyle(
                     color: secondary.withValues(alpha: 0.75),
                     fontWeight: FontWeight.w500,
@@ -261,36 +376,101 @@ class _HelpPageState extends State<HelpPage> {
             if (hasText)
               InkResponse(
                 radius: 18,
-                onTap: () {
-                  _searchController.clear();
-                  setState(() => _search = '');
-                },
+                onTap: _clearSearch,
                 child: Padding(
                   padding: const EdgeInsets.all(6),
-                  child: Icon(LucideIcons.x, size: 15, color: secondary),
+                  child: Icon(LucideIcons.x, size: 16, color: secondary),
                 ),
               ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 10),
           ],
         ),
       ),
+    )
+        .animate()
+        .fadeIn(delay: 60.ms, duration: 280.ms, curve: Curves.easeOut)
+        .slideY(begin: 0.08, end: 0, duration: 320.ms, curve: Curves.easeOutCubic);
+  }
+
+  Widget _buildSuggestionChips(BuildContext context) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Wrap(
+      spacing: 7,
+      runSpacing: 7,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(right: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(LucideIcons.sparkles, size: 12, color: secondary),
+              const SizedBox(width: 5),
+              Text(
+                'Tente:',
+                style: TextStyle(
+                  color: secondary,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ),
+        ),
+        for (final term in _suggestions)
+          Material(
+            color: ThemeHelpers.cardBackgroundColor(context),
+            borderRadius: BorderRadius.circular(999),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(999),
+              onTap: () => _applySearch(term),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 11,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: ThemeHelpers.borderColor(context),
+                  ),
+                ),
+                child: Text(
+                  term,
+                  style: TextStyle(
+                    color: secondary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 11.5,
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
-  // ─── Seções ──────────────────────────────────────────────────────────────
+  // ─── Cabeçalho de seção (editorial, sem ícone) ───────────────────────────
 
-  Widget _sectionLabel(BuildContext context, IconData icon, String label) {
+  Widget _sectionHeading(BuildContext context, String label) {
     final secondary = ThemeHelpers.textSecondaryColor(context);
     return Row(
       children: [
-        Icon(icon, size: 13, color: secondary),
-        const SizedBox(width: 6),
+        Container(
+          width: 18,
+          height: 3,
+          decoration: BoxDecoration(
+            color: secondary.withValues(alpha: 0.55),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 8),
         Text(
           label,
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
             color: secondary,
             fontWeight: FontWeight.w900,
-            letterSpacing: 1.4,
+            letterSpacing: 1.6,
             fontSize: 10.5,
           ),
         ),
@@ -309,124 +489,60 @@ class _HelpPageState extends State<HelpPage> {
     );
   }
 
-  // ─── Acesso rápido ───────────────────────────────────────────────────────
+  // ─── Grid de temas ───────────────────────────────────────────────────────
 
-  Widget _buildQuickGrid(BuildContext context) {
-    return GridView.count(
-      crossAxisCount: 2,
+  Widget _buildCategoryGrid(BuildContext context) {
+    final isDark = _isDark;
+    return GridView(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 10,
-      crossAxisSpacing: 10,
-      childAspectRatio: 1.9,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        mainAxisExtent: 118,
+      ),
       children: [
-        for (final link in helpQuickLinks)
-          _QuickLinkCard(link: link, onTap: () => _go(link.route)),
-      ],
-    );
-  }
-
-  // ─── Guias passo a passo ─────────────────────────────────────────────────
-
-  Widget _buildGuides(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        for (final guide in helpGuides)
-          _GuideCard(
-            guide: guide,
-            open: _openGuideId == guide.id,
-            accent: _accent,
-            onToggle: () => setState(() {
-              _openGuideId = _openGuideId == guide.id ? null : guide.id;
+        for (final category in faqCategories)
+          _CategoryCard(
+            category: category,
+            tone: _categoryTone(category.id, isDark),
+            active: category.id == _activeCategoryId,
+            onTap: () => setState(() {
+              _activeCategoryId = category.id;
+              _openFaqKey = null;
             }),
-            onCta: () => _go(guide.ctaRoute),
           ),
       ],
     );
   }
 
-  // ─── FAQ ─────────────────────────────────────────────────────────────────
-
-  Widget _buildCategoryChips(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      clipBehavior: Clip.none,
-      child: Row(
-        children: [
-          for (final category in faqCategories) ...[
-            Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(999),
-                onTap: () => setState(() {
-                  _activeCategoryId = category.id;
-                  _openFaqKey = null;
-                }),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 13,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(999),
-                    color: category.id == _activeCategoryId
-                        ? _accent.withValues(alpha: isDark ? 0.16 : 0.1)
-                        : Colors.transparent,
-                    border: Border.all(
-                      color: category.id == _activeCategoryId
-                          ? _accent.withValues(alpha: 0.45)
-                          : ThemeHelpers.borderColor(context),
-                      width: category.id == _activeCategoryId ? 1.4 : 1,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        category.emoji,
-                        style: const TextStyle(fontSize: 13),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        category.title,
-                        style: TextStyle(
-                          color: category.id == _activeCategoryId
-                              ? _accent
-                              : ThemeHelpers.textColor(context),
-                          fontWeight: category.id == _activeCategoryId
-                              ? FontWeight.w800
-                              : FontWeight.w600,
-                          fontSize: 12.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-          ],
-        ],
-      ),
-    );
-  }
+  // ─── Bloco de FAQ de uma categoria ───────────────────────────────────────
 
   Widget _buildCategoryBlock(BuildContext context, FaqCategory category) {
     final theme = Theme.of(context);
+    final tone = _categoryTone(category.id, _isDark);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final count = category.items.length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (_isSearching) ...[
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8, top: 4),
-            child: Row(
-              children: [
-                Text(category.emoji, style: const TextStyle(fontSize: 15)),
-                const SizedBox(width: 7),
-                Text(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10, top: 4),
+          child: Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(9),
+                  color: tone.color.withValues(alpha: _isDark ? 0.18 : 0.1),
+                ),
+                child: Icon(tone.icon, color: tone.color, size: 15),
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
                   category.title,
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w900,
@@ -434,15 +550,23 @@ class _HelpPageState extends State<HelpPage> {
                     letterSpacing: -0.2,
                   ),
                 ),
-              ],
-            ),
+              ),
+              Text(
+                '$count ${count == 1 ? 'artigo' : 'artigos'}',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: secondary,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 11,
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
         for (var i = 0; i < category.items.length; i++)
           _FaqAccordion(
             item: category.items[i],
             open: _openFaqKey == '${category.id}-$i',
-            accent: _accent,
+            accent: tone.color,
             onToggle: () => setState(() {
               final key = '${category.id}-$i';
               _openFaqKey = _openFaqKey == key ? null : key;
@@ -450,6 +574,35 @@ class _HelpPageState extends State<HelpPage> {
           ),
         const SizedBox(height: 10),
       ],
+    );
+  }
+
+  // ─── Resumo e vazio da busca ─────────────────────────────────────────────
+
+  Widget _buildResultsSummary(
+    BuildContext context,
+    List<FaqCategory> categories,
+  ) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final total = categories.fold<int>(0, (sum, c) => sum + c.items.length);
+    return Text.rich(
+      TextSpan(
+        text: '$total ${total == 1 ? 'resultado' : 'resultados'} para ',
+        children: [
+          TextSpan(
+            text: '"${_search.trim()}"',
+            style: TextStyle(
+              color: ThemeHelpers.textColor(context),
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+      style: theme.textTheme.bodySmall?.copyWith(
+        color: secondary,
+        fontWeight: FontWeight.w600,
+      ),
     );
   }
 
@@ -494,6 +647,69 @@ class _HelpPageState extends State<HelpPage> {
               height: 1.4,
             ),
           ),
+          const SizedBox(height: 14),
+          OutlinedButton.icon(
+            onPressed: _clearSearch,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _accent,
+              side: BorderSide(color: _accent.withValues(alpha: 0.45)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(11),
+              ),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 9,
+              ),
+            ),
+            icon: const Icon(LucideIcons.x, size: 14),
+            label: const Text(
+              'Limpar busca',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Guias passo a passo ─────────────────────────────────────────────────
+
+  Widget _buildGuides(BuildContext context) {
+    final isDark = _isDark;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final guide in helpGuides)
+          _GuideCard(
+            guide: guide,
+            open: _openGuideId == guide.id,
+            accent: _guideAccent(guide.id, isDark),
+            onToggle: () => setState(() {
+              _openGuideId = _openGuideId == guide.id ? null : guide.id;
+            }),
+            onCta: () => _go(guide.ctaRoute),
+          ),
+      ],
+    );
+  }
+
+  // ─── Atalhos (strip horizontal) ──────────────────────────────────────────
+
+  Widget _buildQuickStrip(BuildContext context) {
+    final isDark = _isDark;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      clipBehavior: Clip.none,
+      child: Row(
+        children: [
+          for (var i = 0; i < helpQuickLinks.length; i++) ...[
+            _QuickLinkCard(
+              link: helpQuickLinks[i],
+              accent: _quickLinkAccent(helpQuickLinks[i].route, isDark),
+              onTap: () => _go(helpQuickLinks[i].route),
+            ),
+            if (i != helpQuickLinks.length - 1) const SizedBox(width: 10),
+          ],
         ],
       ),
     );
@@ -503,12 +719,12 @@ class _HelpPageState extends State<HelpPage> {
 
   Widget _buildSupportCta(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final isDark = _isDark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(20),
         color: ThemeHelpers.cardBackgroundColor(context),
         border: Border.all(
           color: _accent.withValues(alpha: isDark ? 0.28 : 0.18),
@@ -524,7 +740,7 @@ class _HelpPageState extends State<HelpPage> {
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(13),
+                  borderRadius: BorderRadius.circular(14),
                   color: _accent.withValues(alpha: isDark ? 0.18 : 0.1),
                 ),
                 child: Icon(LucideIcons.lifeBuoy, color: _accent, size: 22),
@@ -586,75 +802,214 @@ class _HelpPageState extends State<HelpPage> {
   }
 }
 
-// ─── Card de acesso rápido ────────────────────────────────────────────────────
+// ─── Cartão de tema (grid) ────────────────────────────────────────────────────
 
-class _QuickLinkCard extends StatelessWidget {
-  final HelpQuickLink link;
+class _CategoryCard extends StatelessWidget {
+  final FaqCategory category;
+  final _HelpTone tone;
+  final bool active;
   final VoidCallback onTap;
 
-  const _QuickLinkCard({required this.link, required this.onTap});
+  const _CategoryCard({
+    required this.category,
+    required this.tone,
+    required this.active,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final accent = isDark
-        ? AppColors.primary.primaryDarkMode
-        : AppColors.primary.primary;
+    final cardColor = ThemeHelpers.cardBackgroundColor(context);
+    final bg = active
+        ? Color.alphaBlend(
+            tone.color.withValues(alpha: isDark ? 0.10 : 0.06),
+            cardColor,
+          )
+        : cardColor;
+    final count = category.items.length;
+
     return Material(
-      color: ThemeHelpers.cardBackgroundColor(context),
+      color: bg,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
         onTap: onTap,
-        child: Container(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: active
+                  ? tone.color.withValues(alpha: isDark ? 0.55 : 0.45)
+                  : ThemeHelpers.borderLightColor(context),
+              width: active ? 1.4 : 1,
+            ),
             boxShadow: ThemeHelpers.cardShadow(context),
           ),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(11),
-                  color: accent.withValues(alpha: isDark ? 0.18 : 0.1),
-                ),
-                child: Icon(link.icon, color: accent, size: 18),
+              Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(11),
+                      color: tone.color.withValues(
+                        alpha: isDark ? 0.18 : 0.1,
+                      ),
+                    ),
+                    child: Icon(tone.icon, color: tone.color, size: 17),
+                  ),
+                  const Spacer(),
+                  AnimatedOpacity(
+                    duration: const Duration(milliseconds: 180),
+                    opacity: active ? 1 : 0,
+                    child: Container(
+                      width: 18,
+                      height: 18,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: tone.color,
+                      ),
+                      child: const Icon(
+                        LucideIcons.check,
+                        size: 11,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      link.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: ThemeHelpers.textColor(context),
-                        letterSpacing: -0.1,
-                      ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    category.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: ThemeHelpers.textColor(context),
+                      letterSpacing: -0.2,
+                      fontSize: 12.5,
+                      height: 1.18,
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      link.description,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: ThemeHelpers.textSecondaryColor(context),
-                        fontWeight: FontWeight.w600,
-                        fontSize: 10.5,
-                      ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '$count ${count == 1 ? 'artigo' : 'artigos'}',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: active
+                          ? tone.color
+                          : ThemeHelpers.textSecondaryColor(context),
+                      fontWeight: FontWeight.w700,
+                      fontSize: 10.5,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Cartão de atalho (strip horizontal) ──────────────────────────────────────
+
+class _QuickLinkCard extends StatelessWidget {
+  final HelpQuickLink link;
+  final Color accent;
+  final VoidCallback onTap;
+
+  const _QuickLinkCard({
+    required this.link,
+    required this.accent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return SizedBox(
+      width: 196,
+      height: 64,
+      child: Material(
+        color: ThemeHelpers.cardBackgroundColor(context),
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 11),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: ThemeHelpers.borderLightColor(context),
+              ),
+              boxShadow: ThemeHelpers.cardShadow(context),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(11),
+                    color: accent.withValues(alpha: isDark ? 0.18 : 0.1),
+                  ),
+                  child: Icon(link.icon, color: accent, size: 17),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        link.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: ThemeHelpers.textColor(context),
+                          letterSpacing: -0.1,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        link.description,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: ThemeHelpers.textSecondaryColor(context),
+                          fontWeight: FontWeight.w600,
+                          fontSize: 10.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Icon(
+                  LucideIcons.arrowUpRight,
+                  size: 14,
+                  color: ThemeHelpers.textSecondaryColor(
+                    context,
+                  ).withValues(alpha: 0.7),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -739,6 +1094,26 @@ class _GuideCard extends StatelessWidget {
                               color: secondary,
                               height: 1.3,
                             ),
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                LucideIcons.listChecks,
+                                size: 11,
+                                color: accent,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${guide.steps.length} passos',
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: accent,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 10.5,
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -913,6 +1288,7 @@ class _FaqAccordion extends StatelessWidget {
               : ThemeHelpers.borderLightColor(context),
           width: open ? 1.3 : 1,
         ),
+        boxShadow: open ? ThemeHelpers.cardShadow(context) : null,
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -960,17 +1336,26 @@ class _FaqAccordion extends StatelessWidget {
             firstChild: const SizedBox(width: double.infinity, height: 0),
             secondChild: Padding(
               padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  item.answer,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: secondary,
-                    fontWeight: FontWeight.w500,
-                    height: 1.5,
-                    fontSize: 13,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(
+                    height: 1,
+                    margin: const EdgeInsets.only(bottom: 10),
+                    color: ThemeHelpers.borderLightColor(
+                      context,
+                    ).withValues(alpha: 0.6),
                   ),
-                ).animate().fadeIn(duration: 180.ms),
+                  Text(
+                    item.answer,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: secondary,
+                      fontWeight: FontWeight.w500,
+                      height: 1.5,
+                      fontSize: 13,
+                    ),
+                  ).animate().fadeIn(duration: 180.ms),
+                ],
               ),
             ),
           ),

@@ -20,12 +20,13 @@ import '../widgets/public_site_shared.dart';
 
 enum _BioTab { profile, links, analytics }
 
-/// Tela **Link in Bio** — editor mobile da página de links da bio do
-/// Instagram (`bio.intellisysbr.com/{slug}`). Mesma gramática flush das telas
-/// de referência: hero editorial com KPIs, abas com sublinhado, conteúdo nas
-/// margens e ações no próprio item. Paridade com `BioLinkConfigPage.tsx`
-/// (as etapas viáveis em mobile — templates/customização Premium ficam no
-/// painel web; devolvemos `customization` intacta para não apagar nada).
+/// Tela **Link in Bio** — a própria bio page é a heroína: um mock compacto
+/// de telefone mostra avatar, nome, @handle e os botões de link reais em
+/// miniatura; ao lado ficam URL pública, status e ações rápidas. Abaixo, a
+/// edição segue sóbria em abas com sublinhado, conteúdo flush nas margens e
+/// ações no próprio item. Paridade com `BioLinkConfigPage.tsx` (as etapas
+/// viáveis em mobile — templates/customização Premium ficam no painel web;
+/// devolvemos `customization` intacta para não apagar nada).
 class BioLinkPage extends StatefulWidget {
   const BioLinkPage({super.key});
 
@@ -181,10 +182,7 @@ class _BioLinkPageState extends State<BioLinkPage> {
   void _showSnack(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        content: Text(message),
-      ),
+      SnackBar(behavior: SnackBarBehavior.floating, content: Text(message)),
     );
   }
 
@@ -212,8 +210,9 @@ class _BioLinkPageState extends State<BioLinkPage> {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           title: const Text('Despublicar página?'),
           content: const Text(
             'Sua página sai do ar imediatamente e quem tocar no link da bio '
@@ -253,7 +252,9 @@ class _BioLinkPageState extends State<BioLinkPage> {
       if (res.success && res.data != null) _applyPage(res.data!);
     });
     if (res.success) {
-      _showSnack(res.data!.isPublished ? 'Página no ar' : 'Página despublicada');
+      _showSnack(
+        res.data!.isPublished ? 'Página no ar' : 'Página despublicada',
+      );
     } else {
       _showSnack(res.message ?? 'Erro ao alterar publicação');
     }
@@ -265,8 +266,10 @@ class _BioLinkPageState extends State<BioLinkPage> {
     final res = await BioPageService.instance.update({
       'title': _titleController.text.trim(),
       'bio': _bioController.text.trim(),
-      'instagramHandle':
-          _instagramController.text.trim().replaceFirst(RegExp(r'^@+'), ''),
+      'instagramHandle': _instagramController.text.trim().replaceFirst(
+        RegExp(r'^@+'),
+        '',
+      ),
     });
     if (!mounted) return;
     setState(() {
@@ -277,14 +280,14 @@ class _BioLinkPageState extends State<BioLinkPage> {
       }
     });
     _showSnack(
-        res.success ? 'Perfil salvo' : (res.message ?? 'Erro ao salvar'));
+      res.success ? 'Perfil salvo' : (res.message ?? 'Erro ao salvar'),
+    );
   }
 
   // ── Slug ──
 
   void _onSlugChanged(String raw) {
-    final sanitized =
-        raw.toLowerCase().replaceAll(RegExp(r'[^a-z0-9-]'), '');
+    final sanitized = raw.toLowerCase().replaceAll(RegExp(r'[^a-z0-9-]'), '');
     if (sanitized != raw) {
       _slugController.value = TextEditingValue(
         text: sanitized,
@@ -338,9 +341,11 @@ class _BioLinkPageState extends State<BioLinkPage> {
         _slugAvailable = false;
       }
     });
-    _showSnack(res.success
-        ? 'URL atualizada'
-        : (res.message ?? 'Slug inválido ou reservado'));
+    _showSnack(
+      res.success
+          ? 'URL atualizada'
+          : (res.message ?? 'Slug inválido ou reservado'),
+    );
   }
 
   // ── Links ──
@@ -363,8 +368,10 @@ class _BioLinkPageState extends State<BioLinkPage> {
   }
 
   Future<void> _editLink(int index) async {
-    final edited =
-        await BioLinkEditSheet.show(context, initial: _linksDraft[index]);
+    final edited = await BioLinkEditSheet.show(
+      context,
+      initial: _linksDraft[index],
+    );
     if (edited == null || !mounted) return;
     setState(() {
       _linksDraft = List.of(_linksDraft)..[index] = edited;
@@ -383,7 +390,7 @@ class _BioLinkPageState extends State<BioLinkPage> {
           link.label.trim().isEmpty
               ? 'O link sai da página quando você salvar.'
               : '"${link.label.trim()}" sai da página quando você salvar. '
-                  'Para pausar sem excluir, use o interruptor de visibilidade.',
+                    'Para pausar sem excluir, use o interruptor de visibilidade.',
         ),
         actions: [
           TextButton(
@@ -427,7 +434,8 @@ class _BioLinkPageState extends State<BioLinkPage> {
       }
     });
     _showSnack(
-        res.success ? 'Links salvos' : (res.message ?? 'Erro ao salvar links'));
+      res.success ? 'Links salvos' : (res.message ?? 'Erro ao salvar links'),
+    );
   }
 
   // ─── Build ────────────────────────────────────────────────────────────────
@@ -453,324 +461,454 @@ class _BioLinkPageState extends State<BioLinkPage> {
           await _load();
           if (_analyticsLoaded) await _loadAnalytics();
         },
-        child: LayoutBuilder(
-          builder: (context, constraints) => SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: constraints.maxHeight),
-              child: _loading
-                  ? _buildPageSkeleton(context)
-                  : _error != null
-                      ? Padding(
-                          padding: const EdgeInsets.fromLTRB(
-                              _kPagePadH, 48, _kPagePadH, _kPagePadBottom),
-                          child:
-                              SiteErrorState(message: _error!, onRetry: _load),
-                        )
-                      : Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(
-                                  _kPagePadH, _kPagePadTop, _kPagePadH, 0),
-                              child: _buildHero(context),
-                            ),
-                            const SizedBox(height: _kSectionGap),
-                            _buildTabsRail(context),
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(_kPagePadH,
-                                  _kSectionGap, _kPagePadH, _kPagePadBottom),
-                              child: _buildActivePanel(context),
-                            ),
-                          ],
-                        ),
-            ),
-          ),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: EdgeInsets.zero,
+          children: _loading
+              ? [_buildPageSkeleton(context)]
+              : _error != null
+              ? [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      _kPagePadH,
+                      48,
+                      _kPagePadH,
+                      _kPagePadBottom,
+                    ),
+                    child: SiteErrorState(message: _error!, onRetry: _load),
+                  ),
+                ]
+              : [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      _kPagePadH,
+                      _kPagePadTop,
+                      _kPagePadH,
+                      0,
+                    ),
+                    child: _buildPhoneHero(context),
+                  ),
+                  const SizedBox(height: _kSectionGap + 2),
+                  _buildTabsRail(context),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      _kPagePadH,
+                      _kSectionGap,
+                      _kPagePadH,
+                      _kPagePadBottom,
+                    ),
+                    child: _buildActivePanel(context),
+                  ),
+                ],
         ),
       ),
     );
   }
 
-  // ─── Hero editorial ───────────────────────────────────────────────────────
+  // ─── Hero: a bio page é a protagonista (mock de telefone) ────────────────
 
-  Widget _buildHero(BuildContext context) {
+  Widget _buildPhoneHero(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final accent = _accentColor(context);
-    final textColor = ThemeHelpers.textColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final emerald =
-        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
-    final amber =
-        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
-    final violet =
-        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
-    final info =
-        isDark ? AppColors.status.infoDarkMode : AppColors.status.info;
+    final emerald = isDark
+        ? AppColors.status.greenDarkMode
+        : AppColors.status.green;
+    final amber = isDark
+        ? AppColors.status.warningDarkMode
+        : AppColors.status.warning;
+    final violet = isDark
+        ? AppColors.status.purpleDarkMode
+        : AppColors.status.purple;
 
     final page = _page!;
     final published = page.isPublished;
-    final dot = published ? emerald : amber;
+    final statusTone = published ? emerald : amber;
     final slug = (page.slug ?? '').trim();
-    final subtitle = published
-        ? 'Sua página de links está no ar — cole a URL na bio do Instagram.'
-        : (slug.isEmpty
-            ? 'Defina a URL pública, monte seus links e publique para '
-                'colocar a página no ar.'
-            : 'A página ainda não foi publicada — monte os links e '
-                'publique quando estiver pronta.');
     final hasUrl = page.bestPublicUrl != null;
-    final activeLinks = _linksDraft.where((l) => l.isActive).length;
+    final activeLinks = _linksDraft
+        .where((l) => l.isActive)
+        .toList(growable: false);
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(0, 4, 0, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    Widget sideLabel(String label) => Text(
+      label,
+      style: theme.textTheme.labelSmall?.copyWith(
+        color: secondary,
+        fontWeight: FontWeight.w900,
+        letterSpacing: 1.3,
+        fontSize: 9.5,
+      ),
+    );
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildPhoneMock(context, activeLinks),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: dot,
-                  boxShadow: [
-                    BoxShadow(
-                      color: dot.withValues(alpha: 0.55),
-                      blurRadius: 8,
-                      spreadRadius: 1,
+              const SizedBox(height: 2),
+              SiteMiniPill(
+                label: published ? 'No ar' : 'Rascunho',
+                tone: statusTone,
+                icon: published
+                    ? LucideIcons.circleCheckBig
+                    : LucideIcons.circleDashed,
+              ),
+              const SizedBox(height: 14),
+              sideLabel('URL DA BIO'),
+              const SizedBox(height: 3),
+              Text(
+                slug.isEmpty ? 'Não definida' : '/$slug',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.4,
+                  color: slug.isEmpty ? secondary : accent,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                slug.isEmpty ? 'configure na aba Perfil' : kBioPublicBase,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w600,
+                  color: secondary,
+                ),
+              ),
+              const SizedBox(height: 14),
+              sideLabel('LINKS VISÍVEIS'),
+              const SizedBox(height: 3),
+              Text.rich(
+                TextSpan(
+                  text: '${activeLinks.length}',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.4,
+                    color: violet,
+                  ),
+                  children: [
+                    TextSpan(
+                      text: ' de ${_linksDraft.length}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.1,
+                        color: secondary,
+                      ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 9),
-              Text(
-                'LINK IN BIO · INSTAGRAM',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: accent,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2.2,
-                  fontSize: 11,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                published ? 'No ar' : 'Rascunho',
-                style: theme.textTheme.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: textColor,
-                  height: 1.0,
-                  letterSpacing: -1.0,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 5),
-                child: Text(
-                  'status da página',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: secondary,
-                    fontWeight: FontWeight.w800,
-                    height: 1.0,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            subtitle,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: secondary,
-              fontWeight: FontWeight.w600,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 18),
-          _buildKpiStrip(
-            context,
-            urlTone: slug.isEmpty ? secondary : info,
-            linksTone: violet,
-            statusTone: dot,
-            slug: slug,
-            activeLinks: activeLinks,
-            published: published,
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
                 child: OutlinedButton.icon(
                   onPressed: hasUrl ? _openPage : null,
                   style: OutlinedButton.styleFrom(
                     foregroundColor: accent,
                     side: BorderSide(color: accent.withValues(alpha: 0.45)),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(11),
                     ),
-                    padding: const EdgeInsets.symmetric(vertical: 11),
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    visualDensity: VisualDensity.compact,
                   ),
-                  icon: const Icon(LucideIcons.externalLink, size: 15),
+                  icon: const Icon(LucideIcons.externalLink, size: 14),
                   label: const Text(
                     'Abrir página',
-                    style: TextStyle(fontWeight: FontWeight.w800),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12.5,
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(width: 10),
-              Expanded(
+              const SizedBox(height: 7),
+              SizedBox(
+                width: double.infinity,
                 child: OutlinedButton.icon(
                   onPressed: hasUrl ? _copyUrl : null,
                   style: OutlinedButton.styleFrom(
                     foregroundColor: secondary,
-                    side: BorderSide(
-                      color: ThemeHelpers.borderColor(context),
-                    ),
+                    side: BorderSide(color: ThemeHelpers.borderColor(context)),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(11),
                     ),
-                    padding: const EdgeInsets.symmetric(vertical: 11),
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    visualDensity: VisualDensity.compact,
                   ),
-                  icon: const Icon(LucideIcons.copy, size: 15),
+                  icon: const Icon(LucideIcons.copy, size: 14),
                   label: const Text(
                     'Copiar URL',
-                    style: TextStyle(fontWeight: FontWeight.w800),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12.5,
+                    ),
                   ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                published
+                    ? 'Cole a URL na bio do seu Instagram.'
+                    : 'Publique para o endereço começar a funcionar.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: secondary,
+                  height: 1.35,
+                  fontSize: 11,
                 ),
               ),
             ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
-  Widget _buildKpiStrip(
-    BuildContext context, {
-    required Color urlTone,
-    required Color linksTone,
-    required Color statusTone,
-    required String slug,
-    required int activeLinks,
-    required bool published,
-  }) {
-    final divider = ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
-    final blocks = <Widget>[
-      _heroKpiBlock(
-        context,
-        LucideIcons.atSign,
-        'URL PÚBLICA',
-        slug.isEmpty ? 'Não definida' : '/$slug',
-        slug.isEmpty ? 'configure na aba Perfil' : kBioPublicBase,
-        urlTone,
-      ),
-      _heroKpiBlock(
-        context,
-        LucideIcons.link,
-        'LINKS',
-        '$activeLinks/${_linksDraft.length}',
-        'visíveis na página',
-        linksTone,
-      ),
-      _heroKpiBlock(
-        context,
-        published ? LucideIcons.circleCheckBig : LucideIcons.circleDashed,
-        'PUBLICAÇÃO',
-        published ? 'Publicada' : 'Rascunho',
-        published ? 'visível a todos' : 'ninguém vê ainda',
-        statusTone,
-      ),
-    ];
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (var i = 0; i < blocks.length; i++) ...[
-            if (i > 0)
-              Container(
-                width: 1,
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                color: divider,
-              ),
-            Expanded(child: blocks[i]),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _heroKpiBlock(BuildContext context, IconData icon, String label,
-      String value, String sub, Color tone) {
-    final theme = Theme.of(context);
+  /// Mock de "telefone" com a bio page em miniatura — avatar, nome, @handle,
+  /// bio e os primeiros botões de link reais (cores customizadas incluídas).
+  Widget _buildPhoneMock(BuildContext context, List<BioPageLink> activeLinks) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accent = _accentColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 11, color: tone),
-              const SizedBox(width: 5),
-              Flexible(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w900,
-                    color: tone,
-                    letterSpacing: 1.2,
-                    height: 1.0,
+    final page = _page!;
+
+    final title = (page.title ?? '').trim();
+    final handle = (page.instagramHandle ?? '').trim().replaceFirst(
+      RegExp(r'^@+'),
+      '',
+    );
+    final bio = (page.bio ?? '').trim();
+    final shown = activeLinks.take(3).toList(growable: false);
+    final extra = activeLinks.length - shown.length;
+
+    final screenBase = isDark
+        ? AppColors.background.backgroundSecondaryDarkMode
+        : Colors.white;
+
+    return Container(
+          width: 168,
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E1E30) : const Color(0xFF1F2937),
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: ThemeHelpers.cardShadow(context),
+          ),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(10, 10, 10, 14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(21),
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color.alphaBlend(
+                    accent.withValues(alpha: isDark ? 0.16 : 0.09),
+                    screenBase,
                   ),
+                  screenBase,
+                ],
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // "Câmera" do aparelho
+                Center(
+                  child: Container(
+                    width: 42,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: secondary.withValues(alpha: 0.35),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Center(child: _mockAvatar(context, accent, title)),
+                const SizedBox(height: 8),
+                Text(
+                  title.isEmpty ? 'Sua página' : title,
+                  textAlign: TextAlign.center,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.2,
+                    color: title.isEmpty
+                        ? secondary
+                        : ThemeHelpers.textColor(context),
+                  ),
                 ),
-              ),
-            ],
+                if (handle.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    '@$handle',
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w700,
+                      color: secondary,
+                    ),
+                  ),
+                ],
+                if (bio.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    bio,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 8.5,
+                      fontWeight: FontWeight.w600,
+                      height: 1.3,
+                      color: secondary,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                if (shown.isEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: secondary.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Text(
+                      'Seus links entram aqui',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 8.5,
+                        fontWeight: FontWeight.w700,
+                        color: secondary,
+                      ),
+                    ),
+                  )
+                else
+                  for (var i = 0; i < shown.length; i++) ...[
+                    if (i > 0) const SizedBox(height: 6),
+                    _mockLinkButton(context, shown[i], accent, isDark),
+                  ],
+                if (extra > 0) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '+$extra ${extra == 1 ? 'link' : 'links'}',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                      color: secondary,
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              value,
-              style: theme.textTheme.headlineSmall?.copyWith(
+        )
+        .animate()
+        .fadeIn(duration: 300.ms)
+        .moveY(begin: 8, end: 0, curve: Curves.easeOut);
+  }
+
+  Widget _mockAvatar(BuildContext context, Color accent, String title) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final avatarUrl = (_page!.avatarUrl ?? '').trim();
+    final initial = title.isNotEmpty ? title[0].toUpperCase() : null;
+    return Container(
+      width: 46,
+      height: 46,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: accent.withValues(alpha: isDark ? 0.2 : 0.12),
+        border: Border.all(color: accent.withValues(alpha: 0.45), width: 1.5),
+      ),
+      child: avatarUrl.isNotEmpty
+          ? Image.network(
+              avatarUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) =>
+                  _mockAvatarFallback(accent, initial),
+            )
+          : _mockAvatarFallback(accent, initial),
+    );
+  }
+
+  Widget _mockAvatarFallback(Color accent, String? initial) {
+    return Center(
+      child: initial != null
+          ? Text(
+              initial,
+              style: TextStyle(
+                fontSize: 16,
                 fontWeight: FontWeight.w900,
-                color: tone,
-                letterSpacing: -0.4,
-                height: 1.0,
-                fontSize: 17,
+                color: accent,
               ),
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            sub,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: secondary,
-              height: 1.0,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 7),
-          Container(
-            height: 2,
-            width: 18,
-            decoration: BoxDecoration(
-              color: tone,
-              borderRadius: BorderRadius.circular(2),
+            )
+          : Icon(LucideIcons.userRound, size: 18, color: accent),
+    );
+  }
+
+  Widget _mockLinkButton(
+    BuildContext context,
+    BioPageLink link,
+    Color accent,
+    bool isDark,
+  ) {
+    final Color? c1 = siteParseHexColor(link.color);
+    final Color c2 = siteParseHexColor(link.color2) ?? c1 ?? accent;
+    final fg = c1 != null
+        ? (ThemeData.estimateBrightnessForColor(c1) == Brightness.dark
+              ? Colors.white
+              : const Color(0xFF1F2937))
+        : accent;
+    final label = link.label.trim().isEmpty ? 'Sem rótulo' : link.label.trim();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        gradient: c1 != null ? LinearGradient(colors: [c1, c2]) : null,
+        color: c1 != null
+            ? null
+            : accent.withValues(alpha: isDark ? 0.2 : 0.12),
+        border: c1 != null
+            ? null
+            : Border.all(color: accent.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(_linkIcon(link.url), size: 10, color: fg),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.1,
+                color: fg,
+              ),
             ),
           ),
         ],
@@ -854,27 +992,23 @@ class _BioLinkPageState extends State<BioLinkPage> {
     );
   }
 
-  ({IconData icon, String eyebrow, String title, String hint}) _panelMeta(
-      _BioTab tab) {
+  ({IconData icon, String title, String hint}) _panelMeta(_BioTab tab) {
     switch (tab) {
       case _BioTab.profile:
         return (
           icon: LucideIcons.userRound,
-          eyebrow: 'PERFIL & URL',
           title: 'Como sua página se apresenta',
           hint: 'Nome, bio, Instagram e o endereço público da página.',
         );
       case _BioTab.links:
         return (
           icon: LucideIcons.link,
-          eyebrow: 'LINKS DA PÁGINA',
           title: 'Monte a lista de botões',
           hint: 'Ordem de cima para baixo na bio. Oculte sem excluir.',
         );
       case _BioTab.analytics:
         return (
           icon: LucideIcons.chartLine,
-          eyebrow: 'ANALYTICS',
           title: 'Performance da página',
           hint: 'Visualizações, cliques e taxa de conversão por período.',
         );
@@ -888,7 +1022,6 @@ class _BioLinkPageState extends State<BioLinkPage> {
       children: [
         SitePanelHeader(
           icon: meta.icon,
-          eyebrow: meta.eyebrow,
           title: meta.title,
           hint: meta.hint,
           tone: _tone(context, tab),
@@ -902,8 +1035,9 @@ class _BioLinkPageState extends State<BioLinkPage> {
   Widget _readOnlyNotice(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final amber =
-        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
+    final amber = isDark
+        ? AppColors.status.warningDarkMode
+        : AppColors.status.warning;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
@@ -938,12 +1072,15 @@ class _BioLinkPageState extends State<BioLinkPage> {
     final isDark = theme.brightness == Brightness.dark;
     final page = _page!;
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final emerald =
-        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
-    final amber =
-        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
-    final danger =
-        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    final emerald = isDark
+        ? AppColors.status.greenDarkMode
+        : AppColors.status.green;
+    final amber = isDark
+        ? AppColors.status.warningDarkMode
+        : AppColors.status.warning;
+    final danger = isDark
+        ? AppColors.status.errorDarkMode
+        : AppColors.status.error;
     final statusTone = page.isPublished ? emerald : amber;
     final dateFmt = DateFormat("dd/MM/yyyy 'às' HH:mm", 'pt_BR');
 
@@ -998,10 +1135,10 @@ class _BioLinkPageState extends State<BioLinkPage> {
             Text(
               page.isPublished
                   ? (page.publishedAt != null
-                      ? 'Publicada em ${dateFmt.format(page.publishedAt!.toLocal())}.'
-                      : 'Sua página está visível para qualquer visitante.')
+                        ? 'Publicada em ${dateFmt.format(page.publishedAt!.toLocal())}.'
+                        : 'Sua página está visível para qualquer visitante.')
                   : 'Quando os links estiverem prontos, publique para o '
-                      'endereço da bio começar a funcionar.',
+                        'endereço da bio começar a funcionar.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: secondary,
                 height: 1.4,
@@ -1040,8 +1177,8 @@ class _BioLinkPageState extends State<BioLinkPage> {
                     _publishing
                         ? 'Aguarde…'
                         : (page.isPublished
-                            ? 'Despublicar página'
-                            : 'Publicar página'),
+                              ? 'Despublicar página'
+                              : 'Publicar página'),
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ),
@@ -1129,7 +1266,8 @@ class _BioLinkPageState extends State<BioLinkPage> {
       SizedBox(
         width: double.infinity,
         child: FilledButton.icon(
-          onPressed: _canManage &&
+          onPressed:
+              _canManage &&
                   !_slugSaving &&
                   slugChanged &&
                   draftSlug.length >= 3 &&
@@ -1158,8 +1296,8 @@ class _BioLinkPageState extends State<BioLinkPage> {
             _slugSaving
                 ? 'Salvando…'
                 : (slugChanged || currentSlug.isEmpty
-                    ? 'Salvar URL'
-                    : 'URL salva'),
+                      ? 'Salvar URL'
+                      : 'URL salva'),
             style: const TextStyle(fontWeight: FontWeight.w800),
           ),
         ),
@@ -1184,10 +1322,7 @@ class _BioLinkPageState extends State<BioLinkPage> {
         ],
       ),
       const SizedBox(height: 18),
-      const SiteSubsectionHeader(
-        label: 'Perfil',
-        icon: LucideIcons.userRound,
-      ),
+      const SiteSubsectionHeader(label: 'Perfil', icon: LucideIcons.userRound),
       const SizedBox(height: 12),
       Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1276,7 +1411,8 @@ class _BioLinkPageState extends State<BioLinkPage> {
         SiteEmptyState(
           icon: LucideIcons.link,
           title: 'Nenhum link ainda',
-          body: 'Adicione WhatsApp, site, catálogo de imóveis ou formulário — '
+          body:
+              'Adicione WhatsApp, site, catálogo de imóveis ou formulário — '
               'os botões aparecem na página na ordem da lista.',
           tone: tone,
           action: _canManage
@@ -1289,7 +1425,9 @@ class _BioLinkPageState extends State<BioLinkPage> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 18, vertical: 12),
+                      horizontal: 18,
+                      vertical: 12,
+                    ),
                   ),
                   icon: const Icon(LucideIcons.plus, size: 16),
                   label: const Text(
@@ -1305,10 +1443,8 @@ class _BioLinkPageState extends State<BioLinkPage> {
           physics: const NeverScrollableScrollPhysics(),
           buildDefaultDragHandles: false,
           itemCount: _linksDraft.length,
-          proxyDecorator: (child, index, animation) => Material(
-            color: Colors.transparent,
-            child: child,
-          ),
+          proxyDecorator: (child, index, animation) =>
+              Material(color: Colors.transparent, child: child),
           onReorder: !_canManage
               ? (_, __) {}
               : (oldIndex, newIndex) {
@@ -1408,16 +1544,20 @@ class _BioLinkPageState extends State<BioLinkPage> {
   }
 
   Widget _buildLinkTile(
-      BuildContext context, BioPageLink link, int index, Color tone) {
+    BuildContext context,
+    BioPageLink link,
+    int index,
+    Color tone,
+  ) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final danger =
-        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    final danger = isDark
+        ? AppColors.status.errorDarkMode
+        : AppColors.status.error;
     final active = link.isActive;
     final fg = active ? tone : secondary.withValues(alpha: 0.7);
-    final displayUrl =
-        link.url.replaceFirst(RegExp(r'^https?://'), '').trim();
+    final displayUrl = link.url.replaceFirst(RegExp(r'^https?://'), '').trim();
 
     return Container(
       decoration: BoxDecoration(
@@ -1427,8 +1567,8 @@ class _BioLinkPageState extends State<BioLinkPage> {
           color: active
               ? tone.withValues(alpha: isDark ? 0.28 : 0.2)
               : (isDark
-                  ? Colors.white.withValues(alpha: 0.06)
-                  : Colors.black.withValues(alpha: 0.05)),
+                    ? Colors.white.withValues(alpha: 0.06)
+                    : Colors.black.withValues(alpha: 0.05)),
         ),
         boxShadow: ThemeHelpers.cardShadow(context, strength: 0.7),
       ),
@@ -1449,12 +1589,15 @@ class _BioLinkPageState extends State<BioLinkPage> {
                   enabled: _canManage,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 4),
+                      horizontal: 6,
+                      vertical: 4,
+                    ),
                     child: Icon(
                       LucideIcons.gripVertical,
                       size: 16,
-                      color:
-                          secondary.withValues(alpha: _canManage ? 0.7 : 0.3),
+                      color: secondary.withValues(
+                        alpha: _canManage ? 0.7 : 0.3,
+                      ),
                     ),
                   ),
                 ),
@@ -1555,9 +1698,7 @@ class _BioLinkPageState extends State<BioLinkPage> {
       Row(
         children: [
           for (final days in _kAnalyticsPeriods) ...[
-            Expanded(
-              child: _periodChip(context, days, tone),
-            ),
+            Expanded(child: _periodChip(context, days, tone)),
             const SizedBox(width: 8),
           ],
           SiteRowAction(
@@ -1574,14 +1715,12 @@ class _BioLinkPageState extends State<BioLinkPage> {
       else if (_analytics == null)
         SiteEmptyState(
           icon: LucideIcons.chartLine,
-          title: page.isPublished
-              ? 'Sem métricas ainda'
-              : 'Página fora do ar',
+          title: page.isPublished ? 'Sem métricas ainda' : 'Página fora do ar',
           body: page.isPublished
               ? 'Assim que os visitantes acessarem sua página, as métricas '
-                  'aparecem aqui.'
+                    'aparecem aqui.'
               : 'Publique a página para começar a coletar visualizações e '
-                  'cliques.',
+                    'cliques.',
           tone: tone,
           action: OutlinedButton.icon(
             onPressed: () => _loadAnalytics(),
@@ -1634,16 +1773,25 @@ class _BioLinkPageState extends State<BioLinkPage> {
     );
   }
 
-  List<Widget> _buildAnalyticsBody(BuildContext context, ThemeData theme,
-      bool isDark, Color tone, Color secondary) {
+  List<Widget> _buildAnalyticsBody(
+    BuildContext context,
+    ThemeData theme,
+    bool isDark,
+    Color tone,
+    Color secondary,
+  ) {
     final data = _analytics!;
     final numberFmt = NumberFormat.decimalPattern('pt_BR');
     final ctrFmt = NumberFormat('#,##0.0', 'pt_BR');
-    final emerald =
-        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
-    final violet =
-        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
-    final rose = isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    final emerald = isDark
+        ? AppColors.status.greenDarkMode
+        : AppColors.status.green;
+    final violet = isDark
+        ? AppColors.status.purpleDarkMode
+        : AppColors.status.purple;
+    final rose = isDark
+        ? AppColors.status.errorDarkMode
+        : AppColors.status.error;
     final maxClicks = data.links.isEmpty
         ? 0
         : data.links.map((l) => l.clicks).reduce((a, b) => a > b ? a : b);
@@ -1653,13 +1801,23 @@ class _BioLinkPageState extends State<BioLinkPage> {
       Row(
         children: [
           Expanded(
-            child: _statTile(context, LucideIcons.eye, 'Visualizações',
-                numberFmt.format(data.pageViews), tone),
+            child: _statTile(
+              context,
+              LucideIcons.eye,
+              'Visualizações',
+              numberFmt.format(data.pageViews),
+              tone,
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: _statTile(context, LucideIcons.mousePointerClick,
-                'Cliques', numberFmt.format(data.linkClicks), violet),
+            child: _statTile(
+              context,
+              LucideIcons.mousePointerClick,
+              'Cliques',
+              numberFmt.format(data.linkClicks),
+              violet,
+            ),
           ),
         ],
       ),
@@ -1667,14 +1825,23 @@ class _BioLinkPageState extends State<BioLinkPage> {
       Row(
         children: [
           Expanded(
-            child: _statTile(context, LucideIcons.camera, 'Instagram',
-                numberFmt.format(data.instagramClicks), rose),
+            child: _statTile(
+              context,
+              LucideIcons.camera,
+              'Instagram',
+              numberFmt.format(data.instagramClicks),
+              rose,
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: _statTile(context, LucideIcons.trendingUp,
-                'Taxa clique/view', '${ctrFmt.format(data.clickThroughRate)}%',
-                emerald),
+            child: _statTile(
+              context,
+              LucideIcons.trendingUp,
+              'Taxa clique/view',
+              '${ctrFmt.format(data.clickThroughRate)}%',
+              emerald,
+            ),
           ),
         ],
       ),
@@ -1719,11 +1886,11 @@ class _BioLinkPageState extends State<BioLinkPage> {
                 if (i > 0)
                   Divider(
                     height: 16,
-                    color: ThemeHelpers.borderLightColor(context)
-                        .withValues(alpha: 0.5),
+                    color: ThemeHelpers.borderLightColor(
+                      context,
+                    ).withValues(alpha: 0.5),
                   ),
-                _clicksRow(context, data.links[i], maxClicks, tone,
-                    numberFmt),
+                _clicksRow(context, data.links[i], maxClicks, tone, numberFmt),
               ],
             ],
           ),
@@ -1731,8 +1898,13 @@ class _BioLinkPageState extends State<BioLinkPage> {
     ];
   }
 
-  Widget _statTile(BuildContext context, IconData icon, String label,
-      String value, Color tone) {
+  Widget _statTile(
+    BuildContext context,
+    IconData icon,
+    String label,
+    String value,
+    Color tone,
+  ) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
@@ -1797,11 +1969,16 @@ class _BioLinkPageState extends State<BioLinkPage> {
     );
   }
 
-  Widget _buildViewsChart(BuildContext context, BioPageAnalytics data,
-      Color tone, Color secondary) {
+  Widget _buildViewsChart(
+    BuildContext context,
+    BioPageAnalytics data,
+    Color tone,
+    Color secondary,
+  ) {
     final days = data.viewsByDay;
-    final maxViews =
-        days.map((d) => d.views).fold<int>(0, (m, v) => v > m ? v : m);
+    final maxViews = days
+        .map((d) => d.views)
+        .fold<int>(0, (m, v) => v > m ? v : m);
     if (maxViews == 0) return const SizedBox.shrink();
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -1830,11 +2007,12 @@ class _BioLinkPageState extends State<BioLinkPage> {
                       height: days[i].views <= 0
                           ? 3
                           : (6 + 58 * (days[i].views / maxViews))
-                              .clamp(3, 64)
-                              .toDouble(),
+                                .clamp(3, 64)
+                                .toDouble(),
                       decoration: BoxDecoration(
-                        borderRadius:
-                            const BorderRadius.vertical(top: Radius.circular(3)),
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(3),
+                        ),
                         color: days[i].views <= 0
                             ? tone.withValues(alpha: isDark ? 0.14 : 0.1)
                             : tone.withValues(
@@ -1874,8 +2052,13 @@ class _BioLinkPageState extends State<BioLinkPage> {
     );
   }
 
-  Widget _clicksRow(BuildContext context, BioPageLinkAnalytics item,
-      int maxClicks, Color tone, NumberFormat fmt) {
+  Widget _clicksRow(
+    BuildContext context,
+    BioPageLinkAnalytics item,
+    int maxClicks,
+    Color tone,
+    NumberFormat fmt,
+  ) {
     final theme = Theme.of(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final ratio = maxClicks <= 0 ? 0.0 : item.clicks / maxClicks;
@@ -1940,55 +2123,94 @@ class _BioLinkPageState extends State<BioLinkPage> {
           ],
         ),
         const SizedBox(height: 18),
-        const SkeletonBox(width: double.infinity, height: 150, borderRadius: 16),
+        const SkeletonBox(
+          width: double.infinity,
+          height: 150,
+          borderRadius: 16,
+        ),
       ],
     );
   }
 
-  // ─── Skeleton (fiel ao layout real) ──────────────────────────────────────
+  // ─── Skeleton (fiel ao layout novo: mock de telefone + abas) ─────────────
 
   Widget _buildPageSkeleton(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-          _kPagePadH, _kPagePadTop + 4, _kPagePadH, _kPagePadBottom),
+        _kPagePadH,
+        _kPagePadTop + 4,
+        _kPagePadH,
+        _kPagePadBottom,
+      ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SkeletonText(width: 150, height: 11, borderRadius: 999),
-          const SizedBox(height: 12),
-          const SkeletonText(width: 170, height: 34, borderRadius: 8),
-          const SizedBox(height: 10),
-          const SkeletonText(width: double.infinity, height: 13),
-          const SizedBox(height: 20),
           Row(
-            children: const [
-              Expanded(child: SkeletonBox(height: 64, borderRadius: 10)),
-              SizedBox(width: 12),
-              Expanded(child: SkeletonBox(height: 64, borderRadius: 10)),
-              SizedBox(width: 12),
-              Expanded(child: SkeletonBox(height: 64, borderRadius: 10)),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: const [
-              Expanded(child: SkeletonBox(height: 42, borderRadius: 12)),
-              SizedBox(width: 10),
-              Expanded(child: SkeletonBox(height: 42, borderRadius: 12)),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Moldura do telefone
+              Container(
+                width: 168,
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xFF1E1E30)
+                      : const Color(0xFF1F2937),
+                  borderRadius: BorderRadius.circular(28),
+                ),
+                child: const SkeletonBox(height: 264, borderRadius: 21),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    SizedBox(height: 2),
+                    SkeletonBox(width: 86, height: 24, borderRadius: 999),
+                    SizedBox(height: 14),
+                    SkeletonText(width: 66, height: 9),
+                    SizedBox(height: 6),
+                    SkeletonText(width: 110, height: 17),
+                    SizedBox(height: 4),
+                    SkeletonText(width: 90, height: 10),
+                    SizedBox(height: 14),
+                    SkeletonText(width: 80, height: 9),
+                    SizedBox(height: 6),
+                    SkeletonText(width: 56, height: 15),
+                    SizedBox(height: 16),
+                    SkeletonBox(
+                      width: double.infinity,
+                      height: 36,
+                      borderRadius: 11,
+                    ),
+                    SizedBox(height: 7),
+                    SkeletonBox(
+                      width: double.infinity,
+                      height: 36,
+                      borderRadius: 11,
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 22),
-          const SkeletonBox(
-              width: double.infinity, height: 44, borderRadius: 12),
-          const SizedBox(height: 18),
-          const SkeletonBox(
-              width: double.infinity, height: 68, borderRadius: 14),
+          Row(
+            children: const [
+              Expanded(child: SkeletonText(height: 14)),
+              SizedBox(width: 14),
+              Expanded(child: SkeletonText(height: 14)),
+              SizedBox(width: 14),
+              Expanded(child: SkeletonText(height: 14)),
+            ],
+          ),
+          const SizedBox(height: 22),
+          const SkeletonBox(height: 68, borderRadius: 14),
           const SizedBox(height: 8),
-          const SkeletonBox(
-              width: double.infinity, height: 68, borderRadius: 14),
+          const SkeletonBox(height: 68, borderRadius: 14),
           const SizedBox(height: 8),
-          const SkeletonBox(
-              width: double.infinity, height: 68, borderRadius: 14),
+          const SkeletonBox(height: 68, borderRadius: 14),
         ],
       ),
     );

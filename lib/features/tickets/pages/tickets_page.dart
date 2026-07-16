@@ -31,9 +31,11 @@ String _normalize(String value) {
   return out;
 }
 
-/// Tela **Suporte / Meus tickets** — mesmo DNA da tela de Comissões: hero
-/// editorial com KPIs, busca flush, abas flush com sublinhado e contagem,
-/// lista em linhas flush. Espelha a `TicketsPage` do imobx-front (visão do
+/// Tela **Suporte / Meus tickets** — personalidade própria: lista SÓBRIA com
+/// **status strip** no topo (faixa fina segmentada, proporcional à
+/// distribuição por status, com legenda compacta tocável) no lugar de hero
+/// com KPIs. As linhas de ticket usam indicador lateral fino de status e
+/// tipografia protagonista. Espelha a `TicketsPage` do imobx-front (visão do
 /// solicitante): abrir ticket, acompanhar respostas e manter o histórico.
 class TicketsPage extends StatefulWidget {
   const TicketsPage({super.key});
@@ -44,14 +46,22 @@ class TicketsPage extends StatefulWidget {
 
 class _TicketsPageState extends State<TicketsPage> {
   static const double _kPagePadH = 16;
-  static const double _kPagePadTop = 10;
+  static const double _kPagePadTop = 12;
   static const double _kPagePadBottom = 108;
-  static const double _kSectionGap = 12;
 
   static const _tabs = [
     TicketTab.active,
     TicketTab.waiting,
     TicketTab.finished,
+  ];
+
+  /// Ordem fixa dos segmentos da faixa de status (ciclo de vida do ticket).
+  static const List<TicketStatus> _stripOrder = [
+    TicketStatus.open,
+    TicketStatus.inProgress,
+    TicketStatus.waiting,
+    TicketStatus.resolved,
+    TicketStatus.closed,
   ];
 
   TicketTab _activeTab = TicketTab.active;
@@ -153,14 +163,30 @@ class _TicketsPageState extends State<TicketsPage> {
     }
   }
 
-  int get _activeCount => _tickets.where((t) => t.status.isActive).length;
-  int get _waitingCount =>
-      _tickets.where((t) => t.status == TicketStatus.waiting).length;
-  int get _resolvedCount =>
-      _tickets.where((t) => t.status == TicketStatus.resolved).length;
-  int get _urgentOpenCount => _tickets
-      .where((t) => t.priority == TicketPriority.urgent && !t.status.isFinished)
-      .length;
+  /// Contagem global por status (sem recorte de busca) — alimenta a faixa.
+  Map<TicketStatus, int> get _statusCounts {
+    final map = <TicketStatus, int>{};
+    for (final t in _tickets) {
+      map[t.status] = (map[t.status] ?? 0) + 1;
+    }
+    return map;
+  }
+
+  /// Aba correspondente a um status — a faixa filtra através das abas que já
+  /// existem (não inventa filtro novo).
+  TicketTab _tabForStatus(TicketStatus status) {
+    switch (status) {
+      case TicketStatus.open:
+      case TicketStatus.inProgress:
+        return TicketTab.active;
+      case TicketStatus.waiting:
+        return TicketTab.waiting;
+      case TicketStatus.resolved:
+      case TicketStatus.closed:
+      case TicketStatus.unknown:
+        return TicketTab.finished;
+    }
+  }
 
   void _onSearchChanged(String value) {
     _searchDebounce?.cancel();
@@ -208,45 +234,34 @@ class _TicketsPageState extends State<TicketsPage> {
           RefreshIndicator(
             color: _accentColor(context),
             onRefresh: _load,
-            child: LayoutBuilder(
-              builder: (context, constraints) => SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          _kPagePadH,
-                          _kPagePadTop,
-                          _kPagePadH,
-                          0,
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildHero(context),
-                            const SizedBox(height: _kSectionGap),
-                            _buildSearchField(context),
-                            const SizedBox(height: _kSectionGap),
-                          ],
-                        ),
-                      ),
-                      _buildTabsRail(context),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          _kPagePadH,
-                          _kSectionGap,
-                          _kPagePadH,
-                          _kPagePadBottom,
-                        ),
-                        child: _buildActivePanel(context),
-                      ),
-                    ],
-                  ),
-                ),
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.only(
+                top: _kPagePadTop,
+                bottom: _kPagePadBottom,
               ),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: _kPagePadH),
+                  child: _buildStatusStrip(context),
+                ),
+                const SizedBox(height: 16),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: _kPagePadH),
+                  child: _buildSearchField(context),
+                ),
+                const SizedBox(height: 12),
+                _buildTabsRail(context),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    _kPagePadH,
+                    10,
+                    _kPagePadH,
+                    0,
+                  ),
+                  child: _buildActivePanel(context),
+                ),
+              ],
             ),
           ),
           if (_canCreate) _buildCreateButton(context),
@@ -296,277 +311,142 @@ class _TicketsPageState extends State<TicketsPage> {
     );
   }
 
-  // ─── Hero editorial ──────────────────────────────────────────────────────
+  // ─── Status strip ────────────────────────────────────────────────────────
 
-  Widget _buildHero(BuildContext context) {
+  /// Assinatura da tela: título sóbrio + faixa fina segmentada com a
+  /// distribuição por status (cores semânticas) e legenda compacta. Cada
+  /// segmento/legenda é tocável e leva à aba correspondente.
+  Widget _buildStatusStrip(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final accent = _accentColor(context);
     final textColor = ThemeHelpers.textColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final emerald = isDark
-        ? AppColors.status.greenDarkMode
-        : AppColors.status.green;
-    final amber = isDark
-        ? AppColors.status.warningDarkMode
-        : AppColors.status.warning;
-    final blue = isDark ? AppColors.status.infoDarkMode : AppColors.status.info;
-    final danger = isDark
-        ? AppColors.status.errorDarkMode
-        : AppColors.status.error;
 
-    final total = _tickets.length;
-    final hasWaiting = _waitingCount > 0;
-    final hasActive = _activeCount > 0;
-    final dot = hasWaiting
-        ? amber
-        : hasActive
-        ? blue
-        : emerald;
-    final subtitle = total == 0
-        ? 'Abra solicitações para a equipe de desenvolvimento e acompanhe tudo por aqui.'
-        : hasWaiting
-        ? '$_waitingCount ticket${_waitingCount == 1 ? '' : 's'} aguardando sua resposta.'
-        : hasActive
-        ? '$_activeCount em atendimento — você recebe as respostas aqui.'
-        : 'Nenhum ticket em aberto no momento.';
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(0, 4, 0, 0),
-      child: Column(
+    if (_loading && !_loadedOnce) {
+      return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            children: [
-              Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: dot,
-                  boxShadow: [
-                    BoxShadow(
-                      color: dot.withValues(alpha: 0.55),
-                      blurRadius: 8,
-                      spreadRadius: 1,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 9),
-              Text(
-                'SUPORTE · MEUS TICKETS',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: accent,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2.2,
-                  fontSize: 11,
-                ),
-              ),
+            children: const [
+              SkeletonText(width: 118, height: 17),
+              Spacer(),
+              SkeletonText(width: 62, height: 11),
             ],
+          ),
+          const SizedBox(height: 12),
+          const SkeletonBox(
+            width: double.infinity,
+            height: 10,
+            borderRadius: 999,
           ),
           const SizedBox(height: 10),
           Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '$total',
-                style: theme.textTheme.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: textColor,
-                  height: 1.0,
-                  letterSpacing: -1.0,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 5),
-                child: Text(
-                  total == 1 ? 'ticket' : 'tickets',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: secondary,
-                    fontWeight: FontWeight.w800,
-                    height: 1.0,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-              ),
-              if (_urgentOpenCount > 0) ...[
-                const SizedBox(width: 10),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 3),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: danger.withValues(alpha: isDark ? 0.16 : 0.1),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: danger.withValues(alpha: 0.35)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(LucideIcons.zap, size: 11, color: danger),
-                        const SizedBox(width: 4),
-                        Text(
-                          '$_urgentOpenCount urgente${_urgentOpenCount == 1 ? '' : 's'}',
-                          style: TextStyle(
-                            color: danger,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+            children: const [
+              SkeletonText(width: 74, height: 11, borderRadius: 999),
+              SizedBox(width: 14),
+              SkeletonText(width: 92, height: 11, borderRadius: 999),
+              SizedBox(width: 14),
+              SkeletonText(width: 80, height: 11, borderRadius: 999),
             ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            subtitle,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: secondary,
-              fontWeight: FontWeight.w600,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 18),
-          _buildKpiStrip(context, blue, amber, emerald),
         ],
-      ),
-    );
-  }
+      );
+    }
 
-  Widget _buildKpiStrip(
-    BuildContext context,
-    Color blue,
-    Color amber,
-    Color emerald,
-  ) {
-    final divider = ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
-    final blocks = <Widget>[
-      _heroKpiBlock(
-        context,
-        LucideIcons.wrench,
-        'ATIVOS',
-        '$_activeCount',
-        'em atendimento',
-        blue,
-      ),
-      _heroKpiBlock(
-        context,
-        LucideIcons.clock3,
-        'AGUARDANDO VOCÊ',
-        '$_waitingCount',
-        'respostas pendentes',
-        amber,
-      ),
-      _heroKpiBlock(
-        context,
-        LucideIcons.circleCheckBig,
-        'RESOLVIDOS',
-        '$_resolvedCount',
-        'para confirmar',
-        emerald,
-      ),
-    ];
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (var i = 0; i < blocks.length; i++) ...[
-            if (i > 0)
-              Container(
-                width: 1,
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                color: divider,
-              ),
-            Expanded(child: blocks[i]),
-          ],
-        ],
-      ),
-    );
-  }
+    final counts = _statusCounts;
+    final total = _tickets.length;
+    final visible = _stripOrder
+        .where((s) => (counts[s] ?? 0) > 0)
+        .toList(growable: false);
 
-  Widget _heroKpiBlock(
-    BuildContext context,
-    IconData icon,
-    String label,
-    String value,
-    String sub,
-    Color tone,
-  ) {
-    final theme = Theme.of(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 11, color: tone),
-              const SizedBox(width: 5),
-              Flexible(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w900,
-                    color: tone,
-                    letterSpacing: 1.2,
-                    height: 1.0,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              !_loadedOnce && _loading ? '—' : value,
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: tone,
-                letterSpacing: -0.6,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(
+              'Meus tickets',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: textColor,
+                letterSpacing: -0.4,
                 height: 1.0,
-                fontSize: 22,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              total == 0
+                  ? (_error != null ? '—' : 'nenhum registro')
+                  : total == 1
+                  ? '1 no total'
+                  : '$total no total',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: secondary,
+                fontWeight: FontWeight.w700,
+                fontSize: 11,
+                height: 1.0,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (total == 0)
+          Container(
+            height: 10,
+            decoration: BoxDecoration(
+              color: secondary.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(999),
+            ),
+          )
+        else
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: SizedBox(
+              height: 10,
+              child: Row(
+                children: [
+                  for (var i = 0; i < visible.length; i++)
+                    Expanded(
+                      flex: counts[visible[i]]!,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => _selectTab(_tabForStatus(visible[i])),
+                        child: Container(
+                          margin: EdgeInsets.only(left: i == 0 ? 0 : 2),
+                          color: ticketStatusColor(context, visible[i]),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           ),
-          const SizedBox(height: 5),
+        const SizedBox(height: 10),
+        if (total == 0)
           Text(
-            sub,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
+            _error != null
+                ? 'Não foi possível carregar a distribuição por status.'
+                : 'Abra sua primeira solicitação para a equipe de desenvolvimento.',
+            style: theme.textTheme.bodySmall?.copyWith(
               color: secondary,
-              height: 1.0,
+              height: 1.35,
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+          )
+        else
+          Wrap(
+            spacing: 14,
+            runSpacing: 7,
+            children: [
+              for (final status in visible)
+                _StripLegendItem(
+                  count: counts[status]!,
+                  label: status.label,
+                  tone: ticketStatusColor(context, status),
+                  onTap: () => _selectTab(_tabForStatus(status)),
+                ),
+            ],
           ),
-          const SizedBox(height: 7),
-          Container(
-            height: 2,
-            width: 18,
-            decoration: BoxDecoration(
-              color: tone,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-        ],
-      ),
+      ],
     );
   }
 
@@ -720,37 +600,21 @@ class _TicketsPageState extends State<TicketsPage> {
     }
   }
 
-  // ─── Painel ativo ────────────────────────────────────────────────────────
-
-  ({IconData icon, String eyebrow, String title, String hint}) _panelMeta(
-    TicketTab tab,
-  ) {
+  String _tabHint(TicketTab tab) {
     switch (tab) {
       case TicketTab.active:
-        return (
-          icon: LucideIcons.wrench,
-          eyebrow: 'EM ATENDIMENTO',
-          title: 'Tickets ativos',
-          hint: 'Abertos e em andamento com a equipe de desenvolvimento.',
-        );
+        return 'Abertos e em andamento com a equipe de desenvolvimento.';
       case TicketTab.waiting:
-        return (
-          icon: LucideIcons.clock3,
-          eyebrow: 'SUA VEZ',
-          title: 'Aguardando sua resposta',
-          hint: 'O suporte respondeu e está esperando o seu retorno.',
-        );
+        return 'O suporte respondeu e está esperando o seu retorno.';
       case TicketTab.finished:
-        return (
-          icon: LucideIcons.circleCheckBig,
-          eyebrow: 'ENCERRADOS',
-          title: 'Resolvidos e fechados',
-          hint: 'Histórico do que já foi atendido, do mais recente ao antigo.',
-        );
+        return 'Histórico do que já foi resolvido ou fechado.';
     }
   }
 
+  // ─── Painel ativo ────────────────────────────────────────────────────────
+
   Widget _buildActivePanel(BuildContext context) {
+    final theme = Theme.of(context);
     final items = _itemsFor(_activeTab);
     Widget child;
     if (_loading && !_loadedOnce) {
@@ -767,88 +631,20 @@ class _TicketsPageState extends State<TicketsPage> {
           key: ValueKey('panel-${_activeTab.name}'),
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildPanelHeader(context, _activeTab),
-            const SizedBox(height: 14),
+            // Contexto discreto da aba — uma linha, sem eyebrow nem ícone.
+            Text(
+              _tabHint(_activeTab),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: ThemeHelpers.textSecondaryColor(context),
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 4),
             child,
           ],
         )
         .animate(key: ValueKey('panel-${_activeTab.name}'))
         .fadeIn(duration: 240.ms);
-  }
-
-  Widget _buildPanelHeader(BuildContext context, TicketTab tab) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final tone = _tabColor(context, tab);
-    final meta = _panelMeta(tab);
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            color: tone.withValues(alpha: isDark ? 0.2 : 0.12),
-          ),
-          child: Icon(meta.icon, color: tone, size: 20),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      color: tone,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: tone.withValues(alpha: 0.5),
-                          blurRadius: 6,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 7),
-                  Text(
-                    meta.eyebrow,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: tone,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 1.2,
-                      fontSize: 10.5,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 3),
-              Text(
-                meta.title,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: ThemeHelpers.textColor(context),
-                  letterSpacing: -0.2,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                meta.hint,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                  height: 1.32,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
   }
 
   Widget _buildList(BuildContext context, List<Ticket> items) {
@@ -869,32 +665,36 @@ class _TicketsPageState extends State<TicketsPage> {
 
   // ─── Estados ─────────────────────────────────────────────────────────────
 
+  /// Skeleton fiel à linha nova: barra lateral fina + título protagonista +
+  /// linha de status + resumo + rodapé, com a data à direita.
   Widget _buildSkeleton() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: List.generate(
-        5,
+        6,
         (_) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 14),
+          padding: const EdgeInsets.symmetric(vertical: 13),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SkeletonBox(width: 44, height: 44, borderRadius: 13),
+              const SkeletonBox(width: 3, height: 76, borderRadius: 999),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: const [
-                    SkeletonText(width: 96, height: 16, borderRadius: 999),
+                    SkeletonText(width: double.infinity, height: 15),
+                    SizedBox(height: 7),
+                    SkeletonText(width: 150, height: 11, borderRadius: 999),
                     SizedBox(height: 9),
-                    SkeletonText(width: double.infinity, height: 14),
+                    SkeletonText(width: double.infinity, height: 12),
                     SizedBox(height: 6),
-                    SkeletonText(width: 170, height: 12),
+                    SkeletonText(width: 180, height: 11),
                   ],
                 ),
               ),
-              const SizedBox(width: 10),
-              const SkeletonText(width: 52, height: 14),
+              const SizedBox(width: 12),
+              const SkeletonText(width: 44, height: 10),
             ],
           ),
         ),
@@ -1009,6 +809,69 @@ class _TicketsPageState extends State<TicketsPage> {
             label: const Text('Tentar novamente'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─── Legenda da faixa de status ──────────────────────────────────────────────
+
+/// Item compacto da legenda: quadradinho na cor semântica + contagem + rótulo.
+/// Tocar leva à aba que contém aquele status.
+class _StripLegendItem extends StatelessWidget {
+  final int count;
+  final String label;
+  final Color tone;
+  final VoidCallback onTap;
+
+  const _StripLegendItem({
+    required this.count,
+    required this.label,
+    required this.tone,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: tone,
+                borderRadius: BorderRadius.circular(2.5),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              '$count',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: ThemeHelpers.textColor(context),
+                height: 1.0,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: secondary,
+                height: 1.0,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

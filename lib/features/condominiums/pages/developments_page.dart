@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/shell_visual_tokens.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/widgets/app_scaffold.dart';
@@ -15,6 +17,8 @@ import '../services/development_service.dart';
 import '../widgets/estate_card.dart';
 import '../widgets/estate_filters_sheet.dart';
 import '../widgets/estate_shared.dart';
+
+final _estateIntFormatter = NumberFormat.decimalPattern('pt_BR');
 
 enum _DevTab { active, inactive, all }
 
@@ -38,10 +42,10 @@ class _TabState {
   }
 }
 
-/// Tela **Empreendimentos** — porta a `EmpreendimentosPage` do imobx-front.
-/// Mesma gramática flush de Condomínios (hero + pills + busca + abas com
-/// sublinhado), com personalidade própria (tom violeta e chip de material
-/// da equipe). O toque no card abre a página de detalhe.
+/// Tela **Empreendimentos** — mesma linguagem do portfólio de Imóveis
+/// (hero editorial + busca com filtros acoplados + CTA + métricas clicáveis
+/// + abas com sublinhado + cards row densos), com personalidade própria:
+/// tom violeta e o material da equipe em evidência no card.
 class DevelopmentsPage extends StatefulWidget {
   const DevelopmentsPage({super.key});
 
@@ -50,10 +54,10 @@ class DevelopmentsPage extends StatefulWidget {
 }
 
 class _DevelopmentsPageState extends State<DevelopmentsPage> {
+  static const double _kHeaderPadH = 20;
   static const double _kPagePadH = 16;
   static const double _kPagePadTop = 10;
   static const double _kPagePadBottom = 88;
-  static const double _kSectionGap = 12;
   static const int _pageSize = 20;
 
   static const _tabs = [_DevTab.active, _DevTab.inactive, _DevTab.all];
@@ -232,6 +236,22 @@ class _DevelopmentsPageState extends State<DevelopmentsPage> {
     });
   }
 
+  void _clearSearch() {
+    _searchDebounce?.cancel();
+    _searchController.clear();
+    if (_appliedSearch.isEmpty) {
+      setState(() {});
+      return;
+    }
+    _appliedSearch = '';
+    _reloadEverything();
+  }
+
+  void _clearFilters() {
+    _filters = const EstateListFilters(limit: _pageSize);
+    _reloadEverything();
+  }
+
   void _openFilters() {
     showModalBottomSheet<void>(
       context: context,
@@ -344,24 +364,21 @@ class _DevelopmentsPageState extends State<DevelopmentsPage> {
                 children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(
-                        _kPagePadH, _kPagePadTop, _kPagePadH, 0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildHero(context),
-                        const SizedBox(height: 14),
-                        _buildActionsRow(context),
-                        const SizedBox(height: _kSectionGap),
-                        _buildSearchField(context),
-                        const SizedBox(height: _kSectionGap),
-                      ],
-                    ),
+                        _kHeaderPadH, _kPagePadTop, _kHeaderPadH, 14),
+                    child: _buildPortfolioHeader(context),
                   ),
                   _buildTabsRail(context),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(
-                        _kPagePadH, _kSectionGap, _kPagePadH, _kPagePadBottom),
-                    child: _buildActivePanel(context),
+                        _kPagePadH, 14, _kPagePadH, _kPagePadBottom),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildListHeader(context),
+                        const SizedBox(height: 10),
+                        _buildActivePanel(context),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -372,219 +389,216 @@ class _DevelopmentsPageState extends State<DevelopmentsPage> {
     );
   }
 
-  Widget _buildHero(BuildContext context) {
-    final theme = Theme.of(context);
-    final accent = _accent(context);
-    final textColor = ThemeHelpers.textColor(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final green = EstateTones.green(context);
-    final amber = EstateTones.amber(context);
+  // ─── Hero (gramática do portfólio de Imóveis) ────────────────────────────
 
-    final total = (_activeCount ?? 0) + (_inactiveCount ?? 0);
-    final loadedCounts = _activeCount != null || _inactiveCount != null;
-    final dot = (_inactiveCount ?? 0) > 0 ? amber : green;
-    final subtitle = !loadedCounts
-        ? 'Carregando os empreendimentos da empresa…'
-        : total == 0
-            ? 'Cadastre empreendimentos e o material de vendas da equipe.'
-            : '${_activeCount ?? 0} ativo${(_activeCount ?? 0) == 1 ? '' : 's'}'
-                ' · ${_inactiveCount ?? 0} inativo${(_inactiveCount ?? 0) == 1 ? '' : 's'}';
+  Widget _buildPortfolioHeader(BuildContext context) {
+    final hasSearch = _appliedSearch.trim().isNotEmpty;
+    final hasFilters = _filters.activeCount > 0;
 
-    return Padding(
-      padding: const EdgeInsets.only(top: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: dot,
-                  boxShadow: [
-                    BoxShadow(
-                      color: dot.withValues(alpha: 0.55),
-                      blurRadius: 8,
-                      spreadRadius: 1,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 9),
-              Text(
-                'EMPREENDIMENTOS',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: accent,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2.2,
-                  fontSize: 11,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                loadedCounts ? '$total' : '—',
-                style: theme.textTheme.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: textColor,
-                  height: 1.0,
-                  letterSpacing: -1.0,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 5),
-                child: Text(
-                  total == 1 ? 'empreendimento' : 'empreendimentos',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: secondary,
-                    fontWeight: FontWeight.w800,
-                    height: 1.0,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            subtitle,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: secondary,
-              fontWeight: FontWeight.w600,
-              height: 1.4,
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            _heroLeadingIcon(context),
+            const SizedBox(width: 12),
+            Expanded(child: _heroTitleBlock(context, hasSearch)),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(child: _buildSearchField(context)),
+            const SizedBox(width: 10),
+            _buildHeroFilterButton(context, hasFilters),
+          ],
+        ),
+        if (_canCreate) ...[
+          const SizedBox(height: 12),
+          _buildPrimaryCta(
+            context,
+            icon: LucideIcons.plus,
+            label: 'Novo empreendimento',
+            onTap: _goToCreate,
           ),
         ],
-      ),
+        const SizedBox(height: 14),
+        _buildMetricsRow(context),
+        if (hasSearch || hasFilters) ...[
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (hasSearch)
+                _buildActiveContextChip(
+                  context,
+                  LucideIcons.search,
+                  _appliedSearch,
+                  onClear: _clearSearch,
+                ),
+              if (hasFilters)
+                _buildActiveContextChip(
+                  context,
+                  LucideIcons.slidersHorizontal,
+                  'Filtros aplicados',
+                  onClear: _clearFilters,
+                ),
+            ],
+          ),
+        ],
+      ],
     );
   }
 
-  Widget _buildActionsRow(BuildContext context) {
+  Widget _heroLeadingIcon(BuildContext context) {
     final accent = _accent(context);
-    final filtersActive = _filters.activeCount;
-    return Row(
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final deep = HSLColor.fromColor(accent)
+        .withLightness(
+            (HSLColor.fromColor(accent).lightness * 0.72).clamp(0.0, 1.0))
+        .toColor();
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [accent, deep],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: isDark
+                ? accent.withValues(alpha: 0.30)
+                : Colors.black.withValues(alpha: 0.12),
+            blurRadius: isDark ? 14 : 10,
+            offset: Offset(0, isDark ? 8 : 5),
+          ),
+        ],
+      ),
+      child: const Icon(LucideIcons.blocks, color: Colors.white, size: 20),
+    );
+  }
+
+  Widget _heroTitleBlock(BuildContext context, bool hasSearch) {
+    final theme = Theme.of(context);
+    final accent = _accent(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        if (_canCreate) ...[
-          FilledButton.icon(
-            onPressed: _goToCreate,
-            icon: const Icon(LucideIcons.plus, size: 16),
-            label: const Text('Novo empreendimento'),
-            style: FilledButton.styleFrom(
-              backgroundColor: accent,
-              foregroundColor: Colors.white,
-              elevation: 0,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              textStyle:
-                  const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(999),
+        Row(
+          children: [
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 7),
+            Text(
+              hasSearch
+                  ? 'EMPREENDIMENTOS · BUSCA'
+                  : 'EMPREENDIMENTOS · PORTFÓLIO',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: accent,
+                letterSpacing: 1.4,
+                fontWeight: FontWeight.w900,
+                fontSize: 10.5,
               ),
             ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          hasSearch ? 'Resultados da busca' : 'Portfólio de empreendimentos',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.4,
+            height: 1.05,
+            color: ThemeHelpers.textColor(context),
           ),
-          const SizedBox(width: 8),
-        ],
-        OutlinedButton.icon(
-          onPressed: _openFilters,
-          icon: const Icon(LucideIcons.slidersHorizontal, size: 15),
-          label:
-              Text(filtersActive == 0 ? 'Filtros' : 'Filtros ($filtersActive)'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: filtersActive > 0
-                ? accent
-                : ThemeHelpers.textSecondaryColor(context),
-            side: BorderSide(
-              color: filtersActive > 0
-                  ? accent.withValues(alpha: 0.55)
-                  : ThemeHelpers.borderColor(context),
-              width: filtersActive > 0 ? 1.3 : 1,
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            textStyle:
-                const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(999),
-            ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          'Empreendimentos e material de vendas da equipe.',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: ThemeHelpers.textSecondaryColor(context),
+            fontWeight: FontWeight.w600,
           ),
         ),
       ],
     );
   }
 
+  // ─── Busca (peso visual da tela de Imóveis) ──────────────────────────────
+
   Widget _buildSearchField(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final accent = _accent(context);
-    final textColor = ThemeHelpers.textColor(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final cardColor = ThemeHelpers.cardBackgroundColor(context);
-    final borderColor = isDark
-        ? Colors.white.withValues(alpha: 0.08)
-        : Colors.black.withValues(alpha: 0.06);
-    final hasText = _searchController.text.isNotEmpty;
+    final hasText = _searchController.text.trim().isNotEmpty;
     final showAccent = _searchFocused || hasText;
+    final fieldFill = isDark
+        ? AppColors.background.backgroundTertiaryDarkMode
+        : AppColors.background.backgroundTertiary;
 
     return Focus(
       onFocusChange: (f) => setState(() => _searchFocused = f),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeOutCubic,
-        height: 50,
         decoration: BoxDecoration(
-          color: cardColor,
           borderRadius: BorderRadius.circular(14),
+          color: hasText
+              ? Color.alphaBlend(
+                  accent.withValues(alpha: isDark ? 0.08 : 0.04),
+                  fieldFill,
+                )
+              : fieldFill,
           border: Border.all(
             color: showAccent
-                ? accent.withValues(alpha: isDark ? 0.5 : 0.42)
-                : borderColor,
+                ? accent.withValues(alpha: isDark ? 0.50 : 0.38)
+                : ThemeHelpers.borderLightColor(context),
             width: showAccent ? 1.4 : 1,
           ),
-          boxShadow: showAccent
-              ? [
-                  BoxShadow(
-                    color: accent.withValues(alpha: isDark ? 0.18 : 0.12),
-                    blurRadius: 14,
-                    offset: const Offset(0, 5),
-                    spreadRadius: -4,
-                  ),
-                ]
-              : null,
         ),
         child: Row(
           children: [
             const SizedBox(width: 14),
-            Icon(LucideIcons.search,
-                size: 18, color: showAccent ? accent : secondary),
+            Icon(
+              Icons.search_rounded,
+              size: 21,
+              color: showAccent
+                  ? accent
+                  : ThemeHelpers.textSecondaryColor(context),
+            ),
             const SizedBox(width: 10),
             Expanded(
               child: TextField(
                 controller: _searchController,
                 textInputAction: TextInputAction.search,
                 cursorColor: accent,
-                style: TextStyle(
-                  color: textColor,
-                  fontSize: 14.5,
+                style: theme.textTheme.bodyMedium?.copyWith(
                   fontWeight: FontWeight.w700,
-                  letterSpacing: -0.1,
+                  height: 1.2,
                 ),
                 decoration: InputDecoration(
                   hintText: 'Buscar por nome, endereço, cidade…',
-                  hintStyle: TextStyle(
-                    color: secondary.withValues(alpha: 0.75),
+                  hintStyle: theme.textTheme.bodySmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
                     fontWeight: FontWeight.w500,
-                    fontSize: 13.5,
                   ),
-                  filled: false,
                   border: InputBorder.none,
                   enabledBorder: InputBorder.none,
                   focusedBorder: InputBorder.none,
-                  contentPadding: EdgeInsets.zero,
                   isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 13),
                 ),
                 onChanged: (v) {
                   _onSearchChanged(v);
@@ -593,24 +607,239 @@ class _DevelopmentsPageState extends State<DevelopmentsPage> {
               ),
             ),
             if (hasText)
-              InkResponse(
-                radius: 18,
-                onTap: () {
-                  _searchController.clear();
-                  _onSearchChanged('');
-                  setState(() {});
-                },
-                child: Padding(
-                  padding: const EdgeInsets.all(6),
-                  child: Icon(LucideIcons.x, size: 15, color: secondary),
+              IconButton(
+                icon: Icon(
+                  Icons.clear_rounded,
+                  size: 18,
+                  color: ThemeHelpers.textSecondaryColor(context),
                 ),
-              ),
-            const SizedBox(width: 8),
+                visualDensity: VisualDensity.compact,
+                tooltip: 'Limpar busca',
+                onPressed: _clearSearch,
+              )
+            else
+              const SizedBox(width: 4),
           ],
         ),
       ),
     );
   }
+
+  Widget _buildHeroFilterButton(BuildContext context, bool active) {
+    final accent = _accent(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final iconColor =
+        active ? accent : ThemeHelpers.textSecondaryColor(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _openFilters,
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: active
+                ? accent.withValues(alpha: isDark ? 0.16 : 0.09)
+                : ShellVisualTokens.dashboardGlassFill(context),
+            border: Border.all(
+              color: active
+                  ? accent.withValues(alpha: 0.5)
+                  : ShellVisualTokens.dashboardGlassBorder(context),
+              width: active ? 1.4 : 1,
+            ),
+          ),
+          child: Stack(
+            children: [
+              Center(
+                child: Icon(Icons.tune_rounded, size: 21, color: iconColor),
+              ),
+              if (active)
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: Container(
+                    width: 7,
+                    height: 7,
+                    decoration:
+                        BoxDecoration(color: accent, shape: BoxShape.circle),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPrimaryCta(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    final accent = _accent(context);
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: accent,
+          border: Border.all(color: accent),
+          boxShadow: [
+            BoxShadow(
+              color: accent.withValues(alpha: 0.28),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+              spreadRadius: -4,
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 18, color: Colors.white),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+                fontSize: 13.25,
+                height: 1.15,
+                letterSpacing: -0.1,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── Métricas clicáveis (Total/Ativos/Inativos) ──────────────────────────
+
+  Widget _buildMetricsRow(BuildContext context) {
+    final theme = Theme.of(context);
+    final accent = _accent(context);
+    final total = (_activeCount == null && _inactiveCount == null)
+        ? null
+        : (_activeCount ?? 0) + (_inactiveCount ?? 0);
+
+    String fmt(int? v) => v == null ? '—' : _estateIntFormatter.format(v);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Icon(LucideIcons.chartNoAxesColumn, size: 14, color: accent),
+            const SizedBox(width: 6),
+            Text(
+              'VISÃO DA CARTEIRA',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: accent,
+                letterSpacing: 1.65,
+                fontWeight: FontWeight.w900,
+                fontSize: 10.5,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Expanded(
+              child: EstateStatTile(
+                label: 'Total',
+                value: fmt(total),
+                icon: LucideIcons.blocks,
+                accent: accent,
+                selected: _activeTab == _DevTab.all,
+                onTap: () => _selectTab(_DevTab.all),
+              ),
+            ),
+            Expanded(
+              child: EstateStatTile(
+                label: 'Ativos',
+                value: fmt(_activeCount),
+                icon: LucideIcons.circleCheckBig,
+                accent: EstateTones.green(context),
+                selected: _activeTab == _DevTab.active,
+                onTap: () => _selectTab(_DevTab.active),
+              ),
+            ),
+            Expanded(
+              child: EstateStatTile(
+                label: 'Inativos',
+                value: fmt(_inactiveCount),
+                icon: LucideIcons.circleOff,
+                accent: EstateTones.amber(context),
+                selected: _activeTab == _DevTab.inactive,
+                onTap: () => _selectTab(_DevTab.inactive),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActiveContextChip(
+    BuildContext context,
+    IconData icon,
+    String label, {
+    VoidCallback? onClear,
+  }) {
+    final theme = Theme.of(context);
+    final accent = _accent(context);
+    final chipMaxW =
+        (MediaQuery.sizeOf(context).width * 0.52).clamp(96.0, 220.0);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: accent.withValues(alpha: 0.22)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: accent),
+          const SizedBox(width: 8),
+          ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: chipMaxW),
+            child: Text(
+              label,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: ThemeHelpers.textColor(context),
+                fontWeight: FontWeight.w700,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (onClear != null) ...[
+            const SizedBox(width: 4),
+            InkWell(
+              onTap: onClear,
+              borderRadius: BorderRadius.circular(10),
+              child: const Padding(
+                padding: EdgeInsets.all(2),
+                child: Icon(Icons.close_rounded, size: 14),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ─── Abas (sublinhado — escopo da carteira) ──────────────────────────────
 
   int? _tabCount(_DevTab tab) {
     switch (tab) {
@@ -683,13 +912,51 @@ class _DevelopmentsPageState extends State<DevelopmentsPage> {
     );
   }
 
+  // ─── Listagem ────────────────────────────────────────────────────────────
+
+  Widget _buildListHeader(BuildContext context) {
+    final theme = Theme.of(context);
+    final accent = _accent(context);
+    final st = _state[_activeTab]!;
+    final n = st.items.length;
+    return Row(
+      children: [
+        Icon(Icons.view_list_rounded, size: 14, color: accent),
+        const SizedBox(width: 6),
+        Text(
+          'LISTAGEM',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: accent,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.65,
+            fontSize: 10.5,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            '· $n empreendimento${n == 1 ? "" : "s"} carregado${n == 1 ? "" : "s"}'
+            '${st.totalPages > 1 ? " · pg ${st.page}/${st.totalPages}" : ""}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: ThemeHelpers.textSecondaryColor(context),
+              fontWeight: FontWeight.w700,
+              fontSize: 11,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildActivePanel(BuildContext context) {
     final st = _state[_activeTab]!;
     Widget child;
     if (st.loading && st.items.isEmpty) {
       child = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: List.generate(4, (_) => const EstateCardSkeleton()),
+        children: List.generate(5, (_) => const EstateCardSkeleton()),
       );
     } else if (st.error != null && st.items.isEmpty) {
       child = EstateErrorState(
@@ -716,25 +983,35 @@ class _DevelopmentsPageState extends State<DevelopmentsPage> {
     var animIndex = 0;
     for (final d in st.items) {
       nodes.add(
-        EstateCard(
-          name: d.name,
-          imageUrl: d.mainImageUrl,
-          photoCount: d.activeImages.length,
-          isActive: d.isActive,
-          locationLine: d.cityState,
-          zipCode: d.zipCode,
-          description: d.description,
-          updatedAt: d.updatedAt,
-          fallbackIcon: LucideIcons.blocks,
-          accent: _accent(context),
-          chips: _chipsFor(d),
-          onTap: () => _goToDetail(d),
-          onEdit: _canEdit ? () => _goToEdit(d) : null,
-          onDelete: _canDelete ? () => _confirmDelete(d) : null,
-        ).animate(key: ValueKey('dev-${d.id}')).fadeIn(
-              delay: Duration(milliseconds: 30 * (animIndex++).clamp(0, 12)),
-              duration: 220.ms,
-            ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: EstateCard(
+            name: d.name,
+            imageUrl: d.mainImageUrl,
+            photoCount: d.activeImages.length,
+            isActive: d.isActive,
+            typeIcon: LucideIcons.blocks,
+            typeLabel: 'Empreendimento',
+            hasCnpj: (d.cnpj ?? '').trim().isNotEmpty,
+            addressLine: d.fullAddressLine,
+            cityLine: d.cityState,
+            specs: _specsFor(d),
+            footerPill: d.hasMaterial
+                ? const EstateCardChip(
+                    icon: LucideIcons.folderOpen,
+                    label: 'Material',
+                    tone: EstateTones.purple,
+                  )
+                : null,
+            fallbackIcon: LucideIcons.blocks,
+            accent: _accent(context),
+            onTap: () => _goToDetail(d),
+            onMenu: () => _showQuickActions(d),
+          ).animate(key: ValueKey('dev-${d.id}')).fadeIn(
+                delay: Duration(milliseconds: 30 * (animIndex++).clamp(0, 12)),
+                duration: 220.ms,
+              ),
+        ),
       );
     }
 
@@ -772,27 +1049,75 @@ class _DevelopmentsPageState extends State<DevelopmentsPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch, children: nodes);
   }
 
-  List<EstateCardChip> _chipsFor(Development d) {
-    return [
-      if (d.hasMaterial)
-        EstateCardChip(
-          icon: LucideIcons.folderOpen,
-          label: 'Material da equipe',
-          tone: EstateTones.purple,
+  /// Bits informativos do row — material da equipe (links/arquivos), CEP e
+  /// última atualização.
+  List<EstateSpecBit> _specsFor(Development d) {
+    final bits = <EstateSpecBit>[];
+    final links = d.playbookKit.links.length;
+    final files = d.playbookKit.files.length;
+    if (links > 0) {
+      bits.add(EstateSpecBit(
+        icon: LucideIcons.link,
+        label: '$links link${links == 1 ? '' : 's'}',
+      ));
+    }
+    if (files > 0) {
+      bits.add(EstateSpecBit(
+        icon: LucideIcons.paperclip,
+        label: '$files arquivo${files == 1 ? '' : 's'}',
+      ));
+    }
+    if (d.zipCode.trim().isNotEmpty) {
+      bits.add(EstateSpecBit(
+        icon: LucideIcons.mapPinned,
+        label: 'CEP ${d.zipCode.trim()}',
+      ));
+    }
+    if (d.updatedAt != null) {
+      bits.add(EstateSpecBit(
+        icon: LucideIcons.history,
+        label: DateFormat('dd/MM/yyyy', 'pt_BR').format(d.updatedAt!.toLocal()),
+      ));
+    }
+    return bits;
+  }
+
+  /// Ações no próprio item — kebab/long-press abre o sheet de ações rápidas.
+  void _showQuickActions(Development d) {
+    EstateQuickActionsSheet.show(
+      context,
+      accent: _accent(context),
+      title: d.name,
+      meta: [d.fullAddressLine, d.cityState]
+          .where((s) => s.trim().isNotEmpty)
+          .join(' · '),
+      actions: [
+        EstateQuickAction(
+          icon: LucideIcons.layoutGrid,
+          label: 'Abrir ficha',
+          subtitle: 'Detalhes, material da equipe e galeria',
+          color: const Color(0xFF0891B2),
+          onTap: () => _goToDetail(d),
         ),
-      if ((d.cnpj ?? '').trim().isNotEmpty)
-        EstateCardChip(
-          icon: LucideIcons.landmark,
-          label: 'CNPJ',
-          tone: (ctx) => ThemeHelpers.textSecondaryColor(ctx),
-        ),
-      if ((d.website ?? '').trim().isNotEmpty)
-        EstateCardChip(
-          icon: LucideIcons.globe,
-          label: 'Site',
-          tone: EstateTones.amber,
-        ),
-    ];
+        if (_canEdit)
+          EstateQuickAction(
+            icon: LucideIcons.pencil,
+            label: 'Editar empreendimento',
+            subtitle: 'Dados, material e galeria',
+            color: const Color(0xFF6366F1),
+            onTap: () => _goToEdit(d),
+          ),
+        if (_canDelete)
+          EstateQuickAction(
+            icon: LucideIcons.trash2,
+            label: 'Excluir permanentemente',
+            subtitle: 'Remove o empreendimento da base da empresa',
+            color: EstateTones.danger(context),
+            destructive: true,
+            onTap: () => _confirmDelete(d),
+          ),
+      ],
+    );
   }
 
   Widget _buildEmpty(BuildContext context, _DevTab tab) {

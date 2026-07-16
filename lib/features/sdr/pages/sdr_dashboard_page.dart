@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:math' show max;
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -14,6 +14,7 @@ import '../../../shared/widgets/minimal_body_chrome.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../models/sdr_dashboard_filters.dart';
 import '../models/sdr_metrics_model.dart';
+import '../models/sdr_settings_model.dart';
 import '../services/sdr_service.dart';
 import '../widgets/sdr_dashboard_filters_drawer.dart';
 
@@ -30,10 +31,13 @@ const String _kSdrSettingsRoute = '/sdr/settings';
 /// Abas do dashboard SDR.
 enum _SdrTab { overview, team, sources }
 
-/// Dashboard do **SDR com IA** — KPIs do pré-atendimento (paridade com a
-/// `SDRDashboardPage.tsx`, recortada para mobile): hero editorial com os
-/// números do período, abas flush com sublinhado (Visão geral / Equipe /
-/// Origens), listas com barras de conversão e SLA de WhatsApp.
+/// Dashboard do **SDR com IA** — painel de agente. O protagonista do topo é o
+/// console de identidade do assistente (glyph de bot, nome, estado
+/// ativo/pausado e horário de atendimento vindos das configurações reais),
+/// seguido de um placar composto: número dominante de leads, mostrador de
+/// conversão e barra de funil empilhada — nada de fileira de pills.
+/// Violeta é o acento identitário (agente de IA); verde/âmbar/vermelho marcam
+/// estados. Abas flush com sublinhado (Visão geral / Equipe / Origens).
 ///
 /// Gating: módulo `whatsapp_ai` + permissão `whatsapp:manage_config`.
 class SdrDashboardPage extends StatefulWidget {
@@ -45,9 +49,8 @@ class SdrDashboardPage extends StatefulWidget {
 
 class _SdrDashboardPageState extends State<SdrDashboardPage> {
   static const double _kPagePadH = 16;
-  static const double _kPagePadTop = 10;
+  static const double _kPagePadTop = 12;
   static const double _kPagePadBottom = 88;
-  static const double _kSectionGap = 12;
 
   bool _isLoading = true;
   String? _errorMessage;
@@ -55,6 +58,10 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
   SdrDashboardFilters _filters = SdrDashboardFilters.initial;
   List<SdrTeamOption> _teams = const [];
   _SdrTab _activeTab = _SdrTab.overview;
+
+  /// Configurações do assistente — alimentam o console de identidade
+  /// (ativo/pausado + janela de atendimento). Falha aqui não bloqueia a tela.
+  SdrSettings? _agentSettings;
 
   bool get _hasAccess =>
       ModuleAccessService.instance.hasCompanyModule('whatsapp_ai') &&
@@ -65,14 +72,17 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
     super.initState();
     _loadMetrics();
     unawaited(_loadTeams());
+    unawaited(_loadAgentStatus());
   }
 
   // ─── Cores semânticas ──────────────────────────────────────────────────────
+  // Violeta = identidade do agente de IA; verde = sucesso/ativo; âmbar =
+  // atenção; vermelho = perda; azul = informação/origens.
 
-  Color _accent(BuildContext context) =>
+  Color _violet(BuildContext context) =>
       Theme.of(context).brightness == Brightness.dark
-          ? AppColors.primary.primaryDarkMode
-          : AppColors.primary.primary;
+          ? AppColors.status.purpleDarkMode
+          : AppColors.status.purple;
 
   Color _green(BuildContext context) =>
       Theme.of(context).brightness == Brightness.dark
@@ -93,11 +103,6 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
       Theme.of(context).brightness == Brightness.dark
           ? AppColors.status.blueDarkMode
           : AppColors.status.blue;
-
-  Color _purple(BuildContext context) =>
-      Theme.of(context).brightness == Brightness.dark
-          ? AppColors.status.purpleDarkMode
-          : AppColors.status.purple;
 
   // ─── Dados ─────────────────────────────────────────────────────────────────
 
@@ -125,6 +130,17 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
     final res = await SdrService.instance.getTeams();
     if (!mounted || !res.success || res.data == null) return;
     setState(() => _teams = res.data!);
+  }
+
+  Future<void> _loadAgentStatus() async {
+    if (!_hasAccess) return;
+    final res = await SdrService.instance.getSettings();
+    if (!mounted || !res.success || res.data == null) return;
+    setState(() => _agentSettings = res.data);
+  }
+
+  Future<void> _refreshAll() async {
+    await Future.wait([_loadMetrics(), _loadAgentStatus()]);
   }
 
   void _openFilters() {
@@ -185,153 +201,469 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
           : _errorMessage != null
               ? _buildError(context)
               : RefreshIndicator(
-                  color: _accent(context),
-                  onRefresh: _loadMetrics,
-                  child: LayoutBuilder(
-                    builder: (context, constraints) => SingleChildScrollView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      child: ConstrainedBox(
-                        constraints:
-                            BoxConstraints(minHeight: constraints.maxHeight),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(
-                                  _kPagePadH, _kPagePadTop, _kPagePadH, 0),
-                              child: _buildHero(context),
-                            ),
-                            const SizedBox(height: _kSectionGap),
-                            _buildTabsRail(context),
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(
-                                  _kPagePadH,
-                                  _kSectionGap,
-                                  _kPagePadH,
-                                  _kPagePadBottom),
-                              child: _buildActivePanel(context),
-                            ),
-                          ],
-                        ),
+                  color: _violet(context),
+                  onRefresh: _refreshAll,
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(
+                        0, _kPagePadTop, 0, _kPagePadBottom),
+                    children: [
+                      Padding(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: _kPagePadH),
+                        child: _buildAgentConsole(context),
                       ),
-                    ),
+                      const SizedBox(height: 18),
+                      Padding(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: _kPagePadH),
+                        child: _buildScoreboard(context),
+                      ),
+                      const SizedBox(height: 16),
+                      _buildTabsRail(context),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                            _kPagePadH, 14, _kPagePadH, 0),
+                        child: _buildActivePanel(context),
+                      ),
+                    ],
                   ),
                 ),
     );
   }
 
-  // ─── Hero editorial ────────────────────────────────────────────────────────
+  // ─── Console do agente (protagonista do topo) ──────────────────────────────
+  // Identidade do assistente: glyph de bot com badge de estado, nome, papel e
+  // janela de atendimento real (das configurações). Tap leva às configurações.
 
-  Widget _buildHero(BuildContext context) {
+  Widget _buildAgentConsole(BuildContext context) {
     final theme = Theme.of(context);
-    final accent = _accent(context);
-    final textColor = ThemeHelpers.textColor(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final violet = _violet(context);
     final green = _green(context);
-    final amber = _amber(context);
-    final red = _red(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final s = _agentSettings;
+    final bool? active = s?.enabled;
+    final statusTone = (active ?? false) ? green : secondary;
 
-    final s = _metrics.summary;
-    final awaiting = _metrics.whatsapp?.awaitingReplyCount ?? 0;
-    final dot = awaiting > 0 ? amber : green;
-
-    final convLabel =
-        '${s.conversionRate.toStringAsFixed(1).replaceAll('.', ',')}%';
-    final subtitle = s.totalLeads == 0
-        ? 'Nenhum lead no período selecionado.'
-        : awaiting > 0
-            ? '$convLabel de conversão · $awaiting conversa${awaiting == 1 ? '' : 's'} aguardando resposta'
-            : '$convLabel de conversão · nenhuma conversa aguardando resposta';
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(0, 4, 0, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    return InkWell(
+      onTap: _openSettings,
+      borderRadius: BorderRadius.circular(18),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Row(
+          Stack(
+            clipBehavior: Clip.none,
             children: [
               Container(
-                width: 9,
-                height: 9,
+                width: 56,
+                height: 56,
                 decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: dot,
-                  boxShadow: [
-                    BoxShadow(
-                      color: dot.withValues(alpha: 0.55),
-                      blurRadius: 8,
-                      spreadRadius: 1,
+                  borderRadius: BorderRadius.circular(18),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      violet.withValues(alpha: isDark ? 0.30 : 0.18),
+                      violet.withValues(alpha: isDark ? 0.10 : 0.06),
+                    ],
+                  ),
+                  border: Border.all(
+                    color: violet.withValues(alpha: isDark ? 0.45 : 0.32),
+                  ),
+                  boxShadow: ThemeHelpers.cardShadow(context),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  active == false ? LucideIcons.botOff : LucideIcons.bot,
+                  color: violet,
+                  size: 26,
+                ),
+              ),
+              if (active != null)
+                Positioned(
+                  right: -3,
+                  bottom: -3,
+                  child: Container(
+                    width: 19,
+                    height: 19,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: statusTone,
+                      border: Border.all(
+                        color: ThemeHelpers.backgroundColor(context),
+                        width: 2.5,
+                      ),
                     ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      active ? LucideIcons.check : LucideIcons.pause,
+                      size: 10,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(width: 13),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        'Zezin',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          color: ThemeHelpers.textColor(context),
+                          letterSpacing: -0.5,
+                          height: 1.0,
+                        ),
+                      ),
+                    ),
+                    if (active != null) ...[
+                      const SizedBox(width: 8),
+                      _agentStatusChip(context, active),
+                    ],
                   ],
                 ),
-              ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Text(
-                  'SDR COM IA · PRÉ-ATENDIMENTO',
+                const SizedBox(height: 4),
+                Text(
+                  'Agente SDR · pré-atendimento com IA',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: accent,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 2.2,
-                    fontSize: 11,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: secondary,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                    height: 1.2,
                   ),
                 ),
-              ),
-              _periodChip(context),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                _int.format(s.totalLeads),
-                style: theme.textTheme.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: textColor,
-                  height: 1.0,
-                  letterSpacing: -1.0,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 5),
-                  child: Text(
-                    s.totalLeads == 1
-                        ? 'lead no período'
-                        : 'leads no período',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: secondary,
-                      fontWeight: FontWeight.w800,
-                      height: 1.0,
-                      letterSpacing: -0.2,
-                    ),
+                if (s != null) ...[
+                  const SizedBox(height: 5),
+                  Row(
+                    children: [
+                      Icon(LucideIcons.clock3, size: 11.5, color: secondary),
+                      const SizedBox(width: 5),
+                      Flexible(
+                        child: Text(
+                          _scheduleLabel(s),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: secondary,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            height: 1.1,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            subtitle,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: secondary,
-              fontWeight: FontWeight.w600,
-              height: 1.4,
+                ],
+              ],
             ),
           ),
-          const SizedBox(height: 18),
-          _buildKpiStrip(context, green, amber, red),
+          const SizedBox(width: 8),
+          Icon(
+            LucideIcons.chevronRight,
+            size: 16,
+            color: secondary.withValues(alpha: 0.7),
+          ),
         ],
       ),
     );
   }
 
+  String _scheduleLabel(SdrSettings s) {
+    final start = SdrSettings.hourLabel(s.businessHoursStart);
+    final end = SdrSettings.hourLabel(s.businessHoursEnd);
+    final days = s.workOnWeekends ? 'todos os dias' : 'seg a sex';
+    return 'Atende das $start às $end · $days';
+  }
+
+  Widget _agentStatusChip(BuildContext context, bool active) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final tone =
+        active ? _green(context) : ThemeHelpers.textSecondaryColor(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: isDark ? 0.16 : 0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: tone.withValues(alpha: 0.38)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            active ? LucideIcons.zap : LucideIcons.pause,
+            size: 10.5,
+            color: tone,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            active ? 'Ativo' : 'Pausado',
+            style: TextStyle(
+              color: tone,
+              fontWeight: FontWeight.w900,
+              fontSize: 10.5,
+              letterSpacing: 0.2,
+              height: 1.0,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Placar do período (composição, não fileira de pills) ──────────────────
+  // Número dominante de leads + mostrador de conversão + barra de funil
+  // empilhada com legenda + pulso do WhatsApp.
+
+  Widget _buildScoreboard(BuildContext context) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final green = _green(context);
+    final amber = _amber(context);
+    final red = _red(context);
+    final s = _metrics.summary;
+    final total = s.totalLeads;
+
+    final captionParts = <String>[];
+    if (total > 0) {
+      captionParts.add(
+          '${_int.format(s.uniqueLeads)} único${s.uniqueLeads == 1 ? '' : 's'}');
+      if (s.duplicateLeads > 0) {
+        captionParts.add(
+            '${_int.format(s.duplicateLeads)} duplicado${s.duplicateLeads == 1 ? '' : 's'}');
+      }
+    }
+    final caption = total == 0
+        ? 'Nenhum lead captado no recorte atual.'
+        : captionParts.join(' · ');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'LEADS NO PERÍODO',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: secondary,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.4,
+                  fontSize: 10,
+                ),
+              ),
+            ),
+            _periodChip(context),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      _int.format(total),
+                      style: theme.textTheme.displaySmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: ThemeHelpers.textColor(context),
+                        letterSpacing: -1.2,
+                        height: 1.0,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    caption,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: secondary,
+                      fontWeight: FontWeight.w600,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (total > 0) ...[
+              const SizedBox(width: 14),
+              _ConversionDial(
+                rate: s.conversionRate,
+                tone: green,
+                track: ThemeHelpers.borderLightColor(context)
+                    .withValues(alpha: 0.8),
+              ),
+            ],
+          ],
+        ),
+        if (total > 0) ...[
+          const SizedBox(height: 16),
+          _funnelCompositionBar(context, s, green, amber, red),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 14,
+            runSpacing: 6,
+            children: [
+              if (s.transferred > 0)
+                _legendItem(context, green, 'transferidos', s.transferred),
+              if (s.inQualification > 0)
+                _legendItem(
+                    context, amber, 'qualificando', s.inQualification),
+              if (s.lost > 0) _legendItem(context, red, 'perdidos', s.lost),
+              if (_funnelRest(s) > 0)
+                _legendItem(
+                  context,
+                  secondary.withValues(alpha: 0.6),
+                  'outros',
+                  _funnelRest(s),
+                ),
+            ],
+          ),
+        ],
+        if (_metrics.whatsapp != null) ...[
+          const SizedBox(height: 14),
+          _awaitingPulseLine(context, _metrics.whatsapp!),
+        ],
+      ],
+    );
+  }
+
+  int _funnelRest(SdrSummary s) {
+    final known = s.transferred + s.inQualification + s.lost;
+    return math.max(0, s.totalLeads - known);
+  }
+
+  Widget _funnelCompositionBar(BuildContext context, SdrSummary s, Color green,
+      Color amber, Color red) {
+    final track =
+        ThemeHelpers.borderLightColor(context).withValues(alpha: 0.7);
+    final rest = _funnelRest(s);
+    final segments = <({int value, Color color})>[
+      (value: s.transferred, color: green),
+      (value: s.inQualification, color: amber),
+      (value: s.lost, color: red),
+      (value: rest, color: track),
+    ].where((seg) => seg.value > 0).toList(growable: false);
+
+    if (segments.isEmpty) {
+      return Container(
+        height: 10,
+        decoration: BoxDecoration(
+          color: track,
+          borderRadius: BorderRadius.circular(999),
+        ),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(999),
+      child: SizedBox(
+        height: 10,
+        child: Row(
+          children: [
+            for (var i = 0; i < segments.length; i++) ...[
+              if (i > 0) const SizedBox(width: 2),
+              Expanded(
+                flex: segments[i].value,
+                child: Container(color: segments[i].color),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _legendItem(
+      BuildContext context, Color tone, String label, int value) {
+    final theme = Theme.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: tone,
+            borderRadius: BorderRadius.circular(3),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          _int.format(value),
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: tone,
+            fontWeight: FontWeight.w900,
+            fontSize: 11.5,
+            height: 1.0,
+          ),
+        ),
+        const SizedBox(width: 3),
+        Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: ThemeHelpers.textSecondaryColor(context),
+            fontWeight: FontWeight.w600,
+            fontSize: 11,
+            height: 1.0,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _awaitingPulseLine(BuildContext context, SdrWhatsappMetrics w) {
+    final theme = Theme.of(context);
+    final awaiting = w.awaitingReplyCount;
+    final tone = awaiting > 0 ? _amber(context) : _green(context);
+    final label = awaiting > 0
+        ? '$awaiting conversa${awaiting == 1 ? '' : 's'} aguardando resposta no WhatsApp'
+        : 'Nenhuma conversa aguardando resposta no WhatsApp';
+    return Row(
+      children: [
+        Icon(
+          awaiting > 0 ? LucideIcons.clockAlert : LucideIcons.circleCheckBig,
+          size: 13,
+          color: tone,
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: tone,
+              fontWeight: FontWeight.w800,
+              fontSize: 11.5,
+              height: 1.1,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _periodChip(BuildContext context) {
-    final accent = _accent(context);
+    final violet = _violet(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final active = _filters.activeCount > 0;
     return InkWell(
@@ -340,147 +672,27 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: accent.withValues(alpha: isDark ? 0.16 : 0.08),
+          color: violet.withValues(alpha: isDark ? 0.16 : 0.08),
           borderRadius: BorderRadius.circular(999),
           border: Border.all(
-            color: accent.withValues(alpha: active ? 0.55 : 0.28),
+            color: violet.withValues(alpha: active ? 0.55 : 0.28),
           ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(LucideIcons.calendarRange, size: 12, color: accent),
+            Icon(LucideIcons.calendarRange, size: 12, color: violet),
             const SizedBox(width: 5),
             Text(
               _filters.periodLabel(),
               style: TextStyle(
-                color: accent,
+                color: violet,
                 fontWeight: FontWeight.w800,
                 fontSize: 11,
               ),
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildKpiStrip(
-      BuildContext context, Color green, Color amber, Color red) {
-    final s = _metrics.summary;
-    final divider = ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
-    final blocks = <Widget>[
-      _heroKpiBlock(
-        context,
-        LucideIcons.arrowRightLeft,
-        'TRANSFERIDOS',
-        _int.format(s.transferred),
-        'para corretores',
-        green,
-      ),
-      _heroKpiBlock(
-        context,
-        LucideIcons.hourglass,
-        'QUALIFICANDO',
-        _int.format(s.inQualification),
-        'em andamento',
-        amber,
-      ),
-      _heroKpiBlock(
-        context,
-        LucideIcons.circleX,
-        'PERDIDOS',
-        _int.format(s.lost),
-        'no período',
-        red,
-      ),
-    ];
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (var i = 0; i < blocks.length; i++) ...[
-            if (i > 0)
-              Container(
-                width: 1,
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                color: divider,
-              ),
-            Expanded(child: blocks[i]),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _heroKpiBlock(BuildContext context, IconData icon, String label,
-      String value, String sub, Color tone) {
-    final theme = Theme.of(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 11, color: tone),
-              const SizedBox(width: 5),
-              Flexible(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w900,
-                    color: tone,
-                    letterSpacing: 1.2,
-                    height: 1.0,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              value,
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: tone,
-                letterSpacing: -0.6,
-                height: 1.0,
-                fontSize: 22,
-              ),
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            sub,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: secondary,
-              height: 1.0,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 7),
-          Container(
-            height: 2,
-            width: 18,
-            decoration: BoxDecoration(
-              color: tone,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -501,7 +713,7 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
             child: _FlushTab(
               icon: LucideIcons.activity,
               label: 'Visão geral',
-              tone: _accent(context),
+              tone: _violet(context),
               selected: _activeTab == _SdrTab.overview,
               onTap: () => setState(() => _activeTab = _SdrTab.overview),
             ),
@@ -521,7 +733,7 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
               icon: LucideIcons.megaphone,
               label: 'Origens',
               count: _metrics.bySource.length,
-              tone: _purple(context),
+              tone: _blue(context),
               selected: _activeTab == _SdrTab.sources,
               onTap: () => setState(() => _activeTab = _SdrTab.sources),
             ),
@@ -542,79 +754,52 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
         .fadeIn(duration: 240.ms);
   }
 
+  /// Cabeçalho sóbrio de painel: barra tonal curta + título w900 + hint.
   Widget _panelHeader(
     BuildContext context, {
-    required IconData icon,
-    required String eyebrow,
     required String title,
     required String hint,
     required Color tone,
   }) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    return Row(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            color: tone.withValues(alpha: isDark ? 0.2 : 0.12),
-          ),
-          child: Icon(icon, color: tone, size: 20),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      color: tone,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: tone.withValues(alpha: 0.5),
-                          blurRadius: 6,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 7),
-                  Text(
-                    eyebrow,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: tone,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 1.2,
-                      fontSize: 10.5,
-                    ),
-                  ),
-                ],
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 20,
+              height: 3,
+              decoration: BoxDecoration(
+                color: tone,
+                borderRadius: BorderRadius.circular(2),
               ),
-              const SizedBox(height: 3),
-              Text(
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
                 title,
-                style: theme.textTheme.titleSmall?.copyWith(
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w900,
                   color: ThemeHelpers.textColor(context),
-                  letterSpacing: -0.2,
+                  letterSpacing: -0.4,
                 ),
               ),
-              const SizedBox(height: 2),
-              Text(
-                hint,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                  height: 1.32,
-                ),
-              ),
-            ],
+            ),
+          ],
+        ),
+        const SizedBox(height: 5),
+        Padding(
+          padding: const EdgeInsets.only(left: 28),
+          child: Text(
+            hint,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: ThemeHelpers.textSecondaryColor(context),
+              height: 1.35,
+            ),
           ),
         ),
       ],
@@ -681,11 +866,9 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
     final nodes = <Widget>[
       _panelHeader(
         context,
-        icon: LucideIcons.activity,
-        eyebrow: 'VISÃO GERAL',
         title: 'Como está o pré-atendimento',
-        hint: 'Funil do período, atendimento no WhatsApp e entrada de leads.',
-        tone: _accent(context),
+        hint: 'Atendimento no WhatsApp, entrada de leads e motivos de perda.',
+        tone: _violet(context),
       ),
       const SizedBox(height: 16),
     ];
@@ -694,7 +877,7 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
       nodes.add(_emptyState(
         context,
         icon: LucideIcons.inbox,
-        tone: _accent(context),
+        tone: _violet(context),
         title: 'Sem leads no período',
         body: 'Ajuste o período ou os filtros para ver as métricas do SDR.',
       ));
@@ -702,26 +885,9 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
           crossAxisAlignment: CrossAxisAlignment.stretch, children: nodes);
     }
 
-    // Funil resumido — barras proporcionais com cor por significado.
-    nodes.add(_subsectionHeader(
-        context, 'Funil do período', LucideIcons.filter, 0));
-    nodes.add(const SizedBox(height: 12));
-    final funnelTotal = max(1, s.totalLeads);
-    nodes.add(_funnelRow(context, 'Transferidos', s.transferred, funnelTotal,
-        _green(context)));
-    nodes.add(_funnelRow(context, 'Em qualificação', s.inQualification,
-        funnelTotal, _amber(context)));
-    nodes.add(
-        _funnelRow(context, 'Perdidos', s.lost, funnelTotal, _red(context)));
-    if (s.duplicateLeads > 0) {
-      nodes.add(_funnelRow(context, 'Duplicados', s.duplicateLeads,
-          max(1, s.totalEntries), ThemeHelpers.textSecondaryColor(context)));
-    }
-
     // WhatsApp (atendimento).
     final w = _metrics.whatsapp;
     if (w != null) {
-      nodes.add(const SizedBox(height: 18));
       nodes.add(_subsectionHeader(
           context, 'WhatsApp · atendimento', LucideIcons.messageCircle, 0));
       nodes.add(const SizedBox(height: 12));
@@ -731,7 +897,7 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
     // Entrada de leads por dia (mini gráfico de barras).
     final days = _metrics.leadsByDay.where((d) => d.date != null).toList();
     if (days.isNotEmpty) {
-      nodes.add(const SizedBox(height: 18));
+      if (w != null) nodes.add(const SizedBox(height: 18));
       nodes.add(_subsectionHeader(
           context, 'Entrada de leads por dia', LucideIcons.chartColumn, 0));
       nodes.add(const SizedBox(height: 12));
@@ -743,7 +909,7 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
       ..sort((a, b) => b.count.compareTo(a.count));
     if (losses.isNotEmpty) {
       final top = losses.take(6).toList();
-      final maxCount = max(1, top.first.count);
+      final maxCount = math.max(1, top.first.count);
       nodes.add(const SizedBox(height: 18));
       nodes.add(_subsectionHeader(context, 'Principais motivos de perda',
           LucideIcons.circleX, losses.length));
@@ -942,10 +1108,10 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
   /// Gráfico de barras simples (sem lib) — entrada de leads por dia.
   Widget _leadsByDayChart(BuildContext context, List<SdrDayPoint> days) {
     final theme = Theme.of(context);
-    final accent = _accent(context);
+    final violet = _violet(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final data = days.length > 31 ? days.sublist(days.length - 31) : days;
-    final maxTotal = data.fold<int>(0, (m, d) => max(m, d.total));
+    final maxTotal = data.fold<int>(0, (m, d) => math.max(m, d.total));
     if (maxTotal == 0) return const SizedBox.shrink();
     final fmtDay = DateFormat('dd/MM', 'pt_BR');
     final first = data.first.date;
@@ -975,11 +1141,11 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
                           ? '${data[i].total}'
                           : '${fmtDay.format(data[i].date!)} · ${data[i].total} lead${data[i].total == 1 ? '' : 's'}',
                       child: Container(
-                        height: max(3, 72.0 * data[i].total / maxTotal),
+                        height: math.max(3, 72.0 * data[i].total / maxTotal),
                         decoration: BoxDecoration(
                           color: data[i] == peak
-                              ? accent
-                              : accent.withValues(alpha: 0.38),
+                              ? violet
+                              : violet.withValues(alpha: 0.38),
                           borderRadius: const BorderRadius.vertical(
                               top: Radius.circular(3)),
                         ),
@@ -1002,7 +1168,7 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
                 ),
               ),
               const Spacer(),
-              Icon(LucideIcons.trendingUp, size: 11, color: accent),
+              Icon(LucideIcons.trendingUp, size: 11, color: violet),
               const SizedBox(width: 4),
               Text(
                 'pico: ${_int.format(peak.total)}'
@@ -1039,8 +1205,6 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
     final nodes = <Widget>[
       _panelHeader(
         context,
-        icon: LucideIcons.users,
-        eyebrow: 'EQUIPE SDR',
         title: 'Desempenho por atendente',
         hint: 'Leads, transferências e conversão de cada pessoa no período.',
         tone: green,
@@ -1073,7 +1237,7 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
     final brokers = [..._metrics.topBrokers]
       ..sort((a, b) => b.received.compareTo(a.received));
     if (brokers.isNotEmpty) {
-      final maxReceived = max(1, brokers.first.received);
+      final maxReceived = math.max(1, brokers.first.received);
       nodes.add(const SizedBox(height: 18));
       nodes.add(_subsectionHeader(context, 'Corretores que mais receberam',
           LucideIcons.award, brokers.length));
@@ -1091,18 +1255,16 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
   // ─── Painel: Origens ───────────────────────────────────────────────────────
 
   Widget _buildSourcesPanel(BuildContext context) {
-    final purple = _purple(context);
+    final blue = _blue(context);
     final sources = [..._metrics.bySource]
       ..sort((a, b) => b.totalLeads.compareTo(a.totalLeads));
 
     final nodes = <Widget>[
       _panelHeader(
         context,
-        icon: LucideIcons.megaphone,
-        eyebrow: 'ORIGENS & CAMPANHAS',
         title: 'De onde vêm os leads',
         hint: 'Volume e conversão por mídia, campanha e qualificação.',
-        tone: purple,
+        tone: blue,
       ),
       const SizedBox(height: 16),
     ];
@@ -1111,7 +1273,7 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
       nodes.add(_emptyState(
         context,
         icon: LucideIcons.searchX,
-        tone: purple,
+        tone: blue,
         title: 'Sem origens no período',
         body: 'Nenhum lead com origem registrada neste recorte.',
       ));
@@ -1132,21 +1294,21 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
     final campaigns = [..._metrics.byCampaign]
       ..sort((a, b) => b.totalLeads.compareTo(a.totalLeads));
     if (campaigns.isNotEmpty) {
-      final maxLeads = max(1, campaigns.first.totalLeads);
+      final maxLeads = math.max(1, campaigns.first.totalLeads);
       nodes.add(const SizedBox(height: 18));
       nodes.add(_subsectionHeader(
           context, 'Campanhas', LucideIcons.flag, campaigns.length));
       nodes.add(const SizedBox(height: 12));
       for (final c in campaigns.take(8)) {
         nodes.add(_funnelRow(
-            context, c.campaign, c.totalLeads, maxLeads, purple));
+            context, c.campaign, c.totalLeads, maxLeads, blue));
       }
     }
 
     final quals = [..._metrics.byQualification]
       ..sort((a, b) => b.totalLeads.compareTo(a.totalLeads));
     if (quals.isNotEmpty) {
-      final maxLeads = max(1, quals.first.totalLeads);
+      final maxLeads = math.max(1, quals.first.totalLeads);
       nodes.add(const SizedBox(height: 18));
       nodes.add(_subsectionHeader(
           context, 'Por qualificação', LucideIcons.thermometer, quals.length));
@@ -1267,51 +1429,79 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
     );
   }
 
-  /// Skeleton fiel ao layout real: hero (eyebrow + número + KPIs), rail de
-  /// abas e linhas com barras.
+  /// Skeleton fiel ao layout novo: console do agente (glyph + nome + status),
+  /// placar (número dominante + mostrador + barra empilhada), rail de abas e
+  /// linhas de painel.
   Widget _buildSkeleton(BuildContext context) {
     return SingleChildScrollView(
       physics: const NeverScrollableScrollPhysics(),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(
-            _kPagePadH, _kPagePadTop + 4, _kPagePadH, _kPagePadBottom),
+            _kPagePadH, _kPagePadTop, _kPagePadH, _kPagePadBottom),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Console do agente.
             Row(
               children: const [
-                SkeletonBox(width: 9, height: 9, borderRadius: 999),
-                SizedBox(width: 9),
-                SkeletonText(width: 180, height: 11, borderRadius: 4),
-                Spacer(),
-                SkeletonBox(width: 84, height: 26, borderRadius: 999),
-              ],
-            ),
-            const SizedBox(height: 12),
-            const SkeletonText(width: 120, height: 34, borderRadius: 8),
-            const SizedBox(height: 8),
-            const SkeletonText(width: 260, height: 13, borderRadius: 4),
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                for (var i = 0; i < 3; i++) ...[
-                  if (i > 0) const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: const [
-                        SkeletonText(width: 80, height: 9, borderRadius: 4),
-                        SizedBox(height: 9),
-                        SkeletonText(width: 52, height: 22, borderRadius: 6),
-                        SizedBox(height: 7),
-                        SkeletonText(width: 66, height: 10, borderRadius: 4),
-                      ],
-                    ),
+                SkeletonBox(width: 56, height: 56, borderRadius: 18),
+                SizedBox(width: 13),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonText(width: 110, height: 17, borderRadius: 5),
+                      SizedBox(height: 7),
+                      SkeletonText(width: 190, height: 11, borderRadius: 4),
+                      SizedBox(height: 6),
+                      SkeletonText(width: 160, height: 10, borderRadius: 4),
+                    ],
                   ),
-                ],
+                ),
               ],
             ),
             const SizedBox(height: 22),
+            // Placar.
+            Row(
+              children: const [
+                SkeletonText(width: 120, height: 10, borderRadius: 4),
+                Spacer(),
+                SkeletonBox(width: 88, height: 26, borderRadius: 999),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: const [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonText(width: 110, height: 36, borderRadius: 8),
+                      SizedBox(height: 8),
+                      SkeletonText(width: 150, height: 11, borderRadius: 4),
+                    ],
+                  ),
+                ),
+                SizedBox(width: 14),
+                SkeletonBox(width: 74, height: 74, borderRadius: 999),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const SkeletonBox(
+                width: double.infinity, height: 10, borderRadius: 999),
+            const SizedBox(height: 10),
+            Row(
+              children: const [
+                SkeletonText(width: 86, height: 10, borderRadius: 4),
+                SizedBox(width: 14),
+                SkeletonText(width: 86, height: 10, borderRadius: 4),
+                SizedBox(width: 14),
+                SkeletonText(width: 70, height: 10, borderRadius: 4),
+              ],
+            ),
+            const SizedBox(height: 22),
+            // Rail de abas.
             Row(
               children: [
                 for (var i = 0; i < 3; i++) ...[
@@ -1323,24 +1513,19 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
               ],
             ),
             const SizedBox(height: 20),
+            // Cabeçalho de painel.
             Row(
               children: const [
-                SkeletonBox(width: 40, height: 40, borderRadius: 14),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SkeletonText(width: 90, height: 10, borderRadius: 4),
-                      SizedBox(height: 6),
-                      SkeletonText(width: 190, height: 14, borderRadius: 4),
-                      SizedBox(height: 5),
-                      SkeletonText(
-                          width: double.infinity, height: 11, borderRadius: 4),
-                    ],
-                  ),
-                ),
+                SkeletonBox(width: 20, height: 3, borderRadius: 2),
+                SizedBox(width: 8),
+                SkeletonText(width: 200, height: 15, borderRadius: 4),
               ],
+            ),
+            const SizedBox(height: 8),
+            const Padding(
+              padding: EdgeInsets.only(left: 28),
+              child: SkeletonText(
+                  width: double.infinity, height: 11, borderRadius: 4),
             ),
             const SizedBox(height: 20),
             for (var i = 0; i < 4; i++) ...[
@@ -1366,7 +1551,119 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
   }
 }
 
-// ─── Aba flush (sublinhado, mesma gramática de Comissões) ────────────────────
+// ─── Mostrador de conversão (arco custom, sem lib) ───────────────────────────
+
+class _ConversionDial extends StatelessWidget {
+  const _ConversionDial({
+    required this.rate,
+    required this.tone,
+    required this.track,
+    this.size = 74,
+  });
+
+  /// Percentual 0–100.
+  final double rate;
+  final Color tone;
+  final Color track;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final frac = (rate / 100).clamp(0.0, 1.0).toDouble();
+    final label = rate >= 99.95
+        ? '100%'
+        : '${rate.toStringAsFixed(1).replaceAll('.', ',')}%';
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          width: size,
+          height: size,
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: frac),
+            duration: const Duration(milliseconds: 750),
+            curve: Curves.easeOutCubic,
+            builder: (context, anim, _) => CustomPaint(
+              painter: _DialPainter(progress: anim, tone: tone, track: track),
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(13),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      label,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: ThemeHelpers.textColor(context),
+                        letterSpacing: -0.4,
+                        fontSize: 15,
+                        height: 1.0,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'CONVERSÃO',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: ThemeHelpers.textSecondaryColor(context),
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.2,
+            fontSize: 8.5,
+            height: 1.0,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DialPainter extends CustomPainter {
+  _DialPainter({
+    required this.progress,
+    required this.tone,
+    required this.track,
+  });
+
+  final double progress;
+  final Color tone;
+  final Color track;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const stroke = 7.0;
+    final rect = (Offset.zero & size).deflate(stroke / 2);
+
+    final trackPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..color = track;
+    canvas.drawArc(rect, 0, math.pi * 2, false, trackPaint);
+
+    if (progress > 0) {
+      final progressPaint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..strokeCap = StrokeCap.round
+        ..color = tone;
+      canvas.drawArc(
+          rect, -math.pi / 2, math.pi * 2 * progress, false, progressPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DialPainter oldDelegate) =>
+      oldDelegate.progress != progress ||
+      oldDelegate.tone != tone ||
+      oldDelegate.track != track;
+}
+
+// ─── Aba flush (sublinhado, gramática compartilhada do app) ──────────────────
 
 class _FlushTab extends StatelessWidget {
   const _FlushTab({
@@ -1478,11 +1775,11 @@ class _AgentRow extends StatelessWidget {
     final amber =
         isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
     final red = isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-    final accent =
-        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    final violet =
+        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
     final convFrac = (agent.conversionRate / 100).clamp(0.0, 1.0);
     final isTop = rank == 1 && agent.transferred > 0;
-    final rankTone = isTop ? accent : secondary;
+    final rankTone = isTop ? violet : secondary;
 
     Widget stat(String value, String label, Color tone) {
       return Column(
@@ -1629,8 +1926,7 @@ class _SourceRow extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final purple =
-        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
+    final blue = isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
     final green =
         isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
     final convFrac = (source.conversionRate / 100).clamp(0.0, 1.0);
@@ -1647,9 +1943,9 @@ class _SourceRow extends StatelessWidget {
                 height: 30,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(9),
-                  color: purple.withValues(alpha: isDark ? 0.18 : 0.1),
+                  color: blue.withValues(alpha: isDark ? 0.18 : 0.1),
                 ),
-                child: Icon(LucideIcons.megaphone, size: 14, color: purple),
+                child: Icon(LucideIcons.megaphone, size: 14, color: blue),
               ),
               const SizedBox(width: 10),
               Expanded(

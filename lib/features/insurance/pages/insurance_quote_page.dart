@@ -387,67 +387,143 @@ class _InsuranceQuotePageState extends State<InsuranceQuotePage> {
     );
   }
 
-  // ─── Hero flush ──────────────────────────────────────────────────────────
+  // ─── Hero de formulário: identidade + resumo vivo da cotação ─────────────
+  //
+  // Placa de escudo + título limpo, e logo abaixo a **ficha da cotação**:
+  // quatro campos (inquilino, imóvel, aluguel, vigência) que vão sendo
+  // preenchidos em tempo real conforme o formulário avança — cada um no tom
+  // da sua seção. Sem eyebrow com dot pulsante.
 
   Widget _buildHero(BuildContext context) {
     final theme = Theme.of(context);
     final accent = _accent(context);
     final textColor = ThemeHelpers.textColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    final subtitle = switch (_step) {
+      0 => 'Compare as seguradoras integradas e escolha a melhor '
+          'proteção para a locação.',
+      1 => _quotes.where((q) => q.isCompleted).isEmpty
+          ? 'Nenhuma seguradora retornou cotação válida — revise os dados.'
+          : 'Cotações recebidas — compare e selecione a melhor opção.',
+      _ => 'Apólice contratada com sucesso para esta locação.',
+    };
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Container(
-              width: 9,
-              height: 9,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: accent,
-                boxShadow: [
-                  BoxShadow(
-                    color: accent.withValues(alpha: 0.55),
-                    blurRadius: 8,
-                    spreadRadius: 1,
+                borderRadius: BorderRadius.circular(15),
+                color: accent.withValues(alpha: isDark ? 0.18 : 0.1),
+                border: Border.all(color: accent.withValues(alpha: 0.28)),
+              ),
+              child: Icon(LucideIcons.shieldCheck, color: accent, size: 21),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Cotação de seguro',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: textColor,
+                      letterSpacing: -0.5,
+                      height: 1.05,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    'Seguro fiança locatícia',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: secondary,
+                      fontWeight: FontWeight.w700,
+                      height: 1.2,
+                    ),
                   ),
                 ],
-              ),
-            ),
-            const SizedBox(width: 9),
-            Text(
-              'SEGURO FIANÇA',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: accent,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 2.2,
-                fontSize: 11,
               ),
             ),
           ],
         ),
         const SizedBox(height: 10),
         Text(
-          'Cotação de seguro',
-          style: theme.textTheme.headlineSmall?.copyWith(
-            fontWeight: FontWeight.w900,
-            color: textColor,
-            letterSpacing: -0.6,
-            height: 1.05,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Compare as seguradoras integradas e escolha a melhor '
-          'proteção para a locação.',
-          style: theme.textTheme.bodyMedium?.copyWith(
+          subtitle,
+          style: theme.textTheme.bodySmall?.copyWith(
             color: secondary,
             fontWeight: FontWeight.w600,
-            height: 1.4,
+            height: 1.35,
           ),
         ),
+        const SizedBox(height: 14),
+        _buildQuoteSummary(context),
       ],
+    );
+  }
+
+  /// Ficha da cotação — quatro campos que se preenchem conforme o fluxo.
+  Widget _buildQuoteSummary(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final blue = isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
+    final purple =
+        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
+    final emerald =
+        isDark ? AppColors.status.successDarkMode : AppColors.status.success;
+    final amber =
+        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
+    final fmt = DateFormat('dd/MM/yy', 'pt_BR');
+
+    final propertyLabel = _property == null
+        ? null
+        : (_property!.code?.trim().isNotEmpty == true
+            ? 'CÓD ${_property!.code!.trim()}'
+            : _property!.address);
+    final periodLabel = _startDate != null && _endDate != null
+        ? '${fmt.format(_startDate!)} → ${fmt.format(_endDate!)}'
+        : null;
+
+    final slots = <(IconData, String, String?, Color)>[
+      (LucideIcons.userRound, 'INQUILINO', _client?.name, blue),
+      (LucideIcons.house, 'IMÓVEL', propertyLabel, purple),
+      (
+        LucideIcons.banknote,
+        'ALUGUEL',
+        _rentValue > 0 ? '${_money.format(_rentValue)}/mês' : null,
+        emerald,
+      ),
+      (LucideIcons.calendarRange, 'VIGÊNCIA', periodLabel, amber),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, c) {
+        const gap = 10.0;
+        final half = (c.maxWidth - gap) / 2;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: [
+            for (final (icon, label, value, tone) in slots)
+              SizedBox(
+                width: half,
+                child: _SummarySlot(
+                  icon: icon,
+                  label: label,
+                  value: value,
+                  tone: tone,
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 
@@ -1030,6 +1106,108 @@ class _InsuranceQuotePageState extends State<InsuranceQuotePage> {
 }
 
 // ─── Aba de passo (flush, sublinhado — sem pills) ─────────────────────────────
+
+/// Campo da ficha da cotação no hero — apagado enquanto vazio, tonal quando
+/// preenchido (check discreto no canto do rótulo).
+class _SummarySlot extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String? value;
+  final Color tone;
+
+  const _SummarySlot({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.tone,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final filled = value != null && value!.trim().isNotEmpty;
+    final fg = filled ? tone : secondary.withValues(alpha: 0.75);
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+      padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(13),
+        color: filled
+            ? tone.withValues(alpha: isDark ? 0.10 : 0.055)
+            : Colors.transparent,
+        border: Border.all(
+          color: filled
+              ? tone.withValues(alpha: 0.35)
+              : ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 26,
+            height: 26,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              color: fg.withValues(alpha: isDark ? 0.18 : 0.1),
+            ),
+            child: Icon(icon, size: 14, color: fg),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          fontSize: 8,
+                          fontWeight: FontWeight.w900,
+                          color: fg,
+                          letterSpacing: 1.2,
+                          height: 1.0,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (filled) ...[
+                      const SizedBox(width: 4),
+                      Icon(LucideIcons.check, size: 9, color: fg),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  filled ? value!.trim() : 'a preencher',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: filled ? FontWeight.w800 : FontWeight.w500,
+                    fontStyle: filled ? FontStyle.normal : FontStyle.italic,
+                    color: filled
+                        ? ThemeHelpers.textColor(context)
+                        : secondary.withValues(alpha: 0.7),
+                    letterSpacing: -0.1,
+                    height: 1.15,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _StepTab extends StatelessWidget {
   final IconData icon;

@@ -359,62 +359,180 @@ class EstateErrorState extends StatelessWidget {
   }
 }
 
-/// Skeleton fiel ao [EstateCard]: bloco de imagem + linhas do corpo.
+/// Skeleton fiel ao [EstateCard] (row CRM): thumbnail 92×92 + coluna densa
+/// com pills, tipo, nome, endereço, specs e linha-âncora.
 class EstateCardSkeleton extends StatelessWidget {
   const EstateCardSkeleton({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardBg =
+        isDark ? Colors.white.withValues(alpha: 0.025) : Colors.white;
     return Container(
-      margin: const EdgeInsets.only(bottom: 14),
+      margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: ThemeHelpers.cardShadow(context),
+        color: cardBg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
+        ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      padding: const EdgeInsets.fromLTRB(10, 10, 6, 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const ClipRRect(
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-            child: SkeletonBox(
-              width: double.infinity,
-              height: 132,
-              borderRadius: 0,
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(14),
+          const SkeletonBox(width: 92, height: 92, borderRadius: 11),
+          const SizedBox(width: 12),
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SkeletonText(width: 170, height: 16, borderRadius: 6),
-                const SizedBox(height: 8),
-                const SkeletonText(width: 130, height: 12, borderRadius: 5),
-                const SizedBox(height: 12),
                 Row(
                   children: const [
-                    SkeletonBox(width: 72, height: 22, borderRadius: 999),
-                    SizedBox(width: 8),
-                    SkeletonBox(width: 58, height: 22, borderRadius: 999),
-                    SizedBox(width: 8),
-                    SkeletonBox(width: 88, height: 22, borderRadius: 999),
+                    SkeletonBox(width: 62, height: 20, borderRadius: 999),
+                    Spacer(),
+                    SkeletonBox(width: 40, height: 28, borderRadius: 12),
                   ],
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 8),
+                const SkeletonText(width: 110, height: 11, borderRadius: 4),
+                const SizedBox(height: 7),
+                const SkeletonText(width: 180, height: 14, borderRadius: 5),
+                const SizedBox(height: 7),
+                const SkeletonText(width: 150, height: 11, borderRadius: 4),
+                const SizedBox(height: 10),
                 Row(
                   children: const [
-                    SkeletonText(width: 110, height: 11, borderRadius: 4),
+                    SkeletonText(width: 90, height: 15, borderRadius: 5),
                     Spacer(),
-                    SkeletonBox(width: 34, height: 34, borderRadius: 11),
-                    SizedBox(width: 8),
-                    SkeletonBox(width: 34, height: 34, borderRadius: 11),
+                    SkeletonBox(width: 72, height: 20, borderRadius: 999),
                   ],
                 ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// KPI fluido e CLICÁVEL do hero — mesma gramática das métricas da tela de
+/// Imóveis: ícone tinted compacto + label uppercase + número grande (w900)
+/// + traço gradient na cor da categoria. Sem caixa/borda/sombra; o toque
+/// seleciona o escopo correspondente (sublinhado pelas abas).
+class EstateStatTile extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color accent;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const EstateStatTile({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.accent,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final textColor = ThemeHelpers.textColor(context);
+    final mutedColor = ThemeHelpers.textSecondaryColor(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        splashColor: accent.withValues(alpha: 0.12),
+        highlightColor: accent.withValues(alpha: 0.06),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 22,
+                    height: 22,
+                    decoration: BoxDecoration(
+                      color: accent.withValues(
+                          alpha: selected
+                              ? (isDark ? 0.26 : 0.18)
+                              : (isDark ? 0.16 : 0.12)),
+                      borderRadius: BorderRadius.circular(7),
+                      border: Border.all(
+                        color: accent.withValues(
+                            alpha: selected
+                                ? (isDark ? 0.5 : 0.38)
+                                : (isDark ? 0.32 : 0.22)),
+                      ),
+                    ),
+                    child: Icon(icon, color: accent, size: 13),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      label.toUpperCase(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: selected ? accent : mutedColor,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.6,
+                        fontSize: 9.5,
+                        height: 1,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.6,
+                    height: 1.05,
+                    color: textColor,
+                    fontSize: 24,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                height: 2,
+                width: selected ? 40 : 28,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(2),
+                  gradient: LinearGradient(
+                    colors: [
+                      accent.withValues(
+                          alpha: selected ? 1 : (isDark ? 0.85 : 0.7)),
+                      accent.withValues(alpha: 0),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

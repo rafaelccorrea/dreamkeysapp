@@ -6,7 +6,23 @@ import '../../../core/theme/theme_helpers.dart';
 
 /// Widgets compartilhados entre **Meu Site** e **Link in Bio** — mesma
 /// gramática flush das telas de referência (abas com sublinhado, cabeçalho
-/// de painel com eyebrow + dot, estados vazio/erro com retry).
+/// de painel com barra de acento, estados vazio/erro com retry).
+
+/// Converte cor hex vinda do backend ("#RRGGBB", "RGB" ou "#AARRGGBB") em
+/// [Color]. Retorna `null` para valores ausentes/inválidos — quem chama
+/// decide o fallback (em geral a cor da marca do app).
+Color? siteParseHexColor(String? raw) {
+  var hex = raw?.trim() ?? '';
+  if (hex.isEmpty) return null;
+  if (hex.startsWith('#')) hex = hex.substring(1);
+  if (hex.length == 3) {
+    hex = hex.split('').map((c) => '$c$c').join();
+  }
+  if (hex.length == 6) hex = 'FF$hex';
+  if (hex.length != 8) return null;
+  final value = int.tryParse(hex, radix: 16);
+  return value == null ? null : Color(value);
+}
 
 // ─── Aba flush (ícone + rótulo + contagem + sublinhado) ──────────────────────
 
@@ -56,8 +72,9 @@ class SiteFlushTab extends StatelessWidget {
                       maxLines: 1,
                       style: theme.textTheme.labelLarge?.copyWith(
                         color: fg,
-                        fontWeight:
-                            selected ? FontWeight.w900 : FontWeight.w600,
+                        fontWeight: selected
+                            ? FontWeight.w900
+                            : FontWeight.w600,
                         letterSpacing: 0.1,
                       ),
                     ),
@@ -65,7 +82,9 @@ class SiteFlushTab extends StatelessWidget {
                       const SizedBox(width: 6),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 1.5),
+                          horizontal: 6,
+                          vertical: 1.5,
+                        ),
                         decoration: BoxDecoration(
                           color: tone.withValues(alpha: selected ? 0.18 : 0.12),
                           borderRadius: BorderRadius.circular(999),
@@ -92,8 +111,9 @@ class SiteFlushTab extends StatelessWidget {
               height: 2.5,
               decoration: BoxDecoration(
                 color: selected ? tone : Colors.transparent,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(3)),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(3),
+                ),
               ),
             ),
           ],
@@ -103,11 +123,10 @@ class SiteFlushTab extends StatelessWidget {
   }
 }
 
-// ─── Cabeçalho de painel (eyebrow + dot + título + hint) ─────────────────────
+// ─── Cabeçalho de painel (barra de acento + título + hint) ───────────────────
 
 class SitePanelHeader extends StatelessWidget {
   final IconData icon;
-  final String eyebrow;
   final String title;
   final String hint;
   final Color tone;
@@ -115,7 +134,6 @@ class SitePanelHeader extends StatelessWidget {
   const SitePanelHeader({
     super.key,
     required this.icon,
-    required this.eyebrow,
     required this.title,
     required this.hint,
     required this.tone,
@@ -127,57 +145,27 @@ class SitePanelHeader extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
 
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Container(
-          width: 40,
-          height: 40,
+          width: 3.5,
+          height: 34,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            color: tone.withValues(alpha: isDark ? 0.2 : 0.12),
+            color: tone,
+            borderRadius: BorderRadius.circular(999),
           ),
-          child: Icon(icon, color: tone, size: 20),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 11),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  Container(
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      color: tone,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: tone.withValues(alpha: 0.5),
-                          blurRadius: 6,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 7),
-                  Text(
-                    eyebrow,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: tone,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 1.2,
-                      fontSize: 10.5,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 3),
               Text(
                 title,
                 style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w900,
                   color: ThemeHelpers.textColor(context),
-                  letterSpacing: -0.2,
+                  letterSpacing: -0.3,
                 ),
               ),
               const SizedBox(height: 2),
@@ -190,6 +178,16 @@ class SitePanelHeader extends StatelessWidget {
               ),
             ],
           ),
+        ),
+        const SizedBox(width: 10),
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(11),
+            color: tone.withValues(alpha: isDark ? 0.18 : 0.1),
+          ),
+          child: Icon(icon, color: tone, size: 17),
         ),
       ],
     );
@@ -229,8 +227,9 @@ class SiteSubsectionHeader extends StatelessWidget {
             padding: const EdgeInsets.only(left: 10),
             child: Container(
               height: 1,
-              color:
-                  ThemeHelpers.borderLightColor(context).withValues(alpha: 0.5),
+              color: ThemeHelpers.borderLightColor(
+                context,
+              ).withValues(alpha: 0.5),
             ),
           ),
         ),
@@ -431,9 +430,9 @@ class SiteFilledField extends StatelessWidget {
         : Colors.black.withValues(alpha: 0.06);
 
     OutlineInputBorder border(Color color, double width) => OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: color, width: width),
-        );
+      borderRadius: BorderRadius.circular(14),
+      borderSide: BorderSide(color: color, width: width),
+    );
 
     return TextField(
       controller: controller,
@@ -475,8 +474,10 @@ class SiteFilledField extends StatelessWidget {
         filled: true,
         fillColor: enabled ? fill : fill.withValues(alpha: 0.55),
         isDense: true,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 13,
+        ),
         enabledBorder: border(borderColor, 1),
         focusedBorder: border(accent.withValues(alpha: 0.55), 1.4),
         disabledBorder: border(borderColor.withValues(alpha: 0.5), 1),
@@ -516,10 +517,12 @@ class SiteEmptyState extends StatelessWidget {
             height: 64,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: LinearGradient(colors: [
-                tone.withValues(alpha: 0.18),
-                tone.withValues(alpha: 0.06),
-              ]),
+              gradient: LinearGradient(
+                colors: [
+                  tone.withValues(alpha: 0.18),
+                  tone.withValues(alpha: 0.06),
+                ],
+              ),
               border: Border.all(color: tone.withValues(alpha: 0.32)),
             ),
             child: Icon(icon, color: tone, size: 28),
@@ -543,10 +546,7 @@ class SiteEmptyState extends StatelessWidget {
               height: 1.4,
             ),
           ),
-          if (action != null) ...[
-            const SizedBox(height: 14),
-            action!,
-          ],
+          if (action != null) ...[const SizedBox(height: 14), action!],
         ],
       ),
     );
@@ -567,8 +567,9 @@ class SiteErrorState extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final danger =
-        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    final danger = isDark
+        ? AppColors.status.errorDarkMode
+        : AppColors.status.error;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 4),
       child: Column(
@@ -688,8 +689,9 @@ class SiteSaveBar extends StatelessWidget {
                     OutlinedButton(
                       onPressed: saving ? null : onDiscard,
                       style: OutlinedButton.styleFrom(
-                        foregroundColor:
-                            ThemeHelpers.textSecondaryColor(context),
+                        foregroundColor: ThemeHelpers.textSecondaryColor(
+                          context,
+                        ),
                         side: BorderSide(
                           color: ThemeHelpers.borderColor(context),
                         ),
@@ -697,7 +699,9 @@ class SiteSaveBar extends StatelessWidget {
                           borderRadius: BorderRadius.circular(12),
                         ),
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 13),
+                          horizontal: 14,
+                          vertical: 13,
+                        ),
                       ),
                       child: const Text('Descartar'),
                     ),

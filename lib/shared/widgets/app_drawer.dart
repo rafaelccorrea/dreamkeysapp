@@ -528,7 +528,10 @@ class _AppDrawerState extends State<AppDrawer> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                chip,
+                // Flexible: o chip encolhe (o rótulo já tem ellipsis) para o
+                // chevron caber na largura do drawer — sem overflow com nomes
+                // de empresa longos.
+                Flexible(child: chip),
                 Icon(Icons.arrow_drop_down_rounded, size: 22, color: accent),
               ],
             ),

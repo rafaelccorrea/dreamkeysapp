@@ -337,13 +337,16 @@ class _CollectionRulesPageState extends State<CollectionRulesPage> {
     );
   }
 
-  // ─── Hero editorial ──────────────────────────────────────────────────────
+  // ─── Hero: rack da automação ─────────────────────────────────────────────
+  //
+  // Irmão da tela da régua (linha do tempo): aqui a identidade é o "rack" de
+  // regras — um segmento por regra, aceso quando ativa, apagado quando
+  // pausada — com a leitura "X de N ativas". Sem número gigante nem dot
+  // pulsante.
 
   Widget _buildHero(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final accent = _accentColor(context);
-    final textColor = ThemeHelpers.textColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final emerald =
         isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
@@ -353,7 +356,8 @@ class _CollectionRulesPageState extends State<CollectionRulesPage> {
     final total = _rules.length;
     final active = _activeCount;
     final inactive = total - active;
-    final dot = total == 0 ? amber : (active > 0 ? emerald : amber);
+    final running = total > 0 && active > 0;
+    final tone = running ? emerald : amber;
     final subtitle = total == 0
         ? 'Nenhuma regra configurada — comece pelas réguas padrão.'
         : active == 0
@@ -367,69 +371,123 @@ class _CollectionRulesPageState extends State<CollectionRulesPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
-                width: 9,
-                height: 9,
+                width: 44,
+                height: 44,
                 decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: dot,
-                  boxShadow: [
-                    BoxShadow(
-                      color: dot.withValues(alpha: 0.55),
-                      blurRadius: 8,
-                      spreadRadius: 1,
+                  borderRadius: BorderRadius.circular(15),
+                  color: tone.withValues(alpha: isDark ? 0.18 : 0.1),
+                  border: Border.all(color: tone.withValues(alpha: 0.3)),
+                ),
+                child: Icon(
+                  running ? LucideIcons.zap : LucideIcons.zapOff,
+                  color: tone,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Regras da régua',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: ThemeHelpers.textColor(context),
+                        letterSpacing: -0.5,
+                        height: 1.05,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      running
+                          ? 'Automação ligada'
+                          : total == 0
+                              ? 'Automação sem regras'
+                              : 'Automação pausada',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: tone,
+                        fontWeight: FontWeight.w800,
+                        height: 1.2,
+                      ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 9),
-              Text(
-                'REGRAS DA RÉGUA',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: accent,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2.2,
-                  fontSize: 11,
-                ),
-              ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 14),
           Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                '$total',
-                style: theme.textTheme.displaySmall?.copyWith(
+                'RACK DE REGRAS',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: secondary,
                   fontWeight: FontWeight.w900,
-                  color: textColor,
-                  height: 1.0,
-                  letterSpacing: -1.0,
+                  letterSpacing: 1.4,
+                  fontSize: 9.5,
                 ),
               ),
-              const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 5),
-                child: Text(
-                  total == 1 ? 'regra configurada' : 'regras configuradas',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: secondary,
-                    fontWeight: FontWeight.w800,
-                    height: 1.0,
-                    letterSpacing: -0.2,
-                  ),
+              const Spacer(),
+              Text(
+                _loading && _rules.isEmpty
+                    ? '—'
+                    : total == 0
+                        ? 'vazio'
+                        : '$active de $total ativa${total == 1 ? '' : 's'}',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: running ? emerald : secondary,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 11,
+                  letterSpacing: -0.1,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
+          // Um segmento por regra: aceso = ativa, apagado = pausada.
+          SizedBox(
+            height: 8,
+            child: total == 0
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(99),
+                    child: Container(
+                      color: ThemeHelpers.borderColor(context)
+                          .withValues(alpha: 0.4),
+                    ),
+                  )
+                : Row(
+                    children: [
+                      for (var i = 0; i < _rules.length; i++) ...[
+                        if (i > 0) const SizedBox(width: 4),
+                        Expanded(
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 260),
+                            curve: Curves.easeOut,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(99),
+                              color: _rules[i].isActive
+                                  ? emerald
+                                  : ThemeHelpers.borderColor(context)
+                                      .withValues(alpha: 0.55),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+          ),
+          const SizedBox(height: 10),
           Text(
             subtitle,
-            style: theme.textTheme.bodyMedium?.copyWith(
+            style: theme.textTheme.bodySmall?.copyWith(
               color: secondary,
               fontWeight: FontWeight.w600,
-              height: 1.4,
+              height: 1.35,
             ),
           ),
         ],

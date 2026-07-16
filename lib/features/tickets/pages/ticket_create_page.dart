@@ -333,61 +333,51 @@ class _TicketCreatePageState extends State<TicketCreatePage> {
     );
   }
 
+  /// Intro sóbria — título com filete fino da marca (mesma identidade das
+  /// barras laterais da lista de tickets), sem eyebrow em caps nem dot.
   Widget _buildHero(BuildContext context) {
     final theme = Theme.of(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Container(
-              width: 9,
-              height: 9,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _accent,
-                boxShadow: [
-                  BoxShadow(
-                    color: _accent.withValues(alpha: 0.55),
-                    blurRadius: 8,
-                    spreadRadius: 1,
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            width: 3,
+            margin: const EdgeInsets.symmetric(vertical: 2),
+            decoration: BoxDecoration(
+              color: _accent,
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Fale com a equipe',
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: ThemeHelpers.textColor(context),
+                    letterSpacing: -0.6,
+                    height: 1.05,
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Quanto mais contexto e prints, mais rápido o atendimento. Você acompanha as respostas na conversa do ticket.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: secondary,
+                    fontWeight: FontWeight.w600,
+                    height: 1.4,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 9),
-            Text(
-              'SUPORTE · NOVO TICKET',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: _accent,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 2.2,
-                fontSize: 11,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Text(
-          'Fale com a equipe',
-          style: theme.textTheme.headlineSmall?.copyWith(
-            fontWeight: FontWeight.w900,
-            color: ThemeHelpers.textColor(context),
-            letterSpacing: -0.6,
-            height: 1.0,
           ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Quanto mais contexto e prints, mais rápido o atendimento. Você acompanha as respostas na conversa do ticket.',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: secondary,
-            fontWeight: FontWeight.w600,
-            height: 1.4,
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 

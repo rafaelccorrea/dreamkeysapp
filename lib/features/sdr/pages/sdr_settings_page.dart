@@ -15,10 +15,11 @@ import '../services/sdr_service.dart';
 
 /// Configurações do **SDR com IA** — paridade funcional com a
 /// `SDRSettingsPage.tsx` do painel web, reorganizada para mobile:
-/// hero flush com o interruptor mestre, seções flush com eyebrow + filete
-/// (mesma gramática do dashboard SDR), toggles na própria linha, steppers
-/// compactos para números, time-pickers para o horário de atendimento e
-/// barra de ações fixa (Resetar / Salvar).
+/// cabeçalho de identidade do agente (glyph de bot + nome + estado + janela
+/// de atendimento) com o interruptor mestre na própria linha, seções sóbrias
+/// com barra tonal + filete, toggles na própria linha, steppers compactos
+/// para números, time-pickers para o horário de atendimento e barra de ações
+/// fixa (Resetar / Salvar).
 ///
 /// Gating: módulo `whatsapp_ai` + permissão `whatsapp:manage_config`.
 /// O backend ainda restringe a escrita ao líder SDR / admin (403 tratado).
@@ -823,145 +824,206 @@ class _SdrSettingsPageState extends State<SdrSettingsPage> {
     );
   }
 
-  // ─── Hero flush com interruptor mestre ─────────────────────────────────────
+  // ─── Cabeçalho de identidade do agente (com interruptor mestre) ────────────
 
   Widget _buildHero(BuildContext context, SdrSettings s) {
     final theme = Theme.of(context);
-    final accent = _accent(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final purple = _purple(context);
     final green = _green(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final dot = s.enabled ? green : secondary;
+    final statusTone = s.enabled ? green : secondary;
+    final schedule =
+        'Atende das ${SdrSettings.hourLabel(s.businessHoursStart)} às '
+        '${SdrSettings.hourLabel(s.businessHoursEnd)} · '
+        '${s.workOnWeekends ? 'todos os dias' : 'seg a sex'}';
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Container(
-              width: 9,
-              height: 9,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: dot,
-                boxShadow: [
-                  BoxShadow(
-                    color: dot.withValues(alpha: 0.55),
-                    blurRadius: 8,
-                    spreadRadius: 1,
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(18),
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        purple.withValues(alpha: isDark ? 0.30 : 0.18),
+                        purple.withValues(alpha: isDark ? 0.10 : 0.06),
+                      ],
+                    ),
+                    border: Border.all(
+                      color: purple.withValues(alpha: isDark ? 0.45 : 0.32),
+                    ),
+                    boxShadow: ThemeHelpers.cardShadow(context),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(
+                    s.enabled ? LucideIcons.bot : LucideIcons.botOff,
+                    color: purple,
+                    size: 26,
+                  ),
+                ),
+                Positioned(
+                  right: -3,
+                  bottom: -3,
+                  child: Container(
+                    width: 19,
+                    height: 19,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: statusTone,
+                      border: Border.all(
+                        color: ThemeHelpers.backgroundColor(context),
+                        width: 2.5,
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      s.enabled ? LucideIcons.check : LucideIcons.pause,
+                      size: 10,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(width: 13),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          'Zezin',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            color: ThemeHelpers.textColor(context),
+                            letterSpacing: -0.5,
+                            height: 1.0,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _heroStatusChip(context, s.enabled),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Agente SDR · pré-atendimento com IA',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: secondary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                      height: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Row(
+                    children: [
+                      Icon(LucideIcons.clock3, size: 11.5, color: secondary),
+                      const SizedBox(width: 5),
+                      Flexible(
+                        child: Text(
+                          schedule,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: secondary,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            height: 1.1,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 9),
-            Expanded(
-              child: Text(
-                'SDR COM IA · CONFIGURAÇÕES',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: accent,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2.2,
-                  fontSize: 11,
-                ),
-              ),
+            const SizedBox(width: 8),
+            Switch.adaptive(
+              value: s.enabled,
+              activeTrackColor: green,
+              onChanged: _isSaving
+                  ? null
+                  : (v) {
+                      HapticFeedback.selectionClick();
+                      _patch((s) => s.copyWith(enabled: v));
+                    },
             ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 14),
         Text(
-          s.enabled ? 'SDR ativado' : 'SDR desativado',
-          style: theme.textTheme.headlineSmall?.copyWith(
-            fontWeight: FontWeight.w900,
-            color: ThemeHelpers.textColor(context),
-            letterSpacing: -0.6,
-            height: 1.0,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Defina o que o Zezin pode fazer no atendimento ao lead: resposta '
-          'automática, gestão de leads e visitas, comunicação, limites de uso '
-          'e tom de voz.',
-          style: theme.textTheme.bodyMedium?.copyWith(
+          s.enabled
+              ? 'Defina o que o assistente pode fazer no atendimento ao lead: '
+                  'resposta automática, gestão de leads e visitas, comunicação, '
+                  'limites de uso e tom de voz.'
+              : 'Assistente pausado — os leads não recebem resposta automática. '
+                  'Use o interruptor acima para reativar o pré-atendimento.',
+          style: theme.textTheme.bodySmall?.copyWith(
             color: secondary,
-            fontWeight: FontWeight.w600,
-            height: 1.4,
+            fontWeight: FontWeight.w500,
+            height: 1.45,
           ),
         ),
         const SizedBox(height: 16),
         Container(
-          padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
-          decoration: BoxDecoration(
-            color: ThemeHelpers.cardBackgroundColor(context),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: s.enabled
-                  ? green.withValues(alpha: 0.35)
-                  : ThemeHelpers.borderLightColor(context),
-            ),
-            boxShadow: ThemeHelpers.cardShadow(context),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  color: (s.enabled ? green : secondary)
-                      .withValues(alpha: 0.14),
-                ),
-                child: Icon(
-                  s.enabled ? LucideIcons.botMessageSquare : LucideIcons.botOff,
-                  color: s.enabled ? green : secondary,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      s.enabled
-                          ? 'Assistente em operação'
-                          : 'Assistente pausado',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: ThemeHelpers.textColor(context),
-                        letterSpacing: -0.2,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      s.enabled
-                          ? 'O assistente está atuando no pré-atendimento.'
-                          : 'Ative para o assistente começar a responder.',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: secondary,
-                        fontSize: 11,
-                        height: 1.3,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Switch.adaptive(
-                value: s.enabled,
-                activeTrackColor: green,
-                onChanged: _isSaving
-                    ? null
-                    : (v) {
-                        HapticFeedback.selectionClick();
-                        _patch((s) => s.copyWith(enabled: v));
-                      },
-              ),
-            ],
-          ),
+          height: 1,
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
         ),
       ],
+    );
+  }
+
+  /// Chip de estado do agente — tint arredondado, sem dot pulsante.
+  Widget _heroStatusChip(BuildContext context, bool active) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final tone =
+        active ? _green(context) : ThemeHelpers.textSecondaryColor(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: isDark ? 0.16 : 0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: tone.withValues(alpha: 0.38)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            active ? LucideIcons.zap : LucideIcons.pause,
+            size: 10.5,
+            color: tone,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            active ? 'Ativo' : 'Pausado',
+            style: TextStyle(
+              color: tone,
+              fontWeight: FontWeight.w900,
+              fontSize: 10.5,
+              letterSpacing: 0.2,
+              height: 1.0,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1111,8 +1173,8 @@ class _SdrSettingsPageState extends State<SdrSettingsPage> {
     );
   }
 
-  /// Skeleton fiel ao layout: eyebrow, título, card do interruptor mestre e
-  /// seções com linhas de toggle.
+  /// Skeleton fiel ao layout: console do agente (glyph + nome + interruptor),
+  /// texto de apoio e seções com linhas de toggle.
   Widget _buildSkeleton(BuildContext context) {
     return SingleChildScrollView(
       physics: const NeverScrollableScrollPhysics(),
@@ -1122,24 +1184,33 @@ class _SdrSettingsPageState extends State<SdrSettingsPage> {
         children: [
           Row(
             children: const [
-              SkeletonBox(width: 9, height: 9, borderRadius: 999),
-              SizedBox(width: 9),
-              SkeletonText(width: 210, height: 11, borderRadius: 4),
+              SkeletonBox(width: 56, height: 56, borderRadius: 18),
+              SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonText(width: 110, height: 17, borderRadius: 5),
+                    SizedBox(height: 7),
+                    SkeletonText(width: 190, height: 11, borderRadius: 4),
+                    SizedBox(height: 6),
+                    SkeletonText(width: 160, height: 10, borderRadius: 4),
+                  ],
+                ),
+              ),
+              SizedBox(width: 8),
+              SkeletonBox(width: 46, height: 28, borderRadius: 999),
             ],
           ),
-          const SizedBox(height: 12),
-          const SkeletonText(width: 160, height: 26, borderRadius: 8),
-          const SizedBox(height: 8),
+          const SizedBox(height: 16),
           const SkeletonText(width: double.infinity, height: 12, borderRadius: 4),
           const SizedBox(height: 5),
           const SkeletonText(width: 220, height: 12, borderRadius: 4),
-          const SizedBox(height: 16),
-          const SkeletonBox(width: double.infinity, height: 68, borderRadius: 16),
           const SizedBox(height: 26),
           for (var section = 0; section < 3; section++) ...[
             Row(
               children: const [
-                SkeletonBox(width: 7, height: 7, borderRadius: 999),
+                SkeletonBox(width: 14, height: 3, borderRadius: 2),
                 SizedBox(width: 9),
                 SkeletonText(width: 150, height: 11, borderRadius: 4),
               ],
@@ -1175,7 +1246,7 @@ class _SdrSettingsPageState extends State<SdrSettingsPage> {
   }
 }
 
-// ─── Cabeçalho de seção flush (eyebrow + filete) ─────────────────────────────
+// ─── Cabeçalho de seção sóbrio (barra tonal + filete) ────────────────────────
 
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader({
@@ -1200,17 +1271,11 @@ class _SectionHeader extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 7,
-                height: 7,
+                width: 14,
+                height: 2.5,
                 decoration: BoxDecoration(
                   color: tone,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: tone.withValues(alpha: 0.45),
-                      blurRadius: 6,
-                    ),
-                  ],
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
               const SizedBox(width: 9),

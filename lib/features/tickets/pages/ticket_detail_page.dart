@@ -375,37 +375,65 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Eyebrow da categoria.
-        Row(
-          children: [
-            Icon(
-              ticketCategoryIcon(ticket.category),
-              size: 13,
-              color: categoryTone,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              ticket.category.label.toUpperCase(),
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: categoryTone,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1.8,
-                fontSize: 10.5,
+        // Título com filete fino do status — mesma identidade da lista
+        // (barra lateral de 3px), sem eyebrow em caps.
+        IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                width: 3,
+                margin: const EdgeInsets.symmetric(vertical: 2),
+                decoration: BoxDecoration(
+                  color: statusTone,
+                  borderRadius: BorderRadius.circular(999),
+                ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Text(
-          ticket.title,
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w900,
-            color: ThemeHelpers.textColor(context),
-            letterSpacing: -0.5,
-            height: 1.15,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      ticket.title,
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: ThemeHelpers.textColor(context),
+                        letterSpacing: -0.5,
+                        height: 1.15,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Row(
+                      children: [
+                        Icon(
+                          ticketCategoryIcon(ticket.category),
+                          size: 13,
+                          color: categoryTone,
+                        ),
+                        const SizedBox(width: 5),
+                        Flexible(
+                          child: Text(
+                            ticket.category.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: categoryTone,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12,
+                              height: 1.2,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 12),
         Wrap(
           spacing: 6,
           runSpacing: 6,
@@ -666,18 +694,16 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
     final theme = Theme.of(context);
     return Row(
       children: [
+        // Filete curto na cor da seção — ecoa a barra lateral fina da lista.
         Container(
-          width: 6,
-          height: 6,
+          width: 3,
+          height: 12,
           decoration: BoxDecoration(
             color: tone,
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(color: tone.withValues(alpha: 0.5), blurRadius: 6),
-            ],
+            borderRadius: BorderRadius.circular(999),
           ),
         ),
-        const SizedBox(width: 7),
+        const SizedBox(width: 8),
         Text(
           label,
           style: theme.textTheme.labelSmall?.copyWith(
@@ -1034,11 +1060,25 @@ class _TicketDetailPageState extends State<TicketDetailPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SkeletonText(width: 110, height: 11, borderRadius: 999),
-          const SizedBox(height: 12),
-          const SkeletonText(width: double.infinity, height: 24),
-          const SizedBox(height: 6),
-          const SkeletonText(width: 200, height: 24),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: const [
+              SkeletonBox(width: 3, height: 72, borderRadius: 999),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonText(width: double.infinity, height: 24),
+                    SizedBox(height: 6),
+                    SkeletonText(width: 200, height: 24),
+                    SizedBox(height: 8),
+                    SkeletonText(width: 110, height: 12, borderRadius: 999),
+                  ],
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 14),
           Row(
             children: const [

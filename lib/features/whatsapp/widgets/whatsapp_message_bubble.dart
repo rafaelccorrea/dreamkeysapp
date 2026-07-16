@@ -7,14 +7,30 @@ import '../../../core/theme/theme_helpers.dart';
 import '../models/whatsapp_models.dart';
 import 'whatsapp_conversation_card.dart' show whatsAppMessageTypeIcon;
 
-/// Bolha de mensagem do WhatsApp — mesma gramática visual do chat interno
-/// (bolha 18/4, enviada na cor da marca com texto branco, recebida em card),
-/// com as particularidades do WhatsApp: mídia (imagem/áudio/documento),
-/// ticks de status, origem (oficial/QR) e marcação de resposta da IA.
+/// Bolha de mensagem — estilo **WhatsApp para iPhone**:
+/// - enviada em verde suave (verde semântico do tema) com texto de alto
+///   contraste; recebida em superfície neutra que destaca do fundo;
+/// - cantos contínuos assimétricos com "cauda" só na última bolha do grupo;
+/// - horário pequeno dentro da bolha, no canto inferior direito, com ticks
+///   de entrega/leitura nas enviadas;
+/// - agrupamento de mensagens sequenciais do mesmo remetente (margens
+///   menores, autor só na primeira do grupo);
+/// - resposta da IA mantém identidade violeta discreta (rótulo), sem sair da
+///   gramática de bolha verde de saída.
 class WhatsAppMessageBubble extends StatelessWidget {
   final WhatsAppMessage message;
 
-  const WhatsAppMessageBubble({super.key, required this.message});
+  /// Primeira/última bolha de uma sequência do mesmo remetente — controla
+  /// cantos, cauda e o rótulo de autor.
+  final bool isFirstInGroup;
+  final bool isLastInGroup;
+
+  const WhatsAppMessageBubble({
+    super.key,
+    required this.message,
+    this.isFirstInGroup = true,
+    this.isLastInGroup = true,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -22,70 +38,91 @@ class WhatsAppMessageBubble extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     final isOwn = message.isOutbound;
     final isAi = isOwn && message.isAiResponse;
-    final accent =
-        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    final green =
+        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
     final purple =
         isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
 
-    // IA responde "pelo sistema", mas com identidade própria (tint violeta,
-    // texto normal) para o SDR distinguir num relance o que foi automático.
+    // Verde suave sólido (sem translucidez empilhada) para a saída; superfície
+    // neutra clara acima do fundo para a entrada — contraste alto nos 2 temas.
     final Color bubbleColor;
-    final Color textColor;
-    final Color metaColor;
-    if (isAi) {
-      bubbleColor = purple.withValues(alpha: isDark ? 0.16 : 0.1);
-      textColor = ThemeHelpers.textColor(context);
-      metaColor = ThemeHelpers.textSecondaryColor(context);
-    } else if (isOwn) {
-      bubbleColor = accent;
-      textColor = Colors.white;
-      metaColor = Colors.white70;
+    final Color borderColor;
+    if (isOwn) {
+      bubbleColor = isDark
+          ? Color.alphaBlend(
+              green.withValues(alpha: 0.30),
+              AppColors.background.cardBackgroundDarkMode,
+            )
+          : Color.alphaBlend(green.withValues(alpha: 0.16), Colors.white);
+      borderColor = green.withValues(alpha: isDark ? 0.26 : 0.22);
     } else {
-      bubbleColor = ThemeHelpers.cardBackgroundColor(context);
-      textColor = ThemeHelpers.textColor(context);
-      metaColor = ThemeHelpers.textSecondaryColor(context);
+      bubbleColor = isDark
+          ? Color.alphaBlend(
+              Colors.white.withValues(alpha: 0.075),
+              AppColors.background.cardBackgroundDarkMode,
+            )
+          : Colors.white;
+      borderColor = isDark
+          ? Colors.white.withValues(alpha: 0.07)
+          : Colors.black.withValues(alpha: 0.05);
     }
+    final textColor = ThemeHelpers.textColor(context);
+    final metaColor =
+        ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.85);
 
     final text = (message.message ?? '').trim();
 
+    // Cantos contínuos: lado do remetente "fecha" entre bolhas do grupo e a
+    // cauda (canto de 4) aparece só na última.
+    const r = Radius.circular(18);
+    const rMid = Radius.circular(7);
+    const rTail = Radius.circular(4);
+    final radius = isOwn
+        ? BorderRadius.only(
+            topLeft: r,
+            bottomLeft: r,
+            topRight: isFirstInGroup ? r : rMid,
+            bottomRight: isLastInGroup ? rTail : rMid,
+          )
+        : BorderRadius.only(
+            topRight: r,
+            bottomRight: r,
+            topLeft: isFirstInGroup ? r : rMid,
+            bottomLeft: isLastInGroup ? rTail : rMid,
+          );
+
+    final showAiLabel = isAi && isFirstInGroup;
+    final userName = (message.userName ?? '').trim();
+    final showAuthor = !isAi && isOwn && userName.isNotEmpty && isFirstInGroup;
+
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: EdgeInsets.only(bottom: isLastInGroup ? 10 : 2),
       child: Row(
         mainAxisAlignment:
             isOwn ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          if (isOwn) const SizedBox(width: 48),
+          if (isOwn) const SizedBox(width: 52),
           Flexible(
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
               decoration: BoxDecoration(
                 color: bubbleColor,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(18),
-                  topRight: const Radius.circular(18),
-                  bottomLeft: Radius.circular(isOwn ? 18 : 4),
-                  bottomRight: Radius.circular(isOwn ? 4 : 18),
-                ),
-                boxShadow: ThemeHelpers.cardShadow(context, strength: 0.5),
-                border: isOwn && !isAi
+                borderRadius: radius,
+                border: Border.all(color: borderColor, width: 0.8),
+                boxShadow: isDark
                     ? null
-                    : Border.all(
-                        color: isAi
-                            ? purple.withValues(alpha: isDark ? 0.4 : 0.28)
-                            : ThemeHelpers.borderLightColor(context),
-                        width: 0.8,
-                      ),
+                    : ThemeHelpers.cardShadow(context, strength: 0.35),
               ),
               child: Column(
-                crossAxisAlignment:
-                    isOwn ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                // Fim (direita) para o horário assentar no canto da bolha,
+                // como no WhatsApp — o bloco de texto continua lido à esquerda.
+                crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Autor: IA (bot) ou usuário do sistema que enviou.
-                  if (isAi)
+                  if (showAiLabel)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
+                      padding: const EdgeInsets.only(bottom: 3),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -95,7 +132,7 @@ class WhatsAppMessageBubble extends StatelessWidget {
                             'Assistente IA',
                             style: theme.textTheme.labelSmall?.copyWith(
                               color: purple,
-                              fontWeight: FontWeight.w900,
+                              fontWeight: FontWeight.w800,
                               fontSize: 10.5,
                               letterSpacing: 0.2,
                             ),
@@ -103,48 +140,49 @@ class WhatsAppMessageBubble extends StatelessWidget {
                         ],
                       ),
                     )
-                  else if (isOwn && (message.userName ?? '').trim().isNotEmpty)
+                  else if (showAuthor)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 3),
+                      padding: const EdgeInsets.only(bottom: 2),
                       child: Text(
-                        message.userName!.trim(),
+                        userName,
                         style: theme.textTheme.labelSmall?.copyWith(
-                          color: Colors.white70,
+                          color: green,
                           fontWeight: FontWeight.w800,
                           fontSize: 10.5,
+                          letterSpacing: 0.1,
                         ),
                       ),
                     ),
                   if (message.messageType.isMedia) ...[
-                    _buildMedia(context, theme, isOwn, isAi, metaColor),
-                    if (text.isNotEmpty) const SizedBox(height: 7),
+                    _buildMedia(context, theme, metaColor),
+                    if (text.isNotEmpty) const SizedBox(height: 6),
                   ],
                   if (text.isNotEmpty)
                     SelectableText(
                       text,
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: textColor,
-                        height: 1.38,
+                        fontSize: 15,
+                        height: 1.35,
+                        letterSpacing: -0.1,
                       ),
                     ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   _buildMetaRow(context, theme, metaColor, isOwn),
                 ],
               ),
             ),
           ),
-          if (!isOwn) const SizedBox(width: 48),
+          if (!isOwn) const SizedBox(width: 52),
         ],
       ),
     );
   }
 
-  Widget _buildMedia(BuildContext context, ThemeData theme, bool isOwn,
-      bool isAi, Color metaColor) {
+  Widget _buildMedia(BuildContext context, ThemeData theme, Color metaColor) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // Imagem com URL assinada (válida ~1h) — preview clicável não é
-    // necessário aqui; erro cai num placeholder discreto.
+    // Imagem com URL assinada (válida ~1h) — erro cai num placeholder.
     if (message.messageType == WhatsAppMessageType.image &&
         message.mediaUrl != null) {
       return ClipRRect(
@@ -160,8 +198,6 @@ class WhatsAppMessageBubble extends StatelessWidget {
               icon: LucideIcons.image,
               label: 'Imagem indisponível',
               hint: 'O link desta mídia expirou.',
-              isOwn: isOwn,
-              isAi: isAi,
             ),
             loadingBuilder: (context, child, progress) {
               if (progress == null) return child;
@@ -195,8 +231,6 @@ class WhatsAppMessageBubble extends StatelessWidget {
       icon: whatsAppMessageTypeIcon(message.messageType),
       label: message.messageType.label,
       hint: fileName.isNotEmpty ? fileName : 'Abra no painel para visualizar.',
-      isOwn: isOwn,
-      isAi: isAi,
     );
   }
 
@@ -206,18 +240,13 @@ class WhatsAppMessageBubble extends StatelessWidget {
     required IconData icon,
     required String label,
     required String hint,
-    required bool isOwn,
-    required bool isAi,
   }) {
     final theme = Theme.of(context);
-    final solidOwn = isOwn && !isAi;
-    final bg = solidOwn
-        ? Colors.white.withValues(alpha: 0.16)
-        : ThemeHelpers.backgroundColor(context);
-    final border = solidOwn
-        ? Colors.white.withValues(alpha: 0.28)
-        : ThemeHelpers.borderLightColor(context);
-    final fg = solidOwn ? Colors.white : ThemeHelpers.textColor(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final bg = (isDark ? Colors.white : Colors.black)
+        .withValues(alpha: isDark ? 0.07 : 0.045);
+    final border = (isDark ? Colors.white : Colors.black)
+        .withValues(alpha: isDark ? 0.10 : 0.06);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
@@ -229,7 +258,7 @@ class WhatsAppMessageBubble extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 20, color: solidOwn ? Colors.white : metaColor),
+          Icon(icon, size: 20, color: metaColor),
           const SizedBox(width: 9),
           Flexible(
             child: Column(
@@ -239,8 +268,8 @@ class WhatsAppMessageBubble extends StatelessWidget {
                 Text(
                   label,
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: fg,
-                    fontWeight: FontWeight.w800,
+                    color: ThemeHelpers.textColor(context),
+                    fontWeight: FontWeight.w700,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -248,7 +277,7 @@ class WhatsAppMessageBubble extends StatelessWidget {
                 Text(
                   hint,
                   style: theme.textTheme.labelSmall?.copyWith(
-                    color: solidOwn ? Colors.white70 : metaColor,
+                    color: metaColor,
                     fontWeight: FontWeight.w500,
                     fontSize: 10.5,
                   ),
@@ -263,6 +292,7 @@ class WhatsAppMessageBubble extends StatelessWidget {
     );
   }
 
+  /// Horário + ticks no canto inferior direito da bolha (como no WhatsApp).
   Widget _buildMetaRow(
       BuildContext context, ThemeData theme, Color metaColor, bool isOwn) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -272,31 +302,23 @@ class WhatsAppMessageBubble extends StatelessWidget {
     final failed = message.status == WhatsAppMessageStatus.failed;
     final danger =
         isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    final readBlue =
+        isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
 
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Origem da mensagem (oficial × QR) — sinal minúsculo, só quando vem.
-        if (message.integrationSource != WhatsAppIntegrationSource.unknown) ...[
-          Icon(
-            message.integrationSource == WhatsAppIntegrationSource.official
-                ? LucideIcons.badgeCheck
-                : LucideIcons.qrCode,
-            size: 10.5,
-            color: metaColor,
-          ),
-          const SizedBox(width: 4),
-        ],
         Text(
           time,
           style: theme.textTheme.labelSmall?.copyWith(
             color: metaColor,
             fontSize: 10.5,
-            fontWeight: FontWeight.w600,
+            fontWeight: FontWeight.w500,
+            height: 1.2,
           ),
         ),
         if (isOwn) ...[
-          const SizedBox(width: 4),
+          const SizedBox(width: 3.5),
           if (failed)
             Icon(LucideIcons.triangleAlert, size: 12, color: danger)
           else
@@ -306,11 +328,9 @@ class WhatsAppMessageBubble extends StatelessWidget {
                   : message.status == WhatsAppMessageStatus.sent
                       ? LucideIcons.check
                       : LucideIcons.checkCheck,
-              size: 12.5,
+              size: 13,
               color: message.status == WhatsAppMessageStatus.read
-                  ? (isDark
-                      ? AppColors.status.blueDarkMode
-                      : const Color(0xFF7EC8FF))
+                  ? readBlue
                   : metaColor,
             ),
         ],
@@ -330,7 +350,7 @@ class WhatsAppMessageBubble extends StatelessWidget {
   }
 }
 
-/// Separador de dia na thread — chip central discreto.
+/// Separador de dia na thread — chip central discreto (estilo iOS).
 class WhatsAppDaySeparator extends StatelessWidget {
   final DateTime date;
 
@@ -350,24 +370,25 @@ class WhatsAppDaySeparator extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+      padding: const EdgeInsets.symmetric(vertical: 12),
       child: Center(
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 4),
           decoration: BoxDecoration(
-            color: ThemeHelpers.cardBackgroundColor(context)
-                .withValues(alpha: 0.85),
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.07)
+                : Colors.black.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: ThemeHelpers.borderLightColor(context)),
           ),
           child: Text(
             _label,
             style: theme.textTheme.labelSmall?.copyWith(
               color: ThemeHelpers.textSecondaryColor(context),
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w700,
               fontSize: 10.5,
-              letterSpacing: 0.4,
+              letterSpacing: 0.3,
             ),
           ),
         ),

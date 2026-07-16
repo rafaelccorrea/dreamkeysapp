@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/shell_visual_tokens.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/widgets/app_scaffold.dart';
@@ -16,6 +17,8 @@ import '../services/condominium_service.dart';
 import '../widgets/estate_card.dart';
 import '../widgets/estate_filters_sheet.dart';
 import '../widgets/estate_shared.dart';
+
+final _estateIntFormatter = NumberFormat.decimalPattern('pt_BR');
 
 /// Aba de status da listagem (paridade com `filterStatus` do web,
 /// default "Ativos").
@@ -41,10 +44,11 @@ class _TabState {
   }
 }
 
-/// Tela **Condomínios** — porta a `CondominiumsPage` do imobx-front com a
-/// gramática flush do app: hero editorial + ações em pill, busca flush, abas
-/// com sublinhado (Ativos/Inativos/Todos), cards ricos com ações no item e
-/// paginação por "Carregar mais".
+/// Tela **Condomínios** — apresentação na linguagem do portfólio de Imóveis:
+/// hero editorial (ícone gradient + eyebrow + título + subtítulo), busca com
+/// botão de filtros acoplado, CTA primário, métricas clicáveis
+/// (Total/Ativos/Inativos) que comandam as abas com sublinhado, cards row
+/// densos com ações no próprio item e paginação por "Carregar mais".
 class CondominiumsPage extends StatefulWidget {
   const CondominiumsPage({super.key});
 
@@ -53,10 +57,10 @@ class CondominiumsPage extends StatefulWidget {
 }
 
 class _CondominiumsPageState extends State<CondominiumsPage> {
+  static const double _kHeaderPadH = 20;
   static const double _kPagePadH = 16;
   static const double _kPagePadTop = 10;
   static const double _kPagePadBottom = 88;
-  static const double _kSectionGap = 12;
   static const int _pageSize = 20;
 
   static const _tabs = [_CondoTab.active, _CondoTab.inactive, _CondoTab.all];
@@ -224,6 +228,22 @@ class _CondominiumsPageState extends State<CondominiumsPage> {
     });
   }
 
+  void _clearSearch() {
+    _searchDebounce?.cancel();
+    _searchController.clear();
+    if (_appliedSearch.isEmpty) {
+      setState(() {});
+      return;
+    }
+    _appliedSearch = '';
+    _reloadEverything();
+  }
+
+  void _clearFilters() {
+    _filters = const EstateListFilters(limit: _pageSize);
+    _reloadEverything();
+  }
+
   void _openFilters() {
     showModalBottomSheet<void>(
       context: context,
@@ -331,24 +351,21 @@ class _CondominiumsPageState extends State<CondominiumsPage> {
                 children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(
-                        _kPagePadH, _kPagePadTop, _kPagePadH, 0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildHero(context),
-                        const SizedBox(height: 14),
-                        _buildActionsRow(context),
-                        const SizedBox(height: _kSectionGap),
-                        _buildSearchField(context),
-                        const SizedBox(height: _kSectionGap),
-                      ],
-                    ),
+                        _kHeaderPadH, _kPagePadTop, _kHeaderPadH, 14),
+                    child: _buildPortfolioHeader(context),
                   ),
                   _buildTabsRail(context),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(
-                        _kPagePadH, _kSectionGap, _kPagePadH, _kPagePadBottom),
-                    child: _buildActivePanel(context),
+                        _kPagePadH, 14, _kPagePadH, _kPagePadBottom),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildListHeader(context),
+                        const SizedBox(height: 10),
+                        _buildActivePanel(context),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -359,225 +376,214 @@ class _CondominiumsPageState extends State<CondominiumsPage> {
     );
   }
 
-  // ─── Hero ────────────────────────────────────────────────────────────────
+  // ─── Hero (gramática do portfólio de Imóveis) ────────────────────────────
 
-  Widget _buildHero(BuildContext context) {
-    final theme = Theme.of(context);
-    final accent = _accent(context);
-    final textColor = ThemeHelpers.textColor(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final green = EstateTones.green(context);
-    final amber = EstateTones.amber(context);
+  Widget _buildPortfolioHeader(BuildContext context) {
+    final hasSearch = _appliedSearch.trim().isNotEmpty;
+    final hasFilters = _filters.activeCount > 0;
 
-    final total = (_activeCount ?? 0) + (_inactiveCount ?? 0);
-    final loadedCounts = _activeCount != null || _inactiveCount != null;
-    final dot = (_inactiveCount ?? 0) > 0 ? amber : green;
-    final subtitle = !loadedCounts
-        ? 'Carregando o portfólio de condomínios…'
-        : total == 0
-            ? 'Cadastre condomínios para vincular aos imóveis da carteira.'
-            : '${_activeCount ?? 0} ativo${(_activeCount ?? 0) == 1 ? '' : 's'}'
-                ' · ${_inactiveCount ?? 0} inativo${(_inactiveCount ?? 0) == 1 ? '' : 's'}';
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: dot,
-                  boxShadow: [
-                    BoxShadow(
-                      color: dot.withValues(alpha: 0.55),
-                      blurRadius: 8,
-                      spreadRadius: 1,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 9),
-              Text(
-                'CONDOMÍNIOS',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: accent,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2.2,
-                  fontSize: 11,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                loadedCounts ? '$total' : '—',
-                style: theme.textTheme.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: textColor,
-                  height: 1.0,
-                  letterSpacing: -1.0,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 5),
-                child: Text(
-                  total == 1 ? 'condomínio' : 'condomínios',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: secondary,
-                    fontWeight: FontWeight.w800,
-                    height: 1.0,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            subtitle,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: secondary,
-              fontWeight: FontWeight.w600,
-              height: 1.4,
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            _heroLeadingIcon(context),
+            const SizedBox(width: 12),
+            Expanded(child: _heroTitleBlock(context, hasSearch)),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(child: _buildSearchField(context)),
+            const SizedBox(width: 10),
+            _buildHeroFilterButton(context, hasFilters),
+          ],
+        ),
+        if (_canCreate) ...[
+          const SizedBox(height: 12),
+          _buildPrimaryCta(
+            context,
+            icon: LucideIcons.plus,
+            label: 'Novo condomínio',
+            onTap: _goToCreate,
           ),
         ],
-      ),
+        const SizedBox(height: 14),
+        _buildMetricsRow(context),
+        if (hasSearch || hasFilters) ...[
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (hasSearch)
+                _buildActiveContextChip(
+                  context,
+                  LucideIcons.search,
+                  _appliedSearch,
+                  onClear: _clearSearch,
+                ),
+              if (hasFilters)
+                _buildActiveContextChip(
+                  context,
+                  LucideIcons.slidersHorizontal,
+                  'Filtros aplicados',
+                  onClear: _clearFilters,
+                ),
+            ],
+          ),
+        ],
+      ],
     );
   }
 
-  /// Pills de ação — Novo condomínio (gated por create) + Filtros com badge.
-  Widget _buildActionsRow(BuildContext context) {
+  Widget _heroLeadingIcon(BuildContext context) {
     final accent = _accent(context);
-    final filtersActive = _filters.activeCount;
-    return Row(
-      children: [
-        if (_canCreate) ...[
-          FilledButton.icon(
-            onPressed: _goToCreate,
-            icon: const Icon(LucideIcons.plus, size: 16),
-            label: const Text('Novo condomínio'),
-            style: FilledButton.styleFrom(
-              backgroundColor: accent,
-              foregroundColor: Colors.white,
-              elevation: 0,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              textStyle: const TextStyle(
-                fontWeight: FontWeight.w800,
-                fontSize: 13,
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(999),
-              ),
-            ),
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final deep = HSLColor.fromColor(accent)
+        .withLightness(
+            (HSLColor.fromColor(accent).lightness * 0.72).clamp(0.0, 1.0))
+        .toColor();
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [accent, deep],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: isDark
+                ? accent.withValues(alpha: 0.30)
+                : Colors.black.withValues(alpha: 0.12),
+            blurRadius: isDark ? 14 : 10,
+            offset: Offset(0, isDark ? 8 : 5),
           ),
-          const SizedBox(width: 8),
         ],
-        OutlinedButton.icon(
-          onPressed: _openFilters,
-          icon: const Icon(LucideIcons.slidersHorizontal, size: 15),
-          label: Text(filtersActive == 0 ? 'Filtros' : 'Filtros ($filtersActive)'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: filtersActive > 0
-                ? accent
-                : ThemeHelpers.textSecondaryColor(context),
-            side: BorderSide(
-              color: filtersActive > 0
-                  ? accent.withValues(alpha: 0.55)
-                  : ThemeHelpers.borderColor(context),
-              width: filtersActive > 0 ? 1.3 : 1,
+      ),
+      child: const Icon(LucideIcons.building2, color: Colors.white, size: 20),
+    );
+  }
+
+  Widget _heroTitleBlock(BuildContext context, bool hasSearch) {
+    final theme = Theme.of(context);
+    final accent = _accent(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            textStyle:
-                const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(999),
+            const SizedBox(width: 7),
+            Text(
+              hasSearch ? 'CONDOMÍNIOS · BUSCA' : 'CONDOMÍNIOS · PORTFÓLIO',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: accent,
+                letterSpacing: 1.4,
+                fontWeight: FontWeight.w900,
+                fontSize: 10.5,
+              ),
             ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          hasSearch ? 'Resultados da busca' : 'Portfólio de condomínios',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.4,
+            height: 1.05,
+            color: ThemeHelpers.textColor(context),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          'Gerencie e vincule condomínios aos imóveis.',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: ThemeHelpers.textSecondaryColor(context),
+            fontWeight: FontWeight.w600,
           ),
         ),
       ],
     );
   }
 
-  // ─── Busca flush ─────────────────────────────────────────────────────────
+  // ─── Busca (peso visual da tela de Imóveis) ──────────────────────────────
 
   Widget _buildSearchField(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final accent = _accent(context);
-    final textColor = ThemeHelpers.textColor(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final cardColor = ThemeHelpers.cardBackgroundColor(context);
-    final borderColor = isDark
-        ? Colors.white.withValues(alpha: 0.08)
-        : Colors.black.withValues(alpha: 0.06);
-    final hasText = _searchController.text.isNotEmpty;
+    final hasText = _searchController.text.trim().isNotEmpty;
     final showAccent = _searchFocused || hasText;
+    final fieldFill = isDark
+        ? AppColors.background.backgroundTertiaryDarkMode
+        : AppColors.background.backgroundTertiary;
 
     return Focus(
       onFocusChange: (f) => setState(() => _searchFocused = f),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeOutCubic,
-        height: 50,
         decoration: BoxDecoration(
-          color: cardColor,
           borderRadius: BorderRadius.circular(14),
+          color: hasText
+              ? Color.alphaBlend(
+                  accent.withValues(alpha: isDark ? 0.08 : 0.04),
+                  fieldFill,
+                )
+              : fieldFill,
           border: Border.all(
             color: showAccent
-                ? accent.withValues(alpha: isDark ? 0.5 : 0.42)
-                : borderColor,
+                ? accent.withValues(alpha: isDark ? 0.50 : 0.38)
+                : ThemeHelpers.borderLightColor(context),
             width: showAccent ? 1.4 : 1,
           ),
-          boxShadow: showAccent
-              ? [
-                  BoxShadow(
-                    color: accent.withValues(alpha: isDark ? 0.18 : 0.12),
-                    blurRadius: 14,
-                    offset: const Offset(0, 5),
-                    spreadRadius: -4,
-                  ),
-                ]
-              : null,
         ),
         child: Row(
           children: [
             const SizedBox(width: 14),
-            Icon(LucideIcons.search,
-                size: 18, color: showAccent ? accent : secondary),
+            Icon(
+              Icons.search_rounded,
+              size: 21,
+              color: showAccent
+                  ? accent
+                  : ThemeHelpers.textSecondaryColor(context),
+            ),
             const SizedBox(width: 10),
             Expanded(
               child: TextField(
                 controller: _searchController,
                 textInputAction: TextInputAction.search,
                 cursorColor: accent,
-                style: TextStyle(
-                  color: textColor,
-                  fontSize: 14.5,
+                style: theme.textTheme.bodyMedium?.copyWith(
                   fontWeight: FontWeight.w700,
-                  letterSpacing: -0.1,
+                  height: 1.2,
                 ),
                 decoration: InputDecoration(
                   hintText: 'Buscar por nome, endereço, cidade…',
-                  hintStyle: TextStyle(
-                    color: secondary.withValues(alpha: 0.75),
+                  hintStyle: theme.textTheme.bodySmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
                     fontWeight: FontWeight.w500,
-                    fontSize: 13.5,
                   ),
-                  filled: false,
                   border: InputBorder.none,
                   enabledBorder: InputBorder.none,
                   focusedBorder: InputBorder.none,
-                  contentPadding: EdgeInsets.zero,
                   isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 13),
                 ),
                 onChanged: (v) {
                   _onSearchChanged(v);
@@ -586,26 +592,241 @@ class _CondominiumsPageState extends State<CondominiumsPage> {
               ),
             ),
             if (hasText)
-              InkResponse(
-                radius: 18,
-                onTap: () {
-                  _searchController.clear();
-                  _onSearchChanged('');
-                  setState(() {});
-                },
-                child: Padding(
-                  padding: const EdgeInsets.all(6),
-                  child: Icon(LucideIcons.x, size: 15, color: secondary),
+              IconButton(
+                icon: Icon(
+                  Icons.clear_rounded,
+                  size: 18,
+                  color: ThemeHelpers.textSecondaryColor(context),
                 ),
-              ),
-            const SizedBox(width: 8),
+                visualDensity: VisualDensity.compact,
+                tooltip: 'Limpar busca',
+                onPressed: _clearSearch,
+              )
+            else
+              const SizedBox(width: 4),
           ],
         ),
       ),
     );
   }
 
-  // ─── Abas ────────────────────────────────────────────────────────────────
+  /// Botão de filtros colado na busca — quadrado, com dot quando há filtro.
+  Widget _buildHeroFilterButton(BuildContext context, bool active) {
+    final accent = _accent(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final iconColor =
+        active ? accent : ThemeHelpers.textSecondaryColor(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _openFilters,
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: active
+                ? accent.withValues(alpha: isDark ? 0.16 : 0.09)
+                : ShellVisualTokens.dashboardGlassFill(context),
+            border: Border.all(
+              color: active
+                  ? accent.withValues(alpha: 0.5)
+                  : ShellVisualTokens.dashboardGlassBorder(context),
+              width: active ? 1.4 : 1,
+            ),
+          ),
+          child: Stack(
+            children: [
+              Center(
+                child: Icon(Icons.tune_rounded, size: 21, color: iconColor),
+              ),
+              if (active)
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: Container(
+                    width: 7,
+                    height: 7,
+                    decoration:
+                        BoxDecoration(color: accent, shape: BoxShape.circle),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// CTA primário full-width — mesma pegada do "Novo imóvel".
+  Widget _buildPrimaryCta(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    final accent = _accent(context);
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: accent,
+          border: Border.all(color: accent),
+          boxShadow: [
+            BoxShadow(
+              color: accent.withValues(alpha: 0.28),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+              spreadRadius: -4,
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 18, color: Colors.white),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+                fontSize: 13.25,
+                height: 1.15,
+                letterSpacing: -0.1,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── Métricas clicáveis (Total/Ativos/Inativos) ──────────────────────────
+
+  Widget _buildMetricsRow(BuildContext context) {
+    final theme = Theme.of(context);
+    final accent = _accent(context);
+    final total = (_activeCount == null && _inactiveCount == null)
+        ? null
+        : (_activeCount ?? 0) + (_inactiveCount ?? 0);
+
+    String fmt(int? v) => v == null ? '—' : _estateIntFormatter.format(v);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Icon(LucideIcons.chartNoAxesColumn, size: 14, color: accent),
+            const SizedBox(width: 6),
+            Text(
+              'VISÃO DA CARTEIRA',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: accent,
+                letterSpacing: 1.65,
+                fontWeight: FontWeight.w900,
+                fontSize: 10.5,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Expanded(
+              child: EstateStatTile(
+                label: 'Total',
+                value: fmt(total),
+                icon: LucideIcons.building2,
+                accent: accent,
+                selected: _activeTab == _CondoTab.all,
+                onTap: () => _selectTab(_CondoTab.all),
+              ),
+            ),
+            Expanded(
+              child: EstateStatTile(
+                label: 'Ativos',
+                value: fmt(_activeCount),
+                icon: LucideIcons.circleCheckBig,
+                accent: EstateTones.green(context),
+                selected: _activeTab == _CondoTab.active,
+                onTap: () => _selectTab(_CondoTab.active),
+              ),
+            ),
+            Expanded(
+              child: EstateStatTile(
+                label: 'Inativos',
+                value: fmt(_inactiveCount),
+                icon: LucideIcons.circleOff,
+                accent: EstateTones.amber(context),
+                selected: _activeTab == _CondoTab.inactive,
+                onTap: () => _selectTab(_CondoTab.inactive),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActiveContextChip(
+    BuildContext context,
+    IconData icon,
+    String label, {
+    VoidCallback? onClear,
+  }) {
+    final theme = Theme.of(context);
+    final accent = _accent(context);
+    final chipMaxW =
+        (MediaQuery.sizeOf(context).width * 0.52).clamp(96.0, 220.0);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: accent.withValues(alpha: 0.22)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: accent),
+          const SizedBox(width: 8),
+          ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: chipMaxW),
+            child: Text(
+              label,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: ThemeHelpers.textColor(context),
+                fontWeight: FontWeight.w700,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (onClear != null) ...[
+            const SizedBox(width: 4),
+            InkWell(
+              onTap: onClear,
+              borderRadius: BorderRadius.circular(10),
+              child: const Padding(
+                padding: EdgeInsets.all(2),
+                child: Icon(Icons.close_rounded, size: 14),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ─── Abas (sublinhado — escopo da carteira) ──────────────────────────────
 
   int? _tabCount(_CondoTab tab) {
     switch (tab) {
@@ -678,7 +899,45 @@ class _CondominiumsPageState extends State<CondominiumsPage> {
     );
   }
 
-  // ─── Painel ──────────────────────────────────────────────────────────────
+  // ─── Listagem ────────────────────────────────────────────────────────────
+
+  /// Eyebrow "LISTAGEM · N carregados · pg X/Y" — contexto entre as abas
+  /// e a lista, igual à tela de Imóveis.
+  Widget _buildListHeader(BuildContext context) {
+    final theme = Theme.of(context);
+    final accent = _accent(context);
+    final st = _state[_activeTab]!;
+    final n = st.items.length;
+    return Row(
+      children: [
+        Icon(Icons.view_list_rounded, size: 14, color: accent),
+        const SizedBox(width: 6),
+        Text(
+          'LISTAGEM',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: accent,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.65,
+            fontSize: 10.5,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            '· $n condomínio${n == 1 ? "" : "s"} carregado${n == 1 ? "" : "s"}'
+            '${st.totalPages > 1 ? " · pg ${st.page}/${st.totalPages}" : ""}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: ThemeHelpers.textSecondaryColor(context),
+              fontWeight: FontWeight.w700,
+              fontSize: 11,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
   Widget _buildActivePanel(BuildContext context) {
     final st = _state[_activeTab]!;
@@ -686,7 +945,7 @@ class _CondominiumsPageState extends State<CondominiumsPage> {
     if (st.loading && st.items.isEmpty) {
       child = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: List.generate(4, (_) => const EstateCardSkeleton()),
+        children: List.generate(5, (_) => const EstateCardSkeleton()),
       );
     } else if (st.error != null && st.items.isEmpty) {
       child = EstateErrorState(
@@ -713,25 +972,29 @@ class _CondominiumsPageState extends State<CondominiumsPage> {
     var animIndex = 0;
     for (final c in st.items) {
       nodes.add(
-        EstateCard(
-          name: c.name,
-          imageUrl: c.mainImageUrl,
-          photoCount: c.activeImages.length,
-          isActive: c.isActive,
-          locationLine: c.cityState,
-          zipCode: c.zipCode,
-          description: c.description,
-          updatedAt: c.updatedAt,
-          fallbackIcon: LucideIcons.building2,
-          accent: _accent(context),
-          chips: _chipsFor(c),
-          onTap: () => _showDetail(c),
-          onEdit: _canEdit ? () => _goToEdit(c) : null,
-          onDelete: _canDelete ? () => _confirmDelete(c) : null,
-        ).animate(key: ValueKey('condo-${c.id}')).fadeIn(
-              delay: Duration(milliseconds: 30 * (animIndex++).clamp(0, 12)),
-              duration: 220.ms,
-            ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: EstateCard(
+            name: c.name,
+            imageUrl: c.mainImageUrl,
+            photoCount: c.activeImages.length,
+            isActive: c.isActive,
+            typeIcon: LucideIcons.building2,
+            typeLabel: 'Condomínio',
+            hasCnpj: (c.cnpj ?? '').trim().isNotEmpty,
+            addressLine: c.fullAddressLine,
+            cityLine: c.cityState,
+            specs: _specsFor(c),
+            footerPill: _completenessPill(c),
+            fallbackIcon: LucideIcons.building2,
+            accent: _accent(context),
+            onTap: () => _showDetail(c),
+            onMenu: () => _showQuickActions(c),
+          ).animate(key: ValueKey('condo-${c.id}')).fadeIn(
+                delay: Duration(milliseconds: 30 * (animIndex++).clamp(0, 12)),
+                duration: 220.ms,
+              ),
+        ),
       );
     }
 
@@ -765,34 +1028,84 @@ class _CondominiumsPageState extends State<CondominiumsPage> {
       );
     }
 
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: nodes);
+    return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch, children: nodes);
   }
 
-  List<EstateCardChip> _chipsFor(Condominium c) {
+  /// Bits informativos do row — CEP, site e última atualização.
+  List<EstateSpecBit> _specsFor(Condominium c) {
+    final bits = <EstateSpecBit>[];
+    if (c.zipCode.trim().isNotEmpty) {
+      bits.add(EstateSpecBit(
+        icon: LucideIcons.mapPinned,
+        label: 'CEP ${c.zipCode.trim()}',
+      ));
+    }
+    final host = websiteHost(c.website);
+    if (host.isNotEmpty) {
+      bits.add(EstateSpecBit(icon: LucideIcons.globe, label: host));
+    }
+    if (c.updatedAt != null) {
+      bits.add(EstateSpecBit(
+        icon: LucideIcons.history,
+        label: DateFormat('dd/MM/yyyy', 'pt_BR').format(c.updatedAt!.toLocal()),
+      ));
+    }
+    return bits;
+  }
+
+  /// Pill de completude do cadastro — cor por significado (verde ≥75,
+  /// âmbar ≥45, neutro abaixo).
+  EstateCardChip _completenessPill(Condominium c) {
     final pct = c.completenessPct;
-    return [
-      if ((c.cnpj ?? '').trim().isNotEmpty)
-        EstateCardChip(
-          icon: LucideIcons.landmark,
-          label: 'CNPJ',
-          tone: (ctx) => ThemeHelpers.textSecondaryColor(ctx),
+    return EstateCardChip(
+      icon: LucideIcons.chartNoAxesColumn,
+      label: '$pct%',
+      tone: pct >= 75
+          ? EstateTones.green
+          : pct >= 45
+              ? EstateTones.amber
+              : (ctx) => ThemeHelpers.textSecondaryColor(ctx),
+    );
+  }
+
+  /// Ações no próprio item — kebab/long-press abre o sheet de ações rápidas
+  /// (mesma gramática do menu contextual do card de imóvel).
+  void _showQuickActions(Condominium c) {
+    EstateQuickActionsSheet.show(
+      context,
+      accent: _accent(context),
+      title: c.name,
+      meta: [c.fullAddressLine, c.cityState]
+          .where((s) => s.trim().isNotEmpty)
+          .join(' · '),
+      actions: [
+        EstateQuickAction(
+          icon: LucideIcons.layoutGrid,
+          label: 'Ver ficha completa',
+          subtitle: 'Endereço, contato, fotos e auditoria',
+          color: const Color(0xFF0891B2),
+          onTap: () => _showDetail(c),
         ),
-      if ((c.website ?? '').trim().isNotEmpty)
-        EstateCardChip(
-          icon: LucideIcons.globe,
-          label: 'Site',
-          tone: EstateTones.amber,
-        ),
-      EstateCardChip(
-        icon: LucideIcons.chartNoAxesColumn,
-        label: '$pct% completo',
-        tone: pct >= 75
-            ? EstateTones.green
-            : pct >= 45
-                ? EstateTones.amber
-                : (ctx) => ThemeHelpers.textSecondaryColor(ctx),
-      ),
-    ];
+        if (_canEdit)
+          EstateQuickAction(
+            icon: LucideIcons.pencil,
+            label: 'Editar condomínio',
+            subtitle: 'Dados, endereço e galeria',
+            color: const Color(0xFF6366F1),
+            onTap: () => _goToEdit(c),
+          ),
+        if (_canDelete)
+          EstateQuickAction(
+            icon: LucideIcons.trash2,
+            label: 'Excluir permanentemente',
+            subtitle: 'Remove o condomínio da base da empresa',
+            color: EstateTones.danger(context),
+            destructive: true,
+            onTap: () => _confirmDelete(c),
+          ),
+      ],
+    );
   }
 
   Widget _buildEmpty(BuildContext context, _CondoTab tab) {

@@ -16,10 +16,11 @@ import '../widgets/collection_filters_sheet.dart';
 import '../widgets/collection_message_card.dart';
 
 /// Tela **Régua de Cobrança** (`/collection`) — paridade com a
-/// `CollectionPage.tsx` do imobx-front, no DNA do app: hero editorial com
-/// KPIs (taxa de sucesso, lidas, falhas), distribuição por canal, busca +
-/// filtros flush, abas com sublinhado por situação da mensagem e ações do
-/// gestor no próprio fluxo (processar cobranças / configurar réguas).
+/// `CollectionPage.tsx` do imobx-front, no DNA do app: a própria régua como
+/// hero (linha do tempo Enviada → Entregue → Lida, com desvio de Falhas),
+/// medidor de taxa de sucesso, distribuição por canal, busca + filtros flush,
+/// abas com sublinhado por situação da mensagem e ações do gestor no próprio
+/// fluxo (processar cobranças / configurar réguas).
 class CollectionPage extends StatefulWidget {
   const CollectionPage({super.key});
 
@@ -326,7 +327,12 @@ class _CollectionPageState extends State<CollectionPage> {
     );
   }
 
-  // ─── Hero editorial ──────────────────────────────────────────────────────
+  // ─── Hero: a régua como linha do tempo ───────────────────────────────────
+  //
+  // A identidade desta tela é a própria régua: estações Enviada → Entregue →
+  // Lida conectadas por um trilho, com o desvio de Falhas ao final, e um
+  // medidor de taxa de sucesso logo abaixo. Sem número gigante nem fileira
+  // de KPIs sublinhados.
 
   Widget _buildHero(BuildContext context) {
     final theme = Theme.of(context);
@@ -334,22 +340,16 @@ class _CollectionPageState extends State<CollectionPage> {
     final accent = _accentColor(context);
     final textColor = ThemeHelpers.textColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final emerald =
-        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
-    final blue = isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
     final danger =
         isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
 
     final total = _stats.total;
     final hasFailures = _stats.failed > 0;
-    final dot = hasFailures ? danger : emerald;
-    final ratePct = (_stats.successRate * 100).clamp(0, 100);
     final subtitle = total == 0
         ? 'As cobranças enviadas pela régua aparecem aqui.'
         : hasFailures
-            ? '${_stats.failed} falha${_stats.failed == 1 ? '' : 's'} de envio · '
-                '${_fmtPct(ratePct.toDouble())} de sucesso'
-            : '${_fmtPct(ratePct.toDouble())} de sucesso — nenhuma falha de envio.';
+            ? '${_stats.failed} falha${_stats.failed == 1 ? '' : 's'} de envio para revisar.'
+            : 'Todos os envios da régua saíram sem problemas.';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(0, 4, 0, 0),
@@ -357,73 +357,69 @@ class _CollectionPageState extends State<CollectionPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: dot,
-                  boxShadow: [
-                    BoxShadow(
-                      color: dot.withValues(alpha: 0.55),
-                      blurRadius: 8,
-                      spreadRadius: 1,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Régua de cobrança',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: textColor,
+                        letterSpacing: -0.5,
+                        height: 1.05,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: hasFailures && !_statsLoading
+                            ? danger
+                            : secondary,
+                        fontWeight: FontWeight.w600,
+                        height: 1.35,
+                      ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 9),
-              Text(
-                'RÉGUA DE COBRANÇA',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: accent,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2.2,
-                  fontSize: 11,
+              const SizedBox(width: 10),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  color: accent.withValues(alpha: isDark ? 0.16 : 0.08),
+                  border: Border.all(color: accent.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(LucideIcons.send, size: 12, color: accent),
+                    const SizedBox(width: 5),
+                    Text(
+                      _statsLoading
+                          ? '—'
+                          : '$total envio${total == 1 ? '' : 's'}',
+                      style: TextStyle(
+                        color: accent,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 11.5,
+                        letterSpacing: -0.1,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '$total',
-                style: theme.textTheme.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: textColor,
-                  height: 1.0,
-                  letterSpacing: -1.0,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 5),
-                child: Text(
-                  total == 1 ? 'cobrança enviada' : 'cobranças enviadas',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: secondary,
-                    fontWeight: FontWeight.w800,
-                    height: 1.0,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            subtitle,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: secondary,
-              fontWeight: FontWeight.w600,
-              height: 1.4,
-            ),
           ),
           const SizedBox(height: 18),
-          _buildKpiStrip(context, emerald, blue, danger),
+          _buildJourney(context),
+          const SizedBox(height: 16),
+          _buildSuccessMeter(context),
           const SizedBox(height: 14),
           _buildChannelStrip(context),
           const SizedBox(height: 12),
@@ -456,123 +452,145 @@ class _CollectionPageState extends State<CollectionPage> {
     return '$s%';
   }
 
-  Widget _buildKpiStrip(
-      BuildContext context, Color emerald, Color blue, Color danger) {
-    final divider = ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
-    final ratePct = (_stats.successRate * 100).clamp(0, 100).toDouble();
-    final blocks = <Widget>[
-      _heroKpiBlock(
-        context,
-        LucideIcons.circleCheckBig,
-        'SUCESSO',
-        _fmtPct(ratePct),
-        '${_stats.successCount} enviada${_stats.successCount == 1 ? '' : 's'}',
-        emerald,
-      ),
-      _heroKpiBlock(
-        context,
-        LucideIcons.mailCheck,
-        'LIDAS',
-        '${_stats.read}',
-        'pelo destinatário',
-        blue,
-      ),
-      _heroKpiBlock(
-        context,
-        LucideIcons.circleAlert,
-        'FALHAS',
-        '${_stats.failed}',
-        _stats.failed == 0 ? 'nenhuma falha' : 'para revisar',
-        danger,
-      ),
-    ];
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (var i = 0; i < blocks.length; i++) ...[
-            if (i > 0)
-              Container(
-                width: 1,
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                color: divider,
+  /// Linha do tempo da régua — estações conectadas por um trilho, com o
+  /// desvio de Falhas separado por um divisor vertical.
+  Widget _buildJourney(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final blue = isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
+    final emerald =
+        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
+    final purple =
+        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
+    final danger =
+        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+
+    // Trilho entre estações — alinhado ao centro do círculo (38px / 2).
+    Widget rail(Color from, Color to) => Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(top: 18),
+            child: Container(
+              height: 2,
+              margin: const EdgeInsets.symmetric(horizontal: 6),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(2),
+                gradient: LinearGradient(
+                  colors: [
+                    from.withValues(alpha: 0.5),
+                    to.withValues(alpha: 0.5),
+                  ],
+                ),
               ),
-            Expanded(child: blocks[i]),
-          ],
-        ],
-      ),
+            ),
+          ),
+        );
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _JourneyStation(
+          icon: LucideIcons.send,
+          label: 'ENVIADAS',
+          count: _statsLoading ? null : _stats.sent,
+          tone: blue,
+        ),
+        rail(blue, emerald),
+        _JourneyStation(
+          icon: LucideIcons.mailCheck,
+          label: 'ENTREGUES',
+          count: _statsLoading ? null : _stats.delivered,
+          tone: emerald,
+        ),
+        rail(emerald, purple),
+        _JourneyStation(
+          icon: LucideIcons.mailOpen,
+          label: 'LIDAS',
+          count: _statsLoading ? null : _stats.read,
+          tone: purple,
+        ),
+        Container(
+          width: 1,
+          height: 52,
+          margin: const EdgeInsets.symmetric(horizontal: 10),
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+        ),
+        _JourneyStation(
+          icon: LucideIcons.circleAlert,
+          label: 'FALHAS',
+          count: _statsLoading ? null : _stats.failed,
+          tone: danger,
+          dimWhenZero: true,
+        ),
+      ],
     );
   }
 
-  Widget _heroKpiBlock(BuildContext context, IconData icon, String label,
-      String value, String sub, Color tone) {
+  /// Medidor da taxa de sucesso da régua — rótulo, barra fina e percentual.
+  Widget _buildSuccessMeter(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 11, color: tone),
-              const SizedBox(width: 5),
-              Flexible(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w900,
-                    color: tone,
-                    letterSpacing: 1.2,
-                    height: 1.0,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+    final emerald =
+        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
+    final frac =
+        _statsLoading ? 0.0 : _stats.successRate.clamp(0.0, 1.0).toDouble();
+    final pct = (_stats.successRate * 100).clamp(0, 100).toDouble();
+
+    return Row(
+      children: [
+        Text(
+          'TAXA DE SUCESSO',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: secondary,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.4,
+            fontSize: 9.5,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(99),
+            child: SizedBox(
+              height: 6,
+              child: LayoutBuilder(
+                builder: (context, c) => Stack(
+                  children: [
+                    Container(
+                      color: ThemeHelpers.borderColor(context)
+                          .withValues(alpha: 0.4),
+                    ),
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 500),
+                      curve: Curves.easeOutCubic,
+                      width: c.maxWidth * frac,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(99),
+                        gradient: LinearGradient(
+                          colors: [
+                            emerald.withValues(alpha: 0.7),
+                            emerald,
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              _statsLoading ? '—' : value,
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: tone,
-                letterSpacing: -0.6,
-                height: 1.0,
-                fontSize: 22,
-              ),
             ),
           ),
-          const SizedBox(height: 5),
-          Text(
-            sub,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: secondary,
-              height: 1.0,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+        ),
+        const SizedBox(width: 10),
+        Text(
+          _statsLoading ? '—' : _fmtPct(pct),
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: emerald,
+            fontWeight: FontWeight.w900,
+            fontSize: 12,
+            letterSpacing: -0.2,
+            fontFeatures: const [FontFeature.tabularFigures()],
           ),
-          const SizedBox(height: 7),
-          Container(
-            height: 2,
-            width: 18,
-            decoration: BoxDecoration(
-              color: tone,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -1229,6 +1247,76 @@ class _CollectionPageState extends State<CollectionPage> {
       backgroundColor: Colors.transparent,
       barrierColor: Colors.black.withValues(alpha: 0.55),
       builder: (ctx) => _MessageDetailSheet(message: m),
+    );
+  }
+}
+
+// ─── Estação da linha do tempo (hero) ────────────────────────────────────────
+
+/// Uma estação da régua: círculo tonal com ícone, contagem tabular e rótulo.
+/// `count == null` indica carregamento (“—”). Com [dimWhenZero], a estação
+/// fica discreta quando não há ocorrências (ex.: nenhuma falha).
+class _JourneyStation extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final int? count;
+  final Color tone;
+  final bool dimWhenZero;
+
+  const _JourneyStation({
+    required this.icon,
+    required this.label,
+    required this.count,
+    required this.tone,
+    this.dimWhenZero = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final dim = dimWhenZero && count == 0;
+    final fg = dim ? tone.withValues(alpha: 0.45) : tone;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: fg.withValues(alpha: isDark ? 0.16 : 0.1),
+            border: Border.all(color: fg.withValues(alpha: 0.35)),
+          ),
+          child: Icon(icon, size: 16, color: fg),
+        ),
+        const SizedBox(height: 7),
+        Text(
+          count == null ? '—' : '$count',
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w900,
+            color: dim ? ThemeHelpers.textSecondaryColor(context) : fg,
+            letterSpacing: -0.4,
+            height: 1.0,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 8.5,
+            fontWeight: FontWeight.w900,
+            color: dim
+                ? ThemeHelpers.textSecondaryColor(context)
+                    .withValues(alpha: 0.7)
+                : fg,
+            letterSpacing: 1.1,
+            height: 1.0,
+          ),
+        ),
+      ],
     );
   }
 }

@@ -12,7 +12,7 @@ import '../models/visit_report_access.dart';
 import '../models/visit_report_model.dart';
 import '../services/visit_report_service.dart';
 import '../widgets/visit_report_card.dart'
-    show visitStatusColor, visitStatusIcon;
+    show VisitDateLeaf, visitStatusColor;
 import '../widgets/visit_signature_link_sheet.dart';
 
 /// Detalhe do **relatório de visita** — seções read-rich (assinatura, imóveis
@@ -253,11 +253,11 @@ class _VisitReportDetailPageState extends State<VisitReportDetailPage> {
 
   Widget _buildContent(BuildContext context, VisitReport r) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final tone = visitStatusColor(context, r.signatureStatus);
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final dateFmt = DateFormat('dd/MM/yyyy', 'pt_BR');
     final dateTimeFmt = DateFormat("dd/MM/yyyy 'às' HH:mm", 'pt_BR');
+    final longDateFmt = DateFormat("EEEE, d 'de' MMMM 'de' y", 'pt_BR');
 
     return SingleChildScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -269,17 +269,9 @@ class _VisitReportDetailPageState extends State<VisitReportDetailPage> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(15),
-                  color: tone.withValues(alpha: isDark ? 0.16 : 0.1),
-                  border: Border.all(color: tone.withValues(alpha: 0.3)),
-                ),
-                child: Icon(visitStatusIcon(r.signatureStatus),
-                    color: tone, size: 25),
-              ),
+              // Folhinha da data da visita — mesma identidade de agenda da
+              // listagem (status fica na pill e no painel de assinatura).
+              VisitDateLeaf(date: r.visitDate, tone: _accent, width: 54),
               const SizedBox(width: 13),
               Expanded(
                 child: Column(
@@ -319,13 +311,17 @@ class _VisitReportDetailPageState extends State<VisitReportDetailPage> {
               children: [
                 Icon(LucideIcons.calendarDays, size: 13, color: secondary),
                 const SizedBox(width: 6),
-                Text(
-                  r.visitDate != null
-                      ? 'Visita em ${dateFmt.format(r.visitDate!)}'
-                      : 'Data da visita não informada',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: secondary,
-                    fontWeight: FontWeight.w700,
+                Expanded(
+                  child: Text(
+                    r.visitDate != null
+                        ? 'Visita em ${longDateFmt.format(r.visitDate!)}'
+                        : 'Data da visita não informada',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: secondary,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ],
@@ -724,7 +720,7 @@ class _VisitReportDetailPageState extends State<VisitReportDetailPage> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SkeletonBox(width: 52, height: 52, borderRadius: 15),
+              SkeletonBox(width: 54, height: 62, borderRadius: 14),
               const SizedBox(width: 13),
               Expanded(
                 child: Column(

@@ -5,9 +5,11 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../models/ticket_models.dart';
 
-/// Item da lista de tickets — **linha flush** (sem card/sombra), mesmo DNA
-/// das listas de comissões/chaves: glyph tonal da categoria, status + título +
-/// resumo no meio, prioridade e data à direita. Toca para abrir o detalhe.
+/// Item da lista de tickets — linha SÓBRIA e flush: indicador lateral FINO
+/// (3px) na cor do status, tipografia protagonista (título primeiro) e
+/// metadados neutros em texto puro. A cor só aparece onde tem significado:
+/// status à esquerda, prioridade à direita quando pesa (alta/urgente).
+/// Toca para abrir o detalhe.
 class TicketCard extends StatelessWidget {
   final Ticket ticket;
   final VoidCallback? onTap;
@@ -17,10 +19,8 @@ class TicketCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final neutral = ThemeHelpers.textSecondaryColor(context);
     final statusTone = ticketStatusColor(context, ticket.status);
-    final categoryTone = ticketCategoryColor(context, ticket.category);
     final priorityTone = ticketPriorityColor(context, ticket.priority);
 
     final description = ticket.description
@@ -40,133 +40,155 @@ class TicketCard extends StatelessWidget {
               bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
             ),
           ),
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Glyph tonal da categoria.
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(13),
-                  color: categoryTone.withValues(alpha: isDark ? 0.16 : 0.1),
-                  border: Border.all(
-                    color: categoryTone.withValues(alpha: 0.28),
+          padding: const EdgeInsets.symmetric(vertical: 13),
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Indicador lateral fino de status — a assinatura da linha.
+                Container(
+                  width: 3,
+                  margin: const EdgeInsets.symmetric(vertical: 2),
+                  decoration: BoxDecoration(
+                    color: statusTone,
+                    borderRadius: BorderRadius.circular(999),
                   ),
                 ),
-                child: Icon(
-                  ticketCategoryIcon(ticket.category),
-                  color: categoryTone,
-                  size: 21,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: _StatusPill(
-                            label: ticket.status.label,
-                            color: statusTone,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Flexible(
-                          child: Text(
-                            ticket.category.label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: neutral,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 11,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      ticket.title,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: ThemeHelpers.textColor(context),
-                        height: 1.2,
-                        letterSpacing: -0.2,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (description.isNotEmpty) ...[
-                      const SizedBox(height: 3),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Título protagonista.
                       Text(
-                        description,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: neutral,
-                          fontWeight: FontWeight.w600,
-                          height: 1.3,
+                        ticket.title,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: ThemeHelpers.textColor(context),
+                          height: 1.25,
+                          letterSpacing: -0.2,
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
-                    ],
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 3,
-                      children: [
-                        if (ticket.attendantLabel != null)
-                          _SpecBit(
-                            icon: LucideIcons.headset,
-                            text: ticket.attendantLabel!,
-                            color: neutral,
-                          )
-                        else
-                          _SpecBit(
-                            icon: LucideIcons.hourglass,
-                            text: 'Aguardando atendimento',
-                            color: neutral,
+                      const SizedBox(height: 5),
+                      // Status (na cor semântica) · categoria — texto, sem pílula.
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              ticket.status.label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w800,
+                                color: statusTone,
+                                height: 1.2,
+                              ),
+                            ),
                           ),
-                        if (ticket.lastReplyAt != null)
-                          _SpecBit(
-                            icon: LucideIcons.messageCircle,
-                            text: 'Resposta ${_relative(ticket.lastReplyAt!)}',
-                            color: neutral,
+                          Text(
+                            '  ·  ',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: neutral.withValues(alpha: 0.7),
+                              height: 1.2,
+                            ),
                           ),
+                          Flexible(
+                            child: Text(
+                              ticket.category.label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: neutral,
+                                height: 1.2,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (description.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          description,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: neutral,
+                            fontWeight: FontWeight.w500,
+                            height: 1.35,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ],
+                      const SizedBox(height: 7),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 3,
+                        children: [
+                          if (ticket.attendantLabel != null)
+                            _MetaBit(
+                              icon: LucideIcons.headset,
+                              text: ticket.attendantLabel!,
+                              color: neutral,
+                            )
+                          else
+                            _MetaBit(
+                              icon: LucideIcons.hourglass,
+                              text: 'Aguardando atendimento',
+                              color: neutral,
+                            ),
+                          if (ticket.lastReplyAt != null)
+                            _MetaBit(
+                              icon: LucideIcons.messageCircle,
+                              text: 'Resposta ${_relative(ticket.lastReplyAt!)}',
+                              color: neutral,
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // Data à direita; prioridade só quando pesa (texto na cor).
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    if (ticket.createdAt != null)
+                      Text(
+                        _dateLabel(ticket.createdAt!),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: neutral,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 10.5,
+                        ),
+                      ),
+                    if (showPriority) ...[
+                      const SizedBox(height: 5),
+                      Text(
+                        ticket.priority.label,
+                        style: TextStyle(
+                          color: priorityTone,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 10.5,
+                          height: 1.2,
+                        ),
+                      ),
+                    ],
+                    const Spacer(),
+                    Icon(
+                      LucideIcons.chevronRight,
+                      size: 15,
+                      color: neutral.withValues(alpha: 0.6),
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(width: 10),
-              // Prioridade (só quando pesa) + data de abertura.
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  if (showPriority)
-                    _StatusPill(
-                      label: ticket.priority.label,
-                      color: priorityTone,
-                    )
-                  else
-                    Icon(LucideIcons.chevronRight, size: 16, color: neutral),
-                  const SizedBox(height: 6),
-                  if (ticket.createdAt != null)
-                    Text(
-                      _dateLabel(ticket.createdAt!),
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: neutral,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 10.5,
-                      ),
-                    ),
-                ],
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -189,13 +211,13 @@ class TicketCard extends StatelessWidget {
   }
 }
 
-/// Mini-item de metadado (ícone + texto compacto).
-class _SpecBit extends StatelessWidget {
+/// Mini-item de metadado (ícone + texto compacto, neutro).
+class _MetaBit extends StatelessWidget {
   final IconData icon;
   final String text;
   final Color color;
 
-  const _SpecBit({required this.icon, required this.text, required this.color});
+  const _MetaBit({required this.icon, required this.text, required this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -208,44 +230,12 @@ class _SpecBit extends StatelessWidget {
           text,
           style: TextStyle(
             fontSize: 11.5,
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w600,
             color: color,
             height: 1.2,
           ),
         ),
       ],
-    );
-  }
-}
-
-/// Pílula de status — tint da cor + texto na cor (grammar do app).
-class _StatusPill extends StatelessWidget {
-  final String label;
-  final Color color;
-
-  const _StatusPill({required this.label, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: isDark ? 0.16 : 0.1),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: isDark ? 0.4 : 0.3)),
-      ),
-      child: Text(
-        label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: color,
-          fontWeight: FontWeight.w800,
-          fontSize: 11,
-          letterSpacing: -0.1,
-        ),
-      ),
     );
   }
 }
