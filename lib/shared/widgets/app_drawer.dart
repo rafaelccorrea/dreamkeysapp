@@ -1161,6 +1161,26 @@ class _AppDrawerState extends State<AppDrawer> {
                               );
                             },
                           ),
+                          if (canSeeMultichannel)
+                            _buildDrawerItem(
+                              context: context,
+                              currentRoute: activeRoute,
+                              route: AppRoutes.analyticsMultichannel,
+                              icon: LucideIcons.radar,
+                              activeIcon: LucideIcons.radar,
+                              title: 'Análise Multicanal',
+                              accent: accent,
+                              showLeadingTile: true,
+                              onTap: () {
+                                Navigator.pop(context);
+                                if (activeRoute ==
+                                    AppRoutes.analyticsMultichannel) {
+                                  return;
+                                }
+                                Navigator.of(context)
+                                    .pushNamed(AppRoutes.analyticsMultichannel);
+                              },
+                            ),
                           Divider(
                             height: 1,
                             thickness: 1,
@@ -1168,6 +1188,188 @@ class _AppDrawerState extends State<AppDrawer> {
                               context,
                             ).withValues(alpha: 0.5),
                           ),
+                          if (showVendasCrmGroup) ...[
+                            _buildExpansionTile(
+                              context: context,
+                              title: 'Vendas & CRM',
+                              icon: LucideIcons.target,
+                              activeIcon: LucideIcons.target,
+                              isExpanded: _vendasCrmExpanded,
+                              groupActive: vendasCrmGroupActive,
+                              accent: accent,
+                              onExpansionChanged: (expanded) {
+                                setState(() {
+                                  _vendasCrmExpanded = expanded;
+                                });
+                              },
+                              children: [
+                                if (canSeeWhatsapp)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.whatsapp,
+                                    icon: LucideIcons.messageCircle,
+                                    activeIcon: LucideIcons.messageCircle,
+                                    title: 'WhatsApp',
+                                    accent: accent,
+                                    isActive: activeRoute.startsWith(
+                                      '/whatsapp',
+                                    ),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.whatsapp) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.whatsapp);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeSdr)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.sdr,
+                                    icon: LucideIcons.botMessageSquare,
+                                    activeIcon: LucideIcons.botMessageSquare,
+                                    title: 'SDR com IA',
+                                    accent: accent,
+                                    isActive: activeRoute.startsWith('/sdr'),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.sdr) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.sdr);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeKanban)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.kanban,
+                                    icon: LucideIcons.layoutGrid,
+                                    activeIcon: LucideIcons.layoutGrid,
+                                    title: 'CRM',
+                                    accent: accent,
+                                    isActive:
+                                        activeRoute == AppRoutes.kanban ||
+                                        activeRoute.startsWith('/kanban/task'),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.kanban ||
+                                          activeRoute.startsWith(
+                                            '/kanban/task',
+                                          )) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamedAndRemoveUntil(
+                                        AppRoutes.kanban,
+                                        (route) => false,
+                                      );
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                // Fichas moram em Vendas & CRM (posição do
+                                // menu web). Visitas e MCMV: ocultos como no
+                                // web (rotas /visits e /mcmv/* vivas).
+                                if (canSeeSaleForms)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.saleForms,
+                                    icon: LucideIcons.handshake,
+                                    activeIcon: LucideIcons.handshake,
+                                    title: 'Fichas de venda',
+                                    accent: accent,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.saleForms) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.saleForms);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeProposals)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.proposals,
+                                    icon: LucideIcons.fileSignature,
+                                    activeIcon: LucideIcons.fileSignature,
+                                    title: 'Fichas de proposta',
+                                    accent: accent,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.proposals) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.proposals);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeRentalForms)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.rentalForms,
+                                    icon: LucideIcons.clipboardList,
+                                    activeIcon: LucideIcons.clipboardList,
+                                    title: 'Fichas de locação',
+                                    accent: accent,
+                                    isActive: activeRoute.startsWith(
+                                      '/rental-forms',
+                                    ),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute ==
+                                          AppRoutes.rentalForms) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.rentalForms);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeClients)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.clients,
+                                    icon: LucideIcons.users,
+                                    activeIcon: LucideIcons.users,
+                                    title: 'Clientes',
+                                    accent: accent,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.clients ||
+                                          activeRoute.startsWith('/clients')) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamedAndRemoveUntil(
+                                        AppRoutes.clients,
+                                        (route) => false,
+                                      );
+                                    },
+                                    isSubItem: true,
+                                  ),
+                              ],
+                            ),
+                          ],
                           if (showImoveisGroup) ...[
                             _buildExpansionTile(
                               context: context,
@@ -1278,253 +1480,6 @@ class _AppDrawerState extends State<AppDrawer> {
                               ],
                             ),
                           ],
-                          if (showVendasCrmGroup) ...[
-                            _buildExpansionTile(
-                              context: context,
-                              title: 'Vendas & CRM',
-                              icon: LucideIcons.target,
-                              activeIcon: LucideIcons.target,
-                              isExpanded: _vendasCrmExpanded,
-                              groupActive: vendasCrmGroupActive,
-                              accent: accent,
-                              onExpansionChanged: (expanded) {
-                                setState(() {
-                                  _vendasCrmExpanded = expanded;
-                                });
-                              },
-                              children: [
-                                if (canSeeKanban)
-                                  _buildDrawerItem(
-                                    context: context,
-                                    currentRoute: activeRoute,
-                                    route: AppRoutes.kanban,
-                                    icon: LucideIcons.layoutGrid,
-                                    activeIcon: LucideIcons.layoutGrid,
-                                    title: 'CRM',
-                                    accent: accent,
-                                    isActive:
-                                        activeRoute == AppRoutes.kanban ||
-                                        activeRoute.startsWith('/kanban/task'),
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      if (activeRoute == AppRoutes.kanban ||
-                                          activeRoute.startsWith(
-                                            '/kanban/task',
-                                          )) {
-                                        return;
-                                      }
-                                      Navigator.of(
-                                        context,
-                                      ).pushNamedAndRemoveUntil(
-                                        AppRoutes.kanban,
-                                        (route) => false,
-                                      );
-                                    },
-                                    isSubItem: true,
-                                  ),
-                                if (canSeeClients)
-                                  _buildDrawerItem(
-                                    context: context,
-                                    currentRoute: activeRoute,
-                                    route: AppRoutes.clients,
-                                    icon: LucideIcons.users,
-                                    activeIcon: LucideIcons.users,
-                                    title: 'Clientes',
-                                    accent: accent,
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      if (activeRoute == AppRoutes.clients ||
-                                          activeRoute.startsWith('/clients')) {
-                                        return;
-                                      }
-                                      Navigator.of(
-                                        context,
-                                      ).pushNamedAndRemoveUntil(
-                                        AppRoutes.clients,
-                                        (route) => false,
-                                      );
-                                    },
-                                    isSubItem: true,
-                                  ),
-                                if (canSeeWhatsapp)
-                                  _buildDrawerItem(
-                                    context: context,
-                                    currentRoute: activeRoute,
-                                    route: AppRoutes.whatsapp,
-                                    icon: LucideIcons.messageCircle,
-                                    activeIcon: LucideIcons.messageCircle,
-                                    title: 'WhatsApp',
-                                    accent: accent,
-                                    isActive: activeRoute.startsWith(
-                                      '/whatsapp',
-                                    ),
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      if (activeRoute == AppRoutes.whatsapp) {
-                                        return;
-                                      }
-                                      Navigator.of(
-                                        context,
-                                      ).pushNamed(AppRoutes.whatsapp);
-                                    },
-                                    isSubItem: true,
-                                  ),
-                                if (canSeeSdr)
-                                  _buildDrawerItem(
-                                    context: context,
-                                    currentRoute: activeRoute,
-                                    route: AppRoutes.sdr,
-                                    icon: LucideIcons.botMessageSquare,
-                                    activeIcon: LucideIcons.botMessageSquare,
-                                    title: 'SDR com IA',
-                                    accent: accent,
-                                    isActive: activeRoute.startsWith('/sdr'),
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      if (activeRoute == AppRoutes.sdr) {
-                                        return;
-                                      }
-                                      Navigator.of(
-                                        context,
-                                      ).pushNamed(AppRoutes.sdr);
-                                    },
-                                    isSubItem: true,
-                                  ),
-                                // Fichas moram em Vendas & CRM (posição do
-                                // menu web). Visitas e MCMV: ocultos como no
-                                // web (rotas /visits e /mcmv/* vivas).
-                                if (canSeeSaleForms)
-                                  _buildDrawerItem(
-                                    context: context,
-                                    currentRoute: activeRoute,
-                                    route: AppRoutes.saleForms,
-                                    icon: LucideIcons.handshake,
-                                    activeIcon: LucideIcons.handshake,
-                                    title: 'Fichas de venda',
-                                    accent: accent,
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      if (activeRoute == AppRoutes.saleForms) {
-                                        return;
-                                      }
-                                      Navigator.of(
-                                        context,
-                                      ).pushNamed(AppRoutes.saleForms);
-                                    },
-                                    isSubItem: true,
-                                  ),
-                                if (canSeeProposals)
-                                  _buildDrawerItem(
-                                    context: context,
-                                    currentRoute: activeRoute,
-                                    route: AppRoutes.proposals,
-                                    icon: LucideIcons.fileSignature,
-                                    activeIcon: LucideIcons.fileSignature,
-                                    title: 'Fichas de proposta',
-                                    accent: accent,
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      if (activeRoute == AppRoutes.proposals) {
-                                        return;
-                                      }
-                                      Navigator.of(
-                                        context,
-                                      ).pushNamed(AppRoutes.proposals);
-                                    },
-                                    isSubItem: true,
-                                  ),
-                                if (canSeeRentalForms)
-                                  _buildDrawerItem(
-                                    context: context,
-                                    currentRoute: activeRoute,
-                                    route: AppRoutes.rentalForms,
-                                    icon: LucideIcons.clipboardList,
-                                    activeIcon: LucideIcons.clipboardList,
-                                    title: 'Fichas de locação',
-                                    accent: accent,
-                                    isActive: activeRoute.startsWith(
-                                      '/rental-forms',
-                                    ),
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      if (activeRoute ==
-                                          AppRoutes.rentalForms) {
-                                        return;
-                                      }
-                                      Navigator.of(
-                                        context,
-                                      ).pushNamed(AppRoutes.rentalForms);
-                                    },
-                                    isSubItem: true,
-                                  ),
-                              ],
-                            ),
-                          ],
-                          if (canSeeCalendar)
-                            _buildDrawerItem(
-                              context: context,
-                              currentRoute: activeRoute,
-                              route: AppRoutes.calendar,
-                              icon: LucideIcons.calendar,
-                              activeIcon: LucideIcons.calendar,
-                              title: 'Calendário',
-                              accent: accent,
-                              showLeadingTile: true,
-                              onTap: () {
-                                Navigator.pop(context);
-                                if (activeRoute == AppRoutes.calendar) return;
-                                Navigator.of(
-                                  context,
-                                ).pushNamed(AppRoutes.calendar);
-                              },
-                            ),
-                          if (canSeeNotes)
-                            _buildDrawerItem(
-                              context: context,
-                              currentRoute: activeRoute,
-                              route: AppRoutes.notes,
-                              icon: LucideIcons.scrollText,
-                              activeIcon: LucideIcons.scrollText,
-                              title: 'Anotações',
-                              accent: accent,
-                              showLeadingTile: true,
-                              onTap: () {
-                                Navigator.pop(context);
-                                if (activeRoute == AppRoutes.notes) return;
-                                Navigator.of(
-                                  context,
-                                ).pushNamed(AppRoutes.notes);
-                              },
-                            ),
-                          // Fichas de venda/proposta moram no grupo Vendas &
-                          // CRM; Check-in mora em Colaboradores (menu web).
-                          // Corrigido de quebra o aninhamento antigo que
-                          // condicionava Comissões ao gate do Check-in.
-                          if (canSeeCommissions)
-                            _buildDrawerItem(
-                              context: context,
-                              currentRoute: activeRoute,
-                              route: AppRoutes.commissions,
-                              icon: LucideIcons.percent,
-                              activeIcon: LucideIcons.percent,
-                              title: 'Comissões',
-                              accent: accent,
-                              showLeadingTile: true,
-                              onTap: () {
-                                Navigator.pop(context);
-                                if (activeRoute == AppRoutes.commissions) {
-                                  return;
-                                }
-                                Navigator.of(
-                                  context,
-                                ).pushNamed(AppRoutes.commissions);
-                              },
-                            ),
-                          // Produtividade (Checklists/Patrimônio/Metas) e
-                          // Operacional (Locações/Seguros/Crédito/Régua):
-                          // OCULTOS — não estão visíveis no menu do web.
-                          // Rotas continuam vivas; Fichas de Locação mora em
-                          // Vendas & CRM (posição do web).
                           if (canSeeWorkspace)
                             _buildExpansionTile(
                               context: context,
@@ -1609,70 +1564,71 @@ class _AppDrawerState extends State<AppDrawer> {
                                   ),
                               ],
                             ),
-                          if (canSeeMultichannel)
+                          if (canSeeCalendar)
                             _buildDrawerItem(
                               context: context,
                               currentRoute: activeRoute,
-                              route: AppRoutes.analyticsMultichannel,
-                              icon: LucideIcons.radar,
-                              activeIcon: LucideIcons.radar,
-                              title: 'Análise Multicanal',
+                              route: AppRoutes.calendar,
+                              icon: LucideIcons.calendar,
+                              activeIcon: LucideIcons.calendar,
+                              title: 'Calendário',
                               accent: accent,
                               showLeadingTile: true,
                               onTap: () {
                                 Navigator.pop(context);
-                                if (activeRoute ==
-                                    AppRoutes.analyticsMultichannel) {
+                                if (activeRoute == AppRoutes.calendar) return;
+                                Navigator.of(
+                                  context,
+                                ).pushNamed(AppRoutes.calendar);
+                              },
+                            ),
+                          if (canSeeNotes)
+                            _buildDrawerItem(
+                              context: context,
+                              currentRoute: activeRoute,
+                              route: AppRoutes.notes,
+                              icon: LucideIcons.scrollText,
+                              activeIcon: LucideIcons.scrollText,
+                              title: 'Anotações',
+                              accent: accent,
+                              showLeadingTile: true,
+                              onTap: () {
+                                Navigator.pop(context);
+                                if (activeRoute == AppRoutes.notes) return;
+                                Navigator.of(
+                                  context,
+                                ).pushNamed(AppRoutes.notes);
+                              },
+                            ),
+                          // Fichas de venda/proposta moram no grupo Vendas &
+                          // CRM; Check-in mora em Colaboradores (menu web).
+                          // Corrigido de quebra o aninhamento antigo que
+                          // condicionava Comissões ao gate do Check-in.
+                          if (canSeeCommissions)
+                            _buildDrawerItem(
+                              context: context,
+                              currentRoute: activeRoute,
+                              route: AppRoutes.commissions,
+                              icon: LucideIcons.percent,
+                              activeIcon: LucideIcons.percent,
+                              title: 'Comissões',
+                              accent: accent,
+                              showLeadingTile: true,
+                              onTap: () {
+                                Navigator.pop(context);
+                                if (activeRoute == AppRoutes.commissions) {
                                   return;
                                 }
-                                Navigator.of(context)
-                                    .pushNamed(AppRoutes.analyticsMultichannel);
+                                Navigator.of(
+                                  context,
+                                ).pushNamed(AppRoutes.commissions);
                               },
                             ),
-                          if (showIntegracoesGroup) ...[
-                            _buildExpansionTile(
-                              context: context,
-                              title: 'Integrações',
-                              icon: LucideIcons.plugZap,
-                              activeIcon: LucideIcons.plugZap,
-                              isExpanded: _integracoesExpanded,
-                              groupActive: integracoesGroupActive,
-                              accent: accent,
-                              onExpansionChanged: (expanded) {
-                                setState(() {
-                                  _integracoesExpanded = expanded;
-                                });
-                              },
-                              children: [
-                                if (canSeeIntegrations)
-                                  _buildDrawerItem(
-                                    context: context,
-                                    currentRoute: activeRoute,
-                                    route: AppRoutes.integrations,
-                                    icon: LucideIcons.plugZap,
-                                    activeIcon: LucideIcons.plugZap,
-                                    title: 'Central de Integrações',
-                                    accent: accent,
-                                    isActive: activeRoute.startsWith(
-                                      '/integrations',
-                                    ),
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      if (activeRoute ==
-                                          AppRoutes.integrations) {
-                                        return;
-                                      }
-                                      Navigator.of(
-                                        context,
-                                      ).pushNamed(AppRoutes.integrations);
-                                    },
-                                    isSubItem: true,
-                                  ),
-                                // Meu Site e Link in Bio moram no grupo
-                                // Configurações (posição do menu web).
-                              ],
-                            ),
-                          ],
+                          // Produtividade (Checklists/Patrimônio/Metas) e
+                          // Operacional (Locações/Seguros/Crédito/Régua):
+                          // OCULTOS — não estão visíveis no menu do web.
+                          // Rotas continuam vivas; Fichas de Locação mora em
+                          // Vendas & CRM (posição do web).
                           _buildExpansionTile(
                             context: context,
                             title: 'Suporte',
@@ -1727,6 +1683,50 @@ class _AppDrawerState extends State<AppDrawer> {
                                 ),
                             ],
                           ),
+                          if (showIntegracoesGroup) ...[
+                            _buildExpansionTile(
+                              context: context,
+                              title: 'Integrações',
+                              icon: LucideIcons.plugZap,
+                              activeIcon: LucideIcons.plugZap,
+                              isExpanded: _integracoesExpanded,
+                              groupActive: integracoesGroupActive,
+                              accent: accent,
+                              onExpansionChanged: (expanded) {
+                                setState(() {
+                                  _integracoesExpanded = expanded;
+                                });
+                              },
+                              children: [
+                                if (canSeeIntegrations)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.integrations,
+                                    icon: LucideIcons.plugZap,
+                                    activeIcon: LucideIcons.plugZap,
+                                    title: 'Central de Integrações',
+                                    accent: accent,
+                                    isActive: activeRoute.startsWith(
+                                      '/integrations',
+                                    ),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute ==
+                                          AppRoutes.integrations) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.integrations);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                // Meu Site e Link in Bio moram no grupo
+                                // Configurações (posição do menu web).
+                              ],
+                            ),
+                          ],
                           Divider(
                             height: 1,
                             thickness: 1,
@@ -1898,6 +1898,7 @@ class _AppDrawerState extends State<AppDrawer> {
           style: theme.textTheme.titleSmall?.copyWith(
             color: emphasis ? ThemeHelpers.textColor(context) : secondary,
             fontWeight: emphasis ? FontWeight.w800 : FontWeight.w600,
+            fontSize: 13,
             height: 1.15,
           ),
         ),
@@ -2057,6 +2058,7 @@ class _AppDrawerState extends State<AppDrawer> {
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: color,
                   fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                  fontSize: 13,
                   height: 1.2,
                 ),
               ),
