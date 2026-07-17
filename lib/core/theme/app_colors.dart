@@ -118,6 +118,9 @@ class StatusColors {
   final Color purple = const Color(0xFF8B5CF6);
   final Color purpleDarkMode = const Color(0xFFa78bfa);
 
+  final Color rose = const Color(0xFFEC4899);
+  final Color roseDarkMode = const Color(0xFFF472B6);
+
   final Color red = const Color(0xFFDC2626);
   final Color redDarkMode = const Color(0xFFEF5350);
 }

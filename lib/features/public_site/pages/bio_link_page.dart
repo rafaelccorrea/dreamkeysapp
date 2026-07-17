@@ -109,10 +109,31 @@ class _BioLinkPageState extends State<BioLinkPage> {
   // violeta (identidade) + verde (publicada) + âmbar (rascunho) convivem
   // sem nunca encostar verde em vermelho.
 
-  Color _accent(BuildContext context) {
+  /// Acento do STEP ativo — cada aba tem sua própria cor (paleta por step):
+  /// Perfil = azul (informacional), Links = rosa (ação), Métricas = violeta.
+  /// Como só um painel é visível por vez, tudo dentro dele recolore sozinho.
+  Color _accent(BuildContext context) => _stepAccent(context, _activeTab);
+
+  /// Cor identitária fixa da tela (violeta de "bio/criador") — usada só no
+  /// hero, que fica estável independentemente da aba ativa.
+  Color _identity(BuildContext context) {
     return Theme.of(context).brightness == Brightness.dark
         ? AppColors.status.purpleDarkMode
         : AppColors.status.purple;
+  }
+
+  Color _stepAccent(BuildContext context, _BioTab tab) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    switch (tab) {
+      case _BioTab.profile:
+        return isDark ? AppColors.status.infoDarkMode : AppColors.status.info;
+      case _BioTab.links:
+        return isDark ? AppColors.status.roseDarkMode : AppColors.status.rose;
+      case _BioTab.analytics:
+        return isDark
+            ? AppColors.status.purpleDarkMode
+            : AppColors.status.purple;
+    }
   }
 
   /// Tinta do hero — a cor custom da própria bio quando existir (primeiro
@@ -123,7 +144,7 @@ class _BioLinkPageState extends State<BioLinkPage> {
       final custom = siteParseHexColor(link.color);
       if (custom != null) return custom;
     }
-    return _accent(context);
+    return _identity(context);
   }
 
   // ─── Dados ────────────────────────────────────────────────────────────────
@@ -473,7 +494,7 @@ class _BioLinkPageState extends State<BioLinkPage> {
       title: 'Link in Bio',
       showBottomNavigation: false,
       body: RefreshIndicator(
-        color: _accent(context),
+        color: _identity(context),
         onRefresh: () async {
           await _load();
           if (_analyticsLoaded) await _loadAnalytics();
@@ -664,6 +685,232 @@ class _BioLinkPageState extends State<BioLinkPage> {
     );
   }
 
+  /// Controle de publicação (aba Perfil) — painel de superfície refinado:
+  /// roundel de status, título + microcopy, checklist de prontidão (endereço
+  /// e links) e a ação principal (publicar verde / despublicar neutro).
+  Widget _buildPublishControl(
+    BuildContext context, {
+    required BioPageConfig page,
+    required Color statusTone,
+    required Color emerald,
+    required Color amber,
+    required Color secondary,
+    required bool isDark,
+    required ThemeData theme,
+    required DateFormat dateFmt,
+    required bool hasSlug,
+  }) {
+    final published = page.isPublished;
+    final linkCount = _linksDraft.where((l) => l.isActive).length;
+    final title = published ? 'Sua página está no ar' : 'Pronta para publicar?';
+    final sub = published
+        ? (page.publishedAt != null
+              ? 'Publicada em ${dateFmt.format(page.publishedAt!.toLocal())}'
+              : 'Visível para qualquer visitante do seu link')
+        : 'Revise os links e publique quando quiser';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 15, 16, 16),
+      decoration: BoxDecoration(
+        color: ThemeHelpers.cardBackgroundColor(context),
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: ThemeHelpers.cardShadow(context),
+        border: Border.all(
+          color: statusTone.withValues(alpha: isDark ? 0.28 : 0.20),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      statusTone.withValues(alpha: isDark ? 0.26 : 0.18),
+                      statusTone.withValues(alpha: isDark ? 0.12 : 0.08),
+                    ],
+                  ),
+                  border: Border.all(
+                    color: statusTone.withValues(alpha: 0.4),
+                  ),
+                ),
+                child: Icon(
+                  published ? LucideIcons.globe : LucideIcons.rocket,
+                  size: 18,
+                  color: statusTone,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.3,
+                        color: ThemeHelpers.textColor(context),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      sub,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: secondary,
+                        height: 1.3,
+                        fontSize: 11.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 13),
+          // Prontidão — dois selos que "acendem" verdes quando prontos.
+          Row(
+            children: [
+              _readyChip(
+                context,
+                label: hasSlug ? 'Endereço definido' : 'Falta o endereço',
+                ok: hasSlug,
+                emerald: emerald,
+                amber: amber,
+              ),
+              const SizedBox(width: 8),
+              _readyChip(
+                context,
+                label: linkCount == 0
+                    ? 'Nenhum link ativo'
+                    : '$linkCount ${linkCount == 1 ? 'link ativo' : 'links ativos'}',
+                ok: linkCount > 0,
+                emerald: emerald,
+                amber: amber,
+              ),
+            ],
+          ),
+          if (_canManage) ...[
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: published
+                  ? OutlinedButton.icon(
+                      onPressed: _publishing ? null : _togglePublish,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: secondary,
+                        side: BorderSide(
+                          color: ThemeHelpers.borderColor(context),
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      icon: _publishing
+                          ? SizedBox(
+                              width: 15,
+                              height: 15,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: secondary,
+                              ),
+                            )
+                          : const Icon(LucideIcons.eyeOff, size: 17),
+                      label: Text(
+                        _publishing ? 'Aguarde…' : 'Despublicar página',
+                        softWrap: false,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    )
+                  : FilledButton.icon(
+                      onPressed: _publishing ? null : _togglePublish,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: emerald,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                      ),
+                      icon: _publishing
+                          ? const SizedBox(
+                              width: 15,
+                              height: 15,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(LucideIcons.rocket, size: 17),
+                      label: Text(
+                        _publishing ? 'Aguarde…' : 'Publicar página',
+                        softWrap: false,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Selo de prontidão — check verde quando ok, alerta âmbar quando falta.
+  Widget _readyChip(
+    BuildContext context, {
+    required String label,
+    required bool ok,
+    required Color emerald,
+    required Color amber,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final tone = ok ? emerald : amber;
+    return Flexible(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+        decoration: BoxDecoration(
+          color: tone.withValues(alpha: isDark ? 0.13 : 0.09),
+          borderRadius: BorderRadius.circular(9),
+          border: Border.all(color: tone.withValues(alpha: 0.25)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              ok ? LucideIcons.circleCheck : LucideIcons.circleAlert,
+              size: 12.5,
+              color: tone,
+            ),
+            const SizedBox(width: 5),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.fade,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                  color: tone,
+                  letterSpacing: -0.1,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// Microlinha de apoio sob um campo — ícone 12px + texto de uma linha.
   Widget _fieldMeta(
     BuildContext context, {
@@ -720,7 +967,7 @@ class _BioLinkPageState extends State<BioLinkPage> {
   /// ações Copiar/Abrir como icon-chips neutros 32px lado a lado.
   Widget _buildHeroUrl(BuildContext context) {
     final theme = Theme.of(context);
-    final violet = _accent(context);
+    final violet = _identity(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final page = _page!;
     final slug = (page.slug ?? '').trim();
@@ -830,7 +1077,7 @@ class _BioLinkPageState extends State<BioLinkPage> {
 
   /// Par de mini-stats — número tabular w800 + label overline.
   Widget _buildHeroMiniStats(BuildContext context) {
-    final violet = _accent(context);
+    final violet = _identity(context);
     final numberFmt = NumberFormat.decimalPattern('pt_BR');
     final visible = _linksDraft.where((l) => l.isActive).length;
     final views = _analytics?.pageViews;
@@ -1179,7 +1426,7 @@ class _BioLinkPageState extends State<BioLinkPage> {
                 icon: _tabIcon(tab),
                 label: _tabLabel(tab),
                 count: tab == _BioTab.links ? _linksDraft.length : null,
-                tone: _accent(context),
+                tone: _stepAccent(context, tab),
                 selected: _activeTab == tab,
                 onTap: () {
                   setState(() => _activeTab = tab);
@@ -1405,120 +1652,21 @@ class _BioLinkPageState extends State<BioLinkPage> {
           padding: const EdgeInsets.only(bottom: 10),
           child: _readOnlyNotice(context),
         ),
-      // Card de publicação — ação principal no próprio card.
-      Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: statusTone.withValues(alpha: isDark ? 0.12 : 0.07),
-          border: Border.all(color: statusTone.withValues(alpha: 0.25)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  page.isPublished
-                      ? LucideIcons.circleCheckBig
-                      : LucideIcons.circleDashed,
-                  size: 18,
-                  color: statusTone,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  page.isPublished ? 'PÁGINA PUBLICADA' : 'PÁGINA EM RASCUNHO',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: statusTone,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.4,
-                    fontSize: 10.5,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              page.isPublished
-                  ? (page.publishedAt != null
-                        ? 'Publicada em ${dateFmt.format(page.publishedAt!.toLocal())}.'
-                        : 'Sua página está visível para qualquer visitante.')
-                  : 'Quando os links estiverem prontos, publique para o '
-                        'endereço da bio começar a funcionar.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: secondary,
-                height: 1.4,
-              ),
-            ),
-            if (_canManage) ...[
-              const SizedBox(height: 14),
-              // Publicada: despublicar é ação DISCRETA e neutra — o vermelho
-              // fica só no botão confirmar do diálogo. Rascunho: publicar é
-              // o "vá" — verde cheio.
-              SizedBox(
-                width: double.infinity,
-                child: page.isPublished
-                    ? OutlinedButton.icon(
-                        onPressed: _publishing ? null : _togglePublish,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: secondary,
-                          side: BorderSide(
-                            color: ThemeHelpers.borderColor(context),
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                        icon: _publishing
-                            ? SizedBox(
-                                width: 15,
-                                height: 15,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: secondary,
-                                ),
-                              )
-                            : const Icon(LucideIcons.cloudOff, size: 17),
-                        label: Text(
-                          _publishing ? 'Aguarde…' : 'Despublicar página',
-                          softWrap: false,
-                          style: const TextStyle(fontWeight: FontWeight.w800),
-                        ),
-                      )
-                    : FilledButton.icon(
-                        onPressed: _publishing ? null : _togglePublish,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: emerald,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                        icon: _publishing
-                            ? const SizedBox(
-                                width: 15,
-                                height: 15,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Icon(LucideIcons.rocket, size: 17),
-                        label: Text(
-                          _publishing ? 'Aguarde…' : 'Publicar página',
-                          softWrap: false,
-                          style: const TextStyle(fontWeight: FontWeight.w800),
-                        ),
-                      ),
-              ),
-            ],
-          ],
-        ),
+      // Controle de publicação — superfície neutra (não caixa tingida), com
+      // roundel de status, checklist de prontidão e a ação principal.
+      _buildPublishControl(
+        context,
+        page: page,
+        statusTone: statusTone,
+        emerald: emerald,
+        amber: amber,
+        secondary: secondary,
+        isDark: isDark,
+        theme: theme,
+        dateFmt: dateFmt,
+        hasSlug: currentSlug.isNotEmpty,
       ),
-      const SizedBox(height: 20),
+      const SizedBox(height: 22),
       _sectionHeader(context, eyebrow: 'Endereço', title: 'URL pública'),
       const SizedBox(height: 12),
       SiteFilledField(
@@ -1781,6 +1929,109 @@ class _BioLinkPageState extends State<BioLinkPage> {
 
   // ── Links ──
 
+  /// Barra-resumo viva do topo da lista de links — total, visíveis, cliques
+  /// no período (quando há métrica) e a dica de reordenar.
+  Widget _buildLinksResumo(
+    BuildContext context,
+    Color tone,
+    Color secondary,
+  ) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final total = _linksDraft.length;
+    final visible = _linksDraft.where((l) => l.isActive).length;
+    final hidden = total - visible;
+    final totalClicks = (_analytics?.links ?? const <BioPageLinkAnalytics>[])
+        .fold<int>(0, (s, l) => s + l.clicks);
+    final numberFmt = NumberFormat.decimalPattern('pt_BR');
+
+    Widget stat(IconData icon, String value, String label, Color c) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: c),
+          const SizedBox(width: 6),
+          Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: value,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                    color: ThemeHelpers.textColor(context),
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                    letterSpacing: -0.2,
+                  ),
+                ),
+                TextSpan(
+                  text: '  $label',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    color: secondary,
+                    letterSpacing: -0.1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: isDark ? 0.10 : 0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: tone.withValues(alpha: 0.22)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 16,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              stat(LucideIcons.link, '$total',
+                  total == 1 ? 'link' : 'links', tone),
+              stat(LucideIcons.eye, '$visible', 'visíveis',
+                  const Color(0xFF3FA66B)),
+              if (hidden > 0)
+                stat(LucideIcons.eyeOff, '$hidden', 'ocultos', secondary),
+              if (totalClicks > 0)
+                stat(LucideIcons.mousePointerClick,
+                    numberFmt.format(totalClicks), 'cliques', tone),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Container(height: 1, color: tone.withValues(alpha: 0.16)),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Icon(LucideIcons.gripVertical, size: 12, color: tone),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Arraste pela alça para reordenar — a ordem aqui é a ordem na página.',
+                  maxLines: 2,
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w600,
+                    color: secondary,
+                    height: 1.3,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildLinksPanel(BuildContext context) {
     final theme = Theme.of(context);
     final tone = _accent(context);
@@ -1798,6 +2049,10 @@ class _BioLinkPageState extends State<BioLinkPage> {
           padding: const EdgeInsets.only(bottom: 10),
           child: _readOnlyNotice(context),
         ),
+      if (_linksDraft.isNotEmpty) ...[
+        _buildLinksResumo(context, tone, secondary),
+        const SizedBox(height: 14),
+      ],
       if (_linksDraft.isEmpty)
         SiteEmptyState(
           icon: LucideIcons.link,
@@ -1893,13 +2148,12 @@ class _BioLinkPageState extends State<BioLinkPage> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(LucideIcons.gripVertical, size: 13, color: secondary),
+              Icon(LucideIcons.info, size: 13, color: secondary),
               const SizedBox(width: 7),
               Expanded(
                 child: Text(
-                  'Arraste pela alça à direita para reordenar e toque no '
-                  'link para editar. O ícone do botão é detectado pela URL. '
-                  'As alterações só vão ao ar depois de salvar.',
+                  'Toque no link para editar — o ícone do botão é detectado '
+                  'pela URL. As alterações só vão ao ar depois de salvar.',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: secondary,
                     height: 1.35,
