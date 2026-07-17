@@ -177,7 +177,6 @@ class _AppDrawerState extends State<AppDrawer> {
         activeRoute == AppRoutes.clients ||
         activeRoute.startsWith('/clients') ||
         activeRoute.startsWith('/whatsapp') ||
-        activeRoute.startsWith('/sdr') ||
         activeRoute == AppRoutes.saleForms ||
         activeRoute.startsWith('/proposals') ||
         activeRoute.startsWith('/rental-forms')) {
@@ -957,7 +956,6 @@ class _AppDrawerState extends State<AppDrawer> {
         activeRoute == AppRoutes.clients ||
         activeRoute.startsWith('/clients') ||
         activeRoute.startsWith('/whatsapp') ||
-        activeRoute.startsWith('/sdr') ||
         activeRoute == AppRoutes.saleForms ||
         activeRoute.startsWith('/proposals') ||
         activeRoute.startsWith('/rental-forms');
@@ -1007,13 +1005,6 @@ class _AppDrawerState extends State<AppDrawer> {
         );
     // Comissões: módulo da empresa + permissão de visualização (corretor vê só
     // as próprias; master/admin/manager têm bypass no ModuleAccessService).
-    final canSeeCommissions =
-        ModuleAccessService.instance.hasCompanyModule(
-          AppPermissions.moduleCommissionManagement,
-        ) &&
-        ModuleAccessService.instance.hasPermission(
-          AppPermissions.commissionView,
-        );
     // Colaboradores → Usuários (drawer item).
     // Paridade com web: `user:view` AND (`create` OR `update` OR `delete`),
     // com bypass admin/master/manager via `hasAnyPermission`.
@@ -1062,10 +1053,8 @@ class _AppDrawerState extends State<AppDrawer> {
             ModuleAccessService.instance
                 .hasPermission('whatsapp:view_messages'));
 
-    // SDR IA (módulo whatsapp_ai + whatsapp:manage_config).
-    final canSeeSdr =
-        ModuleAccessService.instance.hasCompanyModule('whatsapp_ai') &&
-        ModuleAccessService.instance.hasPermission('whatsapp:manage_config');
+    // SDR com IA (/sdr) e Comissões (/commissions): ocultos do menu por
+    // decisão de produto — rotas continuam vivas.
 
     // Central de Integrações (any-of dos módulos/permissões do web).
     final canSeeIntegrations = (ModuleAccessService.instance
@@ -1226,27 +1215,7 @@ class _AppDrawerState extends State<AppDrawer> {
                                     },
                                     isSubItem: true,
                                   ),
-                                if (canSeeSdr)
-                                  _buildDrawerItem(
-                                    context: context,
-                                    currentRoute: activeRoute,
-                                    route: AppRoutes.sdr,
-                                    icon: LucideIcons.botMessageSquare,
-                                    activeIcon: LucideIcons.botMessageSquare,
-                                    title: 'SDR com IA',
-                                    accent: accent,
-                                    isActive: activeRoute.startsWith('/sdr'),
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      if (activeRoute == AppRoutes.sdr) {
-                                        return;
-                                      }
-                                      Navigator.of(
-                                        context,
-                                      ).pushNamed(AppRoutes.sdr);
-                                    },
-                                    isSubItem: true,
-                                  ),
+                                // SDR com IA: oculto do menu (rota /sdr viva).
                                 if (canSeeKanban)
                                   _buildDrawerItem(
                                     context: context,
@@ -1600,30 +1569,7 @@ class _AppDrawerState extends State<AppDrawer> {
                                 ).pushNamed(AppRoutes.notes);
                               },
                             ),
-                          // Fichas de venda/proposta moram no grupo Vendas &
-                          // CRM; Check-in mora em Colaboradores (menu web).
-                          // Corrigido de quebra o aninhamento antigo que
-                          // condicionava Comissões ao gate do Check-in.
-                          if (canSeeCommissions)
-                            _buildDrawerItem(
-                              context: context,
-                              currentRoute: activeRoute,
-                              route: AppRoutes.commissions,
-                              icon: LucideIcons.percent,
-                              activeIcon: LucideIcons.percent,
-                              title: 'Comissões',
-                              accent: accent,
-                              showLeadingTile: true,
-                              onTap: () {
-                                Navigator.pop(context);
-                                if (activeRoute == AppRoutes.commissions) {
-                                  return;
-                                }
-                                Navigator.of(
-                                  context,
-                                ).pushNamed(AppRoutes.commissions);
-                              },
-                            ),
+                          // Comissões: oculto do menu (rota /commissions viva).
                           // Produtividade (Checklists/Patrimônio/Metas) e
                           // Operacional (Locações/Seguros/Crédito/Régua):
                           // OCULTOS — não estão visíveis no menu do web.
