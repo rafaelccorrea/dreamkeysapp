@@ -402,6 +402,10 @@ class SiteFilledField extends StatelessWidget {
   final ValueChanged<String>? onChanged;
   final String? prefixText;
 
+  /// Cor de foco/cursor. Quando nula, usa o vermelho da marca (Meu Site).
+  /// O Link in Bio passa o violeta da tela — lá o vermelho não entra.
+  final Color? accent;
+
   const SiteFilledField({
     super.key,
     required this.controller,
@@ -414,6 +418,7 @@ class SiteFilledField extends StatelessWidget {
     this.enabled = true,
     this.onChanged,
     this.prefixText,
+    this.accent,
   });
 
   @override
@@ -421,9 +426,9 @@ class SiteFilledField extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final accent = isDark
-        ? AppColors.primary.primaryDarkMode
-        : AppColors.primary.primary;
+    final focusTone =
+        accent ??
+        (isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary);
     final fill = ThemeHelpers.cardBackgroundColor(context);
     final borderColor = isDark
         ? Colors.white.withValues(alpha: 0.08)
@@ -440,7 +445,7 @@ class SiteFilledField extends StatelessWidget {
       maxLines: maxLines,
       maxLength: maxLength,
       keyboardType: keyboardType,
-      cursorColor: accent,
+      cursorColor: focusTone,
       onChanged: onChanged,
       style: TextStyle(
         color: ThemeHelpers.textColor(context),
@@ -479,7 +484,7 @@ class SiteFilledField extends StatelessWidget {
           vertical: 13,
         ),
         enabledBorder: border(borderColor, 1),
-        focusedBorder: border(accent.withValues(alpha: 0.55), 1.4),
+        focusedBorder: border(focusTone.withValues(alpha: 0.55), 1.4),
         disabledBorder: border(borderColor.withValues(alpha: 0.5), 1),
       ),
     );
@@ -594,10 +599,26 @@ class SiteErrorState extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
+          // Neutro de propósito — o tema pinta OutlinedButton com o vermelho
+          // da marca, que aqui leria como mais um alerta, não como saída.
           OutlinedButton.icon(
             onPressed: onRetry,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: ThemeHelpers.textColor(context),
+              side: BorderSide(color: ThemeHelpers.borderColor(context)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 18,
+                vertical: 11,
+              ),
+            ),
             icon: const Icon(LucideIcons.refreshCw, size: 16),
-            label: const Text('Tentar novamente'),
+            label: const Text(
+              'Tentar novamente',
+              style: TextStyle(fontWeight: FontWeight.w800),
+            ),
           ),
         ],
       ),
@@ -671,9 +692,10 @@ class SiteSaveBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final accent = isDark
-        ? AppColors.primary.primaryDarkMode
-        : AppColors.primary.primary;
+    // Salvar = confirmar → verde. O vermelho da marca é identidade, não ação.
+    final green = isDark
+        ? AppColors.status.greenDarkMode
+        : AppColors.status.green;
 
     return AnimatedSize(
       duration: const Duration(milliseconds: 220),
@@ -703,7 +725,7 @@ class SiteSaveBar extends StatelessWidget {
                           vertical: 13,
                         ),
                       ),
-                      child: const Text('Descartar'),
+                      child: const Text('Descartar', softWrap: false),
                     ),
                     const SizedBox(width: 10),
                   ],
@@ -711,7 +733,7 @@ class SiteSaveBar extends StatelessWidget {
                     child: FilledButton.icon(
                       onPressed: saving ? null : onSave,
                       style: FilledButton.styleFrom(
-                        backgroundColor: accent,
+                        backgroundColor: green,
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -730,6 +752,7 @@ class SiteSaveBar extends StatelessWidget {
                           : const Icon(LucideIcons.check, size: 17),
                       label: Text(
                         saving ? 'Salvando…' : label,
+                        softWrap: false,
                         style: const TextStyle(
                           fontWeight: FontWeight.w800,
                           letterSpacing: -0.1,

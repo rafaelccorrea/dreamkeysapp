@@ -36,6 +36,19 @@ String _initialsOf(String name) {
   return (parts.first[0] + parts.last[0]).toUpperCase();
 }
 
+/// Iniciais da EQUIPE pro monograma — paridade com o card da lista
+/// (uma palavra → 2 primeiras letras; várias → primeira + última).
+String _teamInitialsOf(String name) {
+  final parts =
+      name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+  if (parts.isEmpty) return '?';
+  if (parts.length == 1) {
+    final w = parts.first;
+    return w.substring(0, w.length >= 2 ? 2 : 1).toUpperCase();
+  }
+  return (parts.first[0] + parts.last[0]).toUpperCase();
+}
+
 /// Membro em edição local (antes de salvar).
 class _DraftMember {
   final String userId;
@@ -55,9 +68,9 @@ class _DraftMember {
   bool get isLeader => role == 'leader';
 }
 
-/// Criar/editar equipe — nome, descrição, cor, membros (com papel
-/// líder/membro) e, na edição, ativa/inativa + uso nas fichas de venda.
-/// Estrutura flush com seções editoriais e prévia viva do cartão da equipe.
+/// Criar/editar equipe — identidade viva flush no topo (monograma + nome
+/// digitado + meta), banda contínua de cor, membros como protagonistas
+/// (pilha sobreposta, líderes primeiro) e configurações em linhas tonais.
 class TeamFormPage extends StatefulWidget {
   const TeamFormPage({super.key, this.teamId});
 
@@ -90,8 +103,18 @@ class _TeamFormPageState extends State<TeamFormPage> {
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
 
-  /// Cor viva da equipe — pinta prévia, foco dos campos e detalhes.
+  /// Cor CRUA da equipe — pinta swatches, monograma e avatares.
   Color get _teamColor => _parseHex(_color);
+
+  /// Cor da equipe ajustada pra legibilidade de texto/ícone pequeno no dark.
+  Color get _accent => _isDark
+      ? Color.lerp(_teamColor, Colors.white, 0.22)!
+      : _teamColor;
+
+  /// Tom profundo do gradiente do monograma — mesma mistura com índigo
+  /// profundo dos cards da lista de equipes.
+  Color get _deep =>
+      Color.lerp(_teamColor, const Color(0xFF312E81), _isDark ? 0.38 : 0.45)!;
 
   /// Verde de confirmação do sistema (Salvar/Criar).
   Color get _confirm =>
@@ -100,11 +123,20 @@ class _TeamFormPageState extends State<TeamFormPage> {
   Color get _violet =>
       _isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
 
-  Color get _sky => _isDark ? AppColors.status.infoDarkMode : AppColors.status.info;
+  Color get _sky =>
+      _isDark ? AppColors.status.infoDarkMode : AppColors.status.info;
 
   Color get _amber => _isDark
       ? AppColors.message.warningTextDarkMode
       : AppColors.message.warningText;
+
+  /// Líderes primeiro — são o rosto da equipe (mesma ordem da lista).
+  List<_DraftMember> get _ordered => [
+        ..._members.where((m) => m.isLeader),
+        ..._members.where((m) => !m.isLeader),
+      ];
+
+  int get _leadersCount => _members.where((m) => m.isLeader).length;
 
   @override
   void initState() {
@@ -293,69 +325,148 @@ class _TeamFormPageState extends State<TeamFormPage> {
       child: AppScaffold(
         title: _isEditing ? 'Editar equipe' : 'Nova equipe',
         showBottomNavigation: false,
-        body: _loading
-            ? _buildSkeleton()
-            : _error != null
-                ? _buildError()
-                : Column(
-                    children: [
-                      Expanded(child: _buildForm()),
-                      _buildSaveBar(),
-                    ],
-                  ),
+        body: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 220),
+          switchInCurve: Curves.easeOut,
+          switchOutCurve: Curves.easeIn,
+          child: _loading
+              ? KeyedSubtree(
+                  key: const ValueKey('loading'),
+                  child: _buildSkeleton(),
+                )
+              : _error != null
+                  ? KeyedSubtree(
+                      key: const ValueKey('error'),
+                      child: _buildError(),
+                    )
+                  : Column(
+                      key: const ValueKey('form'),
+                      children: [
+                        Expanded(child: _buildForm()),
+                        _buildSaveBar(),
+                      ],
+                    ),
+        ),
       ),
     );
   }
 
-  // ─── Skeleton fiel ao layout (prévia + seções + membros) ───────────────────
+  // ─── Skeleton fiel ao layout novo (masthead flush + banda + membros) ──────
 
   Widget _buildSkeleton() => ListView(
         physics: const NeverScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(_padH, 16, _padH, 16),
+        padding: const EdgeInsets.only(top: 18, bottom: 16),
         children: [
-          const SkeletonBox(height: 118, borderRadius: 18),
-          const SizedBox(height: 26),
-          const SkeletonText(width: 90, height: 10),
-          const SizedBox(height: 8),
-          const SkeletonText(width: 150, height: 20),
-          const SizedBox(height: 16),
-          const SkeletonBox(height: 56, borderRadius: 14),
-          const SizedBox(height: 12),
-          const SkeletonBox(height: 88, borderRadius: 14),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              for (var i = 0; i < 6; i++) ...[
-                const SkeletonBox(width: 40, height: 40, borderRadius: 20),
-                const SizedBox(width: 10),
-              ],
-            ],
-          ),
-          const SizedBox(height: 28),
-          const SkeletonText(width: 70, height: 10),
-          const SizedBox(height: 8),
-          const SkeletonText(width: 120, height: 20),
-          const SizedBox(height: 14),
-          for (var i = 0; i < 3; i++) ...[
-            Row(
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: _padH),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SkeletonBox(width: 40, height: 40, borderRadius: 20),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
-                      SkeletonText(width: 140, height: 13),
-                      SizedBox(height: 6),
-                      SkeletonText(width: 180, height: 10),
-                    ],
-                  ),
+                const SkeletonText(width: 120, height: 10),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    const SkeletonBox(width: 56, height: 56, borderRadius: 16),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          SkeletonText(width: 190, height: 24),
+                          SizedBox(height: 8),
+                          SkeletonText(width: 150, height: 11),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                const SkeletonBox(width: 64, height: 26, borderRadius: 999),
+                const SizedBox(height: 28),
+                const SkeletonText(width: 90, height: 10),
+                const SizedBox(height: 8),
+                const SkeletonText(width: 140, height: 20),
+                const SizedBox(height: 16),
+                const SkeletonBox(height: 56, borderRadius: 14),
+                const SizedBox(height: 12),
+                const SkeletonBox(height: 88, borderRadius: 14),
+                const SizedBox(height: 22),
+                const SkeletonText(width: 110, height: 10),
               ],
             ),
-            const SizedBox(height: 14),
-          ],
+          ),
+          const SizedBox(height: 12),
+          // Banda de cor — círculos grandes correndo pra fora da margem.
+          SizedBox(
+            height: 48,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              physics: const NeverScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: _padH),
+              itemCount: 7,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (_, __) =>
+                  const SkeletonBox(width: 48, height: 48, borderRadius: 24),
+            ),
+          ),
+          const SizedBox(height: 26),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: _padH),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          SkeletonText(width: 70, height: 10),
+                          SizedBox(height: 8),
+                          SkeletonText(width: 120, height: 20),
+                        ],
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        for (var i = 0; i < 3; i++)
+                          const Padding(
+                            padding: EdgeInsets.only(left: 2),
+                            child: SkeletonBox(
+                              width: 28,
+                              height: 28,
+                              borderRadius: 999,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                for (var i = 0; i < 3; i++) ...[
+                  Row(
+                    children: [
+                      const SkeletonBox(
+                          width: 40, height: 40, borderRadius: 999),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const [
+                            SkeletonText(width: 140, height: 13),
+                            SizedBox(height: 6),
+                            SkeletonText(width: 180, height: 10),
+                          ],
+                        ),
+                      ),
+                      const SkeletonBox(
+                          width: 64, height: 26, borderRadius: 999),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                const SkeletonBox(height: 48, borderRadius: 14),
+              ],
+            ),
+          ),
         ],
       );
 
@@ -423,399 +534,432 @@ class _TeamFormPageState extends State<TeamFormPage> {
           borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide(color: _teamColor, width: 1.6),
         ),
+        // Label flutuante na cor da equipe só quando focado e sem erro —
+        // erro continua vermelho, repouso continua neutro.
+        floatingLabelStyle: WidgetStateTextStyle.resolveWith((states) {
+          if (states.contains(WidgetState.error)) {
+            return TextStyle(
+              color: _isDark
+                  ? AppColors.status.errorDarkMode
+                  : AppColors.status.error,
+              fontWeight: FontWeight.w700,
+            );
+          }
+          if (states.contains(WidgetState.focused)) {
+            return TextStyle(color: _accent, fontWeight: FontWeight.w700);
+          }
+          return TextStyle(
+            color: ThemeHelpers.textSecondaryColor(context),
+            fontWeight: FontWeight.w600,
+          );
+        }),
       );
 
   Widget _buildForm() {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(_padH, 16, _padH, 24),
+      padding: const EdgeInsets.only(top: 16, bottom: 24),
       children: [
-        _buildPreviewCard(),
+        _Entrance(index: 0, child: _buildMasthead()),
         const SizedBox(height: 26),
         // ── Identidade ──────────────────────────────────────────────────────
-        _SectionHeader(
-          eyebrow: 'QUEM É A EQUIPE',
-          title: 'Identidade',
-          subtitle: 'Nome, descrição e a cor que assina a equipe no sistema.',
-          tone: _teamColor,
-        ),
-        const SizedBox(height: 16),
-        TextField(
-          controller: _name,
-          enabled: !_saving,
-          textCapitalization: TextCapitalization.words,
-          decoration: _dec(
-            'Nome da equipe *',
-            hint: 'Ex.: Equipe Centro',
-            errorText: _nameError ? 'Informe o nome da equipe.' : null,
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _description,
-          enabled: !_saving,
-          minLines: 2,
-          maxLines: 4,
-          textCapitalization: TextCapitalization.sentences,
-          decoration: _dec(
-            'Descrição',
-            hint: 'Opcional — foco, região, especialidade…',
-          ),
-        ),
-        const SizedBox(height: 18),
-        _buildColorPicker(),
-        // ── Configurações (só edição) ───────────────────────────────────────
-        if (_isEditing) ...[
-          const SizedBox(height: 8),
-          _sectionSeparator(),
-          _SectionHeader(
-            eyebrow: 'COMPORTAMENTO',
-            title: 'Configurações',
-            subtitle: 'Como a equipe aparece e é usada no dia a dia.',
-            tone: _violet,
-          ),
-          const SizedBox(height: 14),
-          _SettingRow(
-            icon: LucideIcons.circleCheck,
-            tone: _confirm,
-            title: 'Equipe ativa',
-            description: _isActive
-                ? 'Visível nas listagens e nos relatórios.'
-                : 'Oculta das listagens até ser reativada.',
-            value: _isActive,
-            enabled: !_saving,
-            onChanged: (v) {
-              HapticFeedback.selectionClick();
-              setState(() => _isActive = v);
-            },
-          ),
-          _rowDivider(indent: 48),
-          _SettingRow(
-            icon: LucideIcons.fileText,
-            tone: _sky,
-            title: 'Usar nas fichas de venda',
-            description: 'Equipe selecionável ao criar novas fichas.',
-            value: _useInSaleForms,
-            enabled: !_saving,
-            onChanged: (v) {
-              HapticFeedback.selectionClick();
-              setState(() => _useInSaleForms = v);
-            },
-          ),
-        ],
-        // ── Membros ─────────────────────────────────────────────────────────
-        const SizedBox(height: 8),
-        _sectionSeparator(),
-        _SectionHeader(
-          eyebrow: 'PESSOAS',
-          title: 'Membros',
-          subtitle: 'Quem faz parte — toque no papel para alternar líder.',
-          tone: _sky,
-          trailing: _buildMembersCounter(),
-        ),
-        const SizedBox(height: 14),
-        if (_members.isEmpty)
-          _buildMembersEmpty()
-        else
-          for (var i = 0; i < _members.length; i++) ...[
-            if (i > 0) _rowDivider(indent: 52),
-            _buildMemberRow(_members[i]),
-          ],
-        const SizedBox(height: 14),
-        _buildAddMemberButton(),
-      ],
-    );
-  }
-
-  // ─── Prévia viva do cartão da equipe ───────────────────────────────────────
-
-  Widget _buildPreviewCard() {
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final cardBg = ThemeHelpers.cardBackgroundColor(context);
-    final name = _name.text.trim();
-    final description = _description.text.trim();
-    final hasName = name.isNotEmpty;
-    final leaders = _members.where((m) => m.isLeader).length;
-    // Inativa desliga a cor da prévia — o cartão "apaga" junto com a equipe.
-    final tone = _isActive ? _teamColor : secondary.withValues(alpha: 0.85);
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 240),
-      curve: Curves.easeOutCubic,
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: ThemeHelpers.cardShadow(context),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        children: [
-          // Barra tonal viva à esquerda.
-          Positioned(
-            left: 0,
-            top: 0,
-            bottom: 0,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 240),
-              width: 5,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [tone, tone.withValues(alpha: 0.35)],
-                ),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(19, 14, 14, 14),
+        _Entrance(
+          index: 1,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: _padH),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Monograma na cor viva.
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 240),
-                      width: 46,
-                      height: 46,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(14),
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [
-                            tone,
-                            Color.lerp(tone, Colors.black, 0.22) ?? tone,
-                          ],
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: tone.withValues(alpha: 0.32),
-                            blurRadius: 10,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      alignment: Alignment.center,
-                      child: hasName
-                          ? Text(
-                              _initialsOf(name),
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w900,
-                                color: Colors.white,
-                                letterSpacing: 0.4,
-                              ),
-                            )
-                          : const Icon(
-                              LucideIcons.users,
-                              size: 20,
-                              color: Colors.white,
-                            ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(LucideIcons.eye, size: 11, color: tone),
-                              const SizedBox(width: 5),
-                              Text(
-                                'PRÉVIA DA EQUIPE',
-                                style: TextStyle(
-                                  fontSize: 9.5,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: 1.6,
-                                  color: tone,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            hasName ? name : 'Nome da equipe',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 16.5,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.4,
-                              color: hasName
-                                  ? ThemeHelpers.textColor(context)
-                                  : secondary.withValues(alpha: 0.55),
-                            ),
-                          ),
-                          Text(
-                            description.isNotEmpty
-                                ? description
-                                : 'Sem descrição',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                              height: 1.3,
-                              color: description.isNotEmpty
-                                  ? secondary
-                                  : secondary.withValues(alpha: 0.55),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+                _SectionHeader(
+                  eyebrow: 'COMO SE APRESENTA',
+                  title: 'Identidade',
+                  subtitle:
+                      'Nome e descrição — a manchete lá em cima acompanha.',
+                  tone: _accent,
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _name,
+                  enabled: !_saving,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: _dec(
+                    'Nome da equipe *',
+                    hint: 'Ex.: Equipe Centro',
+                    errorText:
+                        _nameError ? 'Informe o nome da equipe.' : null,
+                  ),
                 ),
                 const SizedBox(height: 12),
-                Row(
-                  children: [
-                    _buildPreviewBubbles(tone),
-                    const Spacer(),
-                    if (_isEditing)
-                      _StatusChip(
-                        label: _isActive ? 'Ativa' : 'Inativa',
-                        tone: _isActive ? _confirm : secondary,
-                        icon: _isActive
-                            ? LucideIcons.circleCheck
-                            : LucideIcons.circlePause,
-                      ),
-                    if (_isEditing && _useInSaleForms) ...[
-                      const SizedBox(width: 6),
-                      _StatusChip(
-                        label: 'Fichas',
-                        tone: _sky,
-                        icon: LucideIcons.fileText,
-                      ),
-                    ],
-                    if (leaders > 0) ...[
-                      const SizedBox(width: 6),
-                      _StatusChip(
-                        label: leaders == 1 ? '1 líder' : '$leaders líderes',
-                        tone: _amber,
-                        icon: LucideIcons.crown,
-                      ),
-                    ],
-                  ],
+                TextField(
+                  controller: _description,
+                  enabled: !_saving,
+                  minLines: 2,
+                  maxLines: 4,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: _dec(
+                    'Descrição',
+                    hint: 'Opcional — foco, região, especialidade…',
+                  ),
                 ),
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  /// Pilha de avatares sobrepostos da prévia (até 5 + excedente).
-  Widget _buildPreviewBubbles(Color tone) {
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final cardBg = ThemeHelpers.cardBackgroundColor(context);
-    if (_members.isEmpty) {
-      return Text(
-        'Sem membros ainda',
-        style: TextStyle(
-          fontSize: 11.5,
-          fontWeight: FontWeight.w600,
-          color: secondary.withValues(alpha: 0.7),
         ),
-      );
-    }
-    const maxShown = 5;
-    final shown = _members.take(maxShown).toList();
-    final extra = _members.length - shown.length;
-    final slots = shown.length + (extra > 0 ? 1 : 0);
-
-    return SizedBox(
-      width: 28.0 + (slots - 1) * 20.0,
-      height: 28,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          for (var i = 0; i < shown.length; i++)
-            Positioned(
-              left: i * 20.0,
-              child: Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: cardBg, width: 2),
-                ),
-                child: _memberAvatar(shown[i], size: 24, fontSize: 10),
-              ),
-            ),
-          if (extra > 0)
-            Positioned(
-              left: shown.length * 20.0,
-              child: Container(
-                width: 28,
-                height: 28,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: tone.withValues(alpha: 0.12),
-                  border: Border.all(color: cardBg, width: 2),
-                ),
-                child: Text(
-                  '+$extra',
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w800,
-                    color: tone,
+        const SizedBox(height: 22),
+        // ── Banda de cor — full-bleed, correndo além da margem ──────────────
+        _Entrance(index: 2, child: _buildColorBand()),
+        // ── Configurações (só edição) ───────────────────────────────────────
+        if (_isEditing) ...[
+          _sectionSeparator(),
+          _Entrance(
+            index: 3,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: _padH),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _SectionHeader(
+                    eyebrow: 'COMPORTAMENTO',
+                    title: 'Configurações',
+                    subtitle: 'Como a equipe aparece e é usada no dia a dia.',
+                    tone: _violet,
                   ),
-                ),
+                  const SizedBox(height: 10),
+                  _SettingRow(
+                    icon: LucideIcons.circleCheck,
+                    tone: _confirm,
+                    title: 'Equipe ativa',
+                    description: _isActive
+                        ? 'Visível nas listagens e nos relatórios.'
+                        : 'Oculta das listagens até ser reativada.',
+                    value: _isActive,
+                    enabled: !_saving,
+                    onChanged: (v) {
+                      HapticFeedback.selectionClick();
+                      setState(() => _isActive = v);
+                    },
+                  ),
+                  _rowDivider(indent: 48),
+                  _SettingRow(
+                    icon: LucideIcons.fileText,
+                    tone: _sky,
+                    title: 'Usar nas fichas de venda',
+                    description: 'Equipe selecionável ao criar novas fichas.',
+                    value: _useInSaleForms,
+                    enabled: !_saving,
+                    onChanged: (v) {
+                      HapticFeedback.selectionClick();
+                      setState(() => _useInSaleForms = v);
+                    },
+                  ),
+                ],
               ),
             ),
+          ),
         ],
-      ),
-    );
-  }
-
-  // ─── Seletor de cor ────────────────────────────────────────────────────────
-
-  Widget _buildColorPicker() {
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(LucideIcons.palette, size: 14, color: _teamColor),
-            const SizedBox(width: 7),
-            Text(
-              'COR DA EQUIPE',
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1.4,
-                color: ThemeHelpers.textColor(context),
-              ),
+        _sectionSeparator(),
+        // ── Membros ─────────────────────────────────────────────────────────
+        _Entrance(
+          index: _isEditing ? 4 : 3,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: _padH),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _SectionHeader(
+                  eyebrow: 'PESSOAS',
+                  title: 'Membros',
+                  subtitle: _members.isEmpty
+                      ? 'Monte o time e defina quem lidera.'
+                      : _membersSubtitle(),
+                  tone: _accent,
+                  trailing:
+                      _members.isEmpty ? null : _buildHeaderAvatarStack(),
+                ),
+                const SizedBox(height: 14),
+                if (_members.isEmpty)
+                  _buildMembersEmpty()
+                else
+                  ..._buildMemberRows(),
+                const SizedBox(height: 14),
+                _buildAddMemberButton(),
+              ],
             ),
-            const Spacer(),
-            Text(
-              'Assina o cartão e os avatares',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: secondary.withValues(alpha: 0.8),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            for (final hex in _teamColors) _buildSwatch(hex),
-          ],
+          ),
         ),
       ],
     );
   }
 
-  /// Swatch com anel de seleção suave (aro afastado na própria cor).
+  String _membersSubtitle() {
+    final total = _members.length;
+    final leaders = _leadersCount;
+    final t = total == 1 ? '1 pessoa' : '$total pessoas';
+    final l = leaders == 0
+        ? 'sem liderança definida'
+        : leaders == 1
+            ? '1 líder'
+            : '$leaders líderes';
+    return '$t · $l — toque no papel para alternar.';
+  }
+
+  // ─── Masthead flush — a identidade viva da equipe ─────────────────────────
+
+  Widget _buildMasthead() {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final name = _name.text.trim();
+    final hasName = name.isNotEmpty;
+    // Inativa "apaga" a identidade — a cor volta quando reativar.
+    final dimmed = _isEditing && !_isActive;
+    final tone = dimmed ? secondary.withValues(alpha: 0.85) : _teamColor;
+    final toneDeep = dimmed
+        ? secondary.withValues(alpha: 0.6)
+        : _deep;
+    final eyebrowTone = dimmed ? secondary : _accent;
+    final statusTone = _isActive ? _confirm : secondary;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: _padH),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Eyebrow com dot vivo — mesma gramática do hero da lista.
+          Row(
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 240),
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: eyebrowTone,
+                  boxShadow: [
+                    BoxShadow(
+                      color: eyebrowTone.withValues(alpha: 0.55),
+                      blurRadius: 8,
+                      spreadRadius: 1,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 9),
+              Flexible(
+                child: Text(
+                  _isEditing ? 'ORGANIZAÇÃO · EDITANDO EQUIPE'
+                      : 'ORGANIZAÇÃO · NOVA EQUIPE',
+                  maxLines: 1,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: eyebrowTone,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 2.0,
+                    fontSize: 10.5,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Monograma na cor viva — flush na margem, sem moldura em volta.
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 240),
+                curve: Curves.easeOutCubic,
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [tone, toneDeep],
+                  ),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.16),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: tone.withValues(alpha: _isDark ? 0.4 : 0.28),
+                      blurRadius: 12,
+                      offset: const Offset(0, 5),
+                      spreadRadius: -3,
+                    ),
+                  ],
+                ),
+                alignment: Alignment.center,
+                child: hasName
+                    ? Text(
+                        _teamInitialsOf(name),
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                          color: Colors.white,
+                          letterSpacing: 0.3,
+                          height: 1.0,
+                        ),
+                      )
+                    : const Icon(
+                        LucideIcons.users,
+                        size: 24,
+                        color: Colors.white,
+                      ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Manchete que digita junto — nunca trunca com ellipsis.
+                    Text(
+                      hasName ? name : 'Nova equipe',
+                      style: theme.textTheme.headlineMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.8,
+                        height: 1.05,
+                        fontSize: 26,
+                        color: hasName
+                            ? ThemeHelpers.textColor(context)
+                            : secondary.withValues(alpha: 0.45),
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    // Meta discreta: pessoas · cor · status.
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        _MetaBit(
+                          icon: LucideIcons.users,
+                          iconColor: secondary,
+                          text: _members.isEmpty
+                              ? 'sem membros'
+                              : _members.length == 1
+                                  ? '1 membro'
+                                  : '${_members.length} membros',
+                        ),
+                        _metaDot(secondary),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            AnimatedContainer(
+                              duration: const Duration(milliseconds: 240),
+                              width: 9,
+                              height: 9,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: _teamColor,
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.35),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              _color.toUpperCase(),
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.8,
+                                color: secondary,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        _metaDot(secondary),
+                        Text(
+                          _isActive ? 'Ativa' : 'Inativa',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w800,
+                            color: statusTone,
+                            letterSpacing: 0.1,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _metaDot(Color secondary) => Container(
+        width: 3.5,
+        height: 3.5,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: secondary.withValues(alpha: 0.45),
+        ),
+      );
+
+  // ─── Banda de cor — swatches grandes, contínua, full-bleed ────────────────
+
+  Widget _buildColorBand() {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: _padH),
+          child: Row(
+            children: [
+              Icon(LucideIcons.palette, size: 14, color: _accent),
+              const SizedBox(width: 7),
+              Text(
+                'COR DA EQUIPE',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.6,
+                  color: ThemeHelpers.textColor(context),
+                ),
+              ),
+              const Spacer(),
+              Flexible(
+                child: Text(
+                  'Assina monograma, foco e avatares',
+                  maxLines: 1,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: secondary.withValues(alpha: 0.8),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        // A banda corre além das margens — convite natural pro scroll.
+        SizedBox(
+          height: 52,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: _padH),
+            physics: const BouncingScrollPhysics(),
+            itemCount: _teamColors.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (_, i) => _buildSwatch(_teamColors[i]),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Swatch grande com anel de seleção afastado na própria cor.
   Widget _buildSwatch(String hex) {
     final c = _parseHex(hex);
     final selected = _color == hex;
@@ -827,11 +971,11 @@ class _TeamFormPageState extends State<TeamFormPage> {
               setState(() => _color = hex);
             },
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
+        duration: const Duration(milliseconds: 180),
         curve: Curves.easeOutCubic,
-        width: 40,
-        height: 40,
-        padding: const EdgeInsets.all(3),
+        width: 52,
+        height: 52,
+        padding: EdgeInsets.all(selected ? 4 : 6),
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           border: Border.all(
@@ -839,7 +983,9 @@ class _TeamFormPageState extends State<TeamFormPage> {
             color: selected ? c : Colors.transparent,
           ),
         ),
-        child: Container(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
           decoration: BoxDecoration(
             color: c,
             shape: BoxShape.circle,
@@ -847,75 +993,148 @@ class _TeamFormPageState extends State<TeamFormPage> {
                 ? [
                     BoxShadow(
                       color: c.withValues(alpha: 0.45),
-                      blurRadius: 8,
-                      offset: const Offset(0, 3),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                      spreadRadius: -1,
                     ),
                   ]
                 : null,
           ),
           child: selected
-              ? const Icon(LucideIcons.check, size: 15, color: Colors.white)
+              ? const Icon(LucideIcons.check, size: 17, color: Colors.white)
               : null,
         ),
       ),
     );
   }
 
-  // ─── Membros ───────────────────────────────────────────────────────────────
+  // ─── Membros — protagonistas ──────────────────────────────────────────────
 
-  Widget _buildMembersCounter() {
-    final total = _members.length;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: _sky.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        total == 1 ? '1 membro' : '$total membros',
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w800,
-          color: _sky,
-        ),
-      ),
+  /// Pilha de avatares sobrepostos no cabeçalho da seção (líderes primeiro,
+  /// mesma gramática dos cards da lista) + bolha de excedente.
+  Widget _buildHeaderAvatarStack() {
+    const maxShown = 4;
+    final ordered = _ordered;
+    final shown = ordered.take(maxShown).toList();
+    final extra = ordered.length - shown.length;
+    final bg = ThemeHelpers.backgroundColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < shown.length; i++)
+          Align(
+            widthFactor: i == 0 ? 1 : 0.62,
+            child: Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: bg, width: 2),
+              ),
+              child: _memberAvatar(shown[i], size: 28, fontSize: 11),
+            ),
+          ),
+        if (extra > 0)
+          Align(
+            widthFactor: 0.62,
+            child: Container(
+              width: 32,
+              height: 32,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _teamColor.withValues(alpha: 0.12),
+                border: Border.all(color: bg, width: 2),
+              ),
+              child: Text(
+                '+$extra',
+                style: TextStyle(
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w900,
+                  color: _isDark ? _accent : _teamColor,
+                  height: 1.0,
+                  letterSpacing: -0.2,
+                ),
+              ),
+            ),
+          ),
+        if (extra <= 0 && shown.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(left: 6),
+            child: Text(
+              '${_members.length}',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+                color: secondary,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+      ],
     );
   }
 
+  /// Estado vazio ilustrado — trio de "assentos" tonais esperando gente.
   Widget _buildMembersEmpty() {
     final secondary = ThemeHelpers.textSecondaryColor(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 18),
+      padding: const EdgeInsets.symmetric(vertical: 16),
       child: Column(
         children: [
-          Container(
-            width: 58,
-            height: 58,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: _teamColor.withValues(alpha: 0.1),
-              border: Border.all(
-                color: _teamColor.withValues(alpha: 0.25),
-              ),
+          SizedBox(
+            height: 56,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                for (var i = 0; i < 3; i++)
+                  Align(
+                    widthFactor: i == 0 ? 1 : 0.72,
+                    child: Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _teamColor.withValues(
+                          alpha: i == 1 ? 0.14 : 0.07,
+                        ),
+                        border: Border.all(
+                          color: _teamColor.withValues(
+                            alpha: i == 1 ? 0.4 : 0.2,
+                          ),
+                        ),
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(
+                        i == 1 ? LucideIcons.userPlus : LucideIcons.users,
+                        size: i == 1 ? 20 : 16,
+                        color: _accent.withValues(alpha: i == 1 ? 1.0 : 0.45),
+                      ),
+                    ),
+                  ),
+              ],
             ),
-            child: Icon(LucideIcons.users, size: 24, color: _teamColor),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           Text(
-            'Nenhum membro ainda',
+            'A equipe ainda está vazia',
             style: TextStyle(
               fontSize: 13.5,
               fontWeight: FontWeight.w800,
+              letterSpacing: -0.2,
               color: ThemeHelpers.textColor(context),
             ),
           ),
           const SizedBox(height: 3),
           Text(
-            'Adicione corretores e defina quem lidera a equipe.',
+            'Adicione corretores e toque na coroa para\ndefinir quem lidera.',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w500,
+              height: 1.4,
               color: secondary,
             ),
           ),
@@ -924,15 +1143,61 @@ class _TeamFormPageState extends State<TeamFormPage> {
     );
   }
 
+  /// Linhas de membro — líderes agrupados primeiro com eyebrow próprio.
+  List<Widget> _buildMemberRows() {
+    final leaders = _members.where((m) => m.isLeader).toList();
+    final others = _members.where((m) => !m.isLeader).toList();
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final showGroups = leaders.isNotEmpty && others.isNotEmpty;
+
+    final rows = <Widget>[];
+
+    void addGroup(List<_DraftMember> group) {
+      for (var i = 0; i < group.length; i++) {
+        // 44 do avatar + 12 de respiro = divisor alinhado ao texto.
+        if (i > 0) rows.add(_rowDivider(indent: 56));
+        rows.add(_buildMemberRow(group[i]));
+      }
+    }
+
+    if (showGroups) {
+      rows.add(_GroupEyebrow(
+        icon: LucideIcons.crown,
+        label: leaders.length == 1 ? 'LIDERANÇA' : 'LIDERANÇAS',
+        tone: _amber,
+      ));
+      addGroup(leaders);
+      rows.add(const SizedBox(height: 10));
+      rows.add(_GroupEyebrow(
+        icon: LucideIcons.users,
+        label: 'TIME',
+        tone: secondary,
+      ));
+      addGroup(others);
+    } else {
+      addGroup(leaders.isNotEmpty ? leaders : others);
+    }
+    return rows;
+  }
+
   /// Avatar do membro — foto real quando existe, senão monograma na cor viva.
-  Widget _memberAvatar(_DraftMember m, {double size = 40, double fontSize = 14}) {
+  /// Líder ganha anel âmbar + mini coroa (mesma gramática da lista).
+  Widget _memberAvatar(
+    _DraftMember m, {
+    double size = 40,
+    double fontSize = 14,
+    bool leaderBadge = false,
+  }) {
     Widget monogram() => Container(
           width: size,
           height: size,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: _teamColor.withValues(alpha: 0.14),
-            border: Border.all(color: _teamColor.withValues(alpha: 0.3)),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [_teamColor, _deep],
+            ),
           ),
           alignment: Alignment.center,
           child: Text(
@@ -941,24 +1206,68 @@ class _TeamFormPageState extends State<TeamFormPage> {
               fontSize: fontSize * 0.78,
               fontWeight: FontWeight.w900,
               letterSpacing: 0.3,
-              color: _teamColor,
+              color: Colors.white,
+              height: 1.0,
             ),
           ),
         );
 
     final hasPhoto = m.avatar != null && m.avatar!.trim().isNotEmpty;
-    if (!hasPhoto) return monogram();
-    return ClipOval(
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: Image.network(
-          m.avatar!,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => monogram(),
-          loadingBuilder: (_, child, progress) =>
-              progress == null ? child : monogram(),
-        ),
+    final inner = hasPhoto
+        ? ClipOval(
+            child: SizedBox(
+              width: size,
+              height: size,
+              child: Image.network(
+                m.avatar!,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => monogram(),
+                loadingBuilder: (_, child, progress) =>
+                    progress == null ? child : monogram(),
+              ),
+            ),
+          )
+        : monogram();
+
+    if (!leaderBadge || !m.isLeader) return inner;
+
+    final bg = ThemeHelpers.backgroundColor(context);
+    return SizedBox(
+      width: size + 4,
+      height: size + 4,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: size + 4,
+            height: size + 4,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: _amber, width: 1.8),
+            ),
+            alignment: Alignment.center,
+            child: inner,
+          ),
+          Positioned(
+            top: -3,
+            right: -2,
+            child: Container(
+              width: 15,
+              height: 15,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0xFFD97706),
+                border: Border.all(color: bg, width: 1.4),
+              ),
+              alignment: Alignment.center,
+              child: const Icon(
+                LucideIcons.crown,
+                size: 8,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -969,7 +1278,12 @@ class _TeamFormPageState extends State<TeamFormPage> {
       padding: const EdgeInsets.symmetric(vertical: 9),
       child: Row(
         children: [
-          _memberAvatar(m),
+          // Caixa fixa de 44 — líder (com anel) e membro ficam no mesmo eixo.
+          SizedBox(
+            width: 44,
+            height: 44,
+            child: Center(child: _memberAvatar(m, leaderBadge: true)),
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -1082,6 +1396,7 @@ class _TeamFormPageState extends State<TeamFormPage> {
       child: InkWell(
         onTap: _saving ? null : _addMember,
         borderRadius: BorderRadius.circular(14),
+        splashColor: _teamColor.withValues(alpha: 0.14),
         child: Container(
           height: 48,
           decoration: BoxDecoration(
@@ -1091,14 +1406,19 @@ class _TeamFormPageState extends State<TeamFormPage> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(LucideIcons.userPlus, size: 16, color: _teamColor),
+              Icon(LucideIcons.userPlus, size: 16, color: _accent),
               const SizedBox(width: 8),
-              Text(
-                'Adicionar membro',
-                style: TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w800,
-                  color: _teamColor,
+              Flexible(
+                child: Text(
+                  'Adicionar membro',
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.fade,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    color: _accent,
+                  ),
                 ),
               ),
             ],
@@ -1119,7 +1439,7 @@ class _TeamFormPageState extends State<TeamFormPage> {
 
   Widget _sectionSeparator() => Container(
         height: 1,
-        margin: const EdgeInsets.symmetric(vertical: 22),
+        margin: const EdgeInsets.fromLTRB(_padH, 24, 0, 24),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [
@@ -1130,15 +1450,19 @@ class _TeamFormPageState extends State<TeamFormPage> {
         ),
       );
 
-  // ─── Barra de salvar — semântica: neutro cancela, verde confirma ──────────
+  // ─── Barra de salvar — neutro cancela, verde confirma ─────────────────────
+  //
+  // Cancelar dimensiona pela largura do próprio rótulo (nunca espremido num
+  // Expanded) e o rótulo não quebra linha; Salvar ocupa o resto com FittedBox
+  // — aguenta fontes de acessibilidade maiores sem partir "Cancela\r".
 
   Widget _buildSaveBar() {
     final onConfirm = _isDark ? const Color(0xFF0B2314) : Colors.white;
     return Container(
       padding: EdgeInsets.fromLTRB(
-        _padH,
+        16,
         10,
-        _padH,
+        16,
         10 + MediaQuery.paddingOf(context).bottom,
       ),
       decoration: BoxDecoration(
@@ -1151,36 +1475,38 @@ class _TeamFormPageState extends State<TeamFormPage> {
       ),
       child: Row(
         children: [
-          Expanded(
-            child: OutlinedButton(
-              onPressed:
-                  _saving ? null : () => Navigator.of(context).maybePop(),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(0, 50),
-                foregroundColor: ThemeHelpers.textSecondaryColor(context),
-                side: BorderSide(
-                  color: ThemeHelpers.borderColor(context)
-                      .withValues(alpha: 0.75),
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
+          OutlinedButton(
+            onPressed:
+                _saving ? null : () => Navigator.of(context).maybePop(),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(0, 52),
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              foregroundColor: ThemeHelpers.textSecondaryColor(context),
+              side: BorderSide(
+                color: ThemeHelpers.borderColor(context)
+                    .withValues(alpha: 0.75),
               ),
-              child: const Text(
-                'Cancelar',
-                style: TextStyle(fontWeight: FontWeight.w800),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
               ),
+            ),
+            child: const Text(
+              'Cancelar',
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.visible,
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
             ),
           ),
           const SizedBox(width: 10),
           Expanded(
-            flex: 2,
             child: FilledButton(
               onPressed: _saving ? null : _save,
               style: FilledButton.styleFrom(
                 backgroundColor: _confirm,
                 foregroundColor: onConfirm,
-                minimumSize: const Size(0, 50),
+                minimumSize: const Size(0, 52),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
                 ),
@@ -1194,19 +1520,24 @@ class _TeamFormPageState extends State<TeamFormPage> {
                         color: onConfirm,
                       ),
                     )
-                  : Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(LucideIcons.check, size: 17),
-                        const SizedBox(width: 8),
-                        Text(
-                          _isEditing ? 'Salvar alterações' : 'Criar equipe',
-                          style: const TextStyle(
-                            fontSize: 14.5,
-                            fontWeight: FontWeight.w900,
+                  : FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(LucideIcons.check, size: 17),
+                          const SizedBox(width: 8),
+                          Text(
+                            _isEditing ? 'Salvar alterações' : 'Criar equipe',
+                            maxLines: 1,
+                            softWrap: false,
+                            style: const TextStyle(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w900,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
             ),
           ),
@@ -1218,8 +1549,33 @@ class _TeamFormPageState extends State<TeamFormPage> {
 
 // ─── Widgets auxiliares ──────────────────────────────────────────────────────
 
+/// Entrada suave de seção — fade + leve subida, uma única vez ao montar.
+class _Entrance extends StatelessWidget {
+  const _Entrance({required this.index, required this.child});
+
+  final int index;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: Duration(milliseconds: 260 + index * 50),
+      curve: Curves.easeOutCubic,
+      child: child,
+      builder: (context, t, child) => Opacity(
+        opacity: t,
+        child: Transform.translate(
+          offset: Offset(0, (1 - t) * 12),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
 /// Cabeçalho editorial de seção — barra tonal + eyebrow + título + subtítulo
-/// (mesma gramática do ProfilePage).
+/// (mesma gramática do ProfilePage), com trailing opcional.
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader({
     required this.eyebrow,
@@ -1268,7 +1624,8 @@ class _SectionHeader extends StatelessWidget {
                         fontSize: 10,
                       ),
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      overflow: TextOverflow.fade,
+                      softWrap: false,
                     ),
                   ),
                 ],
@@ -1300,9 +1657,86 @@ class _SectionHeader extends StatelessWidget {
         ),
         if (trailing != null)
           Padding(
-            padding: const EdgeInsets.only(left: 10, top: 16),
+            padding: const EdgeInsets.only(left: 10, top: 18),
             child: trailing!,
           ),
+      ],
+    );
+  }
+}
+
+/// Eyebrow de grupo dentro da lista de membros (LIDERANÇA / TIME).
+class _GroupEyebrow extends StatelessWidget {
+  const _GroupEyebrow({
+    required this.icon,
+    required this.label,
+    required this.tone,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, bottom: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 11, color: tone),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 9.5,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.6,
+              color: tone,
+              height: 1.0,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Container(
+              height: 1,
+              color: tone.withValues(alpha: 0.16),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Fragmento de meta do masthead — ícone pequeno + texto discreto.
+class _MetaBit extends StatelessWidget {
+  const _MetaBit({
+    required this.icon,
+    required this.iconColor,
+    required this.text,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 12, color: iconColor.withValues(alpha: 0.8)),
+        const SizedBox(width: 4),
+        Text(
+          text,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w600,
+            color: secondary,
+            letterSpacing: 0.1,
+          ),
+        ),
       ],
     );
   }
@@ -1339,12 +1773,16 @@ class _SettingRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 10),
         child: Row(
           children: [
-            Container(
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
               width: 36,
               height: 36,
               decoration: BoxDecoration(
                 color: tone.withValues(alpha: value ? 0.14 : 0.08),
                 borderRadius: BorderRadius.circular(11),
+                border: Border.all(
+                  color: tone.withValues(alpha: value ? 0.35 : 0.0),
+                ),
               ),
               child: Icon(
                 icon,
@@ -1388,46 +1826,6 @@ class _SettingRow extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// Chip de estado da prévia (Ativa/Inativa, Fichas, líderes).
-class _StatusChip extends StatelessWidget {
-  const _StatusChip({
-    required this.label,
-    required this.tone,
-    required this.icon,
-  });
-
-  final String label;
-  final Color tone;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: tone.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: tone.withValues(alpha: 0.28)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 10.5, color: tone),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w800,
-              color: tone,
-            ),
-          ),
-        ],
       ),
     );
   }

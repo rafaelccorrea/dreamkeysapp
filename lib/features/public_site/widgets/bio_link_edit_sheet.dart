@@ -102,12 +102,17 @@ class _BioLinkEditSheetState extends State<BioLinkEditSheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    // Violeta — o acento do Link in Bio (identidade de "bio/criador").
+    // O vermelho da marca não entra nesta feature; aqui ele fica só nos
+    // textos de erro de validação.
     final accent = isDark
-        ? AppColors.primary.primaryDarkMode
-        : AppColors.primary.primary;
+        ? AppColors.status.purpleDarkMode
+        : AppColors.status.purple;
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final danger =
         isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    final green =
+        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
 
     return Container(
       decoration: BoxDecoration(
@@ -179,7 +184,11 @@ class _BioLinkEditSheetState extends State<BioLinkEditSheet> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'O botão aparece na sua página na ordem da lista.',
+                            _isEditing
+                                ? 'As alterações entram na página quando '
+                                      'você salvar a lista.'
+                                : 'O botão entra no fim da lista — arraste '
+                                      'depois para reordenar.',
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: secondary,
                               height: 1.3,
@@ -197,6 +206,7 @@ class _BioLinkEditSheetState extends State<BioLinkEditSheet> {
                   hint: 'Fale no WhatsApp',
                   icon: LucideIcons.type,
                   maxLength: 80,
+                  accent: accent,
                   onChanged: (_) {
                     if (_labelError != null) {
                       setState(() => _labelError = null);
@@ -221,6 +231,7 @@ class _BioLinkEditSheetState extends State<BioLinkEditSheet> {
                   hint: 'https://wa.me/5511999999999',
                   icon: LucideIcons.link,
                   keyboardType: TextInputType.url,
+                  accent: accent,
                   onChanged: (_) {
                     if (_urlError != null) {
                       setState(() => _urlError = null);
@@ -254,7 +265,7 @@ class _BioLinkEditSheetState extends State<BioLinkEditSheet> {
                           ),
                           padding: const EdgeInsets.symmetric(vertical: 13),
                         ),
-                        child: const Text('Cancelar'),
+                        child: const Text('Cancelar', softWrap: false),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -262,8 +273,10 @@ class _BioLinkEditSheetState extends State<BioLinkEditSheet> {
                       flex: 2,
                       child: FilledButton.icon(
                         onPressed: _submit,
+                        // Confirmar = verde (o vermelho da marca fica na
+                        // identidade do cabeçalho, nunca na ação).
                         style: FilledButton.styleFrom(
-                          backgroundColor: accent,
+                          backgroundColor: green,
                           foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -273,6 +286,7 @@ class _BioLinkEditSheetState extends State<BioLinkEditSheet> {
                         icon: const Icon(LucideIcons.check, size: 17),
                         label: Text(
                           _isEditing ? 'Aplicar' : 'Adicionar link',
+                          softWrap: false,
                           style: const TextStyle(fontWeight: FontWeight.w800),
                         ),
                       ),
