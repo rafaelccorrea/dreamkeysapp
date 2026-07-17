@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -9,7 +10,6 @@ import '../../../core/theme/shell_visual_tokens.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/widgets/app_scaffold.dart';
-import '../../../shared/widgets/minimal_body_chrome.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../models/multichannel_models.dart';
 import '../services/analytics_service.dart';
@@ -61,6 +61,14 @@ class _MultichannelAnalyticsPageState extends State<MultichannelAnalyticsPage> {
   final List<RecentLead> _recentItems = [];
   String? _recentChannel;
   bool _recentLoading = false;
+
+  /// Índice onde começa o lote mais novo — só os itens recém-chegados entram
+  /// com stagger de fade/slide (os anteriores ficam parados).
+  int _recentBatchStart = 0;
+
+  /// Se o usuário já paginou ao menos uma vez — habilita a linha de fecho
+  /// "tudo carregado" quando a lista termina.
+  bool _recentPaged = false;
 
   bool _loading = true;
   String? _error;
@@ -163,6 +171,8 @@ class _MultichannelAnalyticsPageState extends State<MultichannelAnalyticsPage> {
       if (reset) {
         _recentItems.clear();
         _recent = null;
+        _recentBatchStart = 0;
+        _recentPaged = false;
       }
       if (channel != null || reset) _recentChannel = channel;
     });
@@ -177,6 +187,8 @@ class _MultichannelAnalyticsPageState extends State<MultichannelAnalyticsPage> {
       _recentLoading = false;
       if (res.success && res.data != null) {
         _recent = res.data;
+        _recentBatchStart = _recentItems.length;
+        if (!reset && res.data!.items.isNotEmpty) _recentPaged = true;
         _recentItems.addAll(res.data!.items);
       }
     });
@@ -215,6 +227,11 @@ class _MultichannelAnalyticsPageState extends State<MultichannelAnalyticsPage> {
       ),
     );
   }
+
+  /// Dimensões de filtro fora do padrão — alimenta o contador do gatilho de
+  /// filtros (período ≠ mensal e recorte de cidades).
+  int get _activeFilterCount =>
+      (_period != 'monthly' ? 1 : 0) + (_selectedCityKeys.isNotEmpty ? 1 : 0);
 
   String get _periodLabel {
     switch (_period) {
@@ -255,9 +272,8 @@ class _MultichannelAnalyticsPageState extends State<MultichannelAnalyticsPage> {
       title: 'Análise Multicanal',
       showBottomNavigation: false,
       actions: [
-        ChromeToolbarIconButton(
-          icon: Icons.tune_rounded,
-          tooltip: 'Filtros',
+        _FilterTriggerButton(
+          activeCount: _activeFilterCount,
           onPressed: _openFilters,
         ),
       ],
@@ -1986,16 +2002,16 @@ class _MultichannelAnalyticsPageState extends State<MultichannelAnalyticsPage> {
     final devices = e.deviceBreakdown;
     final deviceColors = <Color>[blue, purple, amber, green];
 
-    final gaugeContact = _gaugeTile(
+    final meterContact = _conversionStatTile(
       context,
-      label: 'VISUALIZAÇÃO → CONTATO',
+      label: 'Visualização → Contato',
       rate: e.conversion.viewToContactRate,
       base: const Color(0xFF6366F1),
       icon: LucideIcons.messageSquare,
     );
-    final gaugeWhats = _gaugeTile(
+    final meterWhats = _conversionStatTile(
       context,
-      label: 'VISUALIZAÇÃO → WHATSAPP',
+      label: 'Visualização → WhatsApp',
       rate: e.conversion.viewToWhatsappRate,
       base: const Color(0xFFEC4899),
       icon: LucideIcons.messageCircle,
@@ -2024,19 +2040,19 @@ class _MultichannelAnalyticsPageState extends State<MultichannelAnalyticsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Medidores de conversão — título SEMPRE em largura total (sem
+          // truncar): lado a lado só quando há espaço de sobra.
           LayoutBuilder(
             builder: (context, c) {
-              final wide = c.maxWidth >= 460;
+              final wide = c.maxWidth >= 500;
               if (wide) {
                 return IntrinsicHeight(
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Expanded(flex: 5, child: gaugeContact),
+                      Expanded(child: meterContact),
                       const SizedBox(width: 10),
-                      Expanded(flex: 5, child: gaugeWhats),
-                      const SizedBox(width: 10),
-                      Expanded(flex: 4, child: whatsTile),
+                      Expanded(child: meterWhats),
                     ],
                   ),
                 );
@@ -2044,22 +2060,15 @@ class _MultichannelAnalyticsPageState extends State<MultichannelAnalyticsPage> {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  IntrinsicHeight(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Expanded(child: gaugeContact),
-                        const SizedBox(width: 10),
-                        Expanded(child: gaugeWhats),
-                      ],
-                    ),
-                  ),
+                  meterContact,
                   const SizedBox(height: 10),
-                  whatsTile,
+                  meterWhats,
                 ],
               );
             },
           ),
+          const SizedBox(height: 10),
+          whatsTile,
           const SizedBox(height: 10),
           // Mini chips de interação — telefone, e-mail, favoritos, shares.
           Row(
@@ -2157,9 +2166,12 @@ class _MultichannelAnalyticsPageState extends State<MultichannelAnalyticsPage> {
     return 'SEM REGISTRO';
   }
 
-  /// Tile com gauge semicircular animado — DNA das métricas de conversão do
-  /// dashboard (arco = taxa sobre benchmark de 10%).
-  Widget _gaugeTile(
+  /// Medidor de conversão "stat tile" — substitui o gauge semicircular que
+  /// truncava o título: anel fino ao redor da placa de ícone (progresso sobre
+  /// o benchmark de 10%), título em LARGURA TOTAL com quebra em até 2 linhas
+  /// (nunca reticências), número contado em animação e pill meter segmentado
+  /// que acende da esquerda pra direita.
+  Widget _conversionStatTile(
     BuildContext context, {
     required String label,
     required double rate,
@@ -2170,10 +2182,11 @@ class _MultichannelAnalyticsPageState extends State<MultichannelAnalyticsPage> {
     final isDark = theme.brightness == Brightness.dark;
     final tone = _rateTone(context, rate);
     final progress = (rate / 10).clamp(0.0, 1.0).toDouble();
+    const segments = 10;
 
     return Container(
       clipBehavior: Clip.antiAlias,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
         gradient: LinearGradient(
@@ -2212,121 +2225,187 @@ class _MultichannelAnalyticsPageState extends State<MultichannelAnalyticsPage> {
               ),
             ),
           ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(9),
-                      gradient: LinearGradient(
-                        colors: [
-                          base.withValues(alpha: isDark ? 0.5 : 0.42),
-                          base.withValues(alpha: isDark ? 0.24 : 0.22),
-                        ],
-                      ),
-                    ),
-                    child: Icon(
-                      icon,
-                      size: 13,
-                      color: Colors.white.withValues(alpha: 0.96),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      label,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: base.withValues(alpha: isDark ? 0.95 : 0.88),
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.85,
-                        fontSize: 9.5,
-                        height: 1.15,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                height: 70,
-                child: TweenAnimationBuilder<double>(
-                  tween: Tween(begin: 0, end: progress),
-                  duration: const Duration(milliseconds: 900),
-                  curve: Curves.easeOutCubic,
-                  builder: (context, anim, _) => Stack(
-                    children: [
-                      Positioned.fill(
-                        child: CustomPaint(
-                          painter: _ArcGaugePainter(
-                            progress: anim,
-                            color: tone,
-                            trackColor: isDark
-                                ? Colors.white.withValues(alpha: 0.07)
-                                : base.withValues(alpha: 0.1),
-                            tickColor: base,
+          TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: 1),
+            duration: const Duration(milliseconds: 950),
+            curve: Curves.easeOutCubic,
+            builder: (context, anim, _) => Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // Anel fino no canto — progresso sobre o benchmark,
+                    // com a placa de ícone no centro.
+                    SizedBox(
+                      width: 46,
+                      height: 46,
+                      child: CustomPaint(
+                        painter: _RingMeterPainter(
+                          progress: anim * progress,
+                          color: tone,
+                          trackColor: isDark
+                              ? Colors.white.withValues(alpha: 0.08)
+                              : base.withValues(alpha: 0.12),
+                        ),
+                        child: Center(
+                          child: Container(
+                            width: 28,
+                            height: 28,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: LinearGradient(
+                                colors: [
+                                  base.withValues(alpha: isDark ? 0.5 : 0.42),
+                                  base.withValues(
+                                      alpha: isDark ? 0.24 : 0.22),
+                                ],
+                              ),
+                            ),
+                            child: Icon(
+                              icon,
+                              size: 13,
+                              color: Colors.white.withValues(alpha: 0.96),
+                            ),
                           ),
                         ),
                       ),
-                      Align(
-                        alignment: Alignment.bottomCenter,
-                        child: Padding(
-                          padding: const EdgeInsets.only(bottom: 2),
-                          child: Text(
-                            // O arco satura no benchmark de 10%, mas o número
-                            // exibido é sempre a taxa real (animada em escala).
-                            '${(progress <= 0 ? rate : rate * (anim / progress)).toStringAsFixed(1).replaceAll('.', ',')}%',
-                            style: theme.textTheme.headlineSmall?.copyWith(
-                              color: ThemeHelpers.textColor(context),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Título em largura total — quebra, NUNCA trunca.
+                          Text(
+                            label.toUpperCase(),
+                            softWrap: true,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: base.withValues(
+                                  alpha: isDark ? 0.95 : 0.88),
                               fontWeight: FontWeight.w900,
-                              letterSpacing: -0.85,
-                              height: 1,
+                              letterSpacing: 1.05,
+                              fontSize: 10,
+                              height: 1.35,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          Row(
+                            children: [
+                              Container(
+                                width: 5,
+                                height: 5,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: tone,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: tone.withValues(
+                                          alpha: isDark ? 0.55 : 0.32),
+                                      blurRadius: isDark ? 5 : 4,
+                                      spreadRadius: isDark ? 0 : -0.5,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  _rateStatusLabel(rate),
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: tone,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 0.5,
+                                    fontSize: 9.5,
+                                    height: 1,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      // O meter satura no benchmark de 10%, mas o número é
+                      // sempre a taxa real (contada na entrada).
+                      '${(rate * anim).toStringAsFixed(1).replaceAll('.', ',')}%',
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        color: ThemeHelpers.textColor(context),
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.9,
+                        height: 1,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                    const Spacer(),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 2),
+                      child: Text(
+                        'benchmark 10%',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: ThemeHelpers.textSecondaryColor(context),
+                          fontWeight: FontWeight.w700,
+                          fontSize: 9.5,
+                          letterSpacing: 0.3,
+                          height: 1,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 9),
+                // Pill meter segmentado — cada gomo vale 1 p.p. até 10%.
+                Row(
+                  children: [
+                    for (var i = 0; i < segments; i++) ...[
+                      if (i > 0) const SizedBox(width: 3),
+                      Expanded(
+                        child: Container(
+                          height: 6,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(99),
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.06)
+                                : base.withValues(alpha: 0.09),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(99),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: FractionallySizedBox(
+                                widthFactor:
+                                    ((anim * progress * segments) - i)
+                                        .clamp(0.0, 1.0),
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(99),
+                                    gradient: LinearGradient(
+                                      colors: [
+                                        tone.withValues(alpha: 0.95),
+                                        tone.withValues(alpha: 0.6),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ],
-                  ),
+                  ],
                 ),
-              ),
-              const SizedBox(height: 6),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: tone,
-                      boxShadow: [
-                        BoxShadow(
-                          color: tone.withValues(alpha: isDark ? 0.55 : 0.32),
-                          blurRadius: isDark ? 5 : 4,
-                          spreadRadius: isDark ? 0 : -0.5,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    _rateStatusLabel(rate),
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: tone,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.4,
-                      fontSize: 9.5,
-                      height: 1,
-                    ),
-                  ),
-                ],
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -2421,15 +2500,16 @@ class _MultichannelAnalyticsPageState extends State<MultichannelAnalyticsPage> {
                   Expanded(
                     child: Text(
                       label,
+                      // Título informativo — quebra em largura total, nunca
+                      // trunca (regra da tela).
+                      softWrap: true,
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: base.withValues(alpha: isDark ? 0.95 : 0.88),
                         fontWeight: FontWeight.w900,
                         letterSpacing: 0.85,
                         fontSize: 9.5,
-                        height: 1.15,
+                        height: 1.3,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
@@ -2704,37 +2784,24 @@ class _MultichannelAnalyticsPageState extends State<MultichannelAnalyticsPage> {
               _recentLeadRow(context, _recentItems[i], amber)
                   .animate(key: ValueKey('rl-${_recentItems[i].id}-$i'))
                   .fadeIn(
-                    delay: Duration(milliseconds: 25 * (i % 12)),
-                    duration: 200.ms,
+                    delay: Duration(
+                      milliseconds:
+                          30 * ((i - _recentBatchStart).clamp(0, 11)),
+                    ),
+                    duration: 240.ms,
+                    curve: Curves.easeOut,
+                  )
+                  .slideY(
+                    begin: 0.10,
+                    end: 0,
+                    delay: Duration(
+                      milliseconds:
+                          30 * ((i - _recentBatchStart).clamp(0, 11)),
+                    ),
+                    duration: 300.ms,
+                    curve: Curves.easeOutCubic,
                   ),
-            if (_recent?.hasMore == true)
-              Padding(
-                padding: const EdgeInsets.only(top: 14),
-                child: Center(
-                  child: _recentLoading
-                      ? SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.2,
-                            color: amber,
-                          ),
-                        )
-                      : OutlinedButton.icon(
-                          onPressed: () => _loadRecent(),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: amber,
-                            side: BorderSide(
-                                color: amber.withValues(alpha: 0.45)),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          icon: const Icon(LucideIcons.chevronDown, size: 16),
-                          label: const Text('Carregar mais'),
-                        ),
-                ),
-              ),
+            _recentListFooter(context, amber),
           ],
         ],
       ),
@@ -2815,6 +2882,247 @@ class _MultichannelAnalyticsPageState extends State<MultichannelAnalyticsPage> {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  /// Fecho da lista de leads — nada de botão avulso: uma linha integrada à
+  /// lista com contagem "mostrando X de Y", régua de progresso da paginação,
+  /// spinner inline discreto durante o carregamento e, quando tudo já foi
+  /// paginado, um filete de encerramento silencioso.
+  Widget _recentListFooter(BuildContext context, Color tone) {
+    final theme = Theme.of(context);
+    final data = _recent;
+    if (data == null) return const SizedBox.shrink();
+
+    final total = data.total;
+    final shown = _recentItems.length;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+
+    // ── Tudo carregado após paginar: filete de encerramento ────────────────
+    if (!data.hasMore) {
+      if (!_recentPaged || shown == 0) return const SizedBox.shrink();
+      Widget hairline({required bool fadeLeft}) => Expanded(
+            child: Container(
+              height: 1,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: fadeLeft
+                      ? [
+                          ShellVisualTokens.dashboardGlassBorder(context)
+                              .withValues(alpha: 0.0),
+                          ShellVisualTokens.dashboardGlassBorder(context),
+                        ]
+                      : [
+                          ShellVisualTokens.dashboardGlassBorder(context),
+                          ShellVisualTokens.dashboardGlassBorder(context)
+                              .withValues(alpha: 0.0),
+                        ],
+                ),
+              ),
+            ),
+          );
+      return Padding(
+        padding: const EdgeInsets.only(top: 14),
+        child: Row(
+          children: [
+            hairline(fadeLeft: true),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(LucideIcons.check, size: 12, color: tone),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${_int.format(total)} ${total == 1 ? 'LEAD EXIBIDO' : 'LEADS EXIBIDOS'}',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: secondary,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.2,
+                      fontSize: 9.5,
+                      height: 1,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            hairline(fadeLeft: false),
+          ],
+        ),
+      ).animate().fadeIn(duration: 260.ms);
+    }
+
+    // ── Há mais leads: linha de carregamento integrada ─────────────────────
+    final isDark = theme.brightness == Brightness.dark;
+    final remaining = math.max(total - shown, 0);
+    final fraction =
+        total > 0 ? (shown / total).clamp(0.0, 1.0).toDouble() : 0.0;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: ShellVisualTokens.dashboardGlassFill(context),
+          border: Border.all(
+            color: ShellVisualTokens.dashboardGlassBorder(context),
+          ),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: _recentLoading
+                ? null
+                : () {
+                    HapticFeedback.selectionClick();
+                    _loadRecent();
+                  },
+            splashColor: tone.withValues(alpha: 0.10),
+            highlightColor: tone.withValues(alpha: 0.05),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+              child: Row(
+                children: [
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 200),
+                    switchInCurve: Curves.easeOut,
+                    switchOutCurve: Curves.easeIn,
+                    child: _recentLoading
+                        ? SizedBox(
+                            key: const ValueKey('rlf-spin'),
+                            width: 30,
+                            height: 30,
+                            child: Padding(
+                              padding: const EdgeInsets.all(7),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: tone,
+                              ),
+                            ),
+                          )
+                        : Container(
+                            key: const ValueKey('rlf-icon'),
+                            width: 30,
+                            height: 30,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(10),
+                              color: tone.withValues(
+                                alpha: isDark ? 0.16 : 0.10,
+                              ),
+                            ),
+                            child: Icon(
+                              LucideIcons.chevronsDown,
+                              size: 16,
+                              color: tone,
+                            ),
+                          ),
+                  ),
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 200),
+                          child: Text(
+                            _recentLoading
+                                ? 'Carregando mais leads…'
+                                : 'Carregar mais leads',
+                            key: ValueKey('rlf-title-$_recentLoading'),
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              color: ThemeHelpers.textColor(context),
+                              fontSize: 13,
+                              height: 1.1,
+                              letterSpacing: -0.1,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        Row(
+                          children: [
+                            Text(
+                              'mostrando ${_int.format(shown)} de ${_int.format(total)}',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: secondary,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 10.5,
+                                height: 1,
+                                letterSpacing: 0.1,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            // Régua fina do quanto da lista já chegou.
+                            Expanded(
+                              child: SizedBox(
+                                height: 3,
+                                child: Stack(
+                                  children: [
+                                    Positioned.fill(
+                                      child: DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          borderRadius:
+                                              BorderRadius.circular(99),
+                                          color: tone.withValues(
+                                            alpha: isDark ? 0.12 : 0.10,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(99),
+                                      child: Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: TweenAnimationBuilder<double>(
+                                          tween: Tween(begin: 0, end: fraction),
+                                          duration: const Duration(
+                                              milliseconds: 500),
+                                          curve: Curves.easeOutCubic,
+                                          builder: (context, anim, _) =>
+                                              FractionallySizedBox(
+                                            widthFactor: anim,
+                                            child: DecoratedBox(
+                                              decoration: BoxDecoration(
+                                                borderRadius:
+                                                    BorderRadius.circular(99),
+                                                gradient: LinearGradient(
+                                                  colors: [
+                                                    tone.withValues(
+                                                        alpha: 0.9),
+                                                    tone.withValues(
+                                                        alpha: 0.55),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (remaining > 0) ...[
+                    const SizedBox(width: 10),
+                    MiniPill(label: '+${_int.format(remaining)}', tone: tone),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -3038,76 +3346,199 @@ class _MultichannelAnalyticsPageState extends State<MultichannelAnalyticsPage> {
   }
 }
 
-/// Pintor do gauge semicircular — mesmo DNA do gauge de conversão do
-/// dashboard geral (track sutil, arco com sweep gradient, "led" na ponta e
-/// ticks nas extremidades).
-class _ArcGaugePainter extends CustomPainter {
+/// Pintor do anel fino dos medidores de conversão — círculo completo com
+/// track sutil, arco em sweep gradient a partir do topo e "led" com halo na
+/// ponta (progresso relativo ao benchmark de 10%).
+class _RingMeterPainter extends CustomPainter {
   final double progress; // 0..1
   final Color color;
   final Color trackColor;
-  final Color tickColor;
 
-  _ArcGaugePainter({
+  _RingMeterPainter({
     required this.progress,
     required this.color,
     required this.trackColor,
-    required this.tickColor,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    const strokeWidth = 9.0;
-    final cx = size.width / 2;
-    final cy = size.height - 6;
-    final radius =
-        math.min(size.width / 2, size.height) - strokeWidth / 2 - 2;
-    final rect = Rect.fromCircle(center: Offset(cx, cy), radius: radius);
+    const strokeWidth = 3.4;
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = math.min(size.width, size.height) / 2 - strokeWidth / 2;
+    final rect = Rect.fromCircle(center: center, radius: radius);
 
     final trackPaint = Paint()
       ..color = trackColor
       ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeWidth
-      ..strokeCap = StrokeCap.round;
-    canvas.drawArc(rect, math.pi, math.pi, false, trackPaint);
+      ..strokeWidth = strokeWidth;
+    canvas.drawCircle(center, radius, trackPaint);
 
-    if (progress > 0.001) {
+    final p = progress.clamp(0.0, 1.0);
+    if (p > 0.004) {
+      const start = -math.pi / 2;
+      final sweep = math.pi * 2 * p;
       final progressPaint = Paint()
         ..shader = SweepGradient(
-          startAngle: math.pi,
-          endAngle: math.pi * 2,
-          colors: [color.withValues(alpha: 0.55), color],
+          startAngle: 0,
+          endAngle: math.max(sweep, 0.12),
+          transform: const GradientRotation(start),
+          colors: [color.withValues(alpha: 0.45), color],
         ).createShader(rect)
         ..style = PaintingStyle.stroke
         ..strokeWidth = strokeWidth
         ..strokeCap = StrokeCap.round;
-      canvas.drawArc(rect, math.pi, math.pi * progress, false, progressPaint);
+      canvas.drawArc(rect, start, sweep, false, progressPaint);
 
-      final endAngle = math.pi + math.pi * progress;
-      final endX = cx + radius * math.cos(endAngle);
-      final endY = cy + radius * math.sin(endAngle);
+      final endAngle = start + sweep;
+      final tip = Offset(
+        center.dx + radius * math.cos(endAngle),
+        center.dy + radius * math.sin(endAngle),
+      );
       canvas.drawCircle(
-        Offset(endX, endY),
-        strokeWidth * 0.95,
+        tip,
+        strokeWidth * 1.5,
         Paint()..color = color.withValues(alpha: 0.18),
       );
-      canvas.drawCircle(
-        Offset(endX, endY),
-        strokeWidth * 0.32,
-        Paint()..color = color,
-      );
+      canvas.drawCircle(tip, strokeWidth * 0.62, Paint()..color = color);
     }
-
-    final tickPaint = Paint()
-      ..color = tickColor.withValues(alpha: 0.5)
-      ..style = PaintingStyle.fill;
-    canvas.drawCircle(Offset(cx - radius, cy), 1.6, tickPaint);
-    canvas.drawCircle(Offset(cx + radius, cy), 1.6, tickPaint);
   }
 
   @override
-  bool shouldRepaint(covariant _ArcGaugePainter old) =>
+  bool shouldRepaint(covariant _RingMeterPainter old) =>
       old.progress != progress ||
       old.color != color ||
-      old.trackColor != trackColor ||
-      old.tickColor != tickColor;
+      old.trackColor != trackColor;
+}
+
+/// Gatilho de filtros da toolbar — pill com rótulo, contador de dimensões
+/// ativas e feedback de toque (escala + haptic + tint), vivendo dentro da
+/// cápsula de ações do chrome.
+class _FilterTriggerButton extends StatefulWidget {
+  const _FilterTriggerButton({
+    required this.activeCount,
+    required this.onPressed,
+  });
+
+  final int activeCount;
+  final VoidCallback onPressed;
+
+  @override
+  State<_FilterTriggerButton> createState() => _FilterTriggerButtonState();
+}
+
+class _FilterTriggerButtonState extends State<_FilterTriggerButton> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = AnalyticsTones.accent(context);
+    final active = widget.activeCount > 0;
+    final fg = active
+        ? accent
+        : ThemeHelpers.textColor(context).withValues(alpha: 0.88);
+
+    return Tooltip(
+      message: active
+          ? 'Filtros · ${widget.activeCount} ativo${widget.activeCount == 1 ? '' : 's'}'
+          : 'Filtros',
+      child: AnimatedScale(
+        scale: _pressed ? 0.93 : 1.0,
+        duration: const Duration(milliseconds: 110),
+        curve: Curves.easeOut,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              widget.onPressed();
+            },
+            onTapDown: (_) => setState(() => _pressed = true),
+            onTapCancel: () => setState(() => _pressed = false),
+            onTapUp: (_) => setState(() => _pressed = false),
+            customBorder: const StadiumBorder(),
+            splashColor: accent.withValues(alpha: 0.14),
+            highlightColor: accent.withValues(alpha: 0.07),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              height: 34,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                color: active
+                    ? accent.withValues(alpha: isDark ? 0.18 : 0.10)
+                    : Colors.transparent,
+                border: Border.all(
+                  color: active
+                      ? accent.withValues(alpha: isDark ? 0.55 : 0.45)
+                      : Colors.transparent,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(LucideIcons.slidersHorizontal, size: 16, color: fg),
+                  const SizedBox(width: 7),
+                  Text(
+                    'Filtros',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: fg,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12.5,
+                      letterSpacing: -0.1,
+                      height: 1,
+                    ),
+                  ),
+                  if (active) ...[
+                    const SizedBox(width: 7),
+                    Container(
+                      constraints: const BoxConstraints(minWidth: 17),
+                      height: 17,
+                      padding: const EdgeInsets.symmetric(horizontal: 5),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(999),
+                        gradient: LinearGradient(
+                          colors: [
+                            accent,
+                            accent.withValues(alpha: 0.78),
+                          ],
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: accent.withValues(
+                                alpha: isDark ? 0.45 : 0.28),
+                            blurRadius: 7,
+                            offset: const Offset(0, 2),
+                            spreadRadius: -1,
+                          ),
+                        ],
+                      ),
+                      child: Text(
+                        '${widget.activeCount}',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 10,
+                          height: 1,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ).animate().scale(
+                          begin: const Offset(0.6, 0.6),
+                          end: const Offset(1, 1),
+                          duration: 220.ms,
+                          curve: Curves.easeOutBack,
+                        ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

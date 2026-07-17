@@ -16,6 +16,7 @@ import '../models/sdr_dashboard_filters.dart';
 import '../models/sdr_metrics_model.dart';
 import '../models/sdr_settings_model.dart';
 import '../services/sdr_service.dart';
+import '../widgets/sdr_config_sheet.dart';
 import '../widgets/sdr_dashboard_filters_drawer.dart';
 
 final NumberFormat _int = NumberFormat.decimalPattern('pt_BR');
@@ -39,6 +40,16 @@ enum _SdrTab { overview, team, sources }
 /// Violeta é o acento identitário (agente de IA); verde/âmbar/vermelho marcam
 /// estados. Abas flush com sublinhado (Visão geral / Equipe / Origens).
 ///
+/// Regras da tela:
+/// - Título de seção NUNCA trunca com reticências — cabeçalhos quebram linha
+///   e o contador flui como sufixo compacto.
+/// - Listas longas (atendentes, corretores, origens, campanhas) renderizam em
+///   lotes com "Carregar mais": o endpoint devolve os agregados completos de
+///   uma vez (sem page/limit no backend), então a paginação é client-side.
+/// - Appbar: Config abre o sheet de ajustes rápidos do agente
+///   ([SdrConfigSheet]); Filtros abre o [SdrDashboardFiltersDrawer] com badge
+///   de filtros ativos no botão.
+///
 /// Gating: módulo `whatsapp_ai` + permissão `whatsapp:manage_config`.
 class SdrDashboardPage extends StatefulWidget {
   const SdrDashboardPage({super.key});
@@ -51,6 +62,19 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
   static const double _kPagePadH = 16;
   static const double _kPagePadTop = 12;
   static const double _kPagePadBottom = 88;
+
+  // Paginação client-side dos painéis. O endpoint `sdr/metrics` devolve os
+  // agregados completos de uma vez (sem page/limit no backend) — renderizar
+  // tudo trava a tela em empresas grandes. Cada lista cresce em lotes via
+  // "Carregar mais" e volta ao lote inicial a cada recarga de métricas.
+  static const int _kTeamPageSize = 12;
+  static const int _kBrokersPageSize = 8;
+  static const int _kSourcesPageSize = 10;
+  static const int _kCampaignsPageSize = 8;
+  int _teamVisible = _kTeamPageSize;
+  int _brokersVisible = _kBrokersPageSize;
+  int _sourcesVisible = _kSourcesPageSize;
+  int _campaignsVisible = _kCampaignsPageSize;
 
   bool _isLoading = true;
   String? _errorMessage;
@@ -119,6 +143,10 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
       if (res.success && res.data != null) {
         _metrics = res.data!;
         _errorMessage = null;
+        _teamVisible = _kTeamPageSize;
+        _brokersVisible = _kBrokersPageSize;
+        _sourcesVisible = _kSourcesPageSize;
+        _campaignsVisible = _kCampaignsPageSize;
       } else {
         _errorMessage = res.message ?? 'Erro ao carregar métricas do SDR';
       }
@@ -169,6 +197,27 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
     Navigator.of(context).pushNamed(_kSdrSettingsRoute);
   }
 
+  /// Sheet de configurações rápidas do agente (botão de Config da appbar).
+  /// Salvar atualiza o console do agente na hora; "Todas as opções" leva à
+  /// página completa de configurações.
+  void _openConfigSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      barrierColor: Colors.black54,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => SdrConfigSheet(
+        initial: _agentSettings,
+        onSaved: (s) {
+          if (!mounted) return;
+          setState(() => _agentSettings = s);
+        },
+        onOpenFullSettings: _openSettings,
+      ),
+    );
+  }
+
   // ─── Build ─────────────────────────────────────────────────────────────────
 
   @override
@@ -186,14 +235,17 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
       showBottomNavigation: false,
       actions: [
         ChromeToolbarIconButton(
-          icon: Icons.settings_outlined,
-          tooltip: 'Configurações do SDR',
-          onPressed: _openSettings,
+          icon: LucideIcons.settings2,
+          tooltip: 'Configurações do agente',
+          onPressed: _openConfigSheet,
         ),
-        ChromeToolbarIconButton(
-          icon: Icons.tune_rounded,
-          tooltip: 'Filtros',
-          onPressed: _openFilters,
+        _BadgedToolbarAction(
+          count: _filters.activeCount,
+          child: ChromeToolbarIconButton(
+            icon: LucideIcons.slidersHorizontal,
+            tooltip: 'Filtros',
+            onPressed: _openFilters,
+          ),
         ),
       ],
       body: _isLoading
@@ -451,20 +503,23 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
+            // Título de seção nunca trunca nesta tela — quebra em linhas.
             Expanded(
               child: Text(
                 'LEADS NO PERÍODO',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                softWrap: true,
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: secondary,
                   fontWeight: FontWeight.w900,
                   letterSpacing: 1.4,
                   fontSize: 10,
+                  height: 1.4,
                 ),
               ),
             ),
+            const SizedBox(width: 8),
             _periodChip(context),
           ],
         ),
@@ -755,6 +810,8 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
   }
 
   /// Cabeçalho sóbrio de painel: barra tonal curta + título w900 + hint.
+  /// Regra da tela: título de seção NUNCA trunca — quebra em quantas linhas
+  /// precisar (a barra tonal fica alinhada à primeira linha).
   Widget _panelHeader(
     BuildContext context, {
     required String title,
@@ -766,26 +823,29 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 20,
-              height: 3,
-              decoration: BoxDecoration(
-                color: tone,
-                borderRadius: BorderRadius.circular(2),
+            Padding(
+              padding: const EdgeInsets.only(top: 9),
+              child: Container(
+                width: 20,
+                height: 3,
+                decoration: BoxDecoration(
+                  color: tone,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
             ),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                softWrap: true,
                 style: theme.textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w900,
                   color: ThemeHelpers.textColor(context),
                   letterSpacing: -0.4,
+                  height: 1.25,
                 ),
               ),
             ),
@@ -806,54 +866,72 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
     );
   }
 
+  /// Eyebrow de subseção. Regra da tela: o rótulo NUNCA trunca — quebra em
+  /// quantas linhas precisar, e o contador flui como sufixo compacto colado à
+  /// última palavra (nunca disputa espaço com o texto). O filete separador
+  /// desce para a própria linha, abaixo do rótulo.
   Widget _subsectionHeader(
       BuildContext context, String label, IconData icon, int count) {
     final theme = Theme.of(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Icon(icon, size: 14, color: secondary),
-        const SizedBox(width: 6),
-        Flexible(
-          child: Text(
-            label.toUpperCase(),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: secondary,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 1.4,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Icon(icon, size: 14, color: secondary),
             ),
-          ),
-        ),
-        if (count > 0) ...[
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-            decoration: BoxDecoration(
-              color:
-                  ThemeHelpers.borderLightColor(context).withValues(alpha: 0.7),
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Text(
-              '$count',
-              style: theme.textTheme.labelSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                fontSize: 10,
-                letterSpacing: 0.2,
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(text: label.toUpperCase()),
+                    if (count > 0)
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.middle,
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: ThemeHelpers.borderLightColor(context)
+                                  .withValues(alpha: 0.7),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              _int.format(count),
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 10,
+                                letterSpacing: 0.2,
+                                height: 1.0,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                softWrap: true,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: secondary,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.1,
+                  height: 1.5,
+                ),
               ),
             ),
-          ),
-        ],
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.only(left: 10),
-            child: Container(
-              height: 1,
-              color:
-                  ThemeHelpers.borderLightColor(context).withValues(alpha: 0.5),
-            ),
-          ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          height: 1,
+          color: ThemeHelpers.borderLightColor(context).withValues(alpha: 0.5),
         ),
       ],
     );
@@ -1221,16 +1299,36 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
         body: 'Nenhum lead foi atribuído a atendentes neste recorte.',
       ));
     } else {
+      // Renderização incremental: o payload chega completo do backend, mas a
+      // lista cresce em lotes para não travar a tela em equipes grandes.
+      final visible =
+          agents.length > _teamVisible ? agents.sublist(0, _teamVisible) : agents;
       var animIndex = 0;
-      for (var i = 0; i < agents.length; i++) {
+      for (var i = 0; i < visible.length; i++) {
         nodes.add(
-          _AgentRow(rank: i + 1, agent: agents[i])
-              .animate(key: ValueKey('agent-${agents[i].agentId}-$i'))
+          _AgentRow(rank: i + 1, agent: visible[i])
+              .animate(key: ValueKey('agent-${visible[i].agentId}-$i'))
               .fadeIn(
                 delay: Duration(milliseconds: 30 * (animIndex++).clamp(0, 12)),
                 duration: 220.ms,
               ),
         );
+      }
+      if (agents.length > visible.length) {
+        nodes.add(_loadMoreControl(
+          context,
+          tone: green,
+          shown: visible.length,
+          total: agents.length,
+          step: _kTeamPageSize,
+          noun: 'atendentes',
+          onMore: () => setState(() => _teamVisible += _kTeamPageSize),
+        ));
+      } else if (agents.length > _kTeamPageSize) {
+        nodes.add(_collapseControl(
+          context,
+          onCollapse: () => setState(() => _teamVisible = _kTeamPageSize),
+        ));
       }
     }
 
@@ -1242,9 +1340,29 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
       nodes.add(_subsectionHeader(context, 'Corretores que mais receberam',
           LucideIcons.award, brokers.length));
       nodes.add(const SizedBox(height: 12));
-      for (final b in brokers.take(8)) {
+      final visibleBrokers = brokers.length > _brokersVisible
+          ? brokers.sublist(0, _brokersVisible)
+          : brokers;
+      for (final b in visibleBrokers) {
         nodes.add(_funnelRow(
             context, b.brokerName, b.received, maxReceived, _blue(context)));
+      }
+      if (brokers.length > visibleBrokers.length) {
+        nodes.add(_loadMoreControl(
+          context,
+          tone: _blue(context),
+          shown: visibleBrokers.length,
+          total: brokers.length,
+          step: _kBrokersPageSize,
+          noun: 'corretores',
+          onMore: () => setState(() => _brokersVisible += _kBrokersPageSize),
+        ));
+      } else if (brokers.length > _kBrokersPageSize) {
+        nodes.add(_collapseControl(
+          context,
+          onCollapse: () =>
+              setState(() => _brokersVisible = _kBrokersPageSize),
+        ));
       }
     }
 
@@ -1278,8 +1396,11 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
         body: 'Nenhum lead com origem registrada neste recorte.',
       ));
     } else {
+      final visibleSources = sources.length > _sourcesVisible
+          ? sources.sublist(0, _sourcesVisible)
+          : sources;
       var animIndex = 0;
-      for (final src in sources.take(10)) {
+      for (final src in visibleSources) {
         nodes.add(
           _SourceRow(source: src)
               .animate(key: ValueKey('src-${src.source}'))
@@ -1288,6 +1409,23 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
                 duration: 220.ms,
               ),
         );
+      }
+      if (sources.length > visibleSources.length) {
+        nodes.add(_loadMoreControl(
+          context,
+          tone: blue,
+          shown: visibleSources.length,
+          total: sources.length,
+          step: _kSourcesPageSize,
+          noun: 'origens',
+          onMore: () => setState(() => _sourcesVisible += _kSourcesPageSize),
+        ));
+      } else if (sources.length > _kSourcesPageSize) {
+        nodes.add(_collapseControl(
+          context,
+          onCollapse: () =>
+              setState(() => _sourcesVisible = _kSourcesPageSize),
+        ));
       }
     }
 
@@ -1299,9 +1437,30 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
       nodes.add(_subsectionHeader(
           context, 'Campanhas', LucideIcons.flag, campaigns.length));
       nodes.add(const SizedBox(height: 12));
-      for (final c in campaigns.take(8)) {
+      final visibleCampaigns = campaigns.length > _campaignsVisible
+          ? campaigns.sublist(0, _campaignsVisible)
+          : campaigns;
+      for (final c in visibleCampaigns) {
         nodes.add(_funnelRow(
             context, c.campaign, c.totalLeads, maxLeads, blue));
+      }
+      if (campaigns.length > visibleCampaigns.length) {
+        nodes.add(_loadMoreControl(
+          context,
+          tone: blue,
+          shown: visibleCampaigns.length,
+          total: campaigns.length,
+          step: _kCampaignsPageSize,
+          noun: 'campanhas',
+          onMore: () =>
+              setState(() => _campaignsVisible += _kCampaignsPageSize),
+        ));
+      } else if (campaigns.length > _kCampaignsPageSize) {
+        nodes.add(_collapseControl(
+          context,
+          onCollapse: () =>
+              setState(() => _campaignsVisible = _kCampaignsPageSize),
+        ));
       }
     }
 
@@ -1336,6 +1495,79 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
       default:
         return raw;
     }
+  }
+
+  // ─── Paginação client-side (Carregar mais / Recolher) ──────────────────────
+
+  /// Controle de "Carregar mais" no padrão do app (outlined tonal + chevron),
+  /// com legenda de progresso — deixa claro quanto da lista já está visível.
+  Widget _loadMoreControl(
+    BuildContext context, {
+    required Color tone,
+    required int shown,
+    required int total,
+    required int step,
+    required String noun,
+    required VoidCallback onMore,
+  }) {
+    final theme = Theme.of(context);
+    final next = math.min(step, total - shown);
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, bottom: 4),
+      child: Column(
+        children: [
+          Text(
+            'Mostrando ${_int.format(shown)} de ${_int.format(total)} $noun',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: ThemeHelpers.textSecondaryColor(context),
+              fontWeight: FontWeight.w600,
+              fontSize: 10.5,
+            ),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: onMore,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: tone,
+              side: BorderSide(color: tone.withValues(alpha: 0.45)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+            ),
+            icon: const Icon(LucideIcons.chevronDown, size: 16),
+            label: Text('Carregar mais (+${_int.format(next)})'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Volta a lista ao lote inicial depois de totalmente expandida.
+  Widget _collapseControl(
+    BuildContext context, {
+    required VoidCallback onCollapse,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Center(
+        child: TextButton.icon(
+          onPressed: onCollapse,
+          style: TextButton.styleFrom(
+            foregroundColor: ThemeHelpers.textSecondaryColor(context),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          ),
+          icon: const Icon(LucideIcons.chevronUp, size: 15),
+          label: const Text(
+            'Recolher lista',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+          ),
+        ),
+      ),
+    );
   }
 
   // ─── Estados ───────────────────────────────────────────────────────────────
@@ -2013,6 +2245,61 @@ class _SourceRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ─── Ação da appbar com badge de filtros ativos ──────────────────────────────
+
+/// Envolve um [ChromeToolbarIconButton] com um badge sutil no canto — contador
+/// de filtros ativos do dashboard. Some quando `count == 0`.
+class _BadgedToolbarAction extends StatelessWidget {
+  const _BadgedToolbarAction({required this.count, required this.child});
+
+  final int count;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final tone =
+        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        child,
+        if (count > 0)
+          Positioned(
+            top: 5,
+            right: 4,
+            child: IgnorePointer(
+              child: Container(
+                constraints: const BoxConstraints(minWidth: 15),
+                height: 15,
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  color: tone,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: ThemeHelpers.backgroundColor(context)
+                        .withValues(alpha: 0.9),
+                    width: 1.5,
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  '$count',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 8.5,
+                    fontWeight: FontWeight.w900,
+                    height: 1.0,
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
