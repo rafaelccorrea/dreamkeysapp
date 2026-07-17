@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" role="img" aria-label="ChatPro">
+  <path d="M6 12a6 6 0 0 1 6-6h16a6 6 0 0 1 6 6v10a6 6 0 0 1-6 6H18l-7 6v-6h-1a4 4 0 0 1-4-4V12z" fill="#FFFFFF" fill-opacity="0.95"/>
+  <path d="M18.4 14.4 A3.4 3.4 0 1 0 18.4 19.6" fill="none" stroke="#2563EB" stroke-width="2.3" stroke-linecap="round"/>
+  <path d="M22.8 20.8 V13.2 h2.3 a2.5 2.5 0 0 1 0 5 h-2.3" fill="none" stroke="#2563EB" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

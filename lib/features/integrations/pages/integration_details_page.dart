@@ -10,6 +10,7 @@ import '../../../shared/widgets/skeleton_box.dart';
 import '../models/integration_model.dart';
 import '../services/integrations_service.dart';
 import '../widgets/integration_card.dart' show integrationStatusColor;
+import '../widgets/integration_logo.dart';
 
 /// Caminho da configuração completa no painel web, por integração.
 /// Mostrado no card "Configuração completa" como orientação.
@@ -300,6 +301,12 @@ class _IntegrationDetailsPageState extends State<IntegrationDetailsPage> {
         _buildHero(context, def, st),
         const SizedBox(height: 18),
         _buildFeatureChips(context, def),
+        if (def.steps.isNotEmpty) ...[
+          const SizedBox(height: 22),
+          _SectionHeader(tone: def.accent, label: 'COMO FUNCIONA'),
+          const SizedBox(height: 12),
+          _buildSteps(context, def),
+        ],
         const SizedBox(height: 22),
         _SectionHeader(
           tone: integrationStatusColor(context, configured),
@@ -333,7 +340,6 @@ class _IntegrationDetailsPageState extends State<IntegrationDetailsPage> {
     IntegrationStatusData st,
   ) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final configured = st.configured;
     final tone = integrationStatusColor(context, configured);
@@ -375,17 +381,7 @@ class _IntegrationDetailsPageState extends State<IntegrationDetailsPage> {
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                color: def.accent.withValues(alpha: isDark ? 0.18 : 0.1),
-                border:
-                    Border.all(color: def.accent.withValues(alpha: 0.32)),
-              ),
-              child: Icon(def.icon, color: def.accent, size: 26),
-            ),
+            IntegrationLogo(def: def, size: 56, radius: 16),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
@@ -422,7 +418,7 @@ class _IntegrationDetailsPageState extends State<IntegrationDetailsPage> {
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             _Pill(
-              label: configured ? 'Conectado' : 'Pendente',
+              label: configured ? 'Conectada' : 'Pendente',
               color: tone,
               icon: configured
                   ? LucideIcons.circleCheckBig
@@ -437,6 +433,7 @@ class _IntegrationDetailsPageState extends State<IntegrationDetailsPage> {
           ],
         ),
         const SizedBox(height: 14),
+        // Uma linha só de contexto — o passo a passo vive em "Como funciona".
         Text(
           st.statusLine ?? def.descriptionFor(configured),
           style: theme.textTheme.bodyMedium?.copyWith(
@@ -445,16 +442,6 @@ class _IntegrationDetailsPageState extends State<IntegrationDetailsPage> {
             height: 1.45,
           ),
         ),
-        if (st.statusLine != null) ...[
-          const SizedBox(height: 6),
-          Text(
-            def.descriptionFor(configured),
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: secondary,
-              height: 1.45,
-            ),
-          ),
-        ],
       ],
     );
   }
@@ -488,6 +475,99 @@ class _IntegrationDetailsPageState extends State<IntegrationDetailsPage> {
                 fontSize: 10.5,
                 letterSpacing: 0.2,
               ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  // ─── "Como funciona" — passos curtos e específicos (flush, sem parágrafo) ─
+
+  /// 3-4 passos de uma linha cada, com trilho conector na cor da marca —
+  /// substitui o antigo texto longo padrão que o dono achou "extenso".
+  Widget _buildSteps(BuildContext context, IntegrationDef def) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = def.accent;
+    final steps = def.steps;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < steps.length; i++)
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Trilho: ícone do passo + conector vertical até o próximo.
+                SizedBox(
+                  width: 28,
+                  child: Column(
+                    children: [
+                      Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(9),
+                          color: accent
+                              .withValues(alpha: isDark ? 0.18 : 0.10),
+                          border: Border.all(
+                            color: accent.withValues(alpha: 0.28),
+                          ),
+                        ),
+                        child: Icon(steps[i].icon, size: 14, color: accent),
+                      ),
+                      if (i < steps.length - 1)
+                        Expanded(
+                          child: Container(
+                            width: 2,
+                            margin:
+                                const EdgeInsets.symmetric(vertical: 3),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(2),
+                              color:
+                                  accent.withValues(alpha: isDark ? 0.28 : 0.18),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      top: 5,
+                      bottom: i < steps.length - 1 ? 14 : 0,
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${i + 1}.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: accent,
+                            fontWeight: FontWeight.w900,
+                            height: 1.35,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            steps[i].text,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: ThemeHelpers.textColor(context),
+                              fontWeight: FontWeight.w600,
+                              height: 1.35,
+                              letterSpacing: -0.1,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
       ],
@@ -944,6 +1024,24 @@ class _IntegrationDetailsPageState extends State<IntegrationDetailsPage> {
         SkeletonText(width: double.infinity, height: 13),
         SizedBox(height: 7),
         SkeletonText(width: 230, height: 13),
+        SizedBox(height: 26),
+        SkeletonText(width: 130, height: 11, borderRadius: 999),
+        SizedBox(height: 12),
+        Row(
+          children: [
+            SkeletonBox(width: 28, height: 28, borderRadius: 9),
+            SizedBox(width: 11),
+            Expanded(child: SkeletonText(width: double.infinity, height: 12)),
+          ],
+        ),
+        SizedBox(height: 12),
+        Row(
+          children: [
+            SkeletonBox(width: 28, height: 28, borderRadius: 9),
+            SizedBox(width: 11),
+            Expanded(child: SkeletonText(width: double.infinity, height: 12)),
+          ],
+        ),
         SizedBox(height: 26),
         SkeletonText(width: 170, height: 11, borderRadius: 999),
         SizedBox(height: 12),

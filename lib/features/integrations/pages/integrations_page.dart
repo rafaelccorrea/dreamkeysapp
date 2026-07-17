@@ -14,13 +14,10 @@ import '../services/integrations_service.dart';
 import '../widgets/integration_card.dart';
 import '../widgets/integration_progress_ring.dart';
 
-/// Filtro do hub (paridade com Todas/Conectadas/Pendentes do web).
-enum _HubFilter { all, connected, pending }
-
 /// **Central de Integrações** — hub mobile do `/integrations` do painel web.
-/// Hero flush com anel "X/Y ativas", busca, abas flush com sublinhado
-/// (Todas/Conectadas/Pendentes) e cards agrupados por categoria. Cada card
-/// abre o detalhe da integração (`/integrations/:key`).
+/// Hero flush com anel "X/Y ativas", busca e a lista COMPLETA de uma vez,
+/// agrupada por categoria (sem segmentação — o dono se perdia nela). Cada
+/// card rico (logo real + status + feature pills) abre `/integrations/:key`.
 class IntegrationsPage extends StatefulWidget {
   const IntegrationsPage({super.key});
 
@@ -40,7 +37,6 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
   String? _error;
   Map<String, IntegrationStatusData> _statuses = {};
 
-  _HubFilter _filter = _HubFilter.all;
   final TextEditingController _searchController = TextEditingController();
   Timer? _searchDebounce;
   String _appliedSearch = '';
@@ -137,15 +133,12 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
 
   List<IntegrationDef> get _filteredDefs {
     final q = _appliedSearch.toLowerCase();
+    if (q.isEmpty) return _visibleDefs;
     return _visibleDefs.where((def) {
-      final st = _statuses[def.key];
-      final configured = st?.configured ?? false;
-      if (_filter == _HubFilter.connected && !configured) return false;
-      if (_filter == _HubFilter.pending && configured) return false;
-      if (q.isEmpty) return true;
       return def.name.toLowerCase().contains(q) ||
           def.tagline.toLowerCase().contains(q) ||
-          def.description.toLowerCase().contains(q);
+          def.description.toLowerCase().contains(q) ||
+          def.features.any((f) => f.toLowerCase().contains(q));
     }).toList(growable: false);
   }
 
@@ -177,29 +170,19 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
             physics: const AlwaysScrollableScrollPhysics(),
             child: ConstrainedBox(
               constraints: BoxConstraints(minHeight: constraints.maxHeight),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                        _kPagePadH, _kPagePadTop, _kPagePadH, 0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildHero(context),
-                        const SizedBox(height: _kSectionGap),
-                        _buildSearchField(context),
-                        const SizedBox(height: _kSectionGap),
-                      ],
-                    ),
-                  ),
-                  _buildTabsRail(context),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                        _kPagePadH, _kSectionGap, _kPagePadH, _kPagePadBottom),
-                    child: _buildBody(context),
-                  ),
-                ],
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                    _kPagePadH, _kPagePadTop, _kPagePadH, _kPagePadBottom),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildHero(context),
+                    const SizedBox(height: _kSectionGap),
+                    _buildSearchField(context),
+                    const SizedBox(height: 18),
+                    _buildBody(context),
+                  ],
+                ),
               ),
             ),
           ),
@@ -529,83 +512,7 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
     );
   }
 
-  // ─── Abas flush (sublinhado) ──────────────────────────────────────────────
-
-  Color _filterColor(BuildContext context, _HubFilter f) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    switch (f) {
-      case _HubFilter.all:
-        return _accentColor(context);
-      case _HubFilter.connected:
-        return isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
-      case _HubFilter.pending:
-        return isDark
-            ? AppColors.status.warningDarkMode
-            : AppColors.status.warning;
-    }
-  }
-
-  IconData _filterIcon(_HubFilter f) {
-    switch (f) {
-      case _HubFilter.all:
-        return LucideIcons.plugZap;
-      case _HubFilter.connected:
-        return LucideIcons.circleCheckBig;
-      case _HubFilter.pending:
-        return LucideIcons.hourglass;
-    }
-  }
-
-  String _filterLabel(_HubFilter f) {
-    switch (f) {
-      case _HubFilter.all:
-        return 'Todas';
-      case _HubFilter.connected:
-        return 'Conectadas';
-      case _HubFilter.pending:
-        return 'Pendentes';
-    }
-  }
-
-  int _filterCount(_HubFilter f) {
-    if (_loading) return 0;
-    switch (f) {
-      case _HubFilter.all:
-        return _visibleDefs.length;
-      case _HubFilter.connected:
-        return _configuredCount;
-      case _HubFilter.pending:
-        return _pendingCount;
-    }
-  }
-
-  Widget _buildTabsRail(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
-        ),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: _kPagePadH - 8),
-      child: Row(
-        children: [
-          for (final f in _HubFilter.values)
-            Expanded(
-              child: _FlushTab(
-                icon: _filterIcon(f),
-                label: _filterLabel(f),
-                count: _filterCount(f),
-                tone: _filterColor(context, f),
-                selected: _filter == f,
-                onTap: () => setState(() => _filter = f),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  // ─── Corpo (agrupado por categoria) ──────────────────────────────────────
+  // ─── Corpo (lista completa, agrupada por categoria) ──────────────────────
 
   Widget _buildBody(BuildContext context) {
     if (_loading) return _buildSkeleton();
@@ -622,9 +529,9 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
           defs.where((d) => d.category == category).toList(growable: false);
       if (items.isEmpty) continue;
 
-      if (nodes.isNotEmpty) nodes.add(const SizedBox(height: 18));
+      if (nodes.isNotEmpty) nodes.add(const SizedBox(height: 14));
       nodes.add(_CategoryHeader(category: category, count: items.length));
-      nodes.add(const SizedBox(height: 4));
+      nodes.add(const SizedBox(height: 10));
 
       for (final def in items) {
         nodes.add(
@@ -640,109 +547,38 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
       }
     }
 
-    nodes.add(const SizedBox(height: 22));
+    nodes.add(const SizedBox(height: 14));
     nodes.add(_buildHelpHint(context));
 
     return Column(
-      key: ValueKey('hub-${_filter.name}-$_appliedSearch'),
+      key: ValueKey('hub-$_appliedSearch'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: nodes,
-    ).animate(key: ValueKey('hub-${_filter.name}')).fadeIn(duration: 240.ms);
+    ).animate().fadeIn(duration: 240.ms);
   }
 
+  /// Nota de rodapé flush — uma linha, sem card (o antigo bloco "Como
+  /// funciona?" era extenso demais; o passo a passo agora vive no detalhe).
   Widget _buildHelpHint(BuildContext context) {
     final theme = Theme.of(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final accent = _accentColor(context);
-    final isDark = theme.brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        color: ThemeHelpers.cardBackgroundColor(context),
-        boxShadow: ThemeHelpers.cardShadow(context),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(11),
-              color: accent.withValues(alpha: isDark ? 0.18 : 0.1),
-            ),
-            child: Icon(LucideIcons.info, color: accent, size: 18),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Como funciona?',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    color: ThemeHelpers.textColor(context),
-                    letterSpacing: -0.2,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  'O selo CONECTADO indica que já existe conexão salva para a '
-                  'sua empresa. Toque em uma integração para ver o status da '
-                  'conexão e as ações disponíveis — configurações completas '
-                  'são feitas pelo painel web.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: secondary,
-                    height: 1.4,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ─── Estados ──────────────────────────────────────────────────────────────
-
-  Widget _buildSkeleton() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Padding(
-          padding: EdgeInsets.only(top: 4, bottom: 10),
-          child: SkeletonText(width: 150, height: 12, borderRadius: 999),
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: Icon(LucideIcons.info,
+              size: 13, color: secondary.withValues(alpha: 0.8)),
         ),
-        ...List.generate(
-          6,
-          (_) => Padding(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SkeletonBox(width: 44, height: 44, borderRadius: 13),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
-                      SkeletonBox(width: 88, height: 20, borderRadius: 999),
-                      SizedBox(height: 9),
-                      SkeletonText(width: 170, height: 15),
-                      SizedBox(height: 6),
-                      SkeletonText(width: double.infinity, height: 12),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 10),
-                const Padding(
-                  padding: EdgeInsets.only(top: 12),
-                  child: SkeletonBox(width: 16, height: 16, borderRadius: 6),
-                ),
-              ],
+        const SizedBox(width: 7),
+        Expanded(
+          child: Text(
+            'Toque em uma integração para ver status, passos e ações — a '
+            'configuração completa é feita pelo painel web.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: secondary.withValues(alpha: 0.9),
+              fontSize: 11.5,
+              height: 1.4,
             ),
           ),
         ),
@@ -750,34 +586,111 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
     );
   }
 
+  // ─── Estados ──────────────────────────────────────────────────────────────
+
+  /// Skeleton fiel ao layout novo: cabeçalho de categoria + cards ricos
+  /// (logo plate 48, categoria + pill, nome, tagline, feature pills + CTA).
+  Widget _buildSkeleton() {
+    Widget cardSkeleton() {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          color: ThemeHelpers.cardBackgroundColor(context),
+          boxShadow: ThemeHelpers.cardShadow(context),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                SkeletonBox(width: 48, height: 48, borderRadius: 14),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          SkeletonText(width: 90, height: 9, borderRadius: 999),
+                          Spacer(),
+                          SkeletonBox(width: 74, height: 20, borderRadius: 999),
+                        ],
+                      ),
+                      SizedBox(height: 8),
+                      SkeletonText(width: 150, height: 15),
+                      SizedBox(height: 6),
+                      SkeletonText(width: 190, height: 11),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: const [
+                SkeletonBox(width: 62, height: 21, borderRadius: 999),
+                SizedBox(width: 6),
+                SkeletonBox(width: 54, height: 21, borderRadius: 999),
+                SizedBox(width: 6),
+                SkeletonBox(width: 68, height: 21, borderRadius: 999),
+                Spacer(),
+                SkeletonBox(width: 28, height: 28, borderRadius: 999),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
+    Widget headerSkeleton() {
+      return const Padding(
+        padding: EdgeInsets.only(bottom: 10),
+        child: Row(
+          children: [
+            SkeletonBox(width: 8, height: 8, borderRadius: 3),
+            SizedBox(width: 8),
+            SkeletonText(width: 110, height: 10, borderRadius: 999),
+            SizedBox(width: 8),
+            SkeletonBox(width: 24, height: 16, borderRadius: 999),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        headerSkeleton(),
+        cardSkeleton(),
+        cardSkeleton(),
+        const SizedBox(height: 14),
+        headerSkeleton(),
+        cardSkeleton(),
+        cardSkeleton(),
+        cardSkeleton(),
+      ],
+    );
+  }
+
   Widget _buildEmpty(BuildContext context) {
     final theme = Theme.of(context);
-    final tone = _filterColor(context, _filter);
+    final tone = _accentColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final hasSearch = _appliedSearch.trim().isNotEmpty;
     final (icon, title, body) = hasSearch
         ? (
             LucideIcons.searchX,
             'Nenhuma integração encontrada',
-            'Nada corresponde a "${_appliedSearch.trim()}". Ajuste a busca ou limpe os filtros.',
+            'Nada corresponde a "${_appliedSearch.trim()}". Ajuste os termos da busca.',
           )
-        : switch (_filter) {
-            _HubFilter.connected => (
-                LucideIcons.unplug,
-                'Nada conectado ainda',
-                'Nenhuma integração ativa no momento. As conexões são feitas pelo painel web.',
-              ),
-            _HubFilter.pending => (
-                LucideIcons.partyPopper,
-                'Tudo conectado',
-                'Todas as integrações disponíveis já estão ativas. Excelente!',
-              ),
-            _HubFilter.all => (
-                LucideIcons.plugZap,
-                'Nenhuma integração disponível',
-                'Seu perfil não tem acesso a nenhuma integração nesta empresa.',
-              ),
-          };
+        : (
+            LucideIcons.plugZap,
+            'Nenhuma integração disponível',
+            'Seu perfil não tem acesso a nenhuma integração nesta empresa.',
+          );
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 4),
       child: Column(
@@ -921,100 +834,6 @@ class _CategoryHeader extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-// ─── Aba flush (ícone + rótulo + contagem + sublinhado) ──────────────────────
-
-class _FlushTab extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final int count;
-  final Color tone;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _FlushTab({
-    required this.icon,
-    required this.label,
-    required this.count,
-    required this.tone,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final fg = selected ? tone : ThemeHelpers.textSecondaryColor(context);
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        splashColor: tone.withValues(alpha: 0.12),
-        highlightColor: tone.withValues(alpha: 0.06),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 13),
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(icon, size: 16, color: fg),
-                    const SizedBox(width: 6),
-                    Text(
-                      label,
-                      maxLines: 1,
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: fg,
-                        fontWeight:
-                            selected ? FontWeight.w900 : FontWeight.w600,
-                        letterSpacing: 0.1,
-                      ),
-                    ),
-                    if (count > 0) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 1.5),
-                        decoration: BoxDecoration(
-                          color: tone.withValues(alpha: selected ? 0.18 : 0.12),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          count > 99 ? '99+' : '$count',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: selected
-                                ? tone
-                                : ThemeHelpers.textSecondaryColor(context),
-                            fontWeight: FontWeight.w900,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOut,
-              height: 2.5,
-              decoration: BoxDecoration(
-                color: selected ? tone : Colors.transparent,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(3)),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

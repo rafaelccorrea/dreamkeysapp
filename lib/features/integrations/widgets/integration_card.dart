@@ -3,10 +3,10 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
-import '../../../shared/widgets/skeleton_box.dart';
 import '../models/integration_model.dart';
+import 'integration_logo.dart';
 
-/// Cor semântica do status de conexão (verde = conectado, âmbar = pendente).
+/// Cor semântica do status de conexão (verde = conectada, âmbar = pendente).
 Color integrationStatusColor(BuildContext context, bool configured) {
   final isDark = Theme.of(context).brightness == Brightness.dark;
   if (configured) {
@@ -15,20 +15,19 @@ Color integrationStatusColor(BuildContext context, bool configured) {
   return isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
 }
 
-/// Item da lista de integrações — **linha flush** (sem card/sombra), mesma
-/// gramática do CommissionCard: glyph tonal na cor da marca da integração,
-/// status pill + categoria, nome, linha de contexto e chevron para o detalhe.
+/// **Card rico da integração** — espelha o card do hub web: logo REAL no
+/// plate de marca, categoria discreta, status pill viva (Conectada com dot /
+/// Pendente âmbar), nome, tagline curta, feature pills e CTA de detalhe.
+/// Sombra neutra ([ThemeHelpers.cardShadow]) e cantos generosos.
 class IntegrationCard extends StatelessWidget {
   final IntegrationDef def;
   final IntegrationStatusData? status;
-  final bool loading;
   final VoidCallback? onTap;
 
   const IntegrationCard({
     super.key,
     required this.def,
     this.status,
-    this.loading = false,
     this.onTap,
   });
 
@@ -41,103 +40,120 @@ class IntegrationCard extends StatelessWidget {
     final configured = status?.configured ?? false;
     final tone = integrationStatusColor(context, configured);
 
-    final contextLine = status?.statusLine ?? def.descriptionFor(configured);
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        splashColor: accent.withValues(alpha: 0.1),
-        highlightColor: accent.withValues(alpha: 0.05),
-        child: Container(
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
-            ),
-          ),
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Glyph tonal na cor de marca da integração.
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(13),
-                  color: accent.withValues(alpha: isDark ? 0.16 : 0.1),
-                  border: Border.all(color: accent.withValues(alpha: 0.28)),
-                ),
-                child: Icon(def.icon, color: accent, size: 21),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: ThemeHelpers.cardBackgroundColor(context),
+        boxShadow: ThemeHelpers.cardShadow(context),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(18),
+          splashColor: accent.withValues(alpha: 0.08),
+          highlightColor: accent.withValues(alpha: 0.04),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        if (loading)
-                          const SkeletonBox(
-                              width: 76, height: 20, borderRadius: 999)
-                        else
-                          _StatusPill(
-                            label: configured ? 'Conectado' : 'Pendente',
-                            color: tone,
-                            withDot: configured,
+                    IntegrationLogo(def: def, size: 48, radius: 14),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  def.category.label.toUpperCase(),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: neutral.withValues(alpha: 0.85),
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 9,
+                                    letterSpacing: 1.0,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              _StatusPill(
+                                label: configured ? 'Conectada' : 'Pendente',
+                                color: tone,
+                                withDot: configured,
+                              ),
+                            ],
                           ),
-                        const SizedBox(width: 8),
-                        Flexible(
-                          child: Text(
-                            def.category.label.toUpperCase(),
+                          const SizedBox(height: 5),
+                          Text(
+                            def.name,
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              color: ThemeHelpers.textColor(context),
+                              height: 1.15,
+                              letterSpacing: -0.25,
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: neutral,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 9.5,
-                              letterSpacing: 0.8,
-                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      def.name,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: ThemeHelpers.textColor(context),
-                        height: 1.2,
-                        letterSpacing: -0.2,
+                          const SizedBox(height: 3),
+                          Text(
+                            def.tagline,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: neutral,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 12,
+                              height: 1.3,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      loading ? def.tagline : contextLine,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: neutral,
-                        fontWeight: FontWeight.w600,
-                        height: 1.3,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(width: 10),
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Icon(
-                  LucideIcons.chevronRight,
-                  size: 18,
-                  color: neutral.withValues(alpha: 0.7),
+                const SizedBox(height: 12),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (final f in def.features.take(3))
+                            _FeaturePill(label: f, isDark: isDark),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color:
+                            accent.withValues(alpha: isDark ? 0.20 : 0.10),
+                      ),
+                      child: Icon(
+                        LucideIcons.chevronRight,
+                        size: 15,
+                        color: accent,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -145,7 +161,40 @@ class IntegrationCard extends StatelessWidget {
   }
 }
 
-/// Pílula de status — tint da cor + texto na cor (+ dot quando conectado).
+/// Pílula de feature — discreta, neutra, como as chips do card web.
+class _FeaturePill extends StatelessWidget {
+  final String label;
+  final bool isDark;
+
+  const _FeaturePill({required this.label, required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.05)
+            : Colors.black.withValues(alpha: 0.04),
+        border: Border.all(color: ThemeHelpers.borderLightColor(context)),
+      ),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: ThemeHelpers.textSecondaryColor(context),
+          fontWeight: FontWeight.w700,
+          fontSize: 10,
+          letterSpacing: 0.1,
+        ),
+      ),
+    );
+  }
+}
+
+/// Pílula de status — tint da cor + texto na cor (+ dot vivo quando conectada).
 class _StatusPill extends StatelessWidget {
   final String label;
   final Color color;
@@ -194,7 +243,7 @@ class _StatusPill extends StatelessWidget {
             style: TextStyle(
               color: color,
               fontWeight: FontWeight.w800,
-              fontSize: 11,
+              fontSize: 10.5,
               letterSpacing: -0.1,
             ),
           ),

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Webhook">
+  <path d="M10.04 12.68a3.54 3.54 0 0 1 3.03-1.7c.34 0 .67.05.97.14l2.15-3.65a7 7 0 1 0-9.7 2.52l2.74-4.6a3.54 3.54 0 1 1 3.09 5.99" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M14.93 10.9 12.28 15a3.55 3.55 0 0 1-3.07 1.77H4.7a7 7 0 0 0 10.34 4.62l-2.65-4.47a3.55 3.55 0 0 1 2.54-6.03" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <circle cx="17" cy="17" r="2.2" fill="#FFFFFF"/>
+  <circle cx="7" cy="7" r="2.2" fill="#FFFFFF"/>
+  <circle cx="12" cy="19" r="2.2" fill="#FFFFFF"/>
+</svg>

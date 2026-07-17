@@ -170,6 +170,17 @@ class IntegrationPermissions {
 
 // ─── Definição de uma integração (catálogo) ─────────────────────────────────
 
+/// Pasta dos logos reais (mesmos arquivos do painel web + glifos de marca).
+const String kIntegrationLogoDir = 'assets/images/integrations/';
+
+/// Um passo curto do "Como funciona" (ícone pequeno + frase de uma linha).
+class IntegrationStep {
+  final IconData icon;
+  final String text;
+
+  const IntegrationStep(this.icon, this.text);
+}
+
 class IntegrationDef {
   final String key;
   final String name;
@@ -184,6 +195,16 @@ class IntegrationDef {
   final List<String> features;
   final IntegrationCategory category;
   final IconData icon;
+
+  /// Arquivo do logo REAL (svg/png) dentro de [kIntegrationLogoDir].
+  final String logoFile;
+
+  /// `true` = glifo branco sobre plate na cor da marca (logos monocromáticos);
+  /// `false` = logo colorido sobre plate branco (garante contraste no dark).
+  final bool logoOnBrand;
+
+  /// Passos curtos e específicos do "Como funciona" (detalhe).
+  final List<IntegrationStep> steps;
 
   /// Cor de marca da integração (accent do card — mesma do hub web).
   final Color accent;
@@ -209,12 +230,20 @@ class IntegrationDef {
     required this.features,
     required this.category,
     required this.icon,
+    required this.logoFile,
+    this.logoOnBrand = false,
+    this.steps = const [],
     required this.accent,
     required this.viewPermissions,
     required this.managePermissions,
     this.supportsToggle = false,
     this.supportsTest = false,
   });
+
+  /// Caminho completo do asset do logo real.
+  String get logoAsset => '$kIntegrationLogoDir$logoFile';
+
+  bool get logoIsSvg => logoFile.toLowerCase().endsWith('.svg');
 
   String descriptionFor(bool configured) =>
       configured ? (configuredDescription ?? description) : description;
@@ -238,6 +267,16 @@ class IntegrationCatalog {
       features: ['API Oficial', 'QR Code', 'Templates', 'Agendamento'],
       category: IntegrationCategory.messaging,
       icon: LucideIcons.messageCircle,
+      logoFile: 'whatsapp.svg',
+      logoOnBrand: true,
+      steps: [
+        IntegrationStep(LucideIcons.plug,
+            'Conecte a API Oficial ou escaneie o QR Code no painel web.'),
+        IntegrationStep(LucideIcons.messageCircle,
+            'As conversas dos leads chegam direto no CRM.'),
+        IntegrationStep(LucideIcons.clock,
+            'Agende mensagens e use respostas rápidas com "/".'),
+      ],
       accent: Color(0xFF25D366),
       viewPermissions: [
         IntegrationPermissions.whatsappView,
@@ -254,6 +293,16 @@ class IntegrationCatalog {
       features: ['Grupo', 'Claim "EU"', 'First-wins', 'Auto-atribuição'],
       category: IntegrationCategory.messaging,
       icon: LucideIcons.users,
+      logoFile: 'whatsapp-groups.svg',
+      logoOnBrand: true,
+      steps: [
+        IntegrationStep(LucideIcons.users,
+            'Vincule um grupo do WhatsApp da sua equipe.'),
+        IntegrationStep(LucideIcons.megaphone,
+            'Cada lead novo é anunciado automaticamente no grupo.'),
+        IntegrationStep(LucideIcons.zap,
+            'O primeiro corretor que responder "EU" leva o lead.'),
+      ],
       accent: Color(0xFF128C7E),
       viewPermissions: [IntegrationPermissions.whatsappManageConfig],
       managePermissions: [IntegrationPermissions.whatsappManageConfig],
@@ -269,6 +318,16 @@ class IntegrationCatalog {
       features: ['Sparks', 'WhatsApp', 'Auto-card', 'Multi-instância'],
       category: IntegrationCategory.messaging,
       icon: LucideIcons.messagesSquare,
+      logoFile: 'chat-pro.svg',
+      logoOnBrand: true,
+      steps: [
+        IntegrationStep(LucideIcons.webhook,
+            'Conclua o Webhook de Leads no painel web.'),
+        IntegrationStep(LucideIcons.link2,
+            'Cole a URL indicada na sua conta ChatPro.'),
+        IntegrationStep(LucideIcons.squareKanban,
+            'Cada conversa vira um card no funil, por linha cadastrada.'),
+      ],
       accent: Color(0xFF2563EB),
       viewPermissions: IntegrationPermissions.customLeadCard,
       managePermissions: [IntegrationPermissions.kanbanManageUsers],
@@ -284,6 +343,16 @@ class IntegrationCatalog {
       features: ['Facebook Ads', 'Instagram Ads', 'Leads Forms', 'Métricas'],
       category: IntegrationCategory.marketing,
       icon: LucideIcons.megaphone,
+      logoFile: 'meta.svg',
+      logoOnBrand: true,
+      steps: [
+        IntegrationStep(LucideIcons.plug,
+            'Conecte a conta de anúncios Meta no painel web.'),
+        IntegrationStep(LucideIcons.inbox,
+            'Leads dos formulários caem direto no funil.'),
+        IntegrationStep(LucideIcons.chartLine,
+            'Métricas das campanhas aparecem dentro do CRM.'),
+      ],
       accent: Color(0xFF1877F2),
       viewPermissions: [
         IntegrationPermissions.metaCampaignView,
@@ -301,6 +370,16 @@ class IntegrationCatalog {
       features: ['Multi-canal', 'Orçamento', 'ROI', 'Atribuição'],
       category: IntegrationCategory.marketing,
       icon: LucideIcons.flag,
+      logoFile: 'system-campaigns.svg',
+      logoOnBrand: true,
+      steps: [
+        IntegrationStep(LucideIcons.flag,
+            'Crie a campanha com canal, orçamento e período.'),
+        IntegrationStep(LucideIcons.link2,
+            'Vincule os leads recebidos à campanha.'),
+        IntegrationStep(LucideIcons.target,
+            'Acompanhe custo por lead e ROI em tempo real.'),
+      ],
       accent: Color(0xFFDC2626),
       viewPermissions: [
         IntegrationPermissions.metaCampaignView,
@@ -317,6 +396,15 @@ class IntegrationCatalog {
       features: ['Search', 'Display', 'YouTube', 'CPL real'],
       category: IntegrationCategory.marketing,
       icon: LucideIcons.chartColumnBig,
+      logoFile: 'google-ads-logo.svg',
+      steps: [
+        IntegrationStep(LucideIcons.keyRound,
+            'Informe as credenciais e conecte via OAuth no painel web.'),
+        IntegrationStep(LucideIcons.refreshCw,
+            'Custo, impressões e cliques sincronizam por campanha.'),
+        IntegrationStep(LucideIcons.target,
+            'O CPL real aparece na análise de canais.'),
+      ],
       accent: Color(0xFF4285F4),
       viewPermissions: [
         IntegrationPermissions.googleAdsView,
@@ -334,6 +422,15 @@ class IntegrationCatalog {
       features: ['Analytics', 'Contatos únicos', 'WhatsApp', 'Bate com GA4'],
       category: IntegrationCategory.marketing,
       icon: LucideIcons.chartPie,
+      logoFile: 'ga4-logo.svg',
+      steps: [
+        IntegrationStep(LucideIcons.plug,
+            'Conecte a mesma conta Google usada no GA4.'),
+        IntegrationStep(LucideIcons.hash,
+            'Informe a Property ID e o evento de WhatsApp.'),
+        IntegrationStep(LucideIcons.chartPie,
+            'Os contatos únicos passam a bater com o painel do GA4.'),
+      ],
       accent: Color(0xFFE8710A),
       viewPermissions: [
         IntegrationPermissions.googleAdsView,
@@ -353,6 +450,16 @@ class IntegrationCatalog {
       features: ['ZAP', 'Viva Real', 'OLX', 'Auto leads'],
       category: IntegrationCategory.portals,
       icon: LucideIcons.zap,
+      logoFile: 'grupo-zap.svg',
+      logoOnBrand: true,
+      steps: [
+        IntegrationStep(LucideIcons.rss,
+            'Ative o feed de imóveis para o Grupo ZAP.'),
+        IntegrationStep(LucideIcons.globe,
+            'Os anúncios publicam no ZAP, Viva Real e OLX.'),
+        IntegrationStep(LucideIcons.inbox,
+            'Leads dos portais entram sozinhos no funil.'),
+      ],
       accent: Color(0xFF00A651),
       viewPermissions: [
         IntegrationPermissions.grupoZapView,
@@ -370,6 +477,16 @@ class IntegrationCatalog {
       features: ['Widget', 'API JSON', 'Multi-domínio', 'Somente-leitura'],
       category: IntegrationCategory.portals,
       icon: LucideIcons.globe,
+      logoFile: 'properties-api.svg',
+      logoOnBrand: true,
+      steps: [
+        IntegrationStep(LucideIcons.keyRound,
+            'Gere uma chave de API para o seu site.'),
+        IntegrationStep(LucideIcons.braces,
+            'Use o widget pronto ou consuma a API JSON.'),
+        IntegrationStep(LucideIcons.globe,
+            'Os imóveis publicados aparecem no seu domínio.'),
+      ],
       accent: Color(0xFF2563EB),
       viewPermissions: [
         IntegrationPermissions.propertiesApiView,
@@ -386,6 +503,15 @@ class IntegrationCatalog {
       features: ['XML', 'Auto leads', 'Sync diário'],
       category: IntegrationCategory.portals,
       icon: LucideIcons.keyRound,
+      logoFile: 'chavesnamao-logo.png',
+      steps: [
+        IntegrationStep(LucideIcons.rss,
+            'Compartilhe o feed XML com o portal.'),
+        IntegrationStep(LucideIcons.refreshCw,
+            'Os imóveis sincronizam diariamente.'),
+        IntegrationStep(LucideIcons.webhook,
+            'Leads voltam pelo webhook direto ao CRM.'),
+      ],
       accent: Color(0xFFE8132A),
       viewPermissions: [
         IntegrationPermissions.chavesNaMaoView,
@@ -403,6 +529,15 @@ class IntegrationCatalog {
       features: ['Imovelweb', 'Wimoveis', 'Casa Mineira', 'API + Callback'],
       category: IntegrationCategory.portals,
       icon: LucideIcons.building2,
+      logoFile: 'imovelweb-logo.svg',
+      steps: [
+        IntegrationStep(LucideIcons.keyRound,
+            'Configure as credenciais de API do Grupo QuintoAndar.'),
+        IntegrationStep(LucideIcons.upload,
+            'Anúncios publicam no Imovelweb, Wimoveis e Casa Mineira.'),
+        IntegrationStep(LucideIcons.webhook,
+            'Leads retornam por callback para o funil.'),
+      ],
       accent: Color(0xFFFF5500),
       viewPermissions: [
         IntegrationPermissions.imovelwebView,
@@ -425,6 +560,16 @@ class IntegrationCatalog {
       features: ['Webhook', 'Token', 'Multi-funil', 'Anti-duplicação'],
       category: IntegrationCategory.leads,
       icon: LucideIcons.webhook,
+      logoFile: 'webhook.svg',
+      logoOnBrand: true,
+      steps: [
+        IntegrationStep(LucideIcons.settings2,
+            'Escolha o funil e gere a URL do webhook.'),
+        IntegrationStep(LucideIcons.send,
+            'Aponte qualquer sistema para essa URL via POST.'),
+        IntegrationStep(LucideIcons.shieldCheck,
+            'Token secreto e anti-duplicação protegem a entrada.'),
+      ],
       accent: Color(0xFF0891B2),
       viewPermissions: IntegrationPermissions.customLeadCard,
       managePermissions: [IntegrationPermissions.kanbanManageUsers],
@@ -440,6 +585,16 @@ class IntegrationCatalog {
       features: ['Outbound', 'Retentativas', 'Logs', 'Replay'],
       category: IntegrationCategory.leads,
       icon: LucideIcons.share2,
+      logoFile: 'ficha-sync.svg',
+      logoOnBrand: true,
+      steps: [
+        IntegrationStep(LucideIcons.link2,
+            'Cadastre o endpoint e o segredo de assinatura.'),
+        IntegrationStep(LucideIcons.filter,
+            'Escolha quais status de ficha disparam eventos.'),
+        IntegrationStep(LucideIcons.refreshCw,
+            'Falhas são retentadas e ficam nos logs com replay.'),
+      ],
       accent: Color(0xFF2563EB),
       viewPermissions: IntegrationPermissions.customLeadCard,
       managePermissions: [
@@ -459,6 +614,15 @@ class IntegrationCatalog {
       features: ['Assinatura digital', 'Fichas', 'Propostas', 'Por empresa'],
       category: IntegrationCategory.documents,
       icon: LucideIcons.signature,
+      logoFile: 'autentique-logo.png',
+      steps: [
+        IntegrationStep(LucideIcons.keyRound,
+            'Salve a chave de API da conta Autentique da empresa.'),
+        IntegrationStep(LucideIcons.send,
+            'Envie fichas e propostas para assinatura.'),
+        IntegrationStep(LucideIcons.signature,
+            'Acompanhe cada assinatura sem sair do CRM.'),
+      ],
       accent: Color(0xFF16A34A),
       viewPermissions: [
         IntegrationPermissions.autentiqueView,

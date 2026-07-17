@@ -6,7 +6,7 @@ publish_to: 'none'
 # Tem de ser SEMPRE maior que qualquer build já enviado para esta app.
 # Erro típico: "bundle version must be higher than … previousBundleVersion = N"
 # → subir só o +N (ex. +14 → +15 → +16), commit, novo pipeline
-version: 2.0.0+55
+version: 2.0.0+56
 
 environment:
   sdk: ^3.9.2
@@ -62,6 +62,9 @@ dependencies:
   live_activities: ^2.4.9
   package_info_plus: ^10.1.0
   custom_refresh_indicator: ^4.0.1
+  # Logos REAIS da Central de Integrações (SVGs vindos do painel web em
+  # assets/images/integrations/) — renderizados no "logo plate" dos cards.
+  flutter_svg: ^2.2.0
 
 dev_dependencies:
   flutter_test:
@@ -88,6 +91,7 @@ flutter:
 
   assets:
     - assets/images/
+    - assets/images/integrations/
     - assets/config/dev_lan_host.txt
     - assets/config/api_target.txt
     - assets/config/app_update.txt
