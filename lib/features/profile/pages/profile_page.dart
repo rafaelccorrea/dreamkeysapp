@@ -509,6 +509,7 @@ class _ProfilePageState extends State<ProfilePage> {
               _GhostIconButton(
                 icon: Icons.edit_rounded,
                 tone: brand,
+                label: 'Editar',
                 onTap: () =>
                     Navigator.pushNamed(context, AppRoutes.profileEdit),
               ),
@@ -1613,33 +1614,65 @@ class _MetaPill extends StatelessWidget {
   }
 }
 
-/// Botão fantasma redondo — sem fundo. Atalho para editar o perfil no
-/// canto direito da manchete.
+/// Atalho de edição da manchete — pill tonal com rótulo. O círculo oco
+/// anterior ("só um lápis") lia como decoração; com plate tom-sobre-tom,
+/// rótulo e splash, vira ação inequívoca sem pesar a manchete.
 class _GhostIconButton extends StatelessWidget {
   const _GhostIconButton({
     required this.icon,
     required this.tone,
     required this.onTap,
+    this.label,
   });
 
   final IconData icon;
   final Color tone;
   final VoidCallback onTap;
+  final String? label;
 
   @override
   Widget build(BuildContext context) {
-    return InkResponse(
-      onTap: onTap,
-      radius: 24,
-      child: Container(
-        width: 38,
-        height: 38,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(color: tone.withValues(alpha: 0.32)),
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Semantics(
+      button: true,
+      label: label ?? 'Editar',
+      child: Material(
+        color: tone.withValues(alpha: isDark ? 0.14 : 0.09),
+        shape: StadiumBorder(
+          side: BorderSide(color: tone.withValues(alpha: 0.32)),
         ),
-        alignment: Alignment.center,
-        child: Icon(icon, color: tone, size: 17),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          splashColor: tone.withValues(alpha: 0.14),
+          highlightColor: tone.withValues(alpha: 0.08),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: label != null ? 12 : 10,
+              vertical: 8,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, color: tone, size: 15),
+                if (label != null) ...[
+                  const SizedBox(width: 6),
+                  Text(
+                    label!,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: tone,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 11.5,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
