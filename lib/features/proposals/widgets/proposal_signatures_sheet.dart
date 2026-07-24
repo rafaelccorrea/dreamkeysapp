@@ -1,7 +1,9 @@
 import 'dart:io' show File, Directory;
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -67,6 +69,9 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
   String? _error;
   bool _sending = false;
   bool _syncing = false;
+  bool _uploading = false;
+
+  final ImagePicker _imagePicker = ImagePicker();
 
   late int _etapa;
   late final List<_SignerForm> _forms = [];
@@ -285,6 +290,279 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
     );
   }
 
+  bool get _isGestor {
+    final role = ModuleAccessService.instance.userRole?.toLowerCase();
+    return role == 'manager' || role == 'admin' || role == 'master';
+  }
+
+  /// Etapas em que ainda é permitido anexar a ficha física: liberadas para
+  /// envio (<= maxEtapaLiberadaParaEnvio) e ainda não concluídas por
+  /// assinatura registrada ou anexo já aprovado.
+  List<int> get _etapasDisponiveis {
+    final h = _historico;
+    final max = h?.maxEtapaLiberadaParaEnvio ?? _etapa;
+    final concluidas = <int>{};
+    for (final s in [..._signatures, ...?h?.signatures]) {
+      if (s.status.toLowerCase() == 'signed') concluidas.add(s.etapa);
+    }
+    for (final a in h?.attachments ?? const <ProposalAttachment>[]) {
+      if (a.status.toLowerCase() == 'approved') concluidas.add(a.etapa);
+    }
+    final out = <int>[];
+    for (var i = 1; i <= max && i <= 3; i++) {
+      if (!concluidas.contains(i)) out.add(i);
+    }
+    return out;
+  }
+
+  String _etapaLabel(int etapa) => switch (etapa) {
+        1 => 'Comprador',
+        2 => 'Proprietário',
+        _ => 'Corretor',
+      };
+
+  Future<void> _anexarFicha() async {
+    final etapas = _etapasDisponiveis;
+    if (etapas.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nenhuma etapa disponível para anexo no momento.'),
+        ),
+      );
+      return;
+    }
+
+    final etapa = etapas.length == 1 ? etapas.first : await _escolherEtapa(etapas);
+    if (etapa == null || !mounted) return;
+
+    final origem = await _escolherOrigem();
+    if (origem == null || !mounted) return;
+
+    File? file;
+    try {
+      if (origem == 'camera') {
+        final XFile? shot = await _imagePicker.pickImage(
+          source: ImageSource.camera,
+          imageQuality: 85,
+        );
+        if (shot != null) file = File(shot.path);
+      } else {
+        final result = await FilePicker.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: _kAnexoExtensoes,
+          allowMultiple: false,
+        );
+        final path = result?.files.single.path;
+        if (path != null) file = File(path);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            origem == 'camera'
+                ? 'Não foi possível abrir a câmera.'
+                : 'Não foi possível abrir o seletor de arquivos.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (file == null || !mounted) return;
+
+    // Validação no cliente (o service revalida): tipo e tamanho (15MB).
+    final ext = file.path.split('.').last.toLowerCase();
+    if (!_kAnexoExtensoes.contains(ext)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Formato inválido. Use PDF, JPG, PNG ou WEBP.'),
+        ),
+      );
+      return;
+    }
+    if (await file.length() > 15 * 1024 * 1024) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Arquivo acima do limite de 15MB.')),
+      );
+      return;
+    }
+
+    setState(() => _uploading = true);
+    final res = await PurchaseProposalsService.instance.uploadAnexo(
+      widget.proposalId,
+      file,
+      etapa: etapa,
+      uploadedByName:
+          ModuleAccessService.instance.userPermissions?.userName,
+    );
+    if (!mounted) return;
+    setState(() => _uploading = false);
+
+    if (res.success && res.data != null) {
+      final approved = res.data!.status.toLowerCase() == 'approved';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            approved
+                ? 'Ficha anexada. Etapa ${_etapaLabel(etapa)} liberada.'
+                : 'Ficha anexada. Aguardando aprovação do gestor.',
+          ),
+        ),
+      );
+      widget.onChanged?.call();
+      _load();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(res.message ?? 'Erro ao anexar ficha.')),
+      );
+    }
+  }
+
+  Future<int?> _escolherEtapa(List<int> etapas) {
+    return showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+              child: Text(
+                'Anexar em qual etapa?',
+                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+              ),
+            ),
+            for (final e in etapas)
+              ListTile(
+                leading: CircleAvatar(
+                  radius: 16,
+                  backgroundColor: _accent.withValues(alpha: 0.14),
+                  child: Text(
+                    '$e',
+                    style: TextStyle(
+                      color: _accent,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                title: Text('Etapa $e — ${_etapaLabel(e)}'),
+                onTap: () => Navigator.of(ctx).pop(e),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<String?> _escolherOrigem() {
+    return showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            ListTile(
+              leading: Icon(Icons.photo_camera_rounded, color: _accent),
+              title: const Text('Foto da câmera'),
+              onTap: () => Navigator.of(ctx).pop('camera'),
+            ),
+            ListTile(
+              leading: Icon(Icons.upload_file_rounded, color: _accent),
+              title: const Text('Arquivo (PDF ou imagem)'),
+              onTap: () => Navigator.of(ctx).pop('file'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _aprovarAnexo(ProposalAttachment att) async {
+    final res = await PurchaseProposalsService.instance
+        .aprovarAnexo(widget.proposalId, att.id);
+    if (!mounted) return;
+    if (res.success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Anexo aprovado.')),
+      );
+      widget.onChanged?.call();
+      _load();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(res.message ?? 'Erro ao aprovar anexo.')),
+      );
+    }
+  }
+
+  Future<void> _rejeitarAnexo(ProposalAttachment att) async {
+    final controller = TextEditingController();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Rejeitar anexo'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          minLines: 2,
+          maxLines: 4,
+          decoration: const InputDecoration(
+            labelText: 'Motivo da rejeição *',
+            hintText: 'Explique por que a ficha não foi aceita',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+            ),
+            onPressed: () {
+              final txt = controller.text.trim();
+              if (txt.isEmpty) return;
+              Navigator.of(ctx).pop(txt);
+            },
+            child: const Text('Rejeitar'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (reason == null || reason.isEmpty || !mounted) return;
+
+    final res = await PurchaseProposalsService.instance
+        .rejeitarAnexo(widget.proposalId, att.id, reason: reason);
+    if (!mounted) return;
+    if (res.success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Anexo rejeitado.')),
+      );
+      widget.onChanged?.call();
+      _load();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(res.message ?? 'Erro ao rejeitar anexo.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final canUpdate =
@@ -501,7 +779,43 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
                 ),
           )
         else
-          ...atts.map((a) => _AttachmentTile(att: a)),
+          ...atts.map(
+            (a) => _AttachmentTile(
+              att: a,
+              accent: _accent,
+              onApprove: _isGestor && a.status.toLowerCase() == 'pending_approval'
+                  ? () => _aprovarAnexo(a)
+                  : null,
+              onReject: _isGestor && a.status.toLowerCase() == 'pending_approval'
+                  ? () => _rejeitarAnexo(a)
+                  : null,
+            ),
+          ),
+        if (_etapasDisponiveis.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _uploading ? null : _anexarFicha,
+              icon: _uploading
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.note_add_outlined),
+              label: const Text('Anexar ficha física'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _accent,
+                side: BorderSide(color: _accent.withValues(alpha: 0.6)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 18),
         Text(
           'Eventos',
@@ -834,35 +1148,189 @@ class _SignatureTile extends StatelessWidget {
 }
 
 class _AttachmentTile extends StatelessWidget {
-  const _AttachmentTile({required this.att});
+  const _AttachmentTile({
+    required this.att,
+    required this.accent,
+    this.onApprove,
+    this.onReject,
+  });
+
   final ProposalAttachment att;
+  final Color accent;
+  final VoidCallback? onApprove;
+  final VoidCallback? onReject;
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      dense: true,
-      contentPadding: EdgeInsets.zero,
-      leading: const Icon(Icons.attach_file_rounded),
-      title: Text(
-        att.fileName,
-        style: Theme.of(context).textTheme.bodyMedium,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final tone = _statusTone(att.status);
+    final etapaLabel = switch (att.etapa) {
+      1 => 'Comprador',
+      2 => 'Proprietário',
+      _ => 'Corretor',
+    };
+    final canOpen = att.fileUrl.isNotEmpty;
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
+        ),
       ),
-      subtitle: Text(
-        'Etapa ${att.etapa} • ${att.status}',
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: tone.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  _statusLabel(att.status).toUpperCase(),
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: tone,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1,
+                      ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'ETAPA ${att.etapa} · ${etapaLabel.toUpperCase()}',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: muted,
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+              const Spacer(),
+              if (canOpen)
+                IconButton(
+                  tooltip: 'Abrir',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.open_in_new_rounded, size: 20),
+                  onPressed: () async {
+                    final uri = Uri.tryParse(att.fileUrl);
+                    if (uri != null) {
+                      await launchUrl(uri,
+                          mode: LaunchMode.externalApplication);
+                    }
+                  },
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Icon(Icons.attach_file_rounded, size: 16, color: muted),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  att.fileName,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+              ),
+            ],
+          ),
+          if (att.uploadedByName != null && att.uploadedByName!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                'Enviado por ${att.uploadedByName}',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: muted,
+                    ),
+              ),
             ),
+          if (att.createdAt != null)
+            Text(
+              DateFormat('dd/MM/yyyy HH:mm', 'pt_BR')
+                  .format(att.createdAt!.toLocal()),
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: muted,
+                  ),
+            ),
+          if (att.rejectionReason != null &&
+              att.rejectionReason!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Motivo: ${att.rejectionReason}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFFDC2626),
+                    ),
+              ),
+            ),
+          if (onApprove != null || onReject != null) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                if (onReject != null)
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: onReject,
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                      label: const Text('Rejeitar'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFDC2626),
+                        side: const BorderSide(color: Color(0x55DC2626)),
+                      ),
+                    ),
+                  ),
+                if (onReject != null && onApprove != null)
+                  const SizedBox(width: 10),
+                if (onApprove != null)
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: onApprove,
+                      icon: const Icon(Icons.check_rounded, size: 18),
+                      label: const Text('Aprovar'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF16A34A),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ],
       ),
-      onTap: () async {
-        if (att.fileUrl.isEmpty) return;
-        final uri = Uri.tryParse(att.fileUrl);
-        if (uri != null) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-        }
-      },
     );
+  }
+
+  Color _statusTone(String s) {
+    switch (s.toLowerCase()) {
+      case 'approved':
+        return const Color(0xFF16A34A);
+      case 'rejected':
+        return const Color(0xFFDC2626);
+      case 'pending_approval':
+      case 'pending':
+        return const Color(0xFFD97706);
+      default:
+        return const Color(0xFF6366F1);
+    }
+  }
+
+  String _statusLabel(String s) {
+    switch (s.toLowerCase()) {
+      case 'approved':
+        return 'Aprovado';
+      case 'rejected':
+        return 'Rejeitado';
+      case 'pending_approval':
+      case 'pending':
+        return 'Aguardando aprovação';
+      default:
+        return s;
+    }
   }
 }
 
@@ -917,6 +1385,8 @@ class _EventTile extends StatelessWidget {
     );
   }
 }
+
+const List<String> _kAnexoExtensoes = ['pdf', 'jpg', 'jpeg', 'png', 'webp'];
 
 class _SignerForm {
   _SignerForm()

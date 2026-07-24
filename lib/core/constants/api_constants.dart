@@ -627,8 +627,28 @@ class ApiConstants {
   static String saleFormPdf(String id) => '/sistema/fichas-venda/$id/pdf';
   static String saleFormAnexos(String id) =>
       '/sistema/fichas-venda/$id/anexos';
+  static String saleFormAnexoAprovar(String id, String anexoId) =>
+      '/sistema/fichas-venda/$id/anexos/$anexoId/aprovar';
+  static String saleFormAnexoRejeitar(String id, String anexoId) =>
+      '/sistema/fichas-venda/$id/anexos/$anexoId/rejeitar';
   static String saleFormAssinaturas(String id) =>
       '/sistema/fichas-venda/$id/assinaturas';
+  static String saleFormAssinaturasSync(String id) =>
+      '/sistema/fichas-venda/$id/assinaturas/sync';
+  static String saleFormAssinaturaLink(String id, String signatureId) =>
+      '/sistema/fichas-venda/$id/assinaturas/$signatureId/link';
+  static String saleFormAssinaturasWhatsappEnvio(String id) =>
+      '/sistema/fichas-venda/$id/assinaturas/whatsapp-envio';
+  static String saleFormReenviarWhatsappTodos(String id) =>
+      '/sistema/fichas-venda/$id/assinaturas/reenviar-whatsapp';
+  static String saleFormReenviarWhatsappUm(String id, String signatureId) =>
+      '/sistema/fichas-venda/$id/assinaturas/$signatureId/reenviar-whatsapp';
+  static String saleFormInvalidarAssinaturas(String id) =>
+      '/sistema/fichas-venda/$id/invalidar-assinaturas';
+  static String saleFormAssinaturaEnvioSignersPreview(String id) =>
+      '/sistema/fichas-venda/$id/assinatura-envio-signers-preview';
+  static String saleFormAssinaturaAutomaticaSignersPreview(String id) =>
+      '/sistema/fichas-venda/$id/assinatura-automatica-signers-preview';
   static String saleFormUsuarios(String id) =>
       '/sistema/fichas-venda/$id/usuarios';
 

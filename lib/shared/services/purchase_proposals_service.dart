@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -1495,6 +1496,162 @@ class PurchaseProposalsService {
       return ApiResponse.error(message: e.toString(), statusCode: 0);
     }
   }
+
+  /// Upload de anexo (multipart) para uma etapa da proposta. Valida tipo
+  /// (pdf/jpeg/jpg/png/webp) e tamanho (<= 15MB) no cliente antes de enviar.
+  Future<ApiResponse<ProposalAttachment>> uploadAnexo(
+    String id,
+    File file, {
+    required int etapa,
+    String? uploadedByName,
+  }) async {
+    try {
+      final validationError = _validateProposalAnexo(file);
+      if (validationError != null) {
+        return ApiResponse.error(message: validationError, statusCode: 400);
+      }
+
+      final endpoint = ApiConstants.purchaseProposalAnexos(id);
+      final uri = Uri.parse('${ApiConstants.baseApiUrl}$endpoint');
+      final request = http.MultipartRequest('POST', uri);
+
+      final headers = await _api.buildOutboundHeaders(
+        endpoint: endpoint,
+        excludeContentType: true,
+      );
+      request.headers.addAll(headers);
+
+      final fileLength = await file.length();
+      request.files.add(http.MultipartFile(
+        'file',
+        http.ByteStream(file.openRead()),
+        fileLength,
+        filename: file.path.split('/').last.split('\\').last,
+      ));
+
+      request.fields['etapa'] = '$etapa';
+      if (uploadedByName != null && uploadedByName.trim().isNotEmpty) {
+        request.fields['uploadedByName'] = uploadedByName.trim();
+      }
+
+      final streamed =
+          await request.send().timeout(ApiConstants.receiveTimeout);
+      final response = await http.Response.fromStream(streamed);
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+        final map = decoded is Map && decoded['data'] is Map
+            ? Map<String, dynamic>.from(decoded['data'])
+            : (decoded is Map
+                ? Map<String, dynamic>.from(decoded)
+                : <String, dynamic>{});
+        return ApiResponse.success(
+          data: ProposalAttachment.fromJson(map),
+          statusCode: response.statusCode,
+        );
+      }
+      String message;
+      try {
+        final body = jsonDecode(utf8.decode(response.bodyBytes));
+        message = (body is Map && body['message'] != null)
+            ? body['message'].toString()
+            : 'Erro ao enviar anexo (${response.statusCode})';
+      } catch (_) {
+        message = 'Erro ao enviar anexo (${response.statusCode})';
+      }
+      return ApiResponse.error(
+          message: message, statusCode: response.statusCode);
+    } catch (e) {
+      debugPrint('❌ [PROPOSALS] uploadAnexo: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  Future<ApiResponse<ProposalAttachment>> aprovarAnexo(
+    String id,
+    String anexoId,
+  ) async {
+    try {
+      final res = await _api.patch<dynamic>(
+        ApiConstants.purchaseProposalAnexoAprovar(id, anexoId),
+      );
+      if (!res.success || res.data == null) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao aprovar anexo',
+          statusCode: res.statusCode,
+        );
+      }
+      final raw = res.data;
+      final map = raw is Map && raw['data'] is Map
+          ? Map<String, dynamic>.from(raw['data'])
+          : (raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{});
+      return ApiResponse.success(
+        data: ProposalAttachment.fromJson(map),
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [PROPOSALS] aprovarAnexo: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  Future<ApiResponse<ProposalAttachment>> rejeitarAnexo(
+    String id,
+    String anexoId, {
+    String? reason,
+  }) async {
+    try {
+      final res = await _api.patch<dynamic>(
+        ApiConstants.purchaseProposalAnexoRejeitar(id, anexoId),
+        body: {if (reason != null) 'reason': reason},
+      );
+      if (!res.success || res.data == null) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao rejeitar anexo',
+          statusCode: res.statusCode,
+        );
+      }
+      final raw = res.data;
+      final map = raw is Map && raw['data'] is Map
+          ? Map<String, dynamic>.from(raw['data'])
+          : (raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{});
+      return ApiResponse.success(
+        data: ProposalAttachment.fromJson(map),
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [PROPOSALS] rejeitarAnexo: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+}
+
+/// Valida um anexo de proposta no cliente: tipos pdf/jpeg/jpg/png/webp e
+/// tamanho <= 15MB. Retorna a mensagem de erro (pt-BR) ou `null`.
+const int _kProposalAnexoMaxBytes = 15 * 1024 * 1024; // 15MB
+const List<String> _kProposalAnexoAllowedExtensions = [
+  'pdf',
+  'jpeg',
+  'jpg',
+  'png',
+  'webp',
+];
+
+String? _validateProposalAnexo(File file) {
+  final name = file.path.split('/').last.split('\\').last;
+  final dot = name.lastIndexOf('.');
+  final ext = dot >= 0 ? name.substring(dot + 1).toLowerCase() : '';
+  if (!_kProposalAnexoAllowedExtensions.contains(ext)) {
+    return 'Tipo de arquivo não permitido. Use PDF, JPEG, JPG, PNG ou WEBP.';
+  }
+  try {
+    if (file.lengthSync() > _kProposalAnexoMaxBytes) {
+      return 'Arquivo muito grande. Tamanho máximo: 15MB.';
+    }
+  } catch (_) {
+    // Se não conseguir medir o tamanho aqui, o backend valida.
+  }
+  return null;
 }
 
 // ─── Helpers locais ─────────────────────────────────────────────────────

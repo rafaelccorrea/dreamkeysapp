@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/sale_forms_service.dart';
 import '../../../shared/widgets/app_scaffold.dart';
+import '../widgets/sale_form_anexos_sheet.dart';
+import '../widgets/sale_form_signatures_sheet.dart';
 
 /// Visualização (read-only) de uma ficha de venda — Fase 1.
 class SaleFormDetailPage extends StatefulWidget {
@@ -19,6 +23,11 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
   bool _loading = true;
   String? _error;
   SaleForm? _form;
+
+  // Resumo de assinaturas/anexos (carregado após a ficha; null = ainda carregando).
+  int? _sigTotal;
+  int? _sigSigned;
+  int? _anexoCount;
 
   @override
   void initState() {
@@ -41,6 +50,49 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
         _error = res.message ?? 'Erro ao carregar a ficha de venda.';
       }
     });
+    if (res.success && res.data != null) {
+      _loadSummary();
+    }
+  }
+
+  /// Busca contagens de assinaturas e anexos para o resumo — falha em silêncio
+  /// (os pontos de entrada continuam abrindo os sheets normalmente).
+  Future<void> _loadSummary() async {
+    final sigsFut =
+        SaleFormsService.instance.listSignatures(widget.saleFormId);
+    final anexosFut = SaleFormsService.instance.listAnexos(widget.saleFormId);
+    final sigsRes = await sigsFut;
+    final anexosRes = await anexosFut;
+    if (!mounted) return;
+    setState(() {
+      if (sigsRes.success && sigsRes.data != null) {
+        _sigTotal = sigsRes.data!.length;
+        _sigSigned = sigsRes.data!.where((s) => s.isSigned).length;
+      }
+      if (anexosRes.success && anexosRes.data != null) {
+        _anexoCount = anexosRes.data!.length;
+      }
+    });
+  }
+
+  void _openSignatures() {
+    showSaleFormSignaturesSheet(
+      context,
+      saleFormId: widget.saleFormId,
+      formNumber: _form?.formNumber,
+      canInvalidate:
+          ModuleAccessService.instance.hasPermission('sale_form:update'),
+      onChanged: _loadSummary,
+    );
+  }
+
+  void _openAnexos() {
+    showSaleFormAnexosSheet(
+      context,
+      saleFormId: widget.saleFormId,
+      formNumber: _form?.formNumber,
+      onChanged: _loadSummary,
+    );
   }
 
   Color _statusTone(SaleFormStatus s) {
@@ -210,6 +262,11 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
 
         const SizedBox(height: 22),
 
+        // ── Assinaturas & Anexos ───────────────────────────────────────
+        _buildDocumentsSection(context),
+
+        const SizedBox(height: 22),
+
         // ── Comprador ──────────────────────────────────────────────────
         _Section(
           icon: Icons.person_outline,
@@ -317,6 +374,74 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
     );
   }
 
+  /// Seção flush com os dois pontos de entrada (assinaturas + anexos), cada um
+  /// com um resumo carregado no load.
+  Widget _buildDocumentsSection(BuildContext context) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final accent = Theme.of(context).brightness == Brightness.dark
+        ? AppColors.primary.primaryDarkMode
+        : AppColors.primary.primary;
+
+    String sigSummary() {
+      if (_sigTotal == null) return 'Toque para gerenciar';
+      if (_sigTotal == 0) return 'Nenhuma assinatura enviada';
+      return '${_sigSigned ?? 0} de ${_sigTotal!} assinada(s)';
+    }
+
+    String anexoSummary() {
+      if (_anexoCount == null) return 'Toque para gerenciar';
+      if (_anexoCount == 0) return 'Nenhum anexo';
+      return '${_anexoCount!} anexo(s)';
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.folder_outlined, size: 14, color: muted),
+            const SizedBox(width: 7),
+            Text(
+              'ASSINATURAS & ANEXOS',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w900,
+                color: ThemeHelpers.textColor(context),
+                letterSpacing: 1.4,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Container(
+                height: 1,
+                color: ThemeHelpers.borderLightColor(context)
+                    .withValues(alpha: 0.8),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _ActionCard(
+          icon: Icons.draw_outlined,
+          tone: accent,
+          title: 'Assinaturas',
+          subtitle: sigSummary(),
+          onTap: _openSignatures,
+        ),
+        const SizedBox(height: 10),
+        _ActionCard(
+          icon: Icons.attach_file_rounded,
+          tone: Theme.of(context).brightness == Brightness.dark
+              ? AppColors.status.blueDarkMode
+              : AppColors.status.blue,
+          title: 'Anexos',
+          subtitle: anexoSummary(),
+          onTap: _openAnexos,
+        ),
+      ],
+    );
+  }
+
   String? _join(String? a, String? b) {
     final parts = [a?.trim(), b?.trim()].where((e) => e != null && e.isNotEmpty);
     return parts.isEmpty ? null : parts.join(' / ');
@@ -358,6 +483,79 @@ class _ReasonBox extends StatelessWidget {
                 ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Cartão de ação (abre um bottom sheet) — ícone tonal, título, resumo e chevron.
+class _ActionCard extends StatelessWidget {
+  const _ActionCard({
+    required this.icon,
+    required this.tone,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final Color tone;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: tone.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(icon, size: 20, color: tone),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: muted,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: muted),
+            ],
+          ),
+        ),
       ),
     );
   }
