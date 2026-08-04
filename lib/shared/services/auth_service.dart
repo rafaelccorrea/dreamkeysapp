@@ -4,6 +4,7 @@ import '../../core/push/app_push_service.dart';
 import '../utils/avatar_url_resolver.dart';
 import 'api_service.dart';
 import 'module_access_service.dart';
+import 'subscription_service.dart';
 import 'live_activity_service.dart';
 import 'secure_storage_service.dart';
 
@@ -453,6 +454,7 @@ class AuthService {
       _apiService.clearToken();
       await SecureStorageService.instance.clearAuthSessionKeepCredentials();
       ModuleAccessService.instance.clear();
+      SubscriptionService.instance.clearCache();
       await LiveActivityService.instance.endCheckIn();
       debugPrint(
         '✅ [AUTH_SERVICE] Logout concluído — sessão limpa, credenciais biométricas preservadas',
