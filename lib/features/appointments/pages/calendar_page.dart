@@ -289,10 +289,10 @@ class _CalendarPageState extends State<CalendarPage>
                         : const SizedBox.shrink(),
                   ),
                 ),
-                // Novo modelo (paridade com o web): sem hero nem cards de
-                // stats — "uma barra de contexto e a grade".
+                // Hero editorial (gramática do hero das Propriedades):
+                // identidade + ações — sem dados de contagem no topo.
                 SliverToBoxAdapter(
-                  child: _buildContextBar(ctrl, theme, filtered),
+                  child: _buildHero(ctrl, theme),
                 ),
                 SliverToBoxAdapter(child: _buildViewModeSection(theme)),
                 if (_viewMode == CalendarViewMode.month ||
@@ -377,232 +377,171 @@ class _CalendarPageState extends State<CalendarPage>
   }
 
   // ---------------------------------------------------------------------------
-  // CONTEXT BAR — novo modelo ("uma barra de contexto e a grade")
+  // HERO — identidade da agenda (gramática do hero das Propriedades)
   // ---------------------------------------------------------------------------
 
-  /// Tons da barra de contexto — EXATOS do web (`CONTEXT_TONES`):
-  /// quente → fria → neutra; a cor só acende quando o valor > 0.
+  /// Tons das ações do hero + "Hoje" do header do calendário — mesmos
+  /// valores do web (`CONTEXT_TONES`).
   static const Color _toneToday = Color(0xFFE6B84C);
-  static const Color _toneWeek = Color(0xFF0D9488);
-  static const Color _toneRange = Color(0xFF64748B);
   static const Color _toneInvites = Color(0xFF4A90E2);
   static const Color _toneSchedule = Color(0xFF3FA66B);
+
+  /// Accent da marca sensível ao tema — o vermelho institucional.
+  Color _brandAccent(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? AppColors.primary.primaryDarkMode
+          : AppColors.primary.primary;
 
   static String _capitalizeFirst(String s) =>
       s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
-  /// Barra de contexto flush: hoje por extenso + pílulas de contagem +
-  /// próximo compromisso + atalhos (Convites com badge / Meus horários).
-  /// Substitui o hero premium + 5 stats + pill morta do modelo antigo.
-  Widget _buildContextBar(
-    AppointmentController ctrl,
-    ThemeData theme,
-    List<Appointment> filtered,
-  ) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final weekEnd = today.add(const Duration(days: 7));
+  /// Hero editorial no topo da agenda — substitui a antiga ContextBar.
+  /// Sem dados no topo (as contagens e o "Próximo:" morreram): eyebrow com
+  /// dot, roundel da marca + título/subtítulo e a linha de ações (escopo,
+  /// convites com badge, meus horários). Fecha com uma hairline sutil.
+  Widget _buildHero(AppointmentController ctrl, ThemeData theme) {
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = _brandAccent(context);
+    final accentDeep = isDark
+        ? AppColors.primary.primaryDarkDarkMode
+        : AppColors.primary.primaryDark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final hairline =
         ThemeHelpers.borderColor(context).withValues(alpha: 0.35);
-
-    final todayCount =
-        filtered.where((a) => _isSameDay(a.startDate, today)).length;
-    final weekCount = filtered
-        .where(
-          (a) => !a.startDate.isBefore(today) && a.startDate.isBefore(weekEnd),
-        )
-        .length;
-    final rangeCount = filtered.length;
-
-    final next = filtered
-        .where((a) => !a.endDate.isBefore(now))
-        .fold<Appointment?>(
-          null,
-          (acc, a) =>
-              acc == null || a.startDate.isBefore(acc.startDate) ? a : acc,
-        );
-
     final pending = ctrl.pendingInvites.length;
-    final isTodaySelected = _isSameDay(_selectedDay, today);
-    final todayLine = _capitalizeFirst(
-      DateFormat("EEEE, d 'de' MMMM", 'pt_BR').format(now),
-    );
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Linha 1 — hoje por extenso + atalho "Hoje" quando fora dele.
+          // Eyebrow — dot da marca + rótulo caps.
           Row(
             children: [
+              Container(
+                width: 6,
+                height: 6,
+                decoration:
+                    BoxDecoration(color: accent, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 7),
               Expanded(
                 child: Text(
-                  todayLine,
+                  'AGENDA · COMPROMISSOS',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleMedium?.copyWith(
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: accent,
                     fontWeight: FontWeight.w900,
-                    letterSpacing: -0.3,
-                    fontSize: 16.5,
-                    color: ThemeHelpers.textColor(context),
+                    letterSpacing: 1.6,
+                    fontSize: 10,
                   ),
                 ),
               ),
-              if (!isTodaySelected)
-                InkWell(
-                  borderRadius: BorderRadius.circular(999),
-                  onTap: () => setState(() {
-                    _selectedDay = today;
-                    _focusedDay = today;
-                  }),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(
-                        color: _toneToday.withValues(alpha: 0.55),
-                      ),
-                    ),
-                    child: Text(
-                      'Hoje',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        color: _toneToday,
-                        letterSpacing: 0.3,
-                        height: 1,
-                      ),
-                    ),
-                  ),
-                ),
             ],
           ),
           const SizedBox(height: 10),
-
-          // Linha 2 — pílulas de contagem (acendem quando > 0).
-          Wrap(
-            spacing: 14,
-            runSpacing: 6,
+          // Roundel da marca + título forte + subtítulo de uma linha.
+          Row(
             children: [
-              _contextCount(theme, _toneToday, todayCount, 'hoje'),
-              _contextCount(theme, _toneWeek, weekCount, 'em 7 dias'),
-              _contextCount(theme, _toneRange, rangeCount, 'no período'),
-            ],
-          ),
-
-          // Linha 3 — próximo compromisso (link pro detalhe).
-          if (next != null) ...[
-            const SizedBox(height: 10),
-            InkWell(
-              borderRadius: BorderRadius.circular(8),
-              onTap: () => _openDetails(next),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.play_arrow_rounded, size: 15, color: secondary),
-                  const SizedBox(width: 5),
-                  Flexible(
-                    child: Text(
-                      'Próximo: ${next.title} · '
-                      '${DateFormat('HH:mm').format(next.startDate)}',
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [accent, accentDeep],
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: isDark
+                          ? accent.withValues(alpha: 0.30)
+                          : Colors.black.withValues(alpha: 0.12),
+                      blurRadius: isDark ? 14 : 10,
+                      offset: Offset(0, isDark ? 8 : 5),
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.calendar_month_rounded,
+                  color: Colors.white,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Agenda',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 26,
+                        letterSpacing: -0.6,
+                        height: 1.05,
+                        color: ThemeHelpers.textColor(context),
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Visitas, reuniões e prazos num só lugar.',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
-                        fontWeight: FontWeight.w700,
                         color: secondary,
-                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 3),
-                  Icon(Icons.chevron_right_rounded,
-                      size: 15, color: secondary),
-                ],
-              ),
-            ),
-          ],
-          const SizedBox(height: 12),
-
-          // Linha 4 — atalhos do modelo novo: Escopo (de quem é a agenda) +
-          // Convites (badge) + Meus horários. O escopo saiu da navbar e
-          // vive aqui; preenchido quando difere de "minha agenda".
-          Row(
-            children: [
-              Expanded(
-                child: _contextAction(
-                  theme,
-                  icon: Icons.group_rounded,
-                  label: _scopeChipLabel(ctrl),
-                  tone: _toneInvites,
-                  filled: ctrl.hasCustomScope,
-                  chevron: true,
-                  onTap: _openScopeSheet,
-                ),
-              ),
-              if (pending > 0) ...[
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _contextAction(
-                    theme,
-                    icon: Icons.mark_email_unread_rounded,
-                    label:
-                        '$pending convite${pending > 1 ? 's' : ''} pendente${pending > 1 ? 's' : ''}',
-                    tone: _toneInvites,
-                    filled: true,
-                    onTap: _openInvites,
-                  ),
-                ),
-              ],
-              const SizedBox(width: 8),
-              Expanded(
-                child: _contextAction(
-                  theme,
-                  icon: Icons.schedule_rounded,
-                  label: 'Meus horários',
-                  tone: _toneSchedule,
-                  filled: false,
-                  onTap: _openScheduleSettings,
+                  ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
+          // Ações do hero — escopo, convites (badge) e meus horários.
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _contextAction(
+                theme,
+                icon: Icons.group_rounded,
+                label: _scopeChipLabel(ctrl),
+                tone: _toneInvites,
+                filled: ctrl.hasCustomScope,
+                chevron: true,
+                onTap: _openScopeSheet,
+              ),
+              if (pending > 0)
+                _contextAction(
+                  theme,
+                  icon: Icons.mark_email_unread_rounded,
+                  label: 'Convites',
+                  badge: '$pending',
+                  tone: _toneInvites,
+                  filled: true,
+                  onTap: _openInvites,
+                ),
+              _contextAction(
+                theme,
+                icon: Icons.schedule_rounded,
+                label: 'Meus horários',
+                tone: _toneSchedule,
+                filled: false,
+                onTap: _openScheduleSettings,
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
           Container(height: 1, color: hairline),
         ],
       ),
-    );
-  }
-
-  Widget _contextCount(ThemeData theme, Color tone, int value, String label) {
-    final on = value > 0;
-    final muted = ThemeHelpers.textSecondaryColor(context);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 7,
-          height: 7,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: on ? tone : muted.withValues(alpha: 0.35),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Text(
-          '$value $label',
-          style: theme.textTheme.labelSmall?.copyWith(
-            fontWeight: FontWeight.w800,
-            fontSize: 11.5,
-            color: on ? ThemeHelpers.textColor(context) : muted,
-            fontFeatures: const [FontFeature.tabularFigures()],
-            height: 1,
-          ),
-        ),
-      ],
     );
   }
 
@@ -623,6 +562,7 @@ class _CalendarPageState extends State<CalendarPage>
     required bool filled,
     required VoidCallback onTap,
     bool chevron = false,
+    String? badge,
   }) {
     return Material(
       color: filled ? tone : Colors.transparent,
@@ -657,6 +597,31 @@ class _CalendarPageState extends State<CalendarPage>
                   ),
                 ),
               ),
+              if (badge != null) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2.5,
+                  ),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(999),
+                    color: filled
+                        ? Colors.white.withValues(alpha: 0.24)
+                        : tone.withValues(alpha: 0.14),
+                  ),
+                  child: Text(
+                    badge,
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                      height: 1,
+                      color: filled ? Colors.white : tone,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+              ],
               if (chevron) ...[
                 const SizedBox(width: 2),
                 Icon(
@@ -1484,7 +1449,8 @@ class _CalendarPageState extends State<CalendarPage>
   // VIEW MODE SECTION
   // ---------------------------------------------------------------------------
   Widget _buildViewModeSection(ThemeData theme) {
-    // O chip "Hoje" vive na ContextBar — aqui é só o seletor de modo.
+    // O atalho "Hoje" vive no header do calendário — aqui é só o seletor
+    // de modo (única forma de trocar Mês↔Semana↔Agenda).
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
       child: ViewModeSelector(
@@ -1506,14 +1472,17 @@ class _CalendarPageState extends State<CalendarPage>
   // ---------------------------------------------------------------------------
   // CALENDAR (MES / SEMANA)
   // ---------------------------------------------------------------------------
-  /// Calendário FLUSH — gramática do Apple Calendar: grid direto na
-  /// página (sem card, sem borda, sem sombra, sem gradiente), hoje é o
-  /// número no accent, selecionado é um disco sólido, eventos são dots
-  /// minúsculos na cor real do agendamento. Uma hairline fecha o bloco.
+  /// Calendário de TRABALHO, flush — grade REAL (hairlines internas),
+  /// célula estilo desktop com o número no topo-esquerda e eventos como
+  /// mini-barras na cor real de cada agendamento. O mês tem presença de
+  /// tela cheia (rowHeight maior); a troca Mês↔Semana é SÓ pelo seletor —
+  /// arrastar na grade apenas navega entre páginas (horizontal).
   Widget _buildCalendar(ThemeData theme) {
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final hairline =
         ThemeHelpers.borderColor(context).withValues(alpha: 0.35);
+    final gridline =
+        ThemeHelpers.borderColor(context).withValues(alpha: 0.30);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
@@ -1527,28 +1496,21 @@ class _CalendarPageState extends State<CalendarPage>
             calendarFormat: _tableFormat,
             startingDayOfWeek: StartingDayOfWeek.monday,
             locale: 'pt_BR',
-            rowHeight: 52,
+            rowHeight: _tableFormat == CalendarFormat.month ? 68 : 52,
             daysOfWeekHeight: 30,
+            // Formato NÃO muda por gesto — arrastar vertical não alterna
+            // mais Mês↔Semana; só o ViewModeSelector troca o formato.
+            availableGestures: AvailableGestures.horizontalSwipe,
             availableCalendarFormats: const {
               CalendarFormat.month: 'Mês',
               CalendarFormat.week: 'Semana',
             },
             eventLoader: _eventsFor,
             headerStyle: HeaderStyle(
-              // Título à esquerda, navegação discreta — nada de pills.
+              // Título à esquerda (via headerTitleBuilder, que também traz
+              // o atalho "Hoje"), navegação discreta — nada de pills.
               titleCentered: false,
               formatButtonVisible: false,
-              titleTextFormatter: (date, locale) {
-                final f = DateFormat('MMMM yyyy', 'pt_BR').format(date);
-                return AppointmentVisuals.capitalize(f);
-              },
-              titleTextStyle:
-                  theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.4,
-                    fontSize: 17,
-                  ) ??
-                  const TextStyle(),
               leftChevronIcon: Icon(
                 Icons.chevron_left_rounded,
                 size: 26,
@@ -1583,11 +1545,74 @@ class _CalendarPageState extends State<CalendarPage>
                     : raw.toUpperCase();
               },
             ),
-            calendarStyle: const CalendarStyle(
-              outsideDaysVisible: false,
-              cellMargin: EdgeInsets.all(4),
+            calendarStyle: CalendarStyle(
+              // Grade contínua de desktop: fora do mês fica visível
+              // (apagado na célula) e as hairlines internas formam a
+              // grade REAL de calendário.
+              outsideDaysVisible: true,
+              cellMargin: EdgeInsets.zero,
+              tableBorder: TableBorder(
+                horizontalInside: BorderSide(color: gridline),
+                verticalInside: BorderSide(color: gridline),
+              ),
             ),
             calendarBuilders: CalendarBuilders<Appointment>(
+              // Título do mês + "Hoje" âmbar (aparece só quando o dia
+              // selecionado não é hoje) — o atalho veio da antiga
+              // ContextBar e agora vive no header do calendário.
+              headerTitleBuilder: (context, day) {
+                final title = AppointmentVisuals.capitalize(
+                  DateFormat('MMMM yyyy', 'pt_BR').format(day),
+                );
+                final showToday =
+                    !_isSameDay(_selectedDay, DateTime.now());
+                return Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.4,
+                          fontSize: 17,
+                          color: ThemeHelpers.textColor(context),
+                        ),
+                      ),
+                    ),
+                    if (showToday)
+                      TextButton(
+                        onPressed: () {
+                          final now = DateTime.now();
+                          final today =
+                              DateTime(now.year, now.month, now.day);
+                          setState(() {
+                            _selectedDay = today;
+                            _focusedDay = today;
+                          });
+                        },
+                        style: TextButton.styleFrom(
+                          foregroundColor: _toneToday,
+                          visualDensity: VisualDensity.compact,
+                          tapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          minimumSize: Size.zero,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          textStyle: const TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 12,
+                            letterSpacing: 0.4,
+                          ),
+                        ),
+                        child: const Text('Hoje'),
+                      ),
+                  ],
+                );
+              },
               defaultBuilder: (context, day, focused) =>
                   _dayCell(day, false, false, false),
               todayBuilder: (context, day, focused) =>
@@ -1602,26 +1627,54 @@ class _CalendarPageState extends State<CalendarPage>
                   _dayCell(day, false, false, true),
               markerBuilder: (context, day, events) {
                 if (events.isEmpty) return null;
-                // Dots minúsculos na cor real de cada agendamento — sem
-                // glow. Ficam abaixo do disco, então não precisam trocar
-                // de cor quando o dia está selecionado.
+                // MINI-BARRAS empilhadas no rodapé da célula, na cor REAL
+                // de cada agendamento — muito mais legíveis que dots. Até
+                // 3 barras; acima disso a 3ª vira o excedente "+N".
+                final overflowCount =
+                    events.length > 3 ? events.length - 2 : 0;
+                final bars = (overflowCount > 0
+                        ? events.take(2)
+                        : events.take(3))
+                    .toList();
                 return Positioned(
+                  left: 5,
+                  right: 5,
                   bottom: 4,
-                  child: Row(
+                  child: Column(
                     mainAxisSize: MainAxisSize.min,
-                    children: events.take(3).map((e) {
-                      final c = AppointmentVisuals.colorFromHex(e.color);
-                      return Container(
-                        margin:
-                            const EdgeInsets.symmetric(horizontal: 1.5),
-                        width: 4.5,
-                        height: 4.5,
-                        decoration: BoxDecoration(
-                          color: c,
-                          shape: BoxShape.circle,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (final e in bars)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Container(
+                            height: 3.5,
+                            decoration: BoxDecoration(
+                              color: AppointmentVisuals.colorFromHex(
+                                e.color,
+                              ),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
                         ),
-                      );
-                    }).toList(),
+                      if (overflowCount > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            '+$overflowCount',
+                            maxLines: 1,
+                            style: TextStyle(
+                              fontSize: 8.5,
+                              fontWeight: FontWeight.w800,
+                              height: 1,
+                              color: secondary,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 );
               },
@@ -1657,56 +1710,58 @@ class _CalendarPageState extends State<CalendarPage>
     );
   }
 
-  /// Célula de dia — gramática Apple Calendar:
-  /// - **Hoje**: número no accent da marca (o único vermelho do grid).
-  /// - **Selecionado**: disco sólido — accent quando é hoje; tinta do tema
-  ///   (preto no claro / branco no escuro) nos demais dias.
-  /// - Sem ring, sem gradiente, sem sombra, sem fundo tinted.
+  /// Célula de dia estilo DESKTOP:
+  /// - Número no TOPO-ESQUERDA (13.5 tabular) — nunca centralizado.
+  /// - **Hoje**: número na cor da marca, w900 — sem caixa.
+  /// - **Selecionado**: fundo accent 8% + borda accent 1.2 com radius 6 —
+  ///   retângulo sutil, nada de disco circular.
+  /// - Fora do mês apagado (35%); fim de semana na cor secundária.
   Widget _dayCell(DateTime day, bool selected, bool isToday, bool outside) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final primary = AppColors.primary.primary;
+    final accent = _brandAccent(context);
     final isWeekend =
         day.weekday == DateTime.saturday || day.weekday == DateTime.sunday;
 
-    Color? disc;
     Color text;
-    if (selected) {
-      disc = isToday
-          ? primary
-          : (isDark ? Colors.white : const Color(0xFF111827));
-      text = isToday
-          ? Colors.white
-          : (isDark ? const Color(0xFF111827) : Colors.white);
+    if (isToday) {
+      text = accent;
     } else if (outside) {
       text =
           ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.35);
-    } else if (isToday) {
-      text = primary;
     } else if (isWeekend) {
       text = ThemeHelpers.textSecondaryColor(context);
     } else {
       text = ThemeHelpers.textColor(context);
     }
 
-    return Center(
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        curve: Curves.easeOut,
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(color: disc, shape: BoxShape.circle),
-        alignment: Alignment.center,
-        child: Text(
-          '${day.day}',
-          style: TextStyle(
-            color: text,
-            fontWeight:
-                selected || isToday ? FontWeight.w800 : FontWeight.w500,
-            fontSize: 15.5,
-            letterSpacing: -0.2,
-            fontFeatures: const [FontFeature.tabularFigures()],
-          ),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 160),
+      curve: Curves.easeOut,
+      margin: const EdgeInsets.all(1.5),
+      alignment: Alignment.topLeft,
+      padding: const EdgeInsets.all(5),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(6),
+        color: selected
+            ? accent.withValues(alpha: 0.08)
+            : Colors.transparent,
+        border: Border.all(
+          color: selected ? accent : Colors.transparent,
+          width: 1.2,
+        ),
+      ),
+      child: Text(
+        '${day.day}',
+        style: TextStyle(
+          color: text,
+          fontWeight: isToday
+              ? FontWeight.w900
+              : selected
+                  ? FontWeight.w800
+                  : FontWeight.w600,
+          fontSize: 13.5,
+          letterSpacing: -0.2,
+          height: 1,
+          fontFeatures: const [FontFeature.tabularFigures()],
         ),
       ),
     );

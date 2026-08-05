@@ -4,8 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
+// Mapa real da seção Localização — OSM/CARTO sem chave (paridade com o
+// PropertyMap/Leaflet do web).
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart' show LatLng;
 import '../../../../shared/services/property_service.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
+import '../../../../shared/widgets/minimal_body_chrome.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
 import '../../../../shared/widgets/shimmer_image.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -462,8 +467,367 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   /// URL pública completa do imóvel no site (ex.: `https://site/imovel/31020`).
   /// `null` quando não há base do site.
+  ///
+  /// Sem consumidor direto desde que a seção "Compartilhar" saiu do rodapé
+  /// (o share da AppBar/sheet resolve o link via [PublicPropertyLink]) —
+  /// mantido como builder canônico do link público desta tela.
+  // ignore: unused_element
   String? _publicPropertyUrl(Property property) =>
       PublicPropertyLink.buildUrl(property, _siteBaseUrl);
+
+  /// Sheet de ações do detalhe — substitui o PopupMenu nativo do Material
+  /// (fora do padrão da casa). Mesma anatomia do sheet da listagem:
+  /// grabber + header editorial + tiles com roundel tinted.
+  void _showDetailActionsSheet({
+    required bool canEdit,
+    required bool canDelete,
+    required bool hasOffersShortcut,
+  }) {
+    final property = _property;
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        final isDark = theme.brightness == Brightness.dark;
+        final muted = ThemeHelpers.textSecondaryColor(sheetContext);
+
+        Widget tile({
+          required IconData icon,
+          required String label,
+          required String subtitle,
+          required Color color,
+          required VoidCallback onTap,
+          bool destructive = false,
+          bool badge = false,
+        }) {
+          return Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(14),
+              splashColor: color.withValues(alpha: 0.16),
+              highlightColor: color.withValues(alpha: 0.08),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 10, 8, 10),
+                child: Row(
+                  children: [
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            color:
+                                color.withValues(alpha: isDark ? 0.18 : 0.12),
+                            border: Border.all(
+                              color: color.withValues(
+                                  alpha: isDark ? 0.34 : 0.22),
+                            ),
+                          ),
+                          child: Icon(icon, size: 19, color: color),
+                        ),
+                        if (badge)
+                          Positioned(
+                            top: -2,
+                            right: -2,
+                            child: Container(
+                              width: 9,
+                              height: 9,
+                              decoration: BoxDecoration(
+                                color: AppColors.status.error,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: ThemeHelpers.cardBackgroundColor(
+                                      sheetContext),
+                                  width: 1.5,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.15,
+                              fontSize: 14.5,
+                              color: destructive
+                                  ? color
+                                  : ThemeHelpers.textColor(sheetContext),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              fontWeight: FontWeight.w500,
+                              color: muted,
+                              fontSize: 11.5,
+                              height: 1.3,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+
+        return Container(
+          decoration: BoxDecoration(
+            color: ThemeHelpers.cardBackgroundColor(sheetContext),
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(28)),
+            border: Border(
+              top: BorderSide(
+                color: ThemeHelpers.borderColor(sheetContext)
+                    .withValues(alpha: 0.55),
+              ),
+            ),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 42,
+                    height: 4,
+                    margin: const EdgeInsets.only(top: 10, bottom: 6),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      color: muted.withValues(alpha: 0.32),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(22, 12, 14, 14),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'AÇÕES DO IMÓVEL',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: AppColors.primary.primary,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.6,
+                                fontSize: 10,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              property?.title.isNotEmpty == true
+                                  ? property!.title
+                                  : 'Imóvel',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.4,
+                                color: ThemeHelpers.textColor(sheetContext),
+                                height: 1.15,
+                                fontSize: 19,
+                              ),
+                            ),
+                            if (property != null) ...[
+                              const SizedBox(height: 7),
+                              Row(
+                                children: [
+                                  if ((property.code ?? '')
+                                      .trim()
+                                      .isNotEmpty) ...[
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 7,
+                                        vertical: 3,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(6),
+                                        color:
+                                            muted.withValues(alpha: 0.10),
+                                        border: Border.all(
+                                          color: muted.withValues(
+                                              alpha: 0.25),
+                                        ),
+                                      ),
+                                      child: Text(
+                                        '#${property.code!.trim()}',
+                                        style: theme.textTheme.labelSmall
+                                            ?.copyWith(
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 10.5,
+                                          color: muted,
+                                          height: 1,
+                                          fontFeatures: const [
+                                            FontFeature.tabularFigures(),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                  ],
+                                  Expanded(
+                                    child: Text(
+                                      [property.address, property.city]
+                                          .where((s) => s.trim().isNotEmpty)
+                                          .join(' · '),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 11.5,
+                                        color: muted,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: () => Navigator.of(sheetContext).pop(),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  height: 1,
+                  margin: const EdgeInsets.symmetric(horizontal: 22),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.transparent,
+                        ThemeHelpers.borderColor(sheetContext),
+                        Colors.transparent,
+                      ],
+                      stops: const [0.0, 0.5, 1.0],
+                    ),
+                  ),
+                ),
+                Builder(
+                  builder: (context) {
+                    // Tiles montados em lista pra intercalar hairlines
+                    // (flush: separação por linha, não por espaço morto).
+                    final actionTiles = <Widget>[
+                      // Ação nº 1 do corretor — só quando o imóvel está
+                      // publicado no site (mesmo gate do web).
+                      if (property != null &&
+                          property.isAvailableForSite == true &&
+                          _siteBaseUrl != null)
+                        tile(
+                          icon: Icons.share_rounded,
+                          label: 'Compartilhar link',
+                          subtitle: 'WhatsApp, link do site e mensagem pronta',
+                          color: const Color(0xFF25D366),
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            Future.microtask(() {
+                              if (!mounted) return;
+                              showPropertyShareSheet(this.context, property);
+                            });
+                          },
+                        ),
+                      if (canEdit)
+                        tile(
+                          icon: Icons.edit_rounded,
+                          label: 'Editar imóvel',
+                          subtitle: 'Dados, valores, proprietário e galeria',
+                          color: const Color(0xFF6366F1),
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            Navigator.of(this.context).pushNamed(
+                              '/properties/${widget.propertyId}/edit',
+                            );
+                          },
+                        ),
+                      if (hasOffersShortcut)
+                        tile(
+                          icon: Icons.request_quote_rounded,
+                          label: 'Ver ofertas',
+                          subtitle: 'Há propostas pendentes neste imóvel',
+                          color: const Color(0xFF0891B2),
+                          badge: true,
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            Navigator.of(this.context).pushNamed(
+                              '/properties/offers',
+                              arguments: {'propertyId': widget.propertyId},
+                            );
+                          },
+                        ),
+                      if (canDelete)
+                        tile(
+                          icon: Icons.delete_outline_rounded,
+                          label: 'Excluir permanentemente',
+                          subtitle: 'Remove o imóvel do portfólio da empresa',
+                          color: theme.colorScheme.error,
+                          destructive: true,
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            _deleteProperty();
+                          },
+                        ),
+                    ];
+
+                    return Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (var i = 0; i < actionTiles.length; i++) ...[
+                            if (i > 0)
+                              Padding(
+                                padding: const EdgeInsets.only(left: 62),
+                                child: Container(
+                                  height: 1,
+                                  color: ThemeHelpers.borderColor(sheetContext)
+                                      .withValues(alpha: 0.25),
+                                ),
+                              ),
+                            actionTiles[i],
+                          ],
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   void _handleDetailsScroll() {
     if (!_detailsScrollController.hasClients) return;
@@ -1113,7 +1477,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final theme = Theme.of(context);
 
     return AppScaffold(
-      title: 'Detalhes do Imóvel',
+      // Sem título: o hero da própria página já identifica o imóvel —
+      // título na AppBar era conteúdo dobrado.
+      title: '',
       currentBottomNavIndex: 1,
       showBottomNavigation: true,
       actions: [
@@ -1122,23 +1488,23 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         if (_property != null &&
             _property!.isAvailableForSite == true &&
             _siteBaseUrl != null)
-          IconButton(
-            icon: const Icon(Icons.share_rounded),
+          ChromeToolbarIconButton(
+            icon: Icons.share_rounded,
             tooltip: 'Compartilhar imóvel',
             onPressed: () => showPropertyShareSheet(context, _property!),
           ),
         if (_property != null && _property!.hasPendingOffers == true)
           Stack(
             children: [
-              IconButton(
-                icon: const Icon(Icons.request_quote),
+              ChromeToolbarIconButton(
+                icon: Icons.request_quote_rounded,
+                tooltip: 'Ver ofertas',
                 onPressed: () {
                   Navigator.of(context).pushNamed(
                     '/properties/offers',
                     arguments: {'propertyId': widget.propertyId},
                   );
                 },
-                tooltip: 'Ver Ofertas',
               ),
               Positioned(
                 right: 8,
@@ -1162,66 +1528,21 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             final canDelete = _canDeleteProperty;
             final hasOffersShortcut =
                 _property != null && _property!.hasPendingOffers == true;
-            if (!canEdit && !canDelete && !hasOffersShortcut) {
+            final canShare = _property != null &&
+                _property!.isAvailableForSite == true &&
+                _siteBaseUrl != null;
+            if (!canEdit && !canDelete && !hasOffersShortcut && !canShare) {
               return const SizedBox.shrink();
             }
-            return PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert),
-              onSelected: (value) {
-                switch (value) {
-                  case 'edit':
-                    if (!canEdit) return;
-                    Navigator.of(
-                      context,
-                    ).pushNamed('/properties/${widget.propertyId}/edit');
-                    break;
-                  case 'delete':
-                    if (!canDelete) return;
-                    _deleteProperty();
-                    break;
-                  case 'offers':
-                    Navigator.of(context).pushNamed(
-                      '/properties/offers',
-                      arguments: {'propertyId': widget.propertyId},
-                    );
-                    break;
-                }
-              },
-              itemBuilder: (context) => [
-                if (canEdit)
-                  const PopupMenuItem(
-                    value: 'edit',
-                    child: Row(
-                      children: [
-                        Icon(Icons.edit, size: 20),
-                        SizedBox(width: 8),
-                        Text('Editar'),
-                      ],
-                    ),
-                  ),
-                if (hasOffersShortcut)
-                  const PopupMenuItem(
-                    value: 'offers',
-                    child: Row(
-                      children: [
-                        Icon(Icons.request_quote, size: 20),
-                        SizedBox(width: 8),
-                        Text('Ver Ofertas'),
-                      ],
-                    ),
-                  ),
-                if (canDelete)
-                  const PopupMenuItem(
-                    value: 'delete',
-                    child: Row(
-                      children: [
-                        Icon(Icons.delete, size: 20, color: Colors.red),
-                        SizedBox(width: 8),
-                        Text('Excluir', style: TextStyle(color: Colors.red)),
-                      ],
-                    ),
-                  ),
-              ],
+            // Sheet da casa no lugar do PopupMenu nativo do Material.
+            return ChromeToolbarIconButton(
+              icon: Icons.more_horiz_rounded,
+              tooltip: 'Ações do imóvel',
+              onPressed: () => _showDetailActionsSheet(
+                canEdit: canEdit,
+                canDelete: canDelete,
+                hasOffersShortcut: hasOffersShortcut,
+              ),
             );
           },
         ),
@@ -1820,35 +2141,80 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 1) Título do imóvel — primeira informação (paridade web).
+        // 1) Título do imóvel — primeira informação (paridade web). Fonte
+        // contida (19): o título identifica, não grita.
         Text(
           property.title,
           style: theme.textTheme.headlineSmall?.copyWith(
             fontWeight: FontWeight.w800,
-            letterSpacing: -0.025,
+            letterSpacing: -0.25,
             height: 1.2,
+            fontSize: 19,
             color: ThemeHelpers.textColor(context),
           ),
         ),
         const SizedBox(height: 8),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        // 1.5) Pills de status no LUGAR do endereço (a Localização tem seção
+        // própria com mapa): estado de negócio + situação — a própria
+        // PropertySituationPill já cobre "Ativo · no site" com o globo.
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
           children: [
-            Icon(
-              Icons.location_on_outlined,
-              size: 16,
-              color: ThemeHelpers.textSecondaryColor(context),
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                _formatPropertyHeroAddress(property),
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                  height: 1.4,
-                  fontWeight: FontWeight.w500,
+            PropertyStatusPill(status: property.status),
+            if (canUndoSold)
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: _undoSoldLoading ? null : _confirmAndUndoSold,
+                  borderRadius: BorderRadius.circular(999),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withValues(
+                        alpha: isDark ? 0.14 : 0.1,
+                      ),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: const Color(0xFF10B981).withValues(
+                          alpha: isDark ? 0.45 : 0.35,
+                        ),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _undoSoldLoading
+                              ? Icons.hourglass_top_rounded
+                              : Icons.check_circle_outline_rounded,
+                          size: 14,
+                          color: const Color(0xFF10B981),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          _undoSoldLoading
+                              ? 'Tornando disponível...'
+                              : 'Tornar disponível',
+                          style: const TextStyle(
+                            color: Color(0xFF10B981),
+                            fontWeight: FontWeight.w800,
+                            fontSize: 11,
+                            letterSpacing: 0.15,
+                            height: 1,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
+            PropertySituationPill(
+              isActive: property.isActive,
+              isAvailableForSite: property.isAvailableForSite ?? false,
             ),
           ],
         ),
@@ -1935,72 +2301,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         const SizedBox(height: 12),
         _buildHeroMetaPillsRow(context, property, isDark),
 
-        // 6) STATUS DO IMÓVEL + SITUAÇÃO
-        // precisa ver. Acompanha a paridade com a versão web (badge roxa
-        // "Aguardando autorização do proprietário" + badge verde "Ativo").
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: [
-            PropertyStatusPill(status: property.status),
-            if (canUndoSold)
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: _undoSoldLoading ? null : _confirmAndUndoSold,
-                  borderRadius: BorderRadius.circular(999),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF10B981).withValues(
-                        alpha: isDark ? 0.14 : 0.1,
-                      ),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(
-                        color: const Color(0xFF10B981).withValues(
-                          alpha: isDark ? 0.45 : 0.35,
-                        ),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          _undoSoldLoading
-                              ? Icons.hourglass_top_rounded
-                              : Icons.check_circle_outline_rounded,
-                          size: 14,
-                          color: const Color(0xFF10B981),
-                        ),
-                        const SizedBox(width: 5),
-                        Text(
-                          _undoSoldLoading
-                              ? 'Tornando disponível...'
-                              : 'Tornar disponível',
-                          style: const TextStyle(
-                            color: Color(0xFF10B981),
-                            fontWeight: FontWeight.w800,
-                            fontSize: 11,
-                            letterSpacing: 0.15,
-                            height: 1,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            PropertySituationPill(
-              isActive: property.isActive,
-              isAvailableForSite: property.isAvailableForSite ?? false,
-            ),
-          ],
-        ),
-
         // 3) Pills de meta secundárias (MCMV, aceita proposta, ofertas
         //    pendentes, sem fotos). Já excluímos "no site"/"privado" do
         //    helper porque agora vem na PropertySituationPill.
@@ -2013,12 +2313,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           ),
         ],
 
-        // 4) Captação — agora FLAT (sem moldura externa), só conteúdo
-        // direto no fundo da página.
-        if (_hasCaptorsContent(property)) ...[
-          const SizedBox(height: 16),
-          _buildCaptorsBlock(context, theme, property, isDark, muted),
-        ],
+        // 4) Captação saiu daqui — virou seção própria no fim da aba
+        // Detalhes (logo antes de "Status da chave").
 
         // 5) Footer (responsável, datas)
         if (hasFooter && _formatHeroUpdatedLabel(property.updatedAt) == null) ...[
@@ -2062,79 +2358,58 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   bool _hasCaptorsContent(Property property) => _resolveCaptors(property).isNotEmpty;
 
-  /// Bloco refinado de captação:
-  ///   - eyebrow "CAPTAÇÃO" + contador de captadores
-  ///   - lista de cards com avatar (foto ou iniciais coloridas), nome,
-  ///     e linha de contato (telefone) abaixo
-  ///   - botão de "Ligar" e botão de "WhatsApp" quando há telefone
+  /// Conteúdo da seção "Captação" (o header/contador ficam no molde flush):
+  /// lista de tiles com avatar (foto ou iniciais), nome e contato, com ações
+  /// de Ligar/WhatsApp no próprio item.
   Widget _buildCaptorsBlock(
     BuildContext context,
     ThemeData theme,
     Property property,
-    bool isDark,
-    Color muted,
   ) {
+    final isDark = theme.brightness == Brightness.dark;
+    final muted = ThemeHelpers.textSecondaryColor(context);
     final captors = _resolveCaptors(property);
     final accent = isDark
         ? AppColors.primary.primaryDarkMode
         : AppColors.primary.primary;
 
-    // Bloco flat (sem moldura externa) — segue a identidade do hero da
-    // PropertiesPage: eyebrow accent + contador + lista de captadores.
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Icon(Icons.flag_outlined, size: 13, color: accent),
-            const SizedBox(width: 6),
-            Text(
-              'CAPTAÇÃO',
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1.6,
-                color: accent,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-              decoration: BoxDecoration(
-                color: accent.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(
-                  color: accent.withValues(alpha: 0.32),
-                ),
-              ),
-              child: Text(
-                captors.length == 1
-                    ? '1 captador'
-                    : '${captors.length} captadores',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.3,
-                  color: accent,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Column(
-          children: [
-            for (var i = 0; i < captors.length; i++) ...[
-              if (i > 0) const SizedBox(height: 8),
-              _CaptorTile(
-                captor: captors[i],
-                accent: accent,
-                muted: muted,
-              ),
-            ],
-          ],
-        ),
+        for (var i = 0; i < captors.length; i++) ...[
+          if (i > 0) const SizedBox(height: 8),
+          _CaptorTile(
+            captor: captors[i],
+            accent: accent,
+            muted: muted,
+          ),
+        ],
       ],
+    );
+  }
+
+  /// Contador compacto pro header da seção Captação (trailing).
+  Widget _buildCaptorsCountBadge(BuildContext context, Property property) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accent = isDark
+        ? AppColors.primary.primaryDarkMode
+        : AppColors.primary.primary;
+    final count = _resolveCaptors(property).length;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: accent.withValues(alpha: 0.32)),
+      ),
+      child: Text(
+        count == 1 ? '1 captador' : '$count captadores',
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.3,
+          color: accent,
+        ),
+      ),
     );
   }
 
@@ -2297,16 +2572,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       case PropertyType.rural:
         return Icons.agriculture_outlined;
     }
-  }
-
-  String _formatPropertyHeroAddress(Property property) {
-    final streetLine = [
-      property.street.trim(),
-      if (property.number.trim().isNotEmpty) property.number.trim(),
-    ].where((s) => s.isNotEmpty).join(', ');
-    final cityLine = '${property.city.trim()}/${property.state.trim()}';
-    if (streetLine.isEmpty) return cityLine;
-    return '$streetLine, $cityLine';
   }
 
   /// Pills discretas do hero — paridade `PropertyHeroMetaChip` (web).
@@ -3004,11 +3269,32 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ),
       _buildFlushSection(
         theme: theme,
+        // Mapa/navegação = AZUL (vermelho é marca/erro/destrutivo).
         title: 'Localização',
         icon: Icons.map_outlined,
-        tone: const Color(0xFFEF4444),
+        tone: const Color(0xFF3B82F6),
+        // Atalho discreto no header — o mapa embaixo é vitrine; navegação de
+        // verdade acontece no Google Maps externo. Sem coordenadas, o botão
+        // vive dentro do placeholder (por endereço) pra não duplicar.
+        headerTrailing: _propertyCoords(property) != null
+            ? _buildOpenMapsButton(context, theme, property)
+            : null,
         child: _buildMapSection(context, theme, property),
       ),
+      // Captação — saiu do hero de identidade e virou seção própria,
+      // imediatamente ANTES do status da chave (ordem pedida pelo dono).
+      if (_hasCaptorsContent(property))
+        _buildFlushSection(
+          theme: theme,
+          title: 'Captação',
+          icon: Icons.flag_outlined,
+          // Cor da marca — captação é a assinatura do corretor no imóvel.
+          tone: theme.brightness == Brightness.dark
+              ? AppColors.primary.primaryDarkMode
+              : AppColors.primary.primary,
+          headerTrailing: _buildCaptorsCountBadge(context, property),
+          child: _buildCaptorsBlock(context, theme, property),
+        ),
       _buildFlushSection(
         theme: theme,
         title: 'Status da chave',
@@ -3060,54 +3346,14 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         theme: theme,
         title: 'Ações rápidas',
         icon: Icons.bolt_rounded,
-        // Vira a última seção quando "Compartilhar" não aparece.
-        isLast: !(property.isAvailableForSite == true && _siteBaseUrl != null),
-        // Tom coerente (azul info) — não vermelho.
-        tone: theme.brightness == Brightness.dark
-            ? AppColors.status.blueDarkMode
-            : AppColors.status.blue,
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            // Agendar visita — azul (ação de agenda), não vermelho.
-            FilledButton.icon(
-              onPressed: () => _openScheduleVisit(property),
-              style: FilledButton.styleFrom(
-                backgroundColor: theme.brightness == Brightness.dark
-                    ? AppColors.status.blueDarkMode
-                    : AppColors.status.blue,
-                foregroundColor: Colors.white,
-              ),
-              icon: const Icon(Icons.event_rounded, size: 18),
-              label: const Text('Agendar visita'),
-            ),
-            // Nova vistoria — neutro.
-            OutlinedButton.icon(
-              onPressed: () => Navigator.of(context).pushNamed(
-                AppRoutes.inspectionCreate,
-              ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: ThemeHelpers.textColor(context),
-                side: BorderSide(color: ThemeHelpers.borderColor(context)),
-              ),
-              icon: const Icon(Icons.camera_alt_outlined, size: 18),
-              label: const Text('Nova vistoria'),
-            ),
-          ],
-        ),
+        // Última seção — "Compartilhar" saiu do rodapé (já vive na AppBar e
+        // no sheet dos 3 pontinhos; aqui era conteúdo dobrado).
+        isLast: true,
+        // Âmbar = energia/ação imediata; cada linha tem a cor do próprio
+        // significado.
+        tone: const Color(0xFFE6B84C),
+        child: _buildQuickActionsSection(context, theme, property),
       ),
-      // Compartilhar — só quando o imóvel está no site E temos a base pública
-      // (senão o link sairia errado). Copia a URL real do site.
-      if (property.isAvailableForSite == true && _siteBaseUrl != null)
-        _buildFlushSection(
-          theme: theme,
-          title: 'Compartilhar',
-          icon: Icons.link_rounded,
-          tone: const Color(0xFF64748B),
-          isLast: true,
-          child: _buildShareLinkFooter(context, theme, property),
-        ),
     ];
 
     return Column(
@@ -3841,6 +4087,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     String title,
     IconData icon, {
     Color? accentOverride,
+    Widget? trailing,
   }) {
     final isDark = theme.brightness == Brightness.dark;
     final accent = accentOverride ??
@@ -3868,12 +4115,15 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             ),
           ),
         ),
-        Icon(
-          icon,
-          size: 18,
-          color: ThemeHelpers.textSecondaryColor(context)
-              .withValues(alpha: 0.7),
-        ),
+        // Trailing útil (botão/contador) no lugar do ícone decorativo —
+        // nunca os dois brigando pelo canto direito.
+        trailing ??
+            Icon(
+              icon,
+              size: 18,
+              color: ThemeHelpers.textSecondaryColor(context)
+                  .withValues(alpha: 0.7),
+            ),
       ],
     );
   }
@@ -3888,6 +4138,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     required Color tone,
     required Widget child,
     bool isLast = false,
+    Widget? headerTrailing,
   }) {
     final divider = ThemeHelpers.borderColor(context).withValues(alpha: 0.33);
     return Container(
@@ -3900,7 +4151,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _buildSectionHeader(theme, title, icon, accentOverride: tone),
+          _buildSectionHeader(
+            theme,
+            title,
+            icon,
+            accentOverride: tone,
+            trailing: headerTrailing,
+          ),
           const SizedBox(height: 14),
           child,
         ],
@@ -4168,136 +4425,167 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  Widget _buildShareLinkFooter(
+  /// Ações rápidas como LINHAS ricas — roundel tinted 40 + título w800 +
+  /// subtítulo informativo + chevron, com hairline recuada entre elas. Cor
+  /// POR SIGNIFICADO (agendar = âmbar, matches = violeta, ofertas = cyan,
+  /// vistoria = teal). Substitui o grid de botões soltos sem contexto; zero
+  /// caixa em volta da seção.
+  Widget _buildQuickActionsSection(
     BuildContext context,
     ThemeData theme,
     Property property,
   ) {
-    final isDark = theme.brightness == Brightness.dark;
-    final muted = ThemeHelpers.textSecondaryColor(context);
-    // URL real do imóvel no site (a seção só aparece quando ela existe).
-    final url = _publicPropertyUrl(property) ??
-        (property.code != null && property.code!.isNotEmpty
-            ? 'imovel/${property.code}'
-            : 'imovel/${property.id}');
-    final blue =
-        isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
-    final fieldFill = isDark
-        ? AppColors.background.backgroundTertiaryDarkMode
-        : AppColors.background.backgroundTertiary;
+    final pendingOffers = property.pendingOffersCount ?? 0;
+    final actions = <({
+      IconData icon,
+      String title,
+      String subtitle,
+      Color color,
+      VoidCallback onTap,
+    })>[
+      (
+        icon: Icons.event_rounded,
+        title: 'Agendar visita',
+        subtitle: 'Marque um horário com o cliente na agenda',
+        color: const Color(0xFFE6B84C),
+        onTap: () => _openScheduleVisit(property),
+      ),
+      (
+        icon: Icons.join_inner_rounded,
+        title: 'Ver matches',
+        subtitle: 'Clientes com perfil compatível com este imóvel',
+        color: const Color(0xFF8B5CF6),
+        onTap: () => Navigator.pushNamed(
+          context,
+          AppRoutes.matchesByProperty(widget.propertyId),
+        ),
+      ),
+      (
+        icon: Icons.request_quote_outlined,
+        title: 'Ver ofertas',
+        subtitle: pendingOffers > 0
+            ? '$pendingOffers pendente${pendingOffers > 1 ? 's' : ''} '
+                'aguardando resposta'
+            : 'Propostas recebidas para este imóvel',
+        color: const Color(0xFF0891B2),
+        onTap: () => Navigator.of(context).pushNamed(
+          '/properties/offers',
+          arguments: {'propertyId': widget.propertyId},
+        ),
+      ),
+      (
+        icon: Icons.camera_alt_outlined,
+        title: 'Nova vistoria',
+        subtitle: 'Registre o estado atual do imóvel com fotos',
+        color: const Color(0xFF14B8A6),
+        onTap: () =>
+            Navigator.of(context).pushNamed(AppRoutes.inspectionCreate),
+      ),
+    ];
 
-    const whatsappGreen = Color(0xFF25D366);
-    final message = PublicPropertyLink.shareMessage(property, url);
+    final children = <Widget>[];
+    for (var i = 0; i < actions.length; i++) {
+      if (i > 0) {
+        children.add(Container(
+          height: 1,
+          // Recuada: alinhada ao texto (40 do roundel + 14 do gap).
+          margin: const EdgeInsets.only(left: 54),
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.30),
+        ));
+      }
+      final action = actions[i];
+      children.add(_buildQuickActionRow(
+        context,
+        theme,
+        icon: action.icon,
+        title: action.title,
+        subtitle: action.subtitle,
+        color: action.color,
+        onTap: action.onTap,
+      ));
+    }
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Envie o link público deste imóvel para o cliente — a mensagem '
-          'já vai pronta com título, código e valor.',
-          style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.45),
-        ),
-        const SizedBox(height: 12),
-        // Link em pill — tap copia (ícone deixa a ação óbvia).
-        Material(
-          color: fieldFill,
-          borderRadius: BorderRadius.circular(12),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: () {
-              Clipboard.setData(ClipboardData(text: url));
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Link copiado'),
-                  duration: Duration(seconds: 2),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: children,
+    );
+  }
+
+  Widget _buildQuickActionRow(
+    BuildContext context,
+    ThemeData theme, {
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    final isDark = theme.brightness == Brightness.dark;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        splashColor: color.withValues(alpha: 0.16),
+        highlightColor: color.withValues(alpha: 0.08),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 11),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  color: color.withValues(alpha: isDark ? 0.18 : 0.12),
+                  border: Border.all(
+                    color: color.withValues(alpha: isDark ? 0.34 : 0.22),
+                  ),
                 ),
-              );
-            },
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                border:
-                    Border.all(color: ThemeHelpers.borderLightColor(context)),
+                child: Icon(icon, size: 19, color: color),
               ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      url,
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.1,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.15,
+                        fontSize: 14.5,
                         color: ThemeHelpers.textColor(context),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Icon(Icons.content_copy_rounded, size: 16, color: muted),
-                ],
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w500,
+                        fontSize: 11.5,
+                        height: 1.3,
+                        color: muted,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
+              const SizedBox(width: 10),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 20,
+                color: muted.withValues(alpha: 0.55),
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            // WhatsApp — o caminho nº 1 do corretor (verde da marca).
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: () =>
-                    BrokerContactActions.shareViaWhatsApp(context, message),
-                style: FilledButton.styleFrom(
-                  backgroundColor: whatsappGreen,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                ),
-                icon: const Icon(Icons.chat_rounded, size: 18),
-                // FittedBox: nunca clipar/quebrar o rótulo em tela estreita.
-                label: const FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text('WhatsApp', maxLines: 1, softWrap: false),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            // Share sheet nativo — azul (comunicação).
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: () =>
-                    BrokerContactActions.shareText(context, message),
-                style: FilledButton.styleFrom(
-                  backgroundColor: blue,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                ),
-                icon: const Icon(Icons.share_rounded, size: 18),
-                label: const FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text('Compartilhar', maxLines: 1, softWrap: false),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        // Conferir como o cliente vê — discreto, alinhado à direita.
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton.icon(
-            onPressed: () => launchUrl(
-              Uri.parse(url),
-              mode: LaunchMode.externalApplication,
-            ),
-            style: TextButton.styleFrom(foregroundColor: muted),
-            icon: const Icon(Icons.open_in_new_rounded, size: 15),
-            label: const Text('Ver no site'),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -4360,76 +4648,85 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
+  /// Status da chave — flush. Com chave: linhas ricas (roundel tinted na cor
+  /// SEMÂNTICA do status + nome + detalhe + chevron, tap abre o controle de
+  /// chaves). Sem chave: empty state digno e NEUTRO (slate) — sem vermelho,
+  /// sem caixa gritante.
   Widget _buildKeyStatusSection(
     BuildContext context,
     ThemeData theme,
     Property property,
   ) {
-    final hasKeys = _keys.isNotEmpty;
+    final isDark = theme.brightness == Brightness.dark;
+    final muted = ThemeHelpers.textSecondaryColor(context);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (_isLoadingKeys)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
-            child: LinearProgressIndicator(minHeight: 2),
-          )
-        else ...[
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: (hasKeys
-                      ? AppColors.status.success
-                      : ThemeHelpers.textSecondaryColor(context))
-                  .withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(
-                color: (hasKeys
-                        ? AppColors.status.success
-                        : ThemeHelpers.textSecondaryColor(context))
-                    .withValues(alpha: 0.35),
+    if (_isLoadingKeys) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: LinearProgressIndicator(minHeight: 2),
+      );
+    }
+
+    if (_keys.isEmpty) {
+      final slate = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(13),
+                  color: slate.withValues(alpha: isDark ? 0.16 : 0.10),
+                  border: Border.all(
+                    color: slate.withValues(alpha: isDark ? 0.32 : 0.22),
+                  ),
+                ),
+                child: Icon(Icons.key_off_rounded, size: 20, color: slate),
               ),
-            ),
-            child: Text(
-              hasKeys ? 'Chave disponível' : 'Sem chave',
-              style: theme.textTheme.labelSmall?.copyWith(
-                fontWeight: FontWeight.w800,
-                color: hasKeys
-                    ? AppColors.status.success
-                    : ThemeHelpers.textSecondaryColor(context),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Nenhuma chave cadastrada',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13.5,
+                        color: ThemeHelpers.textColor(context),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Cadastre no painel para controlar retiradas '
+                      'e devoluções',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w500,
+                        fontSize: 11.5,
+                        height: 1.35,
+                        color: muted,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
+            ],
           ),
-          if (hasKeys) ...[
-            const SizedBox(height: 10),
-            Text(
-              _keys.first.name,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
           const SizedBox(height: 12),
           Align(
             alignment: Alignment.centerLeft,
             child: OutlinedButton.icon(
-              onPressed: () {
-                if (hasKeys) {
-                  Navigator.of(context).pushNamed(
-                    '/keys',
-                    arguments: {'propertyId': property.id},
-                  );
-                } else {
-                  _showCreateKeyModal(context, property);
-                }
-              },
-              icon: Icon(
-                hasKeys ? Icons.vpn_key_rounded : Icons.add_rounded,
-                size: 18,
-              ),
-              label: Text(hasKeys ? 'Gerenciar chaves' : 'Cadastrar chave'),
-              // Ação aditiva/neutra — nada de vermelho. Cor coerente: neutra.
+              onPressed: () => _showCreateKeyModal(context, property),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Cadastrar chave'),
+              // Ação aditiva/neutra — nada de vermelho.
               style: OutlinedButton.styleFrom(
                 foregroundColor: ThemeHelpers.textColor(context),
                 side: BorderSide(color: ThemeHelpers.borderColor(context)),
@@ -4442,7 +4739,143 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             ),
           ),
         ],
-      ],
+      );
+    }
+
+    final rows = <Widget>[];
+    for (var i = 0; i < _keys.length; i++) {
+      if (i > 0) {
+        rows.add(Container(
+          height: 1,
+          margin: const EdgeInsets.only(left: 54),
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.30),
+        ));
+      }
+      rows.add(_buildKeyRow(context, theme, property, _keys[i]));
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: rows,
+    );
+  }
+
+  /// Cor + ícone SEMÂNTICOS do status da chave (verde = disponível, âmbar =
+  /// em uso, vermelho = perdida (erro de verdade), laranja = danificada,
+  /// slate = manutenção).
+  ({Color color, IconData icon}) _keyStatusVisual(key_models.KeyStatus status) {
+    switch (status) {
+      case key_models.KeyStatus.available:
+        return (color: const Color(0xFF10B981), icon: Icons.vpn_key_rounded);
+      case key_models.KeyStatus.inUse:
+        return (color: const Color(0xFFF59E0B), icon: Icons.schedule_rounded);
+      case key_models.KeyStatus.lost:
+        return (color: const Color(0xFFEF4444), icon: Icons.key_off_rounded);
+      case key_models.KeyStatus.damaged:
+        return (
+          color: const Color(0xFFF97316),
+          icon: Icons.report_problem_outlined,
+        );
+      case key_models.KeyStatus.maintenance:
+        return (color: const Color(0xFF64748B), icon: Icons.build_rounded);
+    }
+  }
+
+  Widget _buildKeyRow(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+    key_models.Key k,
+  ) {
+    final isDark = theme.brightness == Brightness.dark;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final visual = _keyStatusVisual(k.status);
+    final color = visual.color;
+    final location = k.location?.trim() ?? '';
+    final detail =
+        location.isNotEmpty ? '${k.status.label} · $location' : k.status.label;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => Navigator.of(context).pushNamed(
+          '/keys',
+          arguments: {'propertyId': property.id},
+        ),
+        borderRadius: BorderRadius.circular(12),
+        splashColor: color.withValues(alpha: 0.16),
+        highlightColor: color.withValues(alpha: 0.08),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 11),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  color: color.withValues(alpha: isDark ? 0.18 : 0.12),
+                  border: Border.all(
+                    color: color.withValues(alpha: isDark ? 0.34 : 0.22),
+                  ),
+                ),
+                child: Icon(visual.icon, size: 19, color: color),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      k.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.15,
+                        fontSize: 14.5,
+                        color: ThemeHelpers.textColor(context),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: color,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Expanded(
+                          child: Text(
+                            detail,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              fontWeight: FontWeight.w500,
+                              fontSize: 11.5,
+                              height: 1.3,
+                              color: muted,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 20,
+                color: muted.withValues(alpha: 0.55),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -5317,74 +5750,348 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
+  /// Localização com MAPA REAL (paridade `PropertyMap` do web): tiles CARTO
+  /// claro/escuro sobre dados OpenStreetMap — grátis, sem chave de API — com
+  /// pin da marca e zoom de rua. O mapa aqui é vitrine (interações
+  /// desligadas): o tap inteiro abre o Google Maps externo.
   Widget _buildMapSection(
     BuildContext context,
     ThemeData theme,
     Property property,
   ) {
     final isDark = theme.brightness == Brightness.dark;
-    final address = property.address.isNotEmpty
-        ? property.address
-        : '${property.street}, ${property.number} - ${property.neighborhood}, ${property.city} - ${property.state}';
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    // Azul de mapa/navegação — mesma família do "Abrir no Maps".
+    const mapsBlue = Color(0xFF3B82F6);
+    final coords = _propertyCoords(property);
+
+    final street = [property.street, property.number]
+        .where((s) => s.trim().isNotEmpty)
+        .join(', ');
+    final complement = property.complement?.trim() ?? '';
+    final addressLine = property.address.trim().isNotEmpty
+        ? property.address.trim()
+        : (complement.isNotEmpty && street.isNotEmpty
+            ? '$street — $complement'
+            : street);
+    final cityLine = [property.city, property.state]
+        .where((s) => s.trim().isNotEmpty)
+        .join(' – ');
+
+    final infoRows = <Widget>[
+      if (addressLine.isNotEmpty)
+        _buildLocationInfoRow(
+          theme,
+          Icons.place_rounded,
+          'ENDEREÇO',
+          addressLine,
+          mapsBlue,
+        ),
+      if (property.neighborhood.trim().isNotEmpty)
+        _buildLocationInfoRow(
+          theme,
+          Icons.holiday_village_outlined,
+          'BAIRRO',
+          property.neighborhood.trim(),
+          mapsBlue,
+        ),
+      if (cityLine.isNotEmpty)
+        _buildLocationInfoRow(
+          theme,
+          Icons.location_city_rounded,
+          'CIDADE',
+          cityLine,
+          mapsBlue,
+        ),
+      if (property.zipCode.trim().isNotEmpty)
+        _buildLocationInfoRow(
+          theme,
+          Icons.markunread_mailbox_outlined,
+          'CEP',
+          property.zipCode.trim(),
+          mapsBlue,
+        ),
+    ];
+
+    Widget mapBlock;
+    if (coords != null) {
+      mapBlock = Container(
+        height: 200,
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
+          ),
+        ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            FlutterMap(
+              options: MapOptions(
+                initialCenter: coords,
+                initialZoom: 16,
+                backgroundColor: isDark
+                    ? const Color(0xFF11151F)
+                    : const Color(0xFFE9ECF3),
+                // Vitrine, não navegação — arrastar/zoom desligados.
+                interactionOptions:
+                    const InteractionOptions(flags: InteractiveFlag.none),
+              ),
+              children: [
+                TileLayer(
+                  // Mesmos tiles do web (leafletSetup): CARTO Positron no
+                  // claro, Dark Matter no escuro — OSM cru não tem par dark.
+                  urlTemplate: isDark
+                      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
+                      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+                  subdomains: const ['a', 'b', 'c', 'd'],
+                  maxZoom: 20,
+                  userAgentPackageName: 'com.dreamkeys.corretor',
+                ),
+                MarkerLayer(
+                  markers: [
+                    Marker(
+                      point: coords,
+                      width: 44,
+                      height: 44,
+                      // Ponta do pin exatamente sobre a coordenada.
+                      alignment: Alignment.topCenter,
+                      child: Icon(
+                        Icons.location_on,
+                        size: 40,
+                        // Pin na cor da MARCA (vermelho aqui é marca, não
+                        // erro) — paridade com o ModernPin do web.
+                        color: isDark
+                            ? AppColors.primary.primaryDarkMode
+                            : AppColors.primary.primary,
+                        shadows: [
+                          Shadow(
+                            color: Colors.black.withValues(alpha: 0.35),
+                            blurRadius: 8,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            // Atribuição OSM/CARTO (obrigatória no uso dos tiles) — discreta.
+            Positioned(
+              right: 6,
+              bottom: 4,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(4),
+                  color: (isDark ? Colors.black : Colors.white)
+                      .withValues(alpha: 0.55),
+                ),
+                child: Text(
+                  '© OpenStreetMap · CARTO',
+                  style: TextStyle(
+                    fontSize: 8.5,
+                    fontWeight: FontWeight.w600,
+                    color: muted,
+                  ),
+                ),
+              ),
+            ),
+            // Tap em qualquer ponto do mapa → Google Maps externo.
+            Positioned.fill(
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => _openInExternalMaps(property),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      // Sem coordenadas — placeholder digno com saída útil (nunca a seção
+      // vazia/só texto).
+      mapBlock = Container(
+        height: 160,
+        decoration: BoxDecoration(
+          color: isDark
+              ? AppColors.background.backgroundSecondaryDarkMode
+              : AppColors.background.backgroundSecondary,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.map_outlined,
+              size: 30,
+              color: muted.withValues(alpha: 0.8),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Sem coordenadas cadastradas',
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: ThemeHelpers.textColor(context),
+              ),
+            ),
+            const SizedBox(height: 2),
+            TextButton.icon(
+              onPressed: () => _openInExternalMaps(property),
+              // Azul de navegação — nunca o vermelho default do tema.
+              style: TextButton.styleFrom(
+                foregroundColor: mapsBlue,
+                visualDensity: VisualDensity.compact,
+              ),
+              icon: const Icon(Icons.open_in_new_rounded, size: 14),
+              label: const Text(
+                'Abrir no Maps pelo endereço',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final children = <Widget>[mapBlock];
+    if (infoRows.isNotEmpty) {
+      children.add(const SizedBox(height: 14));
+      for (var i = 0; i < infoRows.length; i++) {
+        if (i > 0) children.add(const SizedBox(height: 10));
+        children.add(infoRows[i]);
+      }
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: children,
+    );
+  }
+
+  /// Coordenadas válidas do imóvel — mesma validação do `parseLatLng` do web
+  /// (faixa geográfica), mais o descarte do (0,0) de cadastro sujo.
+  LatLng? _propertyCoords(Property property) {
+    final lat = property.latitude;
+    final lng = property.longitude;
+    if (lat == null || lng == null) return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    if (lat == 0 && lng == 0) return null;
+    return LatLng(lat, lng);
+  }
+
+  /// Google Maps externo — coordenadas quando existem, senão o endereço
+  /// completo (mesmo `openMaps` que o resto da casa usa).
+  Future<void> _openInExternalMaps(Property property) async {
+    final coords = _propertyCoords(property);
+    if (coords != null) {
+      await BrokerContactActions.openMaps(
+        context,
+        '${coords.latitude},${coords.longitude}',
+      );
+      return;
+    }
+    final query = [
+      property.address.trim().isNotEmpty
+          ? property.address.trim()
+          : [property.street, property.number]
+              .where((s) => s.trim().isNotEmpty)
+              .join(', '),
+      property.neighborhood,
+      property.city,
+      property.state,
+      property.zipCode,
+    ].where((s) => s.trim().isNotEmpty).join(', ');
+    await BrokerContactActions.openMaps(context, query);
+  }
+
+  /// "Abrir no Maps" discreto à direita do header da seção Localização —
+  /// AZUL de navegação (nunca o vermelho default do tema).
+  Widget _buildOpenMapsButton(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    return TextButton.icon(
+      onPressed: () => _openInExternalMaps(property),
+      style: TextButton.styleFrom(
+        foregroundColor: const Color(0xFF3B82F6),
+        minimumSize: Size.zero,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.compact,
+      ),
+      icon: const Icon(Icons.open_in_new_rounded, size: 13),
+      label: const Text(
+        'Abrir no Maps',
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w800,
+          letterSpacing: -0.1,
+        ),
+      ),
+    );
+  }
+
+  /// Linha informativa de endereço — roundel azul pequeno (28) + rótulo
+  /// small caps + valor. Flush: o dado direto na página, sem caixa.
+  Widget _buildLocationInfoRow(
+    ThemeData theme,
+    IconData icon,
+    String label,
+    String value,
+    Color tone,
+  ) {
+    final isDark = theme.brightness == Brightness.dark;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Container(
-          height: 180,
-          width: double.infinity,
+          width: 28,
+          height: 28,
           decoration: BoxDecoration(
-            color: isDark
-                ? AppColors.background.backgroundSecondaryDarkMode
-                : AppColors.background.backgroundSecondary,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(9),
+            color: tone.withValues(alpha: isDark ? 0.18 : 0.12),
+            border: Border.all(
+              color: tone.withValues(alpha: isDark ? 0.34 : 0.22),
+            ),
           ),
+          child: Icon(icon, size: 15, color: tone),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                Icons.map_outlined,
-                size: 44,
-                color: ThemeHelpers.textSecondaryColor(context),
-              ),
-              const SizedBox(height: 8),
               Text(
-                'Mapa de Localização',
+                label,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontSize: 9.5,
+                  letterSpacing: 1.3,
+                  fontWeight: FontWeight.w800,
+                  color: muted,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                value,
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13.5,
+                  height: 1.3,
+                  color: ThemeHelpers.textColor(context),
                 ),
               ),
             ],
           ),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Icon(
-              Icons.location_on,
-              size: 18,
-              color: AppColors.primary.primary,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                address,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: ThemeHelpers.textColor(context),
-                ),
-              ),
-            ),
-            TextButton(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Abrir no mapa será implementado'),
-                  ),
-                );
-              },
-              child: const Text('Abrir no Mapa'),
-            ),
-          ],
         ),
       ],
     );
@@ -7350,9 +8057,9 @@ class _ExpandableDescriptionState extends State<_ExpandableDescription>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final accent =
-        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    // Indigo editorial — mesma voz do BRIEFING do modal do CRM
+    // (`_EditorialDescription`), e o tom da própria seção Descrição.
+    const accent = Color(0xFF6366F1);
     final secondary = ThemeHelpers.textSecondaryColor(context);
 
     final cleaned = widget.text.trim();
@@ -7381,10 +8088,12 @@ class _ExpandableDescriptionState extends State<_ExpandableDescription>
       );
     }
 
+    // Tipografia editorial da casa (ref.: BRIEFING do task_details_modal):
+    // 15px, entrelinha generosa, peso médio.
     final textStyle = theme.textTheme.bodyLarge?.copyWith(
-      height: 1.6,
-      fontSize: 14.5,
-      letterSpacing: -0.05,
+      height: 1.55,
+      fontSize: 15,
+      letterSpacing: -0.1,
       color: ThemeHelpers.textColor(context),
       fontWeight: FontWeight.w500,
     );
@@ -7483,37 +8192,37 @@ class _ExpandToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                expanded ? 'Ver menos' : 'Ver mais',
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: accent,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.1,
-                ),
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: TextButton(
+        onPressed: onTap,
+        // Tema global pinta TextButton de VERMELHO (armadilha conhecida) —
+        // aqui o accent editorial (indigo) é FORÇADO.
+        style: TextButton.styleFrom(
+          foregroundColor: accent,
+          minimumSize: Size.zero,
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          visualDensity: VisualDensity.compact,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              expanded ? 'Ver menos' : 'Ver mais',
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.1,
               ),
-              const SizedBox(width: 4),
-              AnimatedRotation(
-                turns: expanded ? 0.5 : 0,
-                duration: const Duration(milliseconds: 220),
-                child: Icon(
-                  Icons.keyboard_arrow_down_rounded,
-                  size: 18,
-                  color: accent,
-                ),
-              ),
-            ],
-          ),
+            ),
+            const SizedBox(width: 4),
+            AnimatedRotation(
+              turns: expanded ? 0.5 : 0,
+              duration: const Duration(milliseconds: 220),
+              child: const Icon(Icons.expand_more_rounded, size: 16),
+            ),
+          ],
         ),
       ),
     );
@@ -7692,7 +8401,8 @@ class _CaptorTile extends StatelessWidget {
             const SizedBox(width: 4),
             _CaptorActionButton(
               icon: Icons.phone_rounded,
-              tint: accent,
+              // Ligar = AZUL (comunicação) — vermelho é marca/erro, não isso.
+              tint: const Color(0xFF3B82F6),
               tooltip: 'Ligar',
               onTap: () => _call(phone),
             ),

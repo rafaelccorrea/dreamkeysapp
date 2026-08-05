@@ -57,6 +57,14 @@ class KanbanController extends ChangeNotifier {
   static const int _kColumnPageSize = 12;
   final Map<String, ColumnPagination> _columnPagination = {};
 
+  /// Ajuste otimista sobre o `totalTaskCount` da API por coluna. O board
+  /// devolve o total REAL (query de contagem sem paginação), mas o
+  /// `moveTask` é otimista e NÃO recarrega o board no sucesso — sem este
+  /// delta, um drag-drop deixaria o contador do header defasado (+1 na
+  /// origem, -1 no destino) até o próximo reload. Mesma mecânica do
+  /// `columnTaskCountOverrides` do web. Zerado a cada board novo.
+  final Map<String, int> _columnTotalDelta = {};
+
   // Getters
   KanbanBoard? get board => _board;
   bool get loading => _loading;
@@ -134,6 +142,33 @@ class KanbanController extends ChangeNotifier {
 
   List<KanbanTask> get tasks {
     return _board?.tasks ?? [];
+  }
+
+  /// Total REAL de cards da coluna (campo `totalTaskCount` do
+  /// `GET /kanban/board/:teamId`, que conta sem paginação respeitando os
+  /// filtros) + o delta otimista de drag-drop. `null` quando o backend não
+  /// enviou o campo (colunas sintéticas, resposta antiga) — a UI cai para
+  /// a contagem local de cards carregados.
+  int? columnDisplayTotal(KanbanColumn column) {
+    final base = column.totalTaskCount;
+    if (base == null) return null;
+    final adjusted = base + (_columnTotalDelta[column.id] ?? 0);
+    return adjusted < 0 ? 0 : adjusted;
+  }
+
+  /// Total de cards do board para o chrome do topo: soma dos totais reais
+  /// por coluna quando TODAS as colunas trazem `totalTaskCount`; senão,
+  /// cai para a contagem de cards carregados (paginada).
+  int get boardDisplayTotalTasks {
+    final b = _board;
+    if (b == null || b.columns.isEmpty) return tasks.length;
+    var sum = 0;
+    for (final col in b.columns) {
+      final total = columnDisplayTotal(col);
+      if (total == null) return tasks.length;
+      sum += total;
+    }
+    return sum;
   }
 
   /// Estado de filtros (espelho do que vai para `getBoard`) — uso no hero / UI.
@@ -997,6 +1032,25 @@ class KanbanController extends ChangeNotifier {
 
     String? originColumnId = fromColumnId;
 
+    // Delta otimista do contador (header usa o total da API): -1 na origem,
+    // +1 no destino. Revertido nos caminhos de rollback.
+    var countDeltaApplied = false;
+    void applyCountDelta(String from, String to) {
+      if (from == to) return;
+      _columnTotalDelta[from] = (_columnTotalDelta[from] ?? 0) - 1;
+      _columnTotalDelta[to] = (_columnTotalDelta[to] ?? 0) + 1;
+      countDeltaApplied = true;
+    }
+
+    void revertCountDelta() {
+      if (!countDeltaApplied) return;
+      _columnTotalDelta[originColumnId!] =
+          (_columnTotalDelta[originColumnId] ?? 0) + 1;
+      _columnTotalDelta[targetColumnId] =
+          (_columnTotalDelta[targetColumnId] ?? 0) - 1;
+      countDeltaApplied = false;
+    }
+
     try {
       // Optimistic update + descoberta automática do fromColumnId quando o
       // chamador não passou explicitamente (alinhado ao DTO obrigatório do
@@ -1006,6 +1060,7 @@ class KanbanController extends ChangeNotifier {
         if (taskIndex != -1) {
           final task = _board!.tasks[taskIndex];
           originColumnId ??= task.columnId;
+          applyCountDelta(task.columnId, targetColumnId);
           final updatedTask = task.copyWith(
             columnId: targetColumnId,
             position: targetPosition,
@@ -1051,6 +1106,7 @@ class KanbanController extends ChangeNotifier {
         return true;
       } else {
         // Rollback em caso de erro
+        revertCountDelta();
         if (previousBoard != null) {
           _board = previousBoard;
           notifyListeners();
@@ -1061,6 +1117,7 @@ class KanbanController extends ChangeNotifier {
       }
     } catch (e) {
       // Rollback em caso de exceção
+      revertCountDelta();
       if (previousBoard != null) {
         _board = previousBoard;
         notifyListeners();
@@ -1455,6 +1512,7 @@ class KanbanController extends ChangeNotifier {
     _bulkDeleting = false;
     _lastProjectHydrated = false;
     _columnPagination.clear();
+    _columnTotalDelta.clear();
     notifyListeners();
   }
 
@@ -1464,25 +1522,25 @@ class KanbanController extends ChangeNotifier {
 
   /// Inicializa o estado de paginação após `loadBoard` ou refresh.
   ///
-  /// Heurística: se uma coluna chegou com **exatamente** `_kColumnPageSize`
-  /// cards no board inicial, assumimos que pode haver mais e marcamos
-  /// `hasMore = true`. Se chegou com menos, certamente não há mais.
-  /// O `totalPages` real só é descoberto após a primeira chamada
-  /// paginada — antes disso, deixamos `hasMore` como otimista (true).
+  /// Quando a coluna traz `totalTaskCount` (total real da API), `hasMore`
+  /// é exato: `loaded < total`. Sem o campo, cai na heurística antiga: se
+  /// uma coluna chegou com **exatamente** `_kColumnPageSize` cards,
+  /// assumimos que pode haver mais (o `totalPages` real só é descoberto
+  /// após a primeira chamada paginada).
   void _resetColumnPagination(KanbanBoard board) {
     _columnPagination.clear();
+    _columnTotalDelta.clear();
     final byColumn = <String, int>{};
     for (final t in board.tasks) {
       byColumn.update(t.columnId, (v) => v + 1, ifAbsent: () => 1);
     }
     for (final col in board.columns) {
       final loaded = byColumn[col.id] ?? 0;
+      final total = col.totalTaskCount;
       _columnPagination[col.id] = ColumnPagination(
         currentPage: 1,
         loadedCount: loaded,
-        // Se chegou exatamente o page size, há chance de ter mais.
-        // Se chegou menos, não há mais.
-        hasMore: loaded >= _kColumnPageSize,
+        hasMore: total != null ? loaded < total : loaded >= _kColumnPageSize,
       );
     }
   }
@@ -1536,6 +1594,17 @@ class KanbanController extends ChangeNotifier {
         state.loadedCount += newOnes.length;
         // `totalPages` confiável vem aqui — atualizamos o `hasMore`.
         state.hasMore = pageData.page < pageData.totalPages;
+
+        // O `total` da página é a verdade mais fresca do servidor pra esta
+        // coluna (mesmos filtros do board): re-ancora o contador do header
+        // e zera o delta otimista local.
+        final colIdx =
+            _board!.columns.indexWhere((c) => c.id == columnId);
+        if (colIdx != -1) {
+          _board!.columns[colIdx] = _board!.columns[colIdx]
+              .copyWith(totalTaskCount: pageData.total);
+          _columnTotalDelta.remove(columnId);
+        }
       } else {
         // Falha na página → marca como sem-mais pra não loopar.
         state.hasMore = false;

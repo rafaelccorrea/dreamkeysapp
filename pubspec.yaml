@@ -60,6 +60,10 @@ dependencies:
   # Logos REAIS da Central de Integrações (SVGs vindos do painel web em
   # assets/images/integrations/) — renderizados no "logo plate" dos cards.
   flutter_svg: ^2.2.0
+  # Mapa da seção Localização na ficha do imóvel — OpenStreetMap/CARTO sem
+  # chave de API (paridade com o PropertyMap/Leaflet do web).
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
 
 dev_dependencies:
   flutter_test:

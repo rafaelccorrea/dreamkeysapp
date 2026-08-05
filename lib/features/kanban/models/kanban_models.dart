@@ -158,6 +158,13 @@ class KanbanColumn {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  /// Total REAL de tasks da coluna (respeitando os filtros do board),
+  /// independente da paginação — campo `totalTaskCount` que o
+  /// `GET /kanban/board/:teamId` emite por coluna. O DTO marca como
+  /// opcional, então a UI deve cair para `tasks.length` quando ausente
+  /// (mesmo fallback do `Column.tsx` no web).
+  final int? totalTaskCount;
+
   KanbanColumn({
     required this.id,
     required this.title,
@@ -169,6 +176,7 @@ class KanbanColumn {
     required this.createdById,
     required this.createdAt,
     required this.updatedAt,
+    this.totalTaskCount,
   });
 
   factory KanbanColumn.fromJson(Map<String, dynamic> json) {
@@ -183,6 +191,7 @@ class KanbanColumn {
       createdById: json['createdById']?.toString() ?? '',
       createdAt: DateTime.parse(json['createdAt'].toString()),
       updatedAt: DateTime.parse(json['updatedAt'].toString()),
+      totalTaskCount: (json['totalTaskCount'] as num?)?.toInt(),
     );
   }
 
@@ -198,6 +207,7 @@ class KanbanColumn {
       'createdById': createdById,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
+      if (totalTaskCount != null) 'totalTaskCount': totalTaskCount,
     };
   }
 
@@ -212,6 +222,7 @@ class KanbanColumn {
     String? createdById,
     DateTime? createdAt,
     DateTime? updatedAt,
+    int? totalTaskCount,
   }) {
     return KanbanColumn(
       id: id ?? this.id,
@@ -224,6 +235,7 @@ class KanbanColumn {
       createdById: createdById ?? this.createdById,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      totalTaskCount: totalTaskCount ?? this.totalTaskCount,
     );
   }
 

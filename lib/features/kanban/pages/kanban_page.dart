@@ -305,7 +305,8 @@ class _KanbanPageState extends State<KanbanPage> {
     final accent = _kanbanAccentColor(context);
     final canCreateTask = controller.permissions?.canCreateTasks ?? true;
     final cols = controller.displayColumns;
-    final totalTasks = controller.tasks.length;
+    // Soma dos totais reais por coluna (API), não só os cards carregados.
+    final totalTasks = controller.boardDisplayTotalTasks;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -1206,6 +1207,12 @@ class _KanbanPageState extends State<KanbanPage> {
         (controller.permissions?.canEditColumns ?? false) ||
         (controller.permissions?.canDeleteColumns ?? false);
 
+    // Total REAL da coluna (API `totalTaskCount` + delta de drag-drop) —
+    // NUNCA o nº de cards carregados: com paginação, `tasks.length` mentia
+    // ("12" numa etapa com 80 leads). Fallback: contagem local quando o
+    // campo não veio (coluna sintética / resposta antiga).
+    final columnTotal = controller.columnDisplayTotal(column) ?? tasks.length;
+
     final emptyCaption = synth
         ? 'Etapas oficiais aparecem quando o quadro sincroniza.'
         : 'Nenhuma tarefa';
@@ -1312,7 +1319,7 @@ class _KanbanPageState extends State<KanbanPage> {
                                 Padding(
                                   padding: const EdgeInsets.only(top: 2),
                                   child: Text(
-                                    '${tasks.length}',
+                                    '$columnTotal',
                                     style: theme.textTheme.titleSmall?.copyWith(
                                       color: columnColor,
                                       fontWeight: FontWeight.w900,
@@ -1470,6 +1477,7 @@ class _KanbanPageState extends State<KanbanPage> {
                                               context,
                                               columnColor,
                                               pagination,
+                                              columnTotal,
                                             );
                                           }
                                           final task = tasks[index];
@@ -1535,10 +1543,12 @@ class _KanbanPageState extends State<KanbanPage> {
   }
 
   /// Footer da lista de cards — somente spinner do carregamento automático.
+  /// [columnTotal] = total real da coluna (API) para o "X de Y".
   Widget _buildLoadMoreFooter(
     BuildContext context,
     Color columnColor,
     ColumnPagination pagination,
+    int columnTotal,
   ) {
     final theme = Theme.of(context);
     final loading = pagination.loadingMore;
@@ -1573,7 +1583,10 @@ class _KanbanPageState extends State<KanbanPage> {
                 ),
               ] else
                 Text(
-                  '$loaded carregados',
+                  // Com o total real da API, o footer situa: "12 de 80".
+                  columnTotal > loaded
+                      ? '$loaded de $columnTotal'
+                      : '$loaded carregados',
                   style: theme.textTheme.labelSmall?.copyWith(
                     fontWeight: FontWeight.w700,
                     color: columnColor,
@@ -2346,13 +2359,45 @@ class _KanbanPageState extends State<KanbanPage> {
     final whatsappColor = isDark
         ? const Color(0xFF25D366)
         : const Color(0xFF0F8B7E);
+    // Número exatamente como exibido no card — é este texto (com máscara) que
+    // o botão de copiar coloca na área de transferência.
+    final displayNumber = BrokerContactActions.formatBrazilPhone(phone);
     return Row(
       children: [
         Icon(Icons.phone_outlined, size: 13, color: secondaryText),
-        const SizedBox(width: 5),
-        Expanded(
+        const SizedBox(width: 2),
+        // Copiar o número do card. GestureDetector opaco com área ~24px:
+        // o tap é reivindicado aqui e não chega ao double-tap/long-press do
+        // card (nem ao LongPressDraggable da coluna).
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            Clipboard.setData(ClipboardData(text: displayNumber));
+            HapticFeedback.selectionClick();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Número copiado'),
+                duration: Duration(seconds: 2),
+              ),
+            );
+          },
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: Center(
+              child: Icon(
+                Icons.copy_rounded,
+                size: 12.5,
+                color: secondaryText,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 2),
+        Flexible(
+          fit: FlexFit.tight,
           child: Text(
-            BrokerContactActions.formatBrazilPhone(phone),
+            displayNumber,
             style: TextStyle(
               fontSize: 12,
               color: secondaryText,

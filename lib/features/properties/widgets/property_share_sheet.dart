@@ -163,7 +163,9 @@ class _PropertyShareSheetState extends State<_PropertyShareSheet> {
                           Text(
                             'COMPARTILHAR IMÓVEL',
                             style: theme.textTheme.labelSmall?.copyWith(
-                              color: AppColors.primary.primary,
+                              // Verde WhatsApp — a identidade da AÇÃO de
+                              // divulgar (vermelho é marca/erro, não isso).
+                              color: _whatsappGreen,
                               fontWeight: FontWeight.w900,
                               letterSpacing: 1.6,
                               fontSize: 10,

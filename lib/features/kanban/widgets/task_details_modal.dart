@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
@@ -545,35 +546,47 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
                           ),
                   ),
                 ),
+                // Cada aba com identidade própria (ativa colore ícone +
+                // label + indicador; inativas slate).
                 _MinimalTabBar(
                   controller: _tabController,
                   tabs: [
-                    const _TabItem(icon: Icons.article_outlined, label: 'Detalhes'),
+                    const _TabItem(
+                      icon: Icons.article_outlined,
+                      label: 'Detalhes',
+                      color: Color(0xFF6366F1), // indigo
+                    ),
                     const _TabItem(
                       icon: Icons.signpost_outlined,
                       label: 'Jornada',
+                      color: Color(0xFFD97706), // âmbar
                     ),
                     const _TabItem(
                       icon: Icons.checklist_rounded,
                       label: 'Tarefas',
+                      color: Color(0xFF14B8A6), // teal
                     ),
                     _TabItem(
                       icon: Icons.forum_outlined,
                       label: 'Conversas',
+                      color: const Color(0xFF3B82F6), // azul
                       badge: _comments.length,
                     ),
                     _TabItem(
                       icon: Icons.attach_file_rounded,
                       label: 'Arquivos',
+                      color: const Color(0xFF0891B2), // cyan
                       badge: _taskFiles.isNotEmpty ? _taskFiles.length : null,
                     ),
                     const _TabItem(
                       icon: Icons.insights_rounded,
                       label: 'Métricas',
+                      color: Color(0xFF10B981), // emerald
                     ),
                     _TabItem(
                       icon: Icons.history_rounded,
                       label: 'Histórico',
+                      color: const Color(0xFF64748B), // slate
                       badge: (_history.isNotEmpty || _loadingHistory)
                           ? _history.length
                           : null,
@@ -673,7 +686,7 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
           ),
           const SizedBox(height: 26),
 
-          // 2. DOSSIÊ — ficha técnica flush (valor, resultado, prazo, cadência…)
+          // 2. RAIO-X — ficha técnica flush (valor, resultado, prazo, cadência…)
           _TaskDossier(task: task, state: state),
           const SizedBox(height: 26),
 
@@ -1149,11 +1162,11 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Resumo analítico',
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w900,
-            ),
+          // Título na identidade da aba (emerald) — nada de vermelho default.
+          const _SectionHeader(
+            overline: 'Métricas',
+            title: 'Resumo analítico',
+            accent: Color(0xFF10B981),
           ),
           const SizedBox(height: 12),
           row('Subtarefas',
@@ -1363,19 +1376,21 @@ class _TaskHeroHeader extends StatelessWidget {
                           fontWeight: FontWeight.w900,
                           letterSpacing: -0.4,
                           height: 1.2,
-                          fontSize: 20,
+                          fontSize: 18,
                           color: ThemeHelpers.textColor(context),
                         ),
                         maxLines: 4,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _headerSubtitle(task),
+                      const SizedBox(height: 5),
+                      Text.rich(
+                        TextSpan(children: _headerSubtitleSpans(task)),
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: secondary,
                           fontWeight: FontWeight.w600,
-                          height: 1.3,
+                          fontSize: 11.5,
+                          height: 1.35,
+                          letterSpacing: 0.1,
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
@@ -1386,88 +1401,51 @@ class _TaskHeroHeader extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 14),
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            // LayoutBuilder: as pills ficam no tamanho NATURAL enquanto
-            // couberem; só quando o espaço real acaba (tela estreita +
-            // fonte grande) o grupo encolhe em escala via FittedBox. O
-            // avatar (Expanded) absorve o resto e encolhe primeiro.
-            child: LayoutBuilder(
-              builder: (context, rowBox) {
-                final actionsMax = rowBox.hasBoundedWidth
-                    ? (rowBox.maxWidth - 72).clamp(0.0, rowBox.maxWidth)
-                    : double.infinity;
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: Row(
-                        children: [
-                          if (task.assignedTo != null)
-                            Flexible(
-                              child: _MetaAvatarPill(user: task.assignedTo!),
-                            )
-                          else
-                            Flexible(
-                              child: Text(
-                                'Sem responsável',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.labelLarge?.copyWith(
-                                  color: secondary,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: -0.1,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    // Só as duas ações que o time realmente usa, em pill
-                    // SÓLIDA (cor cheia + texto branco) — venda não passa
-                    // por aqui, passa pela ficha de venda.
-                    if (showCrm)
-                      ConstrainedBox(
-                        constraints: BoxConstraints(maxWidth: actionsMax),
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.centerRight,
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (canMarkResult && closed)
-                                _HeroCrmIconButton(
-                                  icon: Icons.tune_rounded,
-                                  tooltip: 'Resultado · reabrir ou revisar',
-                                  color: secondary,
-                                  onPressed: onOpenResult,
-                                ),
-                              if (canMarkResult && !closed)
-                                _HeroSolidAction(
-                                  icon: LucideIcons.trendingDown,
-                                  label: 'Perdido',
-                                  color: const Color(0xFFDC2626),
-                                  onPressed: onMarkLost,
-                                ),
-                              if (canTransfer) ...[
-                                if (canMarkResult) const SizedBox(width: 6),
-                                _HeroSolidAction(
-                                  icon: LucideIcons.arrowLeftRight,
-                                  label: 'Transferir',
-                                  color: const Color(0xFF6366F1),
-                                  onPressed: onTransfer,
-                                ),
-                              ],
-                            ],
-                          ),
+          // Linha de ações CRM: só as pills SÓLIDAS (cor cheia + texto
+          // branco), ancoradas à DIREITA — o responsável saiu daqui, a
+          // seção "Pessoas envolvidas" já cobre. FittedBox segura tela
+          // estreita: encolhe o grupo em escala em vez de estourar a Row.
+          if (showCrm) ...[
+            const SizedBox(height: 14),
+            Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (canMarkResult && closed)
+                        _HeroCrmIconButton(
+                          icon: Icons.tune_rounded,
+                          tooltip: 'Resultado · reabrir ou revisar',
+                          color: secondary,
+                          onPressed: onOpenResult,
                         ),
-                      ),
-                  ],
-                );
-              },
+                      if (canMarkResult && !closed)
+                        _HeroSolidAction(
+                          icon: LucideIcons.trendingDown,
+                          label: 'Perdido',
+                          color: const Color(0xFFDC2626),
+                          onPressed: onMarkLost,
+                        ),
+                      if (canTransfer) ...[
+                        if (canMarkResult) const SizedBox(width: 6),
+                        _HeroSolidAction(
+                          icon: LucideIcons.arrowLeftRight,
+                          label: 'Transferir',
+                          color: const Color(0xFF6366F1),
+                          onPressed: onTransfer,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
             ),
-          ),
+          ],
           Padding(
             padding: const EdgeInsets.only(top: 16, right: 16),
             child: Container(
@@ -1481,16 +1459,30 @@ class _TaskHeroHeader extends StatelessWidget {
     );
   }
 
-  static String _headerSubtitle(KanbanTask task) {
-    final parts = <String>[];
-    if (task.createdBy?.name.isNotEmpty == true) {
-      parts.add('Criada por ${task.createdBy!.name}');
+  /// Subtítulo do hero: "Criada por **Nome** · criada 3 d · atualizada 2 h".
+  /// Nome do autor em w700; separadores '·' com respiro. Sem vermelho.
+  static List<InlineSpan> _headerSubtitleSpans(KanbanTask task) {
+    const sep = TextSpan(text: '  ·  ');
+    final spans = <InlineSpan>[];
+    final creator = task.createdBy?.name.trim() ?? '';
+    if (creator.isNotEmpty) {
+      spans.add(const TextSpan(text: 'Criada por '));
+      spans.add(
+        TextSpan(
+          text: creator,
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+      );
+      spans.add(sep);
     }
-    parts.add(_relativeTime(task.createdAt, prefix: '• criada'));
+    spans.add(TextSpan(text: 'criada ${_relativeTime(task.createdAt)}'));
     if (task.updatedAt.difference(task.createdAt).inMinutes > 1) {
-      parts.add(_relativeTime(task.updatedAt, prefix: '• atualizada'));
+      spans.add(sep);
+      spans.add(
+        TextSpan(text: 'atualizada ${_relativeTime(task.updatedAt)}'),
+      );
     }
-    return parts.join('  ');
+    return spans;
   }
 }
 
@@ -1662,51 +1654,6 @@ class _PriorityMark extends StatelessWidget {
   }
 }
 
-class _MetaAvatarPill extends StatelessWidget {
-  final KanbanUser user;
-
-  const _MetaAvatarPill({required this.user});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final accent = _personColor(user.name);
-    final isDark = theme.brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        color: accent.withValues(alpha: isDark ? 0.16 : 0.08),
-        border: Border.all(color: accent.withValues(alpha: 0.28)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _SolidAvatar(user: user, size: 22),
-          const SizedBox(width: 8),
-          // `Flexible` (em vez de `ConstrainedBox(maxWidth: 160)`) deixa o
-          // texto encolher quando o `Expanded` pai for menor que a soma
-          // mínima dos chips — antes estourava por uns 3px em telas
-          // estreitas.
-          Flexible(
-            child: Text(
-              user.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: accent,
-                fontWeight: FontWeight.w800,
-                fontSize: 11.5,
-                height: 1,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// Avatar circular sólido (cor accent + iniciais), sem gradiente nem sombra.
 class _SolidAvatar extends StatelessWidget {
   final KanbanUser? user;
@@ -1771,7 +1718,16 @@ class _TabItem {
   final String label;
   final int? badge;
 
-  const _TabItem({required this.icon, required this.label, this.badge});
+  /// Identidade da aba: a ATIVA pinta ícone + label + indicador nesta cor
+  /// (inativas ficam slate/secundário). Cada aba fala na sua família.
+  final Color color;
+
+  const _TabItem({
+    required this.icon,
+    required this.label,
+    required this.color,
+    this.badge,
+  });
 }
 
 class _MinimalTabBar extends StatelessWidget {
@@ -1783,7 +1739,10 @@ class _MinimalTabBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final accent = _kanbanAccent(context);
+    // Cor da aba ativa — o modal dá setState no listener do controller,
+    // então o rebuild acompanha a troca de aba.
+    final active = controller.index.clamp(0, tabs.length - 1).toInt();
+    final accent = tabs[active].color;
     final secondary = ThemeHelpers.textSecondaryColor(context);
     return Container(
       decoration: BoxDecoration(
@@ -2450,19 +2409,21 @@ class _EditorialDescription extends StatelessWidget {
 }
 
 // =============================================================================
-// DOSSIÊ — ficha técnica flush do card (substitui o antigo grid 2×2 de caixas)
+// RAIO-X — ficha técnica flush do card (substitui o antigo grid 2×2 de caixas)
 // =============================================================================
 
 /// Segue a mesma gramática editorial do BRIEFING logo acima: eyebrow +
 /// hairline, conteúdo direto na página (sem caixas tingidas).
 ///
 /// Estrutura:
-/// 1. Eyebrow `DOSSIÊ` com o **resultado** do card à direita (EM ABERTO /
+/// 1. Eyebrow `RAIO-X` com o **resultado** do card à direita (EM ABERTO /
 ///    GANHO / PERDIDO / CANCELADO) — substitui o antigo tile de "Status".
 /// 2. **Valor da negociação** como linha-herói (tipografia grande, verde).
 /// 3. Ficha técnica em 2 colunas separadas por hairlines: prazo, prioridade,
 ///    funil, idade no funil, última atividade e cadência — e, quando
 ///    existem, recuperação de perdido, pré-atendimento e transferência.
+///    Valores com informação REAL falam na cor do accent da entrada (a
+///    ficha era "morta", toda slate); "sem prazo"/"inativa" seguem neutros.
 /// 4. Card perdido ganha uma régua vermelha com o motivo da perda (mesma
 ///    linguagem da régua accent do briefing).
 class _TaskDossier extends StatelessWidget {
@@ -2533,7 +2494,8 @@ class _TaskDossier extends StatelessWidget {
         helper: awaiting
             ? 'Aguardando resposta do lead'
             : 'Automação ativa na etapa',
-        valueAccent: awaiting,
+        // Cadência ativa fala na cor: verde rodando, âmbar aguardando.
+        valueAccent: true,
         numeric: true,
       );
     }
@@ -2574,9 +2536,9 @@ class _TaskDossier extends StatelessWidget {
             : due == null
                 ? 'Defina ao editar o card'
                 : _deadlineHelper(state),
-        valueAccent: due != null &&
-            (state.health == _TaskHealth.overdue ||
-                state.health == _TaskHealth.dueToday),
+        // Com prazo definido o valor fala na cor do estado (em dia
+        // inclusive) — só "Sem prazo" fica neutro.
+        valueAccent: due != null,
       ),
 
       // PRIORIDADE — dot na cor real vinda do backend.
@@ -2587,6 +2549,7 @@ class _TaskDossier extends StatelessWidget {
         value: task.priority?.label ?? 'Não definida',
         helper: task.priority == null ? 'Defina ao editar o card' : null,
         dot: priorityColor != null,
+        valueAccent: task.priority != null,
       ),
 
       // FUNIL — violeta = contexto/organização.
@@ -2600,9 +2563,10 @@ class _TaskDossier extends StatelessWidget {
             : task.project!.isPersonal == true
                 ? 'Workspace pessoal'
                 : task.project!.status.label,
+        valueAccent: task.project != null,
       ),
 
-      // IDADE — quanto tempo o lead está vivo no funil.
+      // IDADE — quanto tempo o lead está vivo no funil (sky).
       _SpecEntry(
         icon: LucideIcons.hourglass,
         accent: const Color(0xFF0EA5E9),
@@ -2610,6 +2574,7 @@ class _TaskDossier extends StatelessWidget {
         value: ageDays <= 0 ? 'Hoje' : '$ageDays dia${ageDays == 1 ? '' : 's'}',
         helper: 'desde ${DateFormat("d 'de' MMM", 'pt_BR').format(created)}',
         numeric: true,
+        valueAccent: true,
       ),
 
       // ÚLTIMA ATIVIDADE — voz relativa + data completa no helper.
@@ -2648,6 +2613,7 @@ class _TaskDossier extends StatelessWidget {
         label: 'Pré-atendimento',
         value: preService,
         helper: 'Quem qualificou o lead',
+        valueAccent: true,
       ));
     }
     if (task.transferDate != null) {
@@ -2658,6 +2624,7 @@ class _TaskDossier extends StatelessWidget {
         value: DateFormat("d 'de' MMM 'de' yyyy", 'pt_BR')
             .format(task.transferDate!.toLocal()),
         helper: 'Card movido de funil',
+        valueAccent: true,
       ));
     }
     return entries;
@@ -2696,7 +2663,7 @@ class _TaskDossier extends StatelessWidget {
         Row(
           children: [
             Text(
-              'DOSSIÊ',
+              'RAIO-X',
               style: theme.textTheme.labelSmall?.copyWith(
                 letterSpacing: 2.6,
                 fontWeight: FontWeight.w900,
@@ -2876,7 +2843,10 @@ class _SpecEntry {
   final String value;
   final String? helper;
 
-  /// Valor pintado na cor accent (estados "quentes": atrasada, aguardando).
+  /// Valor pintado na cor accent — sempre que a entrada carrega informação
+  /// real (prazo definido, funil, idade, cadência ativa…); estados
+  /// "quentes" (atrasada, aguardando) continuam forçados. No modo claro o
+  /// tile escurece a tinta pra manter contraste.
   final bool valueAccent;
 
   /// Números tabulares (datas relativas, contagens, dias).
@@ -2914,7 +2884,17 @@ class _SpecTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
+    // Tinta rende diferente por tema: no claro, sky/âmbar puros lavam no
+    // fundo branco — escurece ~18% preservando o matiz; no escuro a cor
+    // pura já contrasta.
+    final accentInk = isDark
+        ? entry.accent
+        : Color.alphaBlend(
+            Colors.black.withValues(alpha: 0.18),
+            entry.accent,
+          );
 
     return Padding(
       padding: EdgeInsets.only(
@@ -2970,7 +2950,7 @@ class _SpecTile extends StatelessWidget {
                     letterSpacing: -0.2,
                     height: 1.2,
                     color: entry.valueAccent
-                        ? entry.accent
+                        ? accentInk
                         : ThemeHelpers.textColor(context),
                     fontFeatures: entry.numeric
                         ? const [FontFeature.tabularFigures()]
@@ -3002,6 +2982,10 @@ class _SpecTile extends StatelessWidget {
 // PEOPLE STRIP
 // =============================================================================
 
+/// Duas colunas flush lado a lado (Responsável · Criado por) separadas por
+/// hairline VERTICAL — substitui os 2 cards encaixotados. Cada coluna:
+/// avatar 44 com anel de 2px na cor da pessoa, nome forte, papel em small
+/// caps colorido e e-mail discreto. Sem containers nem bordas.
 class _PeopleStrip extends StatelessWidget {
   final KanbanTask task;
 
@@ -3009,51 +2993,42 @@ class _PeopleStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, c) {
-        final twoCols = c.maxWidth >= 460;
-        final cards = <Widget>[
-          _PersonCard(
-            label: 'Responsável',
-            user: task.assignedTo,
-            emptyHint: 'Nenhum responsável',
+    final hairline =
+        ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: _PersonColumn(
+              role: 'Responsável',
+              user: task.assignedTo,
+              emptyHint: 'Nenhum responsável',
+            ),
           ),
-          _PersonCard(
-            label: 'Criado por',
-            user: task.createdBy,
-            emptyHint: 'Desconhecido',
+          VerticalDivider(width: 28, thickness: 1, color: hairline),
+          Expanded(
+            child: _PersonColumn(
+              role: 'Criado por',
+              user: task.createdBy,
+              emptyHint: 'Desconhecido',
+            ),
           ),
-        ];
-        if (!twoCols) {
-          return Column(
-            children: [
-              for (var i = 0; i < cards.length; i++) ...[
-                if (i > 0) const SizedBox(height: 10),
-                cards[i],
-              ],
-            ],
-          );
-        }
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(child: cards[0]),
-            const SizedBox(width: 10),
-            Expanded(child: cards[1]),
-          ],
-        );
-      },
+        ],
+      ),
     );
   }
 }
 
-class _PersonCard extends StatelessWidget {
-  final String label;
+/// Coluna flush de uma pessoa do card. Vazio = anel tracejado slate +
+/// texto muted (sem inventar pessoa).
+class _PersonColumn extends StatelessWidget {
+  final String role;
   final KanbanUser? user;
   final String emptyHint;
 
-  const _PersonCard({
-    required this.label,
+  const _PersonColumn({
+    required this.role,
     required this.user,
     required this.emptyHint,
   });
@@ -3061,95 +3036,120 @@ class _PersonCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final assigned = user != null;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: ThemeHelpers.cardBackgroundColor(context)
-            .withValues(alpha: isDark ? 0.42 : 0.55),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.4),
-        ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          if (assigned)
-            _SolidAvatar(user: user, size: 38)
-          else
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: ThemeHelpers.borderColor(context)
-                    .withValues(alpha: 0.18),
-                border: Border.all(
-                  color: ThemeHelpers.borderColor(context)
-                      .withValues(alpha: 0.5),
-                ),
+    final tone = assigned ? _personColor(user!.name) : const Color(0xFF64748B);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (assigned)
+          Container(
+            padding: const EdgeInsets.all(2.5),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: tone.withValues(alpha: 0.75),
+                width: 2,
               ),
-              alignment: Alignment.center,
+            ),
+            child: _SolidAvatar(user: user, size: 44),
+          )
+        else
+          CustomPaint(
+            painter: _DashedRingPainter(
+              color: secondary.withValues(alpha: 0.55),
+            ),
+            child: SizedBox(
+              // Mesmo footprint do avatar com anel (44 + 2×2.5 + 2×2).
+              width: 53,
+              height: 53,
               child: Icon(
                 Icons.person_outline_rounded,
-                size: 18,
+                size: 20,
                 color: secondary,
               ),
             ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  label.toUpperCase(),
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    letterSpacing: 1.2,
-                    fontWeight: FontWeight.w800,
-                    color: secondary,
-                    fontSize: 10,
-                    height: 1,
-                  ),
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  assigned ? user!.name : emptyHint,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.2,
-                    height: 1.2,
-                    color: assigned
-                        ? ThemeHelpers.textColor(context)
-                        : secondary,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                if (assigned && (user!.email).isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    user!.email,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      fontSize: 11.5,
-                      color: secondary,
-                      fontWeight: FontWeight.w600,
-                      height: 1.2,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ],
+          ),
+        const SizedBox(height: 10),
+        Text(
+          assigned ? user!.name : emptyHint,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            fontWeight: FontWeight.w800,
+            fontSize: 14,
+            letterSpacing: -0.2,
+            height: 1.2,
+            color: assigned ? ThemeHelpers.textColor(context) : secondary,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          role.toUpperCase(),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.labelSmall?.copyWith(
+            fontSize: 9.5,
+            letterSpacing: 1.4,
+            fontWeight: FontWeight.w800,
+            color: assigned ? tone : secondary,
+            height: 1,
+          ),
+        ),
+        if (assigned && user!.email.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(
+            user!.email,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: secondary,
+              height: 1.2,
             ),
           ),
         ],
-      ),
+      ],
     );
   }
+}
+
+/// Anel circular tracejado (slot vazio de pessoa) — Border não faz dash.
+class _DashedRingPainter extends CustomPainter {
+  final Color color;
+
+  const _DashedRingPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4
+      ..strokeCap = StrokeCap.round;
+    final radius = (size.shortestSide - paint.strokeWidth) / 2;
+    final center = Offset(size.width / 2, size.height / 2);
+    const dashCount = 14;
+    const step = 2 * math.pi / dashCount;
+    // 55% traço / 45% respiro por segmento.
+    const sweep = step * 0.55;
+    for (var i = 0; i < dashCount; i++) {
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        i * step,
+        sweep,
+        false,
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DashedRingPainter oldDelegate) =>
+      oldDelegate.color != color;
 }
 
 // =============================================================================
@@ -3220,17 +3220,20 @@ Color _tagColor(String tag) {
 // HORIZONTAL TIMELINE (created → updated → due)
 // =============================================================================
 
-/// Linha do tempo **horizontal** ligando 3 marcos do card:
-/// Criada → Atualizada → Prazo. Cada marco tem ícone circular accent,
-/// label, data e helper (tempo relativo).
-///
-/// Substitui o `_TimelineFooter` antigo que era uma lista vertical de 3
-/// rows iguais — visualmente entediante e idêntico aos outros blocos.
+/// Linha do tempo **horizontal** ligando os marcos do card:
+/// Criada → (Transferido) → Atualizada → (Resultado) → Prazo. Os marcos
+/// entre parênteses são CONDICIONAIS e entram ordenados cronologicamente
+/// entre os eventos; o Prazo é destino, não evento — fica sempre por
+/// último. Com mais de 3 marcos a régua rola na horizontal (larguras
+/// fixas) mantendo a linha conectora contínua.
 class _HorizontalTimeline extends StatelessWidget {
   final KanbanTask task;
   final _TaskState state;
 
   const _HorizontalTimeline({required this.task, required this.state});
+
+  /// Largura fixa de cada marco quando a régua entra em modo scroll.
+  static const double _kScrollItemWidth = 112;
 
   @override
   Widget build(BuildContext context) {
@@ -3239,23 +3242,82 @@ class _HorizontalTimeline extends StatelessWidget {
     final fmt = DateFormat("d MMM", 'pt_BR');
     final timeFmt = DateFormat("HH:mm");
 
+    // Eventos datados (sort manual estável — List.sort do Dart não é
+    // estável; o índice de inserção desempata datas iguais, ex.:
+    // Resultado ancorado em updatedAt fica DEPOIS de Atualizada).
+    final dated = <(DateTime, _TimelineEntry)>[
+      (
+        task.createdAt,
+        _TimelineEntry(
+          icon: LucideIcons.circlePlus,
+          accent: const Color(0xFF10B981),
+          label: 'Criada',
+          value: fmt.format(task.createdAt.toLocal()),
+          time: timeFmt.format(task.createdAt.toLocal()),
+          helper: _relativeTime(task.createdAt),
+        ),
+      ),
+      (
+        task.updatedAt,
+        _TimelineEntry(
+          icon: LucideIcons.refreshCw,
+          accent: const Color(0xFF0EA5E9),
+          label: 'Atualizada',
+          value: fmt.format(task.updatedAt.toLocal()),
+          time: timeFmt.format(task.updatedAt.toLocal()),
+          helper: _relativeTime(task.updatedAt),
+        ),
+      ),
+    ];
+
+    final transfer = task.transferDate;
+    if (transfer != null) {
+      final t = transfer.toLocal();
+      dated.add((
+        transfer,
+        _TimelineEntry(
+          icon: LucideIcons.arrowLeftRight,
+          accent: const Color(0xFF6366F1),
+          label: 'Transferido',
+          value: fmt.format(t),
+          // Transferência costuma ser só data (00:00) — não mostra hora vazia.
+          time: (t.hour == 0 && t.minute == 0) ? '' : timeFmt.format(t),
+          helper: _relativeTime(transfer),
+        ),
+      ));
+    }
+
+    if (task.hasClosedResult) {
+      final (resultLabel, resultColor, resultIcon) =
+          switch (task.normalizedResult) {
+        'won' => ('Ganho', const Color(0xFF10B981), LucideIcons.trophy),
+        'lost' => ('Perdido', const Color(0xFFEF4444), LucideIcons.trendingDown),
+        _ => ('Cancelado', const Color(0xFF64748B), LucideIcons.x),
+      };
+      // Sem data própria de resultado no payload — updatedAt é a âncora
+      // (fechar o card é a última mutação na prática).
+      dated.add((
+        task.updatedAt,
+        _TimelineEntry(
+          icon: resultIcon,
+          accent: resultColor,
+          label: 'Resultado',
+          value: resultLabel,
+          time: fmt.format(task.updatedAt.toLocal()),
+          helper: _relativeTime(task.updatedAt),
+          emphasized: true,
+        ),
+      ));
+    }
+
+    final indexed = [for (var i = 0; i < dated.length; i++) (i, dated[i])];
+    indexed.sort((a, b) {
+      final byDate = a.$2.$1.compareTo(b.$2.$1);
+      return byDate != 0 ? byDate : a.$1.compareTo(b.$1);
+    });
+
     final entries = <_TimelineEntry>[
-      _TimelineEntry(
-        icon: LucideIcons.circlePlus,
-        accent: const Color(0xFF10B981),
-        label: 'Criada',
-        value: fmt.format(task.createdAt.toLocal()),
-        time: timeFmt.format(task.createdAt.toLocal()),
-        helper: _relativeTime(task.createdAt),
-      ),
-      _TimelineEntry(
-        icon: LucideIcons.refreshCw,
-        accent: const Color(0xFF0EA5E9),
-        label: 'Atualizada',
-        value: fmt.format(task.updatedAt.toLocal()),
-        time: timeFmt.format(task.updatedAt.toLocal()),
-        helper: _relativeTime(task.updatedAt),
-      ),
+      for (final e in indexed) e.$2.$2,
       if (state.dueDate != null)
         _TimelineEntry(
           icon: state.health == _TaskHealth.overdue
@@ -3277,45 +3339,62 @@ class _HorizontalTimeline extends StatelessWidget {
     final lineColor = ThemeHelpers.borderColor(context)
         .withValues(alpha: isDark ? 0.6 : 0.45);
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          // Posicionamento equidistante dos pontos. O segmento entre
-          // pontos é a "linha conectora" pintada por baixo.
-          return Stack(
-            children: [
-              // Linha conectora — sutil e contínua atrás dos pontos.
-              Positioned(
-                left: 22,
-                right: 22,
-                top: 17, // alinha com centro vertical do círculo (34/2)
-                child: Container(
-                  height: 2,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        lineColor.withValues(alpha: 0.0),
-                        lineColor.withValues(alpha: 1.0),
-                        lineColor.withValues(alpha: 1.0),
-                        lineColor.withValues(alpha: 0.0),
-                      ],
-                      stops: const [0.0, 0.05, 0.95, 1.0],
-                    ),
-                  ),
+    // Com 4-5 marcos, Expanded espreme tudo em tela estreita — régua
+    // passa a rolar com larguras fixas, linha conectora contínua.
+    final scrollable = entries.length > 3;
+
+    Widget rail({double? itemWidth}) {
+      return Stack(
+        children: [
+          // Linha conectora — sutil e contínua atrás dos pontos.
+          Positioned(
+            left: 22,
+            right: 22,
+            top: 17, // alinha com centro vertical do círculo (34/2)
+            child: Container(
+              height: 2,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    lineColor.withValues(alpha: 0.0),
+                    lineColor.withValues(alpha: 1.0),
+                    lineColor.withValues(alpha: 1.0),
+                    lineColor.withValues(alpha: 0.0),
+                  ],
+                  stops: const [0.0, 0.05, 0.95, 1.0],
                 ),
               ),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (var i = 0; i < entries.length; i++)
-                    Expanded(child: entries[i].render(context, theme)),
-                ],
-              ),
+            ),
+          ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final entry in entries)
+                if (itemWidth != null)
+                  SizedBox(
+                    width: itemWidth,
+                    child: entry.render(context, theme),
+                  )
+                else
+                  Expanded(child: entry.render(context, theme)),
             ],
-          );
-        },
-      ),
+          ),
+        ],
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: scrollable
+          ? SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              child: SizedBox(
+                width: entries.length * _kScrollItemWidth,
+                child: rail(itemWidth: _kScrollItemWidth),
+              ),
+            )
+          : rail(),
     );
   }
 }
@@ -3408,15 +3487,16 @@ class _TimelineEntry {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        Text(
-          time,
-          style: theme.textTheme.labelSmall?.copyWith(
-            fontWeight: FontWeight.w600,
-            color: secondary,
-            fontSize: 10.5,
-            fontFeatures: const [FontFeature.tabularFigures()],
+        if (time.isNotEmpty)
+          Text(
+            time,
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: secondary,
+              fontSize: 10.5,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
           ),
-        ),
         if (helper != null && helper!.isNotEmpty) ...[
           const SizedBox(height: 4),
           Text(

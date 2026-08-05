@@ -199,10 +199,9 @@ class _SubTaskManagerState extends State<SubTaskManager> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final accent = isDark
-        ? const Color(0xFFFF4D67)
-        : AppColors.primary.primary;
+    // Identidade da aba Tarefas no modal do card: teal (o vermelho fica
+    // reservado pra marca/erro/destrutivo/atraso).
+    const accent = Color(0xFF14B8A6);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
@@ -246,7 +245,8 @@ class _SubTaskManagerState extends State<SubTaskManager> {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             gradient: LinearGradient(
-              colors: [accent, const Color(0xFF7C3AED)],
+              // Fala na família da aba: teal → cyan (nada de violeta órfão).
+              colors: [accent, const Color(0xFF0891B2)],
             ),
             boxShadow: [
               BoxShadow(
@@ -357,10 +357,8 @@ class _SubTaskManagerState extends State<SubTaskManager> {
 
   Widget _buildEmpty() {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final accent = isDark
-        ? const Color(0xFFFF4D67)
-        : AppColors.primary.primary;
+    // Mesmo teal da aba Tarefas (identidade da seção, não a cor da marca).
+    const accent = Color(0xFF14B8A6);
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 22, 20, 22),
       decoration: BoxDecoration(

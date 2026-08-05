@@ -408,6 +408,11 @@ class Property {
   final String state;
   final String zipCode;
   final String neighborhood;
+  /// Coordenadas geográficas (mesmos campos `latitude`/`longitude` do web) —
+  /// alimentam o mapa da seção Localização. Nulas quando o cadastro não tem
+  /// geolocalização.
+  final double? latitude;
+  final double? longitude;
   final String? internalNotes;
   final String? sector;
   final String? teamId;
@@ -509,6 +514,8 @@ class Property {
     required this.state,
     required this.zipCode,
     required this.neighborhood,
+    this.latitude,
+    this.longitude,
     this.internalNotes,
     this.sector,
     this.teamId,
@@ -593,6 +600,17 @@ class Property {
       return null;
     }
 
+    // Coordenada pode vir string com vírgula decimal (dado legado) — o web
+    // faz o mesmo replace no `parseLatLng` do PropertyMap.
+    double? parseCoord(dynamic value) {
+      if (value == null) return null;
+      if (value is num) return value.toDouble();
+      if (value is String) {
+        return double.tryParse(value.trim().replaceAll(',', '.'));
+      }
+      return null;
+    }
+
     return Property(
       id: _readAnyId(
         json,
@@ -611,6 +629,8 @@ class Property {
       state: json['state']?.toString() ?? '',
       zipCode: json['zipCode']?.toString() ?? json['zip_code']?.toString() ?? '',
       neighborhood: json['neighborhood']?.toString() ?? '',
+      latitude: parseCoord(json['latitude']),
+      longitude: parseCoord(json['longitude']),
       internalNotes: json['internalNotes']?.toString() ??
           json['internal_notes']?.toString(),
       sector: json['sector']?.toString(),

@@ -16,10 +16,8 @@ import '../../../../core/theme/shell_visual_tokens.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../widgets/property_filters_drawer.dart';
 import '../widgets/property_share_sheet.dart';
-import '../widgets/intelligent_search_modal.dart';
 import '../widgets/export_import_dialog.dart';
 import '../services/property_local_draft_storage.dart';
-import '../../../../shared/services/ai_service.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../models/property_wizard_pop_result.dart';
 import '../utils/property_edit_permissions.dart';
@@ -481,15 +479,15 @@ class _PropertiesPageState extends State<PropertiesPage> {
     );
   }
 
-  /// Bottom sheet premium do overflow — substitui o `PopupMenuButton`
-  /// padrão do Flutter, que era simples demais e ocupava muito espaço com
-  /// pouca identidade visual.
+  /// Bottom sheet do overflow — substitui o `PopupMenuButton` padrão do
+  /// Flutter por um sheet na anatomia da casa.
   ///
   /// Estrutura:
-  /// - Header gradient + ícone + título + descrição + close
-  /// - Itens em "tiles" com chip de ícone colorido (cor distinta por intent)
-  /// - Item destacado de Busca IA (gradient premium)
-  /// - Sections separadas por divisor sutil
+  /// - Grabber + header editorial (eyebrow PORTFÓLIO, título, meta com o
+  ///   tamanho da carteira carregada, fechar)
+  /// - Divisor gradient
+  /// - Tiles ricos com cor por significado: rascunhos (âmbar), métricas
+  ///   (violeta) e exportar/importar (teal)
   void _showPropertiesOverflowSheet(BuildContext context) {
     showModalBottomSheet<String>(
       context: context,
@@ -498,8 +496,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
       barrierColor: Colors.black54,
       backgroundColor: Colors.transparent,
       builder: (sheetCtx) => _PropertiesOverflowSheet(
-        hasActiveFilters: _filters != null && _hasActiveFilters(),
         localDraftCount: _localDraftCount,
+        loadedCount: _properties.length,
+        totalCount: _total,
       ),
     ).then((value) {
       if (value == null || !mounted) return;
@@ -509,48 +508,11 @@ class _PropertiesPageState extends State<PropertiesPage> {
 
   void _handlePropertiesOverflowAction(String value) {
     switch (value) {
-      case 'search':
-        _showSearchBottomSheet(context);
-        break;
-      case 'ai_search':
-        showModalBottomSheet<void>(
-          context: context,
-          isScrollControlled: true,
-          useSafeArea: true,
-          barrierColor: Colors.black54,
-          shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          clipBehavior: Clip.antiAlias,
-          builder: (context) => IntelligentSearchModal(
-            onResults: (results) {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    '${results.results.length} propriedades encontradas',
-                  ),
-                  action: SnackBarAction(
-                    label: 'Ver Resultados',
-                    onPressed: () {},
-                  ),
-                ),
-              );
-            },
-          ),
-        );
-        break;
       case 'drafts':
         _openLocalDrafts();
         break;
       case 'portfolio_metrics':
         _showPortfolioOverflowMetricsSheet(context);
-        break;
-      case 'optimize':
-        _showOptimizationDialog(context);
-        break;
-      case 'offers':
-        Navigator.of(context).pushNamed(AppRoutes.propertyOffers);
         break;
       case 'export_import':
         showModalBottomSheet(
@@ -749,9 +711,10 @@ class _PropertiesPageState extends State<PropertiesPage> {
     );
   }
 
-  /// Chip strip por status do portfólio (Todos / Disponíveis / Vendidos /
-  /// Pendentes / Recusados). Em `Wrap` — sem scroll horizontal; quando
-  /// não couber, quebra pra linha de baixo.
+  /// Grade alinhada de escopos do portfólio (Todos / Disponíveis / Vendidos /
+  /// Pendentes / Recusados). Linhas de `Row` com `Expanded` — todas as
+  /// células com a mesma largura e altura, sem os buracos do antigo `Wrap`.
+  /// A última linha ganha células vazias pra fechar o alinhamento da grade.
   Widget _buildPortfolioScopeStrip(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
@@ -794,19 +757,43 @@ class _PropertiesPageState extends State<PropertiesPage> {
       ),
     ];
 
-    return Wrap(
-      spacing: 6,
-      runSpacing: 6,
+    const perRow = 3;
+    final rows = <List<_ScopeChipData?>>[];
+    for (var i = 0; i < chips.length; i += perRow) {
+      final row = List<_ScopeChipData?>.filled(perRow, null);
+      for (var j = 0; j < perRow && i + j < chips.length; j++) {
+        row[j] = chips[i + j];
+      }
+      rows.add(row);
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final c in chips)
-          _PortfolioScopeChip(
-            label: c.label,
-            icon: c.icon,
-            active: c.active,
-            tone: c.tone,
-            isDark: isDark,
-            onTap: c.onTap,
+        for (var r = 0; r < rows.length; r++) ...[
+          if (r > 0) const SizedBox(height: 8),
+          Row(
+            children: [
+              for (var c = 0; c < perRow; c++) ...[
+                if (c > 0) const SizedBox(width: 8),
+                Expanded(
+                  child: rows[r][c] == null
+                      // Célula vazia — mantém a largura das colunas na
+                      // última linha incompleta.
+                      ? const SizedBox(height: _PortfolioScopeChip.height)
+                      : _PortfolioScopeChip(
+                          label: rows[r][c]!.label,
+                          icon: rows[r][c]!.icon,
+                          active: rows[r][c]!.active,
+                          tone: rows[r][c]!.tone,
+                          isDark: isDark,
+                          onTap: rows[r][c]!.onTap,
+                        ),
+                ),
+              ],
+            ],
           ),
+        ],
       ],
     );
   }
@@ -1578,287 +1565,6 @@ class _PropertiesPageState extends State<PropertiesPage> {
     );
   }
 
-  /// Modal de Otimização de Portfólio — bottom sheet premium com cards
-  /// selecionáveis em vez de `RadioListTile`. Cada foco tem cor própria,
-  /// ícone temático e descrição. Botão "Otimizar" é o CTA destacado.
-  void _showOptimizationDialog(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      barrierColor: Colors.black54,
-      backgroundColor: Colors.transparent,
-      builder: (sheetCtx) => _PortfolioOptimizationSheet(
-        onSubmit: (focus) async {
-          final scaffold = ScaffoldMessenger.of(context);
-          try {
-            final aiService = AiService.instance;
-            final response = await aiService.optimizePortfolio(
-              PortfolioOptimizationRequest(focus: focus),
-            );
-            if (!context.mounted) return;
-            Navigator.pop(sheetCtx);
-            if (response.success && response.data != null) {
-              _showOptimizationResults(context, response.data!);
-            } else {
-              scaffold.showSnackBar(
-                SnackBar(
-                  content: Text(
-                    response.message ?? 'Erro ao otimizar portfólio',
-                  ),
-                  backgroundColor: AppColors.status.error,
-                ),
-              );
-            }
-          } catch (e) {
-            debugPrint('Erro na otimização: $e');
-            if (!context.mounted) return;
-            Navigator.pop(sheetCtx);
-            scaffold.showSnackBar(
-              const SnackBar(
-                content: Text('Erro ao conectar com o servidor'),
-              ),
-            );
-          }
-        },
-      ),
-    );
-  }
-
-  void _showOptimizationResults(BuildContext context, dynamic results) {
-    final theme = Theme.of(context);
-
-    if (results is List<PortfolioOptimizationResponse>) {
-      // Múltiplas propriedades
-      final resultsList = results;
-      showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        useSafeArea: true,
-        barrierColor: Colors.black54,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        clipBehavior: Clip.antiAlias,
-        builder: (context) => Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-          ),
-          child: Container(
-            padding: const EdgeInsets.all(20),
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.9,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Resultados da Otimização',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -0.25,
-                            ),
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.pop(context),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: resultsList.length,
-                    itemBuilder: (context, index) {
-                      final result = resultsList[index];
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        child: ListTile(
-                          title: Text(result.propertyTitle),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Score: ${result.priorityScore.toStringAsFixed(1)}%',
-                              ),
-                              if (result.recommendedActions.isNotEmpty)
-                                Text(
-                                  result.recommendedActions.first,
-                                  style: theme.textTheme.bodySmall,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                            ],
-                          ),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.arrow_forward),
-                            onPressed: () {
-                              Navigator.pop(context);
-                              Navigator.of(
-                                context,
-                              ).pushNamed(
-                                AppRoutes.propertyDetails(result.propertyId),
-                              );
-                            },
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close),
-                    label: const Text('Fechar'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    } else if (results is PortfolioOptimizationResponse) {
-      // Uma única propriedade
-      final result = results;
-      showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        useSafeArea: true,
-        barrierColor: Colors.black54,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        clipBehavior: Clip.antiAlias,
-        builder: (context) => Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-          ),
-          child: Container(
-            padding: const EdgeInsets.all(20),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Resultados da Otimização',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.25,
-                              ),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.pop(context),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    result.propertyTitle,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Score: ${result.priorityScore.toStringAsFixed(1)}%',
-                    style: theme.textTheme.bodyLarge,
-                  ),
-                  if (result.recommendedActions.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    Text(
-                      'Ações Recomendadas:',
-                      style: theme.textTheme.titleSmall,
-                    ),
-                    const SizedBox(height: 8),
-                    ...result.recommendedActions.map(
-                      (action) => Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.only(top: 2),
-                              child: Icon(
-                                Icons.chevron_right_rounded,
-                                size: 16,
-                                color: theme.colorScheme.primary,
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: Text(
-                                action,
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  height: 1.38,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 20),
-                  Column(
-                    children: [
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: () {
-                            Navigator.pop(context);
-                            Navigator.of(
-                              context,
-                            ).pushNamed(
-                              AppRoutes.propertyDetails(result.propertyId),
-                            );
-                          },
-                          icon: const Icon(Icons.visibility),
-                          label: const Text('Ver Propriedade'),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () => Navigator.pop(context),
-                          icon: const Icon(Icons.close),
-                          label: const Text('Fechar'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-  }
-
   /// Esqueleto cobrindo a tela inteira — hero, KPIs, carrossel de
   /// "Adicionados recentemente" e grid. Mantém a sensação de uma única
   /// transição de carregamento → conteúdo (em vez de hero pronto + lista
@@ -2159,34 +1865,6 @@ class _PropertiesPageState extends State<PropertiesPage> {
         _filters!.maxArea != null;
   }
 
-  /// Modal de Busca Rápida — bottom sheet premium com input estilizado e
-  /// chips de busca recente/sugerida. Substitui o `TextField` padrão Material
-  /// por um campo customizado coerente com o restante do app.
-  void _showSearchBottomSheet(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      barrierColor: Colors.black54,
-      backgroundColor: Colors.transparent,
-      builder: (sheetCtx) => _PropertiesSearchSheet(
-        controller: _searchController,
-        currentQuery: _searchQuery,
-        onSubmit: (q) {
-          Navigator.of(sheetCtx).pop();
-          _performSearch(q);
-        },
-        onClear: () {
-          _searchController.clear();
-          setState(() => _searchQuery = '');
-          _persistState();
-          Navigator.of(sheetCtx).pop();
-          _reloadList(refreshStats: false);
-        },
-      ),
-    );
-  }
-
   void _performSearch(String query) {
     final trimmed = query.trim();
     if (trimmed == _searchQuery) return;
@@ -2279,30 +1957,27 @@ class _PropertiesPageState extends State<PropertiesPage> {
               valueListenable: _searchRefreshingNotifier,
               builder: (context, refreshing, _) {
                 final hasText = value.text.trim().isNotEmpty;
+                // UMA superfície só: o fill vive apenas neste Container.
+                // (O tema global tem `filled: true` no InputDecorationTheme;
+                // sem `filled: false` no TextField interno ele pintava um
+                // segundo fundo e o campo ficava com duas cores.)
                 final fieldFill = isDark
-                    ? AppColors.background.backgroundTertiaryDarkMode
+                    ? Colors.white.withValues(alpha: 0.05)
                     : AppColors.background.backgroundTertiary;
                 return Container(
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(14),
-                    color: hasText
-                        ? Color.alphaBlend(
-                            accent.withValues(alpha: isDark ? 0.08 : 0.04),
-                            fieldFill,
-                          )
-                        : fieldFill,
+                    color: fieldFill,
                     border: Border.all(
-                      color: hasText
-                          ? accent.withValues(alpha: isDark ? 0.50 : 0.38)
-                          : ThemeHelpers.borderLightColor(context),
-                      width: hasText ? 1.4 : 1,
+                      color: ThemeHelpers.borderColor(context)
+                          .withValues(alpha: 0.4),
                     ),
                   ),
                   child: Row(
                     children: [
                       const SizedBox(width: 14),
-                      // Ícone integrado (sem caixa) — mudo quando vazio, accent
-                      // quando há busca. Evita o "box dentro do box".
+                      // Ícone integrado à superfície — sempre na cor
+                      // secundária; o spinner só o substitui na busca.
                       refreshing
                           ? SizedBox(
                               width: 20,
@@ -2314,10 +1989,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
                             )
                           : Icon(
                               Icons.search_rounded,
-                              size: 21,
-                              color: hasText
-                                  ? accent
-                                  : ThemeHelpers.textSecondaryColor(context),
+                              size: 20,
+                              color:
+                                  ThemeHelpers.textSecondaryColor(context),
                             ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -2336,12 +2010,15 @@ class _PropertiesPageState extends State<PropertiesPage> {
                               color: ThemeHelpers.textSecondaryColor(context),
                               fontWeight: FontWeight.w500,
                             ),
+                            // Sem decoração de fundo própria — o fill do
+                            // tema global é desligado aqui.
+                            filled: false,
                             border: InputBorder.none,
                             enabledBorder: InputBorder.none,
                             focusedBorder: InputBorder.none,
                             isDense: true,
                             contentPadding:
-                                const EdgeInsets.symmetric(vertical: 13),
+                                const EdgeInsets.symmetric(vertical: 14),
                           ),
                           onChanged: _onSearchChanged,
                           onSubmitted: (v) {
@@ -3735,39 +3412,53 @@ class _PropertiesPageState extends State<PropertiesPage> {
 }
 
 // ============================================================================
-// OVERFLOW SHEET — premium bottom sheet do menu de "mais opções" da tela
+// OVERFLOW SHEET — bottom sheet do menu "mais opções" da tela
 // ============================================================================
 
 /// Bottom sheet que substitui o `PopupMenu` do botão `more_vert` no AppBar.
 ///
-/// Visual com **identidade própria** ao invés do menu plano padrão do Material:
-/// - Header com gradient diagonal (accent → cool) + ícone-orb + título +
-///   subtítulo + close
-/// - Items agrupados em seções (cada seção com label minúsculo uppercase)
-/// - Cada tile tem chip de ícone tinted na cor da intent
-/// - Item especial de Busca IA com gradient premium e badge
-/// - Animação de entrada padrão de modal sheet (sliding from bottom)
+/// Anatomia da casa, enxuta e editorial:
+/// - Grabber 42×4 + header com eyebrow `PORTFÓLIO`, título forte, linha de
+///   meta com o contexto da carteira ("N imóveis carregados") e fechar
+/// - Divisor gradient
+/// - Tiles ricos: roundel tinted na cor por significado + título + subtítulo
+///   informativo + chevron, separados por hairline recuada (alinhada ao
+///   início do texto, sem "cortar" a coluna dos roundels)
 class _PropertiesOverflowSheet extends StatelessWidget {
-  final bool hasActiveFilters;
   final int localDraftCount;
+  final int loadedCount;
+  final int totalCount;
 
   const _PropertiesOverflowSheet({
-    required this.hasActiveFilters,
     required this.localDraftCount,
+    required this.loadedCount,
+    required this.totalCount,
   });
+
+  /// Meta discreta do header — contexto real da listagem já carregada.
+  String get _metaLine {
+    if (loadedCount <= 0) return 'Nenhum imóvel carregado';
+    if (totalCount > loadedCount) {
+      return '${_compactIntFormatter.format(loadedCount)} de '
+          '${_compactIntFormatter.format(totalCount)} imóveis carregados';
+    }
+    return loadedCount == 1
+        ? '1 imóvel carregado'
+        : '${_compactIntFormatter.format(loadedCount)} imóveis carregados';
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final mq = MediaQuery.of(context);
+    final muted = ThemeHelpers.textSecondaryColor(context);
 
     return SafeArea(
       top: false,
       child: Container(
         // Sheet ocupa 100% da horizontal — bordas arredondadas só no topo
-        // (estilo bottom sheet "atracado"). Sem margens laterais para
-        // máximo respiro do conteúdo interno.
+        // (estilo bottom sheet "atracado").
         decoration: BoxDecoration(
           color: ThemeHelpers.cardBackgroundColor(context),
           borderRadius: const BorderRadius.vertical(
@@ -3794,69 +3485,59 @@ class _PropertiesOverflowSheet extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // ── Drag handle ───────────────────────────────────────────
-              Container(
-                padding: const EdgeInsets.only(top: 10, bottom: 4),
-                child: Center(
-                  child: Container(
-                    width: 42,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(999),
-                      color: ThemeHelpers.textSecondaryColor(context)
-                          .withValues(alpha: 0.32),
-                    ),
+              // ── Grabber ──────────────────────────────────────────────
+              Center(
+                child: Container(
+                  width: 42,
+                  height: 4,
+                  margin: const EdgeInsets.only(top: 10, bottom: 6),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(999),
+                    color: muted.withValues(alpha: 0.32),
                   ),
                 ),
               ),
-              // ── Header neutro ────────────────────────────────────────
-              // Ícone principal sem gradient — minimalista e default. Os
-              // tiles abaixo é que carregam a cor (cada um na sua intent),
-              // criando contraste com o header neutro.
+              // ── Header editorial ─────────────────────────────────────
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 8, 14),
+                padding: const EdgeInsets.fromLTRB(22, 8, 10, 14),
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(13),
-                        color: ThemeHelpers.textSecondaryColor(context)
-                            .withValues(alpha: isDark ? 0.14 : 0.08),
-                        border: Border.all(
-                          color: ThemeHelpers.borderColor(context),
-                        ),
-                      ),
-                      child: Icon(
-                        Icons.tune_rounded,
-                        color: ThemeHelpers.textColor(context),
-                        size: 22,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            'Mais opções',
-                            style: theme.textTheme.titleMedium?.copyWith(
+                            'PORTFÓLIO',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: AppColors.primary.primary,
                               fontWeight: FontWeight.w900,
-                              letterSpacing: -0.3,
-                              height: 1.1,
+                              letterSpacing: 1.6,
+                              fontSize: 10,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            'Ações do portfólio',
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.45,
+                              height: 1.08,
+                              fontSize: 19,
                               color: ThemeHelpers.textColor(context),
                             ),
                           ),
-                          const SizedBox(height: 2),
+                          const SizedBox(height: 3),
                           Text(
-                            'Busca, métricas, rascunhos e exportações',
+                            _metaLine,
                             style: theme.textTheme.bodySmall?.copyWith(
                               fontWeight: FontWeight.w600,
-                              color: ThemeHelpers.textSecondaryColor(context),
+                              fontSize: 11.5,
+                              height: 1.3,
+                              color: muted,
                             ),
-                            maxLines: 2,
+                            maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ],
@@ -3865,15 +3546,16 @@ class _PropertiesOverflowSheet extends StatelessWidget {
                     IconButton(
                       icon: const Icon(Icons.close_rounded),
                       tooltip: 'Fechar',
+                      color: muted,
                       onPressed: () => Navigator.of(context).pop(),
                     ),
                   ],
                 ),
               ),
-              // Linha gradient horizontal — separador estiloso do header
+              // ── Divisor gradient ─────────────────────────────────────
               Container(
                 height: 1,
-                margin: const EdgeInsets.symmetric(horizontal: 16),
+                margin: const EdgeInsets.symmetric(horizontal: 18),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
@@ -3885,75 +3567,46 @@ class _PropertiesOverflowSheet extends StatelessWidget {
                   ),
                 ),
               ),
-              // ── Body ─────────────────────────────────────────────────
+              // ── Tiles ────────────────────────────────────────────────
               Padding(
                 padding: EdgeInsets.fromLTRB(
+                  8,
                   10,
-                  10,
-                  10,
-                  10 + mq.padding.bottom * 0.3,
+                  8,
+                  12 + mq.padding.bottom * 0.3,
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // ── Seção: Buscar ───────────────────────────────────
-                    _SectionLabel(label: 'Buscar'),
-                    _OverflowTile(
-                      icon: Icons.search_rounded,
-                      label: 'Busca rápida',
-                      subtitle: 'Endereço, bairro, condomínio, lote, código…',
-                      color: const Color(0xFF0891B2), // cyan
-                      onTap: () => Navigator.of(context).pop('search'),
-                    ),
-                    _OverflowAiTile(
-                      onTap: () => Navigator.of(context).pop('ai_search'),
-                    ),
-                    const SizedBox(height: 10),
-                    _SectionLabel(label: 'Trabalho em andamento'),
                     _OverflowTile(
                       icon: Icons.folder_special_rounded,
                       label: 'Rascunhos',
                       subtitle: localDraftCount > 0
-                          ? '$localDraftCount imóvel(eis) salvo(s) localmente'
-                          : 'Sem rascunhos pendentes',
-                      color: const Color(0xFFF59E0B), // âmbar
-                      trailingBadge: localDraftCount > 0
-                          ? '$localDraftCount'
-                          : null,
+                          ? '$localDraftCount rascunho'
+                              '${localDraftCount > 1 ? 's' : ''} salvo'
+                              '${localDraftCount > 1 ? 's' : ''} neste aparelho'
+                          : 'Cadastros começados ficam guardados aqui',
+                      color: const Color(0xFFE6B84C),
+                      trailingBadge:
+                          localDraftCount > 0 ? '$localDraftCount' : null,
                       onTap: () => Navigator.of(context).pop('drafts'),
                     ),
-                    const SizedBox(height: 10),
-                    _SectionLabel(label: 'Portfolio'),
+                    const _OverflowHairline(),
                     _OverflowTile(
                       icon: Icons.insights_rounded,
                       label: 'Métricas detalhadas',
-                      subtitle: 'KPIs avançados do portfolio',
-                      color: const Color(0xFF8B5CF6), // roxo
-                      onTap: () => Navigator.of(context).pop('portfolio_metrics'),
+                      subtitle: 'KPIs, distribuição e panorama da carteira',
+                      color: const Color(0xFF8B5CF6),
+                      onTap: () =>
+                          Navigator.of(context).pop('portfolio_metrics'),
                     ),
-                    _OverflowTile(
-                      icon: Icons.trending_up_rounded,
-                      label: 'Otimizar portfolio',
-                      subtitle: 'Sugestões para melhorar conversão',
-                      color: const Color(0xFF10B981), // verde
-                      onTap: () => Navigator.of(context).pop('optimize'),
-                    ),
-                    const SizedBox(height: 10),
-                    _SectionLabel(label: 'Operações'),
-                    _OverflowTile(
-                      icon: Icons.request_quote_rounded,
-                      label: 'Ver ofertas',
-                      subtitle: 'Negociações em andamento',
-                      color: const Color(0xFF6366F1), // indigo
-                      onTap: () => Navigator.of(context).pop('offers'),
-                    ),
+                    const _OverflowHairline(),
                     _OverflowTile(
                       icon: Icons.import_export_rounded,
                       label: 'Exportar / Importar',
-                      subtitle: 'Planilhas e backups',
-                      color: ThemeHelpers.textSecondaryColor(context),
-                      neutral: true,
+                      subtitle: 'Backup em planilha e carga em massa',
+                      color: const Color(0xFF14B8A6),
                       onTap: () => Navigator.of(context).pop('export_import'),
                     ),
                   ],
@@ -3967,27 +3620,24 @@ class _PropertiesOverflowSheet extends StatelessWidget {
   }
 }
 
-class _SectionLabel extends StatelessWidget {
-  final String label;
-  const _SectionLabel({required this.label});
+/// Hairline recuada entre tiles do overflow — começa onde o texto começa
+/// (após o roundel), separando sem atravessar a coluna dos ícones.
+class _OverflowHairline extends StatelessWidget {
+  const _OverflowHairline();
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
-      child: Text(
-        label.toUpperCase(),
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.1,
-              fontSize: 9.5,
-            ),
-      ),
+    return Container(
+      height: 1,
+      margin: const EdgeInsets.only(left: 66, right: 14),
+      color: ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
     );
   }
 }
 
+/// Tile rico do overflow — roundel 40 tinted na cor por significado,
+/// título forte, subtítulo informativo e chevron (badge opcional antes
+/// do chevron, usado pela contagem de rascunhos).
 class _OverflowTile extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -3995,7 +3645,6 @@ class _OverflowTile extends StatelessWidget {
   final Color color;
   final VoidCallback onTap;
   final String? trailingBadge;
-  final bool neutral;
 
   const _OverflowTile({
     required this.icon,
@@ -4004,7 +3653,6 @@ class _OverflowTile extends StatelessWidget {
     required this.color,
     required this.onTap,
     this.trailingBadge,
-    this.neutral = false,
   });
 
   @override
@@ -4018,24 +3666,24 @@ class _OverflowTile extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(14),
+        splashColor: color.withValues(alpha: 0.10),
+        highlightColor: color.withValues(alpha: 0.05),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
             children: [
-              // Chip do ícone tinted na cor da intent
+              // Roundel tinted na cor por significado
               Container(
-                width: 38,
-                height: 38,
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(11),
-                  color: neutral
-                      ? color.withValues(alpha: isDark ? 0.16 : 0.10)
-                      : color.withValues(alpha: isDark ? 0.18 : 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                  color: color.withValues(alpha: isDark ? 0.18 : 0.12),
                   border: Border.all(
-                    color: color.withValues(alpha: isDark ? 0.32 : 0.22),
+                    color: color.withValues(alpha: isDark ? 0.34 : 0.24),
                   ),
                 ),
-                child: Icon(icon, color: color, size: 19),
+                child: Icon(icon, color: color, size: 20),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -4047,6 +3695,7 @@ class _OverflowTile extends StatelessWidget {
                       label,
                       style: theme.textTheme.bodyMedium?.copyWith(
                         fontWeight: FontWeight.w800,
+                        fontSize: 14.5,
                         letterSpacing: -0.15,
                         height: 1.2,
                         color: ThemeHelpers.textColor(context),
@@ -4070,7 +3719,7 @@ class _OverflowTile extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              if (trailingBadge != null)
+              if (trailingBadge != null) ...[
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 8,
@@ -4092,936 +3741,13 @@ class _OverflowTile extends StatelessWidget {
                       height: 1,
                     ),
                   ),
-                )
-              else
-                Icon(
-                  Icons.chevron_right_rounded,
-                  color: muted,
-                  size: 22,
                 ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Tile especial de "Busca IA" — premium gradient + badge "novo".
-class _OverflowAiTile extends StatelessWidget {
-  final VoidCallback onTap;
-
-  const _OverflowAiTile({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final accent = AppColors.primary.primary;
-    const cool = Color(0xFF0891B2);
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-          padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: isDark
-                  ? [
-                      accent.withValues(alpha: 0.22),
-                      cool.withValues(alpha: 0.16),
-                    ]
-                  : [
-                      accent.withValues(alpha: 0.12),
-                      cool.withValues(alpha: 0.08),
-                    ],
-            ),
-            border: Border.all(
-              color: accent.withValues(alpha: isDark ? 0.45 : 0.32),
-              width: 1.2,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: accent.withValues(alpha: isDark ? 0.22 : 0.10),
-                blurRadius: 14,
-                spreadRadius: -3,
-                offset: const Offset(0, 5),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(11),
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [accent, Color.lerp(accent, cool, 0.55)!],
-                  ),
-                ),
-                child: const Icon(
-                  Icons.auto_awesome_rounded,
-                  color: Colors.white,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            'Busca inteligente',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.2,
-                              color: ThemeHelpers.textColor(context),
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(999),
-                            color: accent,
-                          ),
-                          child: const Text(
-                            'IA',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w900,
-                              fontSize: 9.5,
-                              letterSpacing: 0.4,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Descreva o imóvel em linguagem natural',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: ThemeHelpers.textSecondaryColor(context),
-                        height: 1.3,
-                        fontSize: 11.5,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
+                const SizedBox(width: 4),
+              ],
               Icon(
                 Icons.chevron_right_rounded,
-                color: accent,
-                size: 22,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ============================================================================
-// SEARCH SHEET — modal de Busca Rápida com input customizado
-// ============================================================================
-
-/// Bottom sheet premium da Busca Rápida. Substitui o `TextField` Material
-/// padrão por um input customizado coerente com o resto do app.
-class _PropertiesSearchSheet extends StatefulWidget {
-  final TextEditingController controller;
-  final String currentQuery;
-  final ValueChanged<String> onSubmit;
-  final VoidCallback onClear;
-
-  const _PropertiesSearchSheet({
-    required this.controller,
-    required this.currentQuery,
-    required this.onSubmit,
-    required this.onClear,
-  });
-
-  @override
-  State<_PropertiesSearchSheet> createState() => _PropertiesSearchSheetState();
-}
-
-class _PropertiesSearchSheetState extends State<_PropertiesSearchSheet> {
-  late final FocusNode _focus;
-
-  /// Sugestões rápidas de busca — atalhos reais que cobrem 80% dos casos.
-  static const _suggestions = <({String label, IconData icon})>[
-    (label: 'Casa', icon: Icons.home_rounded),
-    (label: 'Apartamento', icon: Icons.apartment_rounded),
-    (label: 'Sala comercial', icon: Icons.business_rounded),
-    (label: 'Terreno', icon: Icons.landscape_rounded),
-    (label: 'Galpão', icon: Icons.warehouse_rounded),
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _focus = FocusNode();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focus.requestFocus();
-    });
-  }
-
-  @override
-  void dispose() {
-    _focus.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final accent = AppColors.primary.primary;
-    final mq = MediaQuery.of(context);
-
-    return Padding(
-      padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
-      child: SafeArea(
-        top: false,
-        child: Container(
-          margin: const EdgeInsets.fromLTRB(10, 0, 10, 12),
-          decoration: BoxDecoration(
-            color: ThemeHelpers.cardBackgroundColor(context),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.45 : 0.08),
-                blurRadius: 18,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(24),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(18, 8, 12, 18),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 38,
-                      height: 4,
-                      margin: const EdgeInsets.only(top: 4, bottom: 12),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(999),
-                        color: ThemeHelpers.textSecondaryColor(context)
-                            .withValues(alpha: 0.32),
-                      ),
-                    ),
-                  ),
-                  // ── Header neutro (mesma estética do overflow) ─────────
-                  Row(
-                    children: [
-                      Container(
-                        width: 42,
-                        height: 42,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(13),
-                          color: ThemeHelpers.textSecondaryColor(context)
-                              .withValues(alpha: isDark ? 0.14 : 0.08),
-                          border: Border.all(
-                            color: ThemeHelpers.borderColor(context),
-                          ),
-                        ),
-                        child: Icon(
-                          Icons.search_rounded,
-                          color: ThemeHelpers.textColor(context),
-                          size: 22,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              'Busca rápida',
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: -0.3,
-                                height: 1.1,
-                                color: ThemeHelpers.textColor(context),
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Por endereço, bairro, condomínio, lote ou código',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                fontWeight: FontWeight.w600,
-                                color: ThemeHelpers.textSecondaryColor(
-                                  context,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close_rounded),
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  // ── Input customizado ─────────────────────────────────
-                  AnimatedBuilder(
-                    animation: Listenable.merge([
-                      widget.controller,
-                      _focus,
-                    ]),
-                    builder: (context, _) {
-                      final hasText = widget.controller.text.isNotEmpty;
-                      final focused = _focus.hasFocus;
-                      final highlighted = focused || hasText;
-                      return Container(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(14),
-                          color: highlighted
-                              ? Color.alphaBlend(
-                                  accent.withValues(
-                                    alpha: isDark ? 0.10 : 0.05,
-                                  ),
-                                  ThemeHelpers.cardBackgroundColor(context),
-                                )
-                              : ThemeHelpers.cardBackgroundColor(context),
-                          border: Border.all(
-                            color: highlighted
-                                ? accent.withValues(
-                                    alpha: isDark ? 0.6 : 0.42,
-                                  )
-                                : ThemeHelpers.borderColor(context),
-                            width: highlighted ? 1.4 : 1,
-                          ),
-                          boxShadow: highlighted
-                              ? [
-                                  BoxShadow(
-                                    color: accent.withValues(
-                                      alpha: isDark ? 0.16 : 0.08,
-                                    ),
-                                    blurRadius: 12,
-                                    spreadRadius: -3,
-                                    offset: const Offset(0, 4),
-                                  ),
-                                ]
-                              : null,
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 4,
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.search_rounded,
-                                size: 20,
-                                color: highlighted
-                                    ? accent
-                                    : ThemeHelpers.textSecondaryColor(
-                                        context,
-                                      ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: TextField(
-                                  controller: widget.controller,
-                                  focusNode: _focus,
-                                  textInputAction: TextInputAction.search,
-                                  style: theme.textTheme.bodyMedium?.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                    height: 1.2,
-                                    color: ThemeHelpers.textColor(context),
-                                  ),
-                                  decoration: InputDecoration(
-                                    hintText:
-                                        'Buscar por endereço, bairro, condomínio, lote, código…',
-                                    hintStyle:
-                                        theme.textTheme.bodyMedium?.copyWith(
-                                      color:
-                                          ThemeHelpers.textSecondaryColor(
-                                            context,
-                                          ),
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                    border: InputBorder.none,
-                                    enabledBorder: InputBorder.none,
-                                    focusedBorder: InputBorder.none,
-                                    isDense: true,
-                                    contentPadding:
-                                        const EdgeInsets.symmetric(
-                                          horizontal: 0,
-                                          vertical: 14,
-                                        ),
-                                  ),
-                                  onSubmitted: widget.onSubmit,
-                                ),
-                              ),
-                              if (hasText)
-                                IconButton(
-                                  icon: Icon(
-                                    Icons.clear_rounded,
-                                    size: 18,
-                                    color: ThemeHelpers.textSecondaryColor(
-                                      context,
-                                    ),
-                                  ),
-                                  visualDensity: VisualDensity.compact,
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(
-                                    minWidth: 32,
-                                    minHeight: 32,
-                                  ),
-                                  onPressed: () {
-                                    widget.controller.clear();
-                                    setState(() {});
-                                  },
-                                ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 14),
-                  // ── Sugestões rápidas (chips horizontais) ─────────────
-                  Text(
-                    'SUGESTÕES',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.1,
-                      fontSize: 9.5,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: _suggestions
-                        .map(
-                          (s) => _buildSuggestionChip(
-                            theme: theme,
-                            isDark: isDark,
-                            accent: accent,
-                            label: s.label,
-                            icon: s.icon,
-                          ),
-                        )
-                        .toList(),
-                  ),
-                  const SizedBox(height: 18),
-                  // ── Ações ─────────────────────────────────────────────
-                  Row(
-                    children: [
-                      if (widget.currentQuery.isNotEmpty ||
-                          widget.controller.text.isNotEmpty)
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: widget.onClear,
-                            icon: const Icon(Icons.clear_all_rounded),
-                            label: const Text('Limpar busca'),
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                vertical: 13,
-                              ),
-                              side: BorderSide(
-                                color: ThemeHelpers.borderColor(context),
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(13),
-                              ),
-                            ),
-                          ),
-                        ),
-                      if (widget.currentQuery.isNotEmpty ||
-                          widget.controller.text.isNotEmpty)
-                        const SizedBox(width: 10),
-                      Expanded(
-                        flex: 2,
-                        child: ElevatedButton.icon(
-                          onPressed: () =>
-                              widget.onSubmit(widget.controller.text),
-                          icon: const Icon(Icons.search_rounded),
-                          label: const Text('Buscar'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: accent,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 13,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(13),
-                            ),
-                            elevation: 0,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSuggestionChip({
-    required ThemeData theme,
-    required bool isDark,
-    required Color accent,
-    required String label,
-    required IconData icon,
-  }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () {
-          widget.controller.text = label;
-          widget.controller.selection = TextSelection.fromPosition(
-            TextPosition(offset: label.length),
-          );
-          setState(() {});
-          _focus.requestFocus();
-        },
-        borderRadius: BorderRadius.circular(999),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(999),
-            color: ThemeHelpers.cardBackgroundColor(context).withValues(
-              alpha: isDark ? 0.7 : 1,
-            ),
-            border: Border.all(
-              color: ThemeHelpers.borderColor(context),
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                icon,
-                size: 14,
-                color: ThemeHelpers.textSecondaryColor(context),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: ThemeHelpers.textColor(context),
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.05,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ============================================================================
-// PORTFOLIO OPTIMIZATION SHEET — modal de Otimizar com cards selecionáveis
-// ============================================================================
-
-class _PortfolioOptimizationFocus {
-  final String key;
-  final String title;
-  final String description;
-  final IconData icon;
-  final Color color;
-
-  const _PortfolioOptimizationFocus({
-    required this.key,
-    required this.title,
-    required this.description,
-    required this.icon,
-    required this.color,
-  });
-}
-
-/// Modal de Otimização de Portfólio. Substitui os `RadioListTile` Material
-/// padrão por cards selecionáveis com identidade visual (ícone tinted, cor
-/// por foco, estado selecionado com borda destacada).
-class _PortfolioOptimizationSheet extends StatefulWidget {
-  final Future<void> Function(String focus) onSubmit;
-
-  const _PortfolioOptimizationSheet({required this.onSubmit});
-
-  @override
-  State<_PortfolioOptimizationSheet> createState() =>
-      _PortfolioOptimizationSheetState();
-}
-
-class _PortfolioOptimizationSheetState
-    extends State<_PortfolioOptimizationSheet> {
-  String? _selected;
-  bool _running = false;
-
-  static const _focuses = <_PortfolioOptimizationFocus>[
-    _PortfolioOptimizationFocus(
-      key: 'sales_speed',
-      title: 'Vendas rápidas',
-      description: 'Priorizar imóveis com maior potencial de venda imediata',
-      icon: Icons.bolt_rounded,
-      color: Color(0xFFF59E0B), // âmbar — agilidade
-    ),
-    _PortfolioOptimizationFocus(
-      key: 'profitability',
-      title: 'Maximizar lucro',
-      description: 'Priorizar imóveis com maior rentabilidade no portfólio',
-      icon: Icons.trending_up_rounded,
-      color: Color(0xFF10B981), // verde — dinheiro
-    ),
-    _PortfolioOptimizationFocus(
-      key: 'market_coverage',
-      title: 'Cobertura de mercado',
-      description: 'Distribuir presença por regiões e perfis variados',
-      icon: Icons.public_rounded,
-      color: Color(0xFF0891B2), // cyan — alcance
-    ),
-    _PortfolioOptimizationFocus(
-      key: 'balanced',
-      title: 'Balanceado',
-      description: 'Equilíbrio entre velocidade de venda e rentabilidade',
-      icon: Icons.balance_rounded,
-      color: Color(0xFF6366F1), // indigo — neutro
-    ),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final accent = AppColors.primary.primary;
-    final mq = MediaQuery.of(context);
-
-    return Padding(
-      padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
-      child: SafeArea(
-        top: false,
-        child: Container(
-          margin: const EdgeInsets.fromLTRB(10, 0, 10, 12),
-          decoration: BoxDecoration(
-            color: ThemeHelpers.cardBackgroundColor(context),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.45 : 0.08),
-                blurRadius: 18,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(24),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(18, 8, 12, 18),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 38,
-                      height: 4,
-                      margin: const EdgeInsets.only(top: 4, bottom: 12),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(999),
-                        color: ThemeHelpers.textSecondaryColor(context)
-                            .withValues(alpha: 0.32),
-                      ),
-                    ),
-                  ),
-                  Row(
-                    children: [
-                      Container(
-                        width: 42,
-                        height: 42,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(13),
-                          color: ThemeHelpers.textSecondaryColor(context)
-                              .withValues(alpha: isDark ? 0.14 : 0.08),
-                          border: Border.all(
-                            color: ThemeHelpers.borderColor(context),
-                          ),
-                        ),
-                        child: Icon(
-                          Icons.trending_up_rounded,
-                          color: ThemeHelpers.textColor(context),
-                          size: 22,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              'Otimizar portfolio',
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: -0.3,
-                                height: 1.1,
-                                color: ThemeHelpers.textColor(context),
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Selecione o foco e a IA prioriza ações',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                fontWeight: FontWeight.w600,
-                                color: ThemeHelpers.textSecondaryColor(
-                                  context,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close_rounded),
-                        onPressed: _running
-                            ? null
-                            : () => Navigator.of(context).pop(),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  // ── Cards selecionáveis ────────────────────────────────
-                  for (var i = 0; i < _focuses.length; i++) ...[
-                    if (i > 0) const SizedBox(height: 10),
-                    _buildFocusTile(
-                      context: context,
-                      theme: theme,
-                      isDark: isDark,
-                      focus: _focuses[i],
-                      selected: _selected == _focuses[i].key,
-                      onTap: _running
-                          ? null
-                          : () =>
-                              setState(() => _selected = _focuses[i].key),
-                    ),
-                  ],
-                  const SizedBox(height: 18),
-                  // ── CTA ─────────────────────────────────────────────────
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: _running
-                              ? null
-                              : () => Navigator.of(context).pop(),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 13),
-                            side: BorderSide(
-                              color: ThemeHelpers.borderColor(context),
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(13),
-                            ),
-                          ),
-                          child: const Text('Cancelar'),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        flex: 2,
-                        child: ElevatedButton.icon(
-                          onPressed: (_selected == null || _running)
-                              ? null
-                              : () async {
-                                  setState(() => _running = true);
-                                  await widget.onSubmit(_selected!);
-                                  if (mounted) {
-                                    setState(() => _running = false);
-                                  }
-                                },
-                          icon: _running
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation(
-                                      Colors.white,
-                                    ),
-                                  ),
-                                )
-                              : const Icon(Icons.auto_awesome_rounded),
-                          label: Text(_running ? 'Otimizando…' : 'Otimizar'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: accent,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 13),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(13),
-                            ),
-                            elevation: 0,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFocusTile({
-    required BuildContext context,
-    required ThemeData theme,
-    required bool isDark,
-    required _PortfolioOptimizationFocus focus,
-    required bool selected,
-    required VoidCallback? onTap,
-  }) {
-    final color = focus.color;
-    final disabled = onTap == null;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            color: selected
-                ? Color.alphaBlend(
-                    color.withValues(alpha: isDark ? 0.14 : 0.08),
-                    ThemeHelpers.cardBackgroundColor(context),
-                  )
-                : ThemeHelpers.cardBackgroundColor(context),
-            border: Border.all(
-              color: selected
-                  ? color.withValues(alpha: isDark ? 0.55 : 0.4)
-                  : ThemeHelpers.borderColor(context),
-              width: selected ? 1.5 : 1,
-            ),
-            boxShadow: selected
-                ? [
-                    BoxShadow(
-                      color: color.withValues(alpha: isDark ? 0.18 : 0.10),
-                      blurRadius: 12,
-                      spreadRadius: -3,
-                      offset: const Offset(0, 4),
-                    ),
-                  ]
-                : null,
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(11),
-                  color: color.withValues(alpha: isDark ? 0.20 : 0.12),
-                  border: Border.all(
-                    color: color.withValues(alpha: isDark ? 0.42 : 0.28),
-                  ),
-                ),
-                child: Icon(focus.icon, color: color, size: 19),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      focus.title,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.15,
-                        color: disabled
-                            ? ThemeHelpers.textSecondaryColor(context)
-                            : ThemeHelpers.textColor(context),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      focus.description,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: ThemeHelpers.textSecondaryColor(context),
-                        fontWeight: FontWeight.w500,
-                        fontSize: 11.5,
-                        height: 1.3,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              // Indicador de seleção — radio customizado
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                width: 22,
-                height: 22,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: selected ? color : Colors.transparent,
-                  border: Border.all(
-                    color: selected
-                        ? color
-                        : ThemeHelpers.borderColor(context),
-                    width: 2,
-                  ),
-                ),
-                child: selected
-                    ? const Icon(
-                        Icons.check_rounded,
-                        color: Colors.white,
-                        size: 14,
-                      )
-                    : null,
+                color: muted.withValues(alpha: 0.7),
+                size: 20,
               ),
             ],
           ),
@@ -6216,6 +4942,9 @@ class _ScopeChipData {
 }
 
 class _PortfolioScopeChip extends StatelessWidget {
+  /// Altura fixa da célula — todas as linhas da grade alinham por ela.
+  static const double height = 40;
+
   const _PortfolioScopeChip({
     required this.label,
     required this.icon,
@@ -6252,24 +4981,34 @@ class _PortfolioScopeChip extends StatelessWidget {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          height: height,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
             color: bg,
             borderRadius: BorderRadius.circular(999),
             border: Border.all(color: border, width: 1),
           ),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(icon, size: 14, color: fg),
               const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  color: fg,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 12.5,
-                  letterSpacing: -0.1,
+              // Nunca clipa: se a célula apertar, o rótulo escala pra baixo
+              // em vez de virar reticências.
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    softWrap: false,
+                    style: TextStyle(
+                      color: fg,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12.5,
+                      letterSpacing: -0.1,
+                    ),
+                  ),
                 ),
               ),
             ],

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/theme_helpers.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/constants/app_permissions.dart';
 import '../../features/notifications/controllers/notification_controller.dart';
@@ -10,8 +11,9 @@ import '../services/module_access_service.dart';
 /// Bottom Navigation Bar — design premium 2026.
 ///
 /// Características:
-///   • Superfície alinhada aos tokens do tema (card no topo, fundo na base),
-///     casando com a paleta do app em light e dark — não um navy próprio.
+///   • Superfície flush: cor sólida de card do tema (sem gradiente e sem
+///     sombra projetada), separada do conteúdo por uma única hairline no topo
+///     — casa com a paleta do app em light e dark.
 ///   • Spotlight radial deslizante + hairline da marca seguem o tab ativo.
 ///   • Item ativo: placa tingida na cor da marca (tone-plate, como no resto
 ///     do app) + ícone e label na cor da marca — sem bloco vermelho sólido.
@@ -119,19 +121,6 @@ class AppBottomNavigation extends StatelessWidget {
         ? AppColors.background.cardBackgroundDarkMode
         : AppColors.background.cardBackground;
 
-    // Superfície da barra alinhada aos tokens reais do tema (antes usava um
-    // navy #1B2030 que destoava do fundo do app). Topo = superfície de card,
-    // base = fundo da tela — mesma paleta do resto, light e dark.
-    final navTop = isDark
-        ? AppColors.background.cardBackgroundDarkMode
-        : AppColors.background.cardBackground;
-    final navBottom = isDark
-        ? AppColors.background.backgroundDarkMode
-        : AppColors.background.background;
-    final navBorder = isDark
-        ? AppColors.border.borderDarkMode
-        : AppColors.border.border;
-
     final bottomInset = MediaQuery.of(context).padding.bottom;
     final items = _resolveItems();
     final itemCount = items.length;
@@ -142,26 +131,16 @@ class AppBottomNavigation extends StatelessWidget {
         ? -2.0
         : (itemCount <= 1 ? 0 : (currentIndex / (itemCount - 1)) * 2 - 1);
 
+    // Superfície flush: cor sólida de card do tema, sem gradiente nem sombra
+    // projetada — a separação do conteúdo é uma única hairline no topo.
     return Container(
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [navTop, navBottom],
+        color: ThemeHelpers.cardBackgroundColor(context),
+        border: Border(
+          top: BorderSide(
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
+          ),
         ),
-        border: Border(top: BorderSide(color: navBorder, width: 0.8)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.38 : 0.06),
-            blurRadius: 30,
-            offset: const Offset(0, -10),
-          ),
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.16 : 0.03),
-            blurRadius: 6,
-            offset: const Offset(0, -2),
-          ),
-        ],
       ),
       child: SafeArea(
         top: false,
