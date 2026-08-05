@@ -27,16 +27,24 @@ class NotificationWebSocketService {
   Function(int)? _onBadgeUpdate;
   Function(String)? _onNotificationRead;
   Function(bool)? _onConnectionStatusChanged;
+  Function(String)? _onAuthError;
+
+  /// Token recusado pelo gateway: para a fila de reconexão até haver token novo.
+  /// Sem isso a reconexão contínua vira loop infinito com token expirado.
+  bool _authRejected = false;
   Function(String)? _onCompanySubscribed;
   Function(String)? _onCompanyUnsubscribed;
 
-  // Reconexão
+  // Reconexão: contínua para manter sempre conectado
   int _reconnectAttempts = 0;
   static const int _baseReconnectDelay = 1000; // 1 segundo
   static const int _maxReconnectDelay = 30000; // 30 segundos
-  static const int _maxReconnectAttempts = 5; // Máximo de 5 tentativas
   Timer? _reconnectTimer;
   bool _isReconnecting = false;
+
+  // Heartbeat: verifica conexão a cada intervalo e reconecta se estiver desconectado
+  Timer? _heartbeatTimer;
+  static const int _heartbeatIntervalSeconds = 25;
 
   bool get isConnected => _isConnected;
 
@@ -50,12 +58,23 @@ class NotificationWebSocketService {
         return;
       }
 
+      // Token novo (refresh/login) destrava a reconexão suspensa por auth_error.
+      if (token != _currentToken) {
+        _authRejected = false;
+      }
+
       _currentToken = token;
       _currentUserId = userId;
 
-      // Se já está conectado, desconectar primeiro
-      if (_socket != null && _socket!.connected) {
-        await disconnect();
+      // Sempre limpar socket anterior (conectado ou não) para evitar conexões órfãs
+      if (_socket != null) {
+        _reconnectTimer?.cancel();
+        _reconnectTimer = null;
+        _stopHeartbeat();
+        _socket!.disconnect();
+        _socket!.dispose();
+        _socket = null;
+        _isConnected = false;
       }
 
       // Construir URL do WebSocket
@@ -108,6 +127,9 @@ class NotificationWebSocketService {
       _isReconnecting = false;
       _onConnectionStatusChanged?.call(true);
 
+      // Iniciar heartbeat para manter conexão viva e detectar desconexão
+      _startHeartbeat();
+
       // Emitir 'join' com userId
       if (_currentUserId != null && _currentUserId!.isNotEmpty) {
         _socket!.emit('join', _currentUserId);
@@ -125,14 +147,18 @@ class NotificationWebSocketService {
       debugPrint('✅ [WS] Confirmação de conexão recebida: $data');
     });
 
-    // Nova notificação
-    _socket!.on('notification', (data) {
+    // Nova notificação (backend emite 'new_notification' com { notification, timestamp })
+    _socket!.on('new_notification', (data) {
       try {
         debugPrint('📨 [WS] Nova notificação recebida');
-        final notification = NotificationModel.fromJson(
-          data as Map<String, dynamic>,
-        );
-        _onNotificationReceived?.call(notification);
+        final payload = data as Map<String, dynamic>?;
+        final notificationData = payload?['notification'];
+        if (notificationData != null) {
+          final notification = NotificationModel.fromJson(
+            notificationData as Map<String, dynamic>,
+          );
+          _onNotificationReceived?.call(notification);
+        }
       } catch (e, stackTrace) {
         debugPrint('❌ [WS] Erro ao processar notificação: $e');
         debugPrint('📚 [WS] StackTrace: $stackTrace');
@@ -169,22 +195,18 @@ class NotificationWebSocketService {
     _socket!.onDisconnect((reason) {
       debugPrint('❌ [WS] Desconectado: $reason');
       _isConnected = false;
+      _stopHeartbeat();
       _onConnectionStatusChanged?.call(false);
-      
+
       // Se foi desconexão intencional do cliente (io client disconnect), não tentar reconectar
       if (reason.toString().contains('io client disconnect')) {
         debugPrint('ℹ️ [WS] Desconexão intencional do cliente, não tentando reconectar');
-        _reconnectAttempts = 0; // Resetar tentativas
+        _reconnectAttempts = 0;
         return;
       }
-      
-      // Tentar reconectar apenas se não excedeu o limite
-      if (_reconnectAttempts < _maxReconnectAttempts) {
-        _handleReconnect();
-      } else {
-        debugPrint('⚠️ [WS] Limite de tentativas de reconexão atingido ($_maxReconnectAttempts). Parando tentativas automáticas.');
-        _isReconnecting = false;
-      }
+
+      // Manter sempre tentando reconectar (sem limite)
+      _handleReconnect();
     });
 
     // Erro de conexão
@@ -192,14 +214,26 @@ class NotificationWebSocketService {
       debugPrint('❌ [WS] Erro de conexão: $error');
       _isConnected = false;
       _onConnectionStatusChanged?.call(false);
-      
-      // Tentar reconectar apenas se não excedeu o limite
-      if (_reconnectAttempts < _maxReconnectAttempts) {
-        _handleReconnect();
-      } else {
-        debugPrint('⚠️ [WS] Limite de tentativas de reconexão atingido ($_maxReconnectAttempts). Parando tentativas automáticas.');
-        _isReconnecting = false;
-      }
+
+      // Manter sempre tentando reconectar (sem limite)
+      _handleReconnect();
+    });
+
+    // Token recusado pelo gateway — não adianta reconectar com o mesmo token.
+    _socket!.on('auth_error', (data) {
+      final reason = data is Map
+          ? (data['error']?.toString() ?? 'token_invalid')
+          : 'token_invalid';
+      final message = data is Map ? data['message']?.toString() : null;
+      debugPrint('🔒 [WS] Token recusado ($reason): ${message ?? '-'}');
+
+      _authRejected = true;
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+      _isReconnecting = false;
+      _stopHeartbeat();
+
+      _onAuthError?.call(reason);
     });
 
     // Erro geral
@@ -208,44 +242,72 @@ class NotificationWebSocketService {
     });
   }
 
-  /// Reconexão automática com exponential backoff
+  /// Reconexão automática com exponential backoff (sem limite de tentativas)
   void _handleReconnect() {
-    // Verificar se já excedeu o limite de tentativas
-    if (_reconnectAttempts >= _maxReconnectAttempts) {
-      debugPrint('⚠️ [WS] Limite de tentativas de reconexão atingido. Parando tentativas automáticas.');
+    if (_currentToken == null || _currentToken!.isEmpty) {
+      debugPrint('⚠️ [WS] Sem token, não é possível reconectar');
       _isReconnecting = false;
       return;
     }
 
-    // Verificar se já está tentando reconectar
+    if (_authRejected) {
+      debugPrint('🔒 [WS] Token recusado — reconexão suspensa até novo login/refresh');
+      _isReconnecting = false;
+      return;
+    }
+
     if (_reconnectTimer != null && _reconnectTimer!.isActive) {
-      return; // Já está tentando reconectar
+      return;
     }
 
     if (_isReconnecting) {
-      return; // Já está em processo de reconexão
+      return;
     }
 
     _isReconnecting = true;
     _reconnectAttempts++;
 
-    // Exponential backoff: 1s, 2s, 4s, 8s, ... até 30s
+    // Exponential backoff: 1s, 2s, 4s, 8s, ... até 30s (cap)
     final exponentialDelay = _baseReconnectDelay * (1 << (_reconnectAttempts - 1));
     final delay = exponentialDelay > _maxReconnectDelay
         ? _maxReconnectDelay
         : exponentialDelay;
 
-    debugPrint('🔄 [WS] Tentando reconectar em ${delay}ms (tentativa $_reconnectAttempts/$_maxReconnectAttempts)');
+    debugPrint('🔄 [WS] Reconectando em ${delay}ms (tentativa $_reconnectAttempts)');
 
     _reconnectTimer = Timer(Duration(milliseconds: delay), () {
       _reconnectTimer = null;
-      if (_currentToken != null && _reconnectAttempts <= _maxReconnectAttempts) {
+      _isReconnecting = false;
+      if (_currentToken != null) {
         connect(_currentUserId);
-      } else {
-        _isReconnecting = false;
-        debugPrint('⚠️ [WS] Não é possível reconectar: token ausente ou limite atingido');
       }
     });
+  }
+
+  /// Inicia heartbeat: verifica periodicamente se está conectado e reconecta se necessário
+  void _startHeartbeat() {
+    _stopHeartbeat();
+    _heartbeatTimer = Timer.periodic(
+      const Duration(seconds: _heartbeatIntervalSeconds),
+      (_) {
+        if (_socket == null) return;
+        final connected = _socket!.connected;
+        if (!connected && _currentToken != null) {
+          debugPrint('🔄 [WS] Heartbeat: conexão perdida, reconectando...');
+          _isConnected = false;
+          _onConnectionStatusChanged?.call(false);
+          _handleReconnect();
+          return;
+        }
+        if (connected) {
+        }
+      },
+    );
+  }
+
+  void _stopHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
   }
 
   /// Desconecta do WebSocket
@@ -253,7 +315,7 @@ class NotificationWebSocketService {
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     _isReconnecting = false;
-    // Não resetar _reconnectAttempts aqui para manter o histórico de tentativas
+    _stopHeartbeat();
 
     if (_socket != null) {
       _socket!.disconnect();
@@ -325,6 +387,13 @@ class NotificationWebSocketService {
   /// Define callback para mudança de status de conexão
   void setOnConnectionStatusChanged(Function(bool) callback) {
     _onConnectionStatusChanged = callback;
+  }
+
+  /// Define callback para token recusado pelo gateway (`auth_error`).
+  /// Recebe `'token_invalid'` ou `'token_expired'` — o app deve disparar
+  /// refresh de token ou mandar para o login.
+  void setOnAuthError(Function(String) callback) {
+    _onAuthError = callback;
   }
 
   /// Define callback para empresa inscrita

@@ -41,6 +41,11 @@ class SubscriptionAccessInfo {
   final Subscription? subscription;
   final int? daysUntilExpiry;
 
+  /// `false` quando o dado NÃO veio do servidor nesta chamada (falha de
+  /// transporte). Nesse caso o acesso é otimista e deve ser reavaliado — nunca
+  /// use para bloquear a conta.
+  final bool isAuthoritative;
+
   SubscriptionAccessInfo({
     required this.hasAccess,
     required this.status,
@@ -50,7 +55,36 @@ class SubscriptionAccessInfo {
     required this.isSuspended,
     this.subscription,
     this.daysUntilExpiry,
+    this.isAuthoritative = true,
   });
+
+  /// Estado usado quando o servidor não respondeu e não há estado anterior
+  /// conhecido: libera o acesso e marca como não autoritativo.
+  factory SubscriptionAccessInfo.unknown() {
+    return SubscriptionAccessInfo(
+      hasAccess: true,
+      status: 'unknown',
+      reason: 'Não foi possível verificar a assinatura agora',
+      canAccessFeatures: true,
+      isExpired: false,
+      isSuspended: false,
+      isAuthoritative: false,
+    );
+  }
+
+  SubscriptionAccessInfo asStale() {
+    return SubscriptionAccessInfo(
+      hasAccess: hasAccess,
+      status: status,
+      reason: reason,
+      canAccessFeatures: canAccessFeatures,
+      isExpired: isExpired,
+      isSuspended: isSuspended,
+      subscription: subscription,
+      daysUntilExpiry: daysUntilExpiry,
+      isAuthoritative: false,
+    );
+  }
 
   factory SubscriptionAccessInfo.fromJson(Map<String, dynamic> json) {
     return SubscriptionAccessInfo(
@@ -75,7 +109,30 @@ class SubscriptionService {
   static final SubscriptionService instance = SubscriptionService._();
   final ApiService _apiService = ApiService.instance;
 
-  /// Verifica acesso à assinatura
+  /// Último estado confirmado pelo servidor, para sobreviver a uma queda.
+  SubscriptionAccessInfo? _lastKnownAccess;
+
+  /// Falha de transporte — rede, timeout, rate limit ou erro do servidor.
+  /// Não é resposta sobre a assinatura, então NÃO pode bloquear a conta.
+  static bool isTransportFailure(int statusCode) {
+    return statusCode == 0 ||
+        statusCode == 408 ||
+        statusCode == 429 ||
+        statusCode >= 500;
+  }
+
+  /// Descarta o estado em cache — chamar no logout/troca de conta para não
+  /// levar a assinatura de uma conta para a seguinte.
+  void clearCache() {
+    _lastKnownAccess = null;
+  }
+
+  /// Verifica acesso à assinatura.
+  ///
+  /// Nunca devolve erro por falha de transporte: cai no último estado conhecido
+  /// ou, se não houver, num acesso otimista (`isAuthoritative == false`). Tratar
+  /// 5xx/timeout como "sem assinatura" foi o que prendeu corretores na tela
+  /// "Sistema suspenso" durante o crash-loop do backend em 22–24/07.
   Future<ApiResponse<SubscriptionAccessInfo>> checkSubscriptionAccess() async {
     try {
       final response = await _apiService.get<Map<String, dynamic>>(
@@ -84,11 +141,16 @@ class SubscriptionService {
 
       if (response.success && response.data != null) {
         final accessInfo = SubscriptionAccessInfo.fromJson(response.data!);
+        _lastKnownAccess = accessInfo;
         debugPrint('✅ [SUBSCRIPTION_SERVICE] Acesso verificado: ${accessInfo.hasAccess}');
         return ApiResponse.success(
           data: accessInfo,
           statusCode: response.statusCode,
         );
+      }
+
+      if (isTransportFailure(response.statusCode)) {
+        return _fallbackAccess(response.statusCode, response.message);
       }
 
       return ApiResponse.error(
@@ -99,11 +161,20 @@ class SubscriptionService {
     } catch (e, stackTrace) {
       debugPrint('❌ [SUBSCRIPTION_SERVICE] Erro ao verificar acesso: $e');
       debugPrint('📚 [SUBSCRIPTION_SERVICE] StackTrace: $stackTrace');
-      return ApiResponse.error(
-        message: 'Erro ao verificar acesso à assinatura: ${e.toString()}',
-        statusCode: 0,
-      );
+      return _fallbackAccess(0, e.toString());
     }
+  }
+
+  ApiResponse<SubscriptionAccessInfo> _fallbackAccess(
+    int statusCode,
+    String? detail,
+  ) {
+    final fallback = _lastKnownAccess?.asStale() ?? SubscriptionAccessInfo.unknown();
+    debugPrint(
+      '⚠️ [SUBSCRIPTION_SERVICE] Falha de transporte ($statusCode) ao verificar '
+      'assinatura — mantendo acesso ${_lastKnownAccess != null ? 'do último estado conhecido' : 'otimista'}. Detalhe: $detail',
+    );
+    return ApiResponse.success(data: fallback, statusCode: statusCode);
   }
 }
 

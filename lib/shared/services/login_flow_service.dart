@@ -257,7 +257,9 @@ class LoginFlowService {
         final accessInfo = accessResponse.data!;
         debugPrint('📋 [LOGIN_FLOW] Status da assinatura: ${accessInfo.status}');
 
-        if (!accessInfo.hasAccess) {
+        // Estado não confirmado pelo servidor (queda/timeout) nunca bloqueia:
+        // o app segue e reavalia depois.
+        if (!accessInfo.hasAccess && accessInfo.isAuthoritative) {
           if (accessInfo.status == 'none') {
             return LoginFlowResult.redirect(
               route: AppRoutes.settings,

@@ -162,7 +162,8 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   String? _currentUserId;
 
   static const int _kMinGalleryImagesWeb = 2;
-  static const int _kMaxGalleryImagesWeb = 50;
+  // O teto de 50 imagens por imóvel foi extinto no backend (2026-07-31).
+  // O mínimo de 2 continua valendo para publicar no site.
 
   /// Paridade `propertyApi.getApprovalSettingsActive()` + `buildCreatePropertyApiPayload.ts`.
   bool _requireApprovalToBeAvailable = false;
@@ -1568,17 +1569,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           );
           return false;
         }
-        if (totalImages > _kMaxGalleryImagesWeb) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Limite de $_kMaxGalleryImagesWeb imagens. Atualmente: $totalImages.',
-              ),
-              backgroundColor: AppColors.status.error,
-            ),
-          );
-          return false;
-        }
         return true;
 
       case 5: // Etapa 6: Clientes e Proprietário
@@ -2321,11 +2311,11 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     }
 
     final imgCount = _totalSelectableImageCount();
-    if (imgCount < _kMinGalleryImagesWeb || imgCount > _kMaxGalleryImagesWeb) {
+    if (imgCount < _kMinGalleryImagesWeb) {
       return _StepValidationFailure(
         step: 4,
         message:
-            'Publicação no site exige entre $_kMinGalleryImagesWeb e $_kMaxGalleryImagesWeb '
+            'Publicação no site exige no mínimo $_kMinGalleryImagesWeb '
             'imagens (atual: $imgCount).',
       );
     }
@@ -2723,13 +2713,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           step: 4,
           message:
               'Adicione pelo menos $_kMinGalleryImagesWeb imagens (mesmo mínimo do CRM web).',
-        );
-      }
-      if (imgCount > _kMaxGalleryImagesWeb) {
-        return _StepValidationFailure(
-          step: 4,
-          message:
-              'Galeria limitada a $_kMaxGalleryImagesWeb imagens (atual: $imgCount).',
         );
       }
     }
@@ -4609,6 +4592,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                         controller: _streetController,
                         label: 'Rua *',
                         hint: 'Nome da rua',
+                        maxLength: 255, // espelha @MaxLength do CreatePropertyDto
                         validator: (value) {
                           if (value == null || value.trim().isEmpty) {
                             return 'Rua é obrigatória';
@@ -4627,6 +4611,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                         controller: _numberController,
                         label: 'Nº *',
                         hint: '123',
+                        maxLength: 20, // espelha @MaxLength do CreatePropertyDto
                         validator: (value) {
                           if (value == null || value.trim().isEmpty) {
                             return 'Número é obrigatório';
@@ -4644,6 +4629,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                       ? 'Complemento *'
                       : 'Complemento',
                   hint: 'Apartamento, bloco, sala…',
+                  maxLength: 100, // espelha @MaxLength do CreatePropertyDto
                   validator: (value) {
                     if (_formRequiredKeys.contains('complement')) {
                       if (value == null || value.trim().isEmpty) {
@@ -5513,8 +5499,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   Widget _buildStep5Gallery(ThemeData theme) {
     final imgCount = _totalSelectableImageCount();
     final wc = ThemeHelpers.borderColor(context);
-    final badgeColor = imgCount >= _kMinGalleryImagesWeb &&
-            imgCount <= _kMaxGalleryImagesWeb
+    final badgeColor = imgCount >= _kMinGalleryImagesWeb
         ? AppColors.status.success
         : AppColors.status.warning;
 
@@ -5546,20 +5531,18 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             icon: Icons.collections_rounded,
             title: 'Fotos do imóvel',
             subtitle:
-                'Entre $_kMinGalleryImagesWeb e $_kMaxGalleryImagesWeb imagens, como no cadastro web.',
+                'No mínimo $_kMinGalleryImagesWeb imagens, como no cadastro web. Sem limite máximo.',
             trailing: countBadge(),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (imgCount < _kMinGalleryImagesWeb ||
-                    imgCount > _kMaxGalleryImagesWeb) ...[
+                if (imgCount < _kMinGalleryImagesWeb) ...[
                   _wizardHintBanner(
                     theme,
                     accent: AppColors.status.warning,
                     icon: Icons.collections_outlined,
-                    message: imgCount > _kMaxGalleryImagesWeb
-                        ? 'Máximo $_kMaxGalleryImagesWeb imagens. Remova algumas para continuar.'
-                        : 'São necessárias no mínimo $_kMinGalleryImagesWeb imagens para continuar o cadastro.',
+                    message:
+                        'São necessárias no mínimo $_kMinGalleryImagesWeb imagens para continuar o cadastro.',
                   ),
                   const SizedBox(height: 16),
                 ],

@@ -8,6 +8,7 @@ import '../services/notification_service.dart';
 import '../services/notification_websocket_service.dart';
 import '../services/notification_counts_service.dart';
 import '../../../shared/services/secure_storage_service.dart';
+import '../../../shared/services/auth_service.dart';
 
 /// Controller para gerenciar estado das notificações
 class NotificationController extends ChangeNotifier {
@@ -120,6 +121,25 @@ class NotificationController extends ChangeNotifier {
     _wsService.setOnConnectionStatusChanged((connected) {
       _wsConnected = connected;
       notifyListeners();
+    });
+
+    // Token recusado no handshake: renova e reconecta uma vez. Sem isso o
+    // socket ficava em loop de reconexão eterno com token expirado.
+    _wsService.setOnAuthError((reason) async {
+      debugPrint('🔒 [NOTIFICATION_CTRL] auth_error do socket: $reason');
+      _wsConnected = false;
+      notifyListeners();
+
+      final refreshed = await AuthService.instance.refreshToken();
+      if (!refreshed.success) {
+        debugPrint('🔒 [NOTIFICATION_CTRL] Refresh falhou — socket permanece desligado');
+        return;
+      }
+
+      final userId = await _getUserId();
+      if (userId != null) {
+        await _wsService.connect(userId);
+      }
     });
 
     _wsService.setOnCompanySubscribed((companyId) {

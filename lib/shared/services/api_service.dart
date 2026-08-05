@@ -614,13 +614,51 @@ class ApiService {
     }
   }
 
-  /// Extrai mensagem de erro da resposta
+  /// Extrai mensagem de erro da resposta.
+  ///
+  /// No `400 VALIDATION_ERROR` o backend manda sempre o mesmo `message`
+  /// genérico ("Dados de entrada inválidos") e o campo culpado só aparece em
+  /// `details.validationErrors[]` — sem ler essa lista o corretor leva um erro
+  /// no fim do cadastro sem saber o que corrigir.
   String _extractErrorMessage(dynamic body) {
     if (body == null) return 'Erro desconhecido';
     if (body is Map<String, dynamic>) {
+      final validation = _extractValidationErrors(body);
+      if (validation.isNotEmpty) {
+        return validation.join('\n');
+      }
       return body['message'] as String? ?? 'Erro desconhecido';
     }
     return 'Erro desconhecido';
+  }
+
+  /// Achata `details.validationErrors[]` em linhas legíveis.
+  /// Aceita item como string ou como objeto (`{field, errors|message}`).
+  List<String> _extractValidationErrors(Map<String, dynamic> body) {
+    final details = body['details'];
+    if (details is! Map) return const [];
+    final raw = details['validationErrors'];
+    if (raw is! List) return const [];
+
+    final lines = <String>[];
+    for (final item in raw) {
+      if (item is String) {
+        if (item.trim().isNotEmpty) lines.add(item.trim());
+        continue;
+      }
+      if (item is Map) {
+        final field = item['field']?.toString() ?? item['property']?.toString();
+        final errors = item['errors'];
+        final detail = errors is List
+            ? errors.map((e) => e.toString()).where((e) => e.isNotEmpty).join(', ')
+            : (item['message']?.toString() ?? '');
+        if (detail.isEmpty && (field == null || field.isEmpty)) continue;
+        lines.add(
+          field == null || field.isEmpty ? detail : '$field: $detail',
+        );
+      }
+    }
+    return lines;
   }
 }
 
