@@ -618,166 +618,219 @@ class _ScheduleSettingsPageState extends State<ScheduleSettingsPage> {
   Widget _dayBlock(ScheduleDay day) {
     final enabled = day.enabled;
     final isWorkday = day.weekday >= 1 && day.weekday <= 5;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Column(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Transform.scale(
-                scale: 0.8,
-                alignment: Alignment.centerLeft,
-                child: Switch.adaptive(
-                  value: enabled,
-                  activeColor: _kGreen,
-                  onChanged: (v) => _toggleDay(day.weekday, v),
-                ),
-              ),
-              Expanded(
-                child: Text(
-                  kWeekdayLabels[day.weekday] ?? '',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 14.5,
-                    fontWeight: FontWeight.w800,
-                    color: enabled
-                        ? ThemeHelpers.textColor(context)
-                        : ThemeHelpers.textSecondaryColor(context)
-                            .withValues(alpha: 0.6),
-                  ),
-                ),
-              ),
-              if (enabled && isWorkday)
-                IconButton(
-                  onPressed: () => _applyToWorkdays(day.weekday),
-                  tooltip: 'Aplicar aos dias úteis',
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints:
-                      const BoxConstraints(minWidth: 34, minHeight: 34),
-                  icon: Icon(
-                    Icons.layers_rounded,
-                    size: 16,
-                    color: ThemeHelpers.textSecondaryColor(context),
-                  ),
-                ),
-            ],
-          ),
-          if (enabled) ...[
-            for (var i = 0; i < day.intervals.length; i++)
-              _intervalRow(day, i),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: () => _addInterval(day.weekday),
-                style: TextButton.styleFrom(
-                  // Tema global pinta TextButton de vermelho — forçar verde.
-                  foregroundColor: _kGreen,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 6),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                icon: const Icon(Icons.add_rounded, size: 16),
-                label: const Text(
-                  'Adicionar faixa',
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+          // Sigla do dia em roundel — a identidade visual da linha
+          // (o switch fica discreto à direita).
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: enabled
+                  ? _kGreen.withValues(alpha: 0.14)
+                  : secondary.withValues(alpha: 0.08),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              (kWeekdayShortLabels[day.weekday] ?? '').toUpperCase(),
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.4,
+                color:
+                    enabled ? _kGreen : secondary.withValues(alpha: 0.55),
               ),
             ),
-            const SizedBox(height: 4),
-          ],
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  height: 38,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          kWeekdayLabels[day.weekday] ?? '',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w800,
+                            color: enabled
+                                ? ThemeHelpers.textColor(context)
+                                : secondary.withValues(alpha: 0.6),
+                          ),
+                        ),
+                      ),
+                      if (enabled && isWorkday)
+                        IconButton(
+                          onPressed: () => _applyToWorkdays(day.weekday),
+                          tooltip: 'Aplicar aos dias úteis',
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                              minWidth: 34, minHeight: 34),
+                          icon: Icon(
+                            Icons.layers_rounded,
+                            size: 16,
+                            color: secondary,
+                          ),
+                        ),
+                      Transform.scale(
+                        scale: 0.75,
+                        alignment: Alignment.centerRight,
+                        child: Switch.adaptive(
+                          value: enabled,
+                          activeColor: _kGreen,
+                          onChanged: (v) => _toggleDay(day.weekday, v),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (!enabled)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Text(
+                      'Fechado',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        fontStyle: FontStyle.italic,
+                        color: secondary.withValues(alpha: 0.55),
+                      ),
+                    ),
+                  ),
+                if (enabled) ...[
+                  for (var i = 0; i < day.intervals.length; i++)
+                    _intervalRow(day, i),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () => _addInterval(day.weekday),
+                      style: TextButton.styleFrom(
+                        // Tema global pinta TextButton de vermelho — forçar.
+                        foregroundColor: _kGreen,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 0, vertical: 6),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      icon: const Icon(Icons.add_rounded, size: 16),
+                      label: const Text(
+                        'Adicionar faixa',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
+  /// Faixa TIPOGRÁFICA — horas com sublinhado editável em vez de caixas
+  /// (flush de verdade); lixeira discreta em slate, vermelho só quando a
+  /// faixa está inválida.
   Widget _intervalRow(ScheduleDay day, int index) {
     final interval = day.intervals[index];
     final invalid = !interval.isValid;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          Expanded(
-            child: _timeTile(
-              interval.start,
-              onTap: () =>
-                  _pickIntervalTime(day.weekday, index, isStart: true),
+    return Row(
+      children: [
+        _timeText(
+          interval.start,
+          onTap: () => _pickIntervalTime(day.weekday, index, isStart: true),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: Text(
+            '–',
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              color: secondary.withValues(alpha: 0.7),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Text(
-              '–',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                color: ThemeHelpers.textSecondaryColor(context),
-              ),
-            ),
-          ),
-          Expanded(
-            child: _timeTile(
-              interval.end,
-              onTap: () =>
-                  _pickIntervalTime(day.weekday, index, isStart: false),
-              // Feedback vivo: término antes do início acende a borda.
-              borderColor:
-                  invalid ? _kDanger.withValues(alpha: 0.55) : null,
-            ),
-          ),
-          const SizedBox(width: 2),
-          IconButton(
-            onPressed: () => _removeInterval(day.weekday, index),
-            tooltip: 'Remover faixa',
-            visualDensity: VisualDensity.compact,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-            icon: const Icon(
-              Icons.delete_outline_rounded,
-              size: 18,
-              color: _kDanger,
-            ),
+        ),
+        _timeText(
+          interval.end,
+          onTap: () => _pickIntervalTime(day.weekday, index, isStart: false),
+          danger: invalid,
+        ),
+        if (invalid) ...[
+          const SizedBox(width: 6),
+          const Icon(
+            Icons.error_outline_rounded,
+            size: 14,
+            color: _kDanger,
           ),
         ],
-      ),
+        const Spacer(),
+        IconButton(
+          onPressed: () => _removeInterval(day.weekday, index),
+          tooltip: 'Remover faixa',
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+          icon: Icon(
+            Icons.delete_outline_rounded,
+            size: 17,
+            color: secondary.withValues(alpha: 0.7),
+          ),
+        ),
+      ],
     );
   }
 
-  Widget _timeTile(
+  Widget _timeText(
     String value, {
     required VoidCallback onTap,
-    Color? borderColor,
+    bool danger = false,
   }) {
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(8),
       onTap: onTap,
-      child: Container(
-        height: 44,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: ThemeHelpers.cardBackgroundColor(context),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: borderColor ?? ThemeHelpers.borderColor(context),
-          ),
-        ),
-        child: Text(
-          value,
-          style: TextStyle(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.2,
-            fontFeatures: const [FontFeature.tabularFigures()],
-            color: ThemeHelpers.textColor(context),
-          ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.2,
+                fontFeatures: const [FontFeature.tabularFigures()],
+                color: danger ? _kDanger : ThemeHelpers.textColor(context),
+              ),
+            ),
+            const SizedBox(height: 2),
+            Container(
+              height: 1.5,
+              width: 42,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(2),
+                color: (danger ? _kDanger : _kGreen).withValues(alpha: 0.45),
+              ),
+            ),
+          ],
         ),
       ),
     );

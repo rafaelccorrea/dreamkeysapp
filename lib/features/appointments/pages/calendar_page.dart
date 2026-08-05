@@ -229,64 +229,34 @@ class _CalendarPageState extends State<CalendarPage>
           tooltip: _searchOpen ? 'Fechar busca' : 'Buscar',
           onPressed: _toggleSearch,
         ),
-        // Escopo de pessoas (novo modelo): minha agenda / seleção / empresa.
-        Consumer<AppointmentController>(
-          builder: (context, ctrl, _) => Stack(
-            clipBehavior: Clip.none,
-            children: [
-              ChromeToolbarIconButton(
-                icon: Icons.group_rounded,
-                tooltip: 'Agendas de outras pessoas',
-                onPressed: _openScopeSheet,
-              ),
-              if (ctrl.hasCustomScope)
-                Positioned(
-                  top: 6,
-                  right: 6,
-                  child: Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF4A90E2),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: theme.scaffoldBackgroundColor,
-                        width: 1.5,
-                      ),
+        // Máximo de 2 ícones na navbar: busca + filtros. O escopo de
+        // pessoas vive como chip na ContextBar, não como terceiro ícone.
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            ChromeToolbarIconButton(
+              icon: Icons.tune_rounded,
+              tooltip: 'Filtros',
+              onPressed: _openFilters,
+            ),
+            if (_filters.hasActiveFilters)
+              Positioned(
+                top: 6,
+                right: 6,
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.primary,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: theme.scaffoldBackgroundColor,
+                      width: 1.5,
                     ),
                   ),
                 ),
-            ],
-          ),
-        ),
-        Consumer<AppointmentController>(
-          builder: (context, _, _) => Stack(
-            clipBehavior: Clip.none,
-            children: [
-              ChromeToolbarIconButton(
-                icon: Icons.tune_rounded,
-                tooltip: 'Filtros',
-                onPressed: _openFilters,
               ),
-              if (_filters.hasActiveFilters)
-                Positioned(
-                  top: 6,
-                  right: 6,
-                  child: Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.primary,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: theme.scaffoldBackgroundColor,
-                        width: 1.5,
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
+          ],
         ),
       ],
       body: Consumer<AppointmentController>(
@@ -352,14 +322,14 @@ class _CalendarPageState extends State<CalendarPage>
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Container(
         decoration: BoxDecoration(
-          color: isDark ? Colors.white.withOpacity(0.04) : Colors.white,
+          color: isDark ? Colors.white.withValues(alpha: 0.04) : Colors.white,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: ThemeHelpers.borderColor(context)),
           boxShadow: isDark
               ? null
               : [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
+                    color: Colors.black.withValues(alpha: 0.05),
                     blurRadius: 8,
                     offset: const Offset(0, 2),
                   ),
@@ -557,10 +527,24 @@ class _CalendarPageState extends State<CalendarPage>
           ],
           const SizedBox(height: 12),
 
-          // Linha 4 — atalhos do modelo novo: Convites (badge) + Meus horários.
+          // Linha 4 — atalhos do modelo novo: Escopo (de quem é a agenda) +
+          // Convites (badge) + Meus horários. O escopo saiu da navbar e
+          // vive aqui; preenchido quando difere de "minha agenda".
           Row(
             children: [
+              Expanded(
+                child: _contextAction(
+                  theme,
+                  icon: Icons.group_rounded,
+                  label: _scopeChipLabel(ctrl),
+                  tone: _toneInvites,
+                  filled: ctrl.hasCustomScope,
+                  chevron: true,
+                  onTap: _openScopeSheet,
+                ),
+              ),
               if (pending > 0) ...[
+                const SizedBox(width: 8),
                 Expanded(
                   child: _contextAction(
                     theme,
@@ -572,8 +556,8 @@ class _CalendarPageState extends State<CalendarPage>
                     onTap: _openInvites,
                   ),
                 ),
-                const SizedBox(width: 8),
               ],
+              const SizedBox(width: 8),
               Expanded(
                 child: _contextAction(
                   theme,
@@ -622,6 +606,15 @@ class _CalendarPageState extends State<CalendarPage>
     );
   }
 
+  /// Rótulo do chip de escopo: "Minha agenda" / "Toda a empresa" /
+  /// "N agenda(s)" quando há seleção de pessoas.
+  String _scopeChipLabel(AppointmentController ctrl) {
+    if (ctrl.scopeAllCompany) return 'Toda a empresa';
+    final n = ctrl.scopeUserIds.length;
+    if (n == 0) return 'Minha agenda';
+    return '$n agenda${n > 1 ? 's' : ''}';
+  }
+
   Widget _contextAction(
     ThemeData theme, {
     required IconData icon,
@@ -629,6 +622,7 @@ class _CalendarPageState extends State<CalendarPage>
     required Color tone,
     required bool filled,
     required VoidCallback onTap,
+    bool chevron = false,
   }) {
     return Material(
       color: filled ? tone : Colors.transparent,
@@ -663,6 +657,14 @@ class _CalendarPageState extends State<CalendarPage>
                   ),
                 ),
               ),
+              if (chevron) ...[
+                const SizedBox(width: 2),
+                Icon(
+                  Icons.expand_more_rounded,
+                  size: 14,
+                  color: filled ? Colors.white : tone,
+                ),
+              ],
             ],
           ),
         ),
@@ -903,6 +905,33 @@ class _CalendarPageState extends State<CalendarPage>
     if (mounted) refresh(() {});
   }
 
+  /// Paleta de cores ESTÁVEIS para o avatar-inicial dos membros — a cor
+  /// deriva de um hash do nome, então a mesma pessoa fica sempre igual.
+  static const List<Color> _memberAvatarPalette = [
+    Color(0xFF0EA5E9),
+    Color(0xFF14B8A6),
+    Color(0xFF6366F1),
+    Color(0xFFF97316),
+    Color(0xFF22C55E),
+    Color(0xFFEC4899),
+    Color(0xFFA855F7),
+    Color(0xFF0891B2),
+  ];
+
+  static Color _memberAvatarColor(String name) {
+    var hash = 0;
+    for (final unit in name.toLowerCase().codeUnits) {
+      hash = (hash * 31 + unit) & 0x7fffffff;
+    }
+    return _memberAvatarPalette[hash % _memberAvatarPalette.length];
+  }
+
+  /// Azul do escopo — mesmo tom dos convites na ContextBar.
+  static const Color _scopeAccent = _toneInvites;
+
+  /// Sheet de escopo com a anatomia da casa (ref.: property_share_sheet):
+  /// grabber, eyebrow + título editorial, divisor gradient, tiles ricos
+  /// com roundel/radio custom, busca por nome e rodapé Cancelar/Aplicar.
   void _openScopeSheet() {
     final ctrl = context.read<AppointmentController>();
     final role = ModuleAccessService.instance.userRole?.toLowerCase() ?? '';
@@ -912,6 +941,8 @@ class _CalendarPageState extends State<CalendarPage>
 
     var selectedIds = List<String>.of(ctrl.scopeUserIds);
     var allCompany = ctrl.scopeAllCompany;
+    final memberSearchCtrl = TextEditingController();
+    var memberQuery = '';
 
     showModalBottomSheet<void>(
       context: context,
@@ -919,232 +950,533 @@ class _CalendarPageState extends State<CalendarPage>
       useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
-        final mq = MediaQuery.of(sheetContext);
         return StatefulBuilder(
           builder: (sheetContext, refresh) {
-            _ensureMembersLoaded(refresh);
+            _ensureMembersLoaded((fn) {
+              if (sheetContext.mounted) refresh(fn);
+            });
+            final mq = MediaQuery.of(sheetContext);
             final theme = Theme.of(sheetContext);
+            final isDark = theme.brightness == Brightness.dark;
             final muted = ThemeHelpers.textSecondaryColor(sheetContext);
             final hairline = ThemeHelpers.borderColor(sheetContext)
                 .withValues(alpha: 0.35);
             final isMine = !allCompany && selectedIds.isEmpty;
 
-            return Container(
-              constraints: BoxConstraints(maxHeight: mq.size.height * 0.85),
-              decoration: BoxDecoration(
-                color: ThemeHelpers.cardBackgroundColor(sheetContext),
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(26)),
-              ),
-              child: SafeArea(
-                top: false,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 42,
-                        height: 4,
-                        margin: const EdgeInsets.only(top: 10, bottom: 6),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(999),
-                          color: muted.withValues(alpha: 0.32),
-                        ),
-                      ),
+            final members = _members ?? const <({String id, String name})>[];
+            final visibleMembers = memberQuery.isEmpty
+                ? members
+                : members
+                    .where((m) => m.name.toLowerCase().contains(memberQuery))
+                    .toList();
+
+            return Padding(
+              // Busca aberta com teclado: o sheet sobe junto.
+              padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
+              child: Container(
+                constraints:
+                    BoxConstraints(maxHeight: mq.size.height * 0.85),
+                decoration: BoxDecoration(
+                  color: ThemeHelpers.cardBackgroundColor(sheetContext),
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(28)),
+                  border: Border(
+                    top: BorderSide(
+                      color: ThemeHelpers.borderColor(sheetContext)
+                          .withValues(alpha: 0.55),
                     ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(22, 8, 22, 12),
-                      child: Text(
-                        'De quem é a agenda?',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.3,
-                          color: ThemeHelpers.textColor(sheetContext),
-                        ),
-                      ),
-                    ),
-                    Container(height: 1, color: hairline),
-                    Flexible(
-                      child: ListView(
-                        shrinkWrap: true,
-                        padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
-                        children: [
-                          _scopeOption(
-                            theme,
-                            sheetContext,
-                            icon: Icons.person_rounded,
-                            label: 'Meus agendamentos',
-                            selected: isMine,
-                            onTap: () => refresh(() {
-                              allCompany = false;
-                              selectedIds = [];
-                            }),
-                          ),
-                          if (canViewAllCompany)
-                            _scopeOption(
-                              theme,
-                              sheetContext,
-                              icon: Icons.apartment_rounded,
-                              label: 'Toda a empresa',
-                              selected: allCompany,
-                              onTap: () => refresh(() {
-                                allCompany = true;
-                                selectedIds = [];
-                              }),
-                            ),
-                          Padding(
-                            padding:
-                                const EdgeInsets.fromLTRB(12, 14, 12, 6),
-                            child: Text(
-                              'PESSOAS ESPECÍFICAS',
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                letterSpacing: 1.4,
-                                fontWeight: FontWeight.w800,
-                                fontSize: 9.5,
-                                color: muted,
-                              ),
-                            ),
-                          ),
-                          if (_loadingMembers)
-                            const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 20),
-                              child: Center(
-                                child: SizedBox(
-                                  width: 22,
-                                  height: 22,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2.4),
-                                ),
-                              ),
-                            )
-                          else if ((_members ?? const []).isEmpty)
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
-                              child: Text(
-                                'Nenhum membro encontrado.',
-                                style: theme.textTheme.bodySmall
-                                    ?.copyWith(color: muted),
-                              ),
-                            )
-                          else
-                            for (final m in _members!)
-                              _scopeOption(
-                                theme,
-                                sheetContext,
-                                icon: Icons.person_outline_rounded,
-                                label: m.name,
-                                selected: selectedIds.contains(m.id),
-                                checkbox: true,
-                                onTap: () => refresh(() {
-                                  allCompany = false;
-                                  if (selectedIds.contains(m.id)) {
-                                    selectedIds =
-                                        selectedIds.where((x) => x != m.id).toList();
-                                  } else {
-                                    selectedIds = [...selectedIds, m.id];
-                                  }
-                                }),
-                              ),
-                        ],
-                      ),
-                    ),
-                    Container(height: 1, color: hairline),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: TextButton(
-                              onPressed: () =>
-                                  Navigator.of(sheetContext).pop(),
-                              style: TextButton.styleFrom(
-                                  foregroundColor: muted),
-                              child: const Text('Cancelar'),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: FilledButton(
-                              onPressed: () async {
-                                Navigator.of(sheetContext).pop();
-                                await ctrl.setScope(
-                                  userIds: selectedIds,
-                                  allCompany: allCompany,
-                                );
-                                await ctrl.loadAppointments(reset: true);
-                              },
-                              style: FilledButton.styleFrom(
-                                backgroundColor: const Color(0xFF059669),
-                                foregroundColor: Colors.white,
-                              ),
-                              child: const Text('Aplicar'),
-                            ),
-                          ),
-                        ],
-                      ),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black
+                          .withValues(alpha: isDark ? 0.45 : 0.10),
+                      blurRadius: 22,
+                      offset: const Offset(0, -8),
                     ),
                   ],
+                ),
+                child: ClipRRect(
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(28)),
+                  child: SafeArea(
+                    top: false,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // Grabber
+                        Center(
+                          child: Container(
+                            width: 42,
+                            height: 4,
+                            margin: const EdgeInsets.only(top: 10, bottom: 6),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(999),
+                              color: muted.withValues(alpha: 0.32),
+                            ),
+                          ),
+                        ),
+                        // ── Header editorial: eyebrow + título + fechar ──
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(22, 12, 14, 14),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      'ESCOPO',
+                                      style: theme.textTheme.labelSmall
+                                          ?.copyWith(
+                                        color: _scopeAccent,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: 1.6,
+                                        fontSize: 10,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      'De quem é a agenda?',
+                                      style: theme.textTheme.titleLarge
+                                          ?.copyWith(
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: -0.4,
+                                        color: ThemeHelpers.textColor(
+                                            sheetContext),
+                                        height: 1.15,
+                                        fontSize: 19,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.close_rounded),
+                                onPressed: () =>
+                                    Navigator.of(sheetContext).pop(),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Divisor gradient sutil
+                        Container(
+                          height: 1,
+                          margin:
+                              const EdgeInsets.symmetric(horizontal: 22),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                Colors.transparent,
+                                ThemeHelpers.borderColor(sheetContext),
+                                Colors.transparent,
+                              ],
+                              stops: const [0.0, 0.5, 1.0],
+                            ),
+                          ),
+                        ),
+                        Flexible(
+                          child: ListView(
+                            shrinkWrap: true,
+                            padding:
+                                const EdgeInsets.fromLTRB(16, 10, 16, 10),
+                            children: [
+                              _scopeModeTile(
+                                theme,
+                                sheetContext,
+                                icon: Icons.person_rounded,
+                                label: 'Minha agenda',
+                                subtitle: 'Somente os seus compromissos',
+                                selected: isMine,
+                                onTap: () => refresh(() {
+                                  allCompany = false;
+                                  selectedIds = [];
+                                }),
+                              ),
+                              if (canViewAllCompany)
+                                _scopeModeTile(
+                                  theme,
+                                  sheetContext,
+                                  icon: Icons.apartment_rounded,
+                                  label: 'Toda a empresa',
+                                  subtitle:
+                                      'Compromissos de todos os usuários',
+                                  selected: allCompany,
+                                  onTap: () => refresh(() {
+                                    allCompany = true;
+                                    selectedIds = [];
+                                  }),
+                                ),
+                              const SizedBox(height: 14),
+                              // ── Seção: pessoas específicas ──────────────
+                              Row(
+                                children: [
+                                  Text(
+                                    'PESSOAS ESPECÍFICAS',
+                                    style:
+                                        theme.textTheme.labelSmall?.copyWith(
+                                      letterSpacing: 1.4,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 9.5,
+                                      color: muted,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Container(
+                                        height: 1, color: hairline),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              // Busca por nome — filled compacto.
+                              TextField(
+                                controller: memberSearchCtrl,
+                                onChanged: (v) => refresh(() =>
+                                    memberQuery = v.trim().toLowerCase()),
+                                textAlignVertical: TextAlignVertical.center,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: ThemeHelpers.textColor(sheetContext),
+                                ),
+                                decoration: InputDecoration(
+                                  isDense: true,
+                                  filled: true,
+                                  fillColor: isDark
+                                      ? AppColors.background
+                                          .backgroundTertiaryDarkMode
+                                      : AppColors
+                                          .background.backgroundTertiary,
+                                  hintText: 'Buscar pessoa…',
+                                  hintStyle: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                    color: muted.withValues(alpha: 0.9),
+                                  ),
+                                  prefixIcon: Icon(
+                                    Icons.search_rounded,
+                                    size: 18,
+                                    color: muted,
+                                  ),
+                                  prefixIconConstraints:
+                                      const BoxConstraints(
+                                    minWidth: 38,
+                                    minHeight: 36,
+                                  ),
+                                  contentPadding:
+                                      const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 9,
+                                  ),
+                                  border: OutlineInputBorder(
+                                    borderRadius:
+                                        BorderRadius.circular(11),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              if (_loadingMembers)
+                                const Padding(
+                                  padding:
+                                      EdgeInsets.symmetric(vertical: 20),
+                                  child: Center(
+                                    child: SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2.4),
+                                    ),
+                                  ),
+                                )
+                              else if (members.isEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                      6, 8, 6, 10),
+                                  child: Text(
+                                    'Nenhum membro encontrado.',
+                                    style: theme.textTheme.bodySmall
+                                        ?.copyWith(color: muted),
+                                  ),
+                                )
+                              else if (visibleMembers.isEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                      6, 8, 6, 10),
+                                  child: Text(
+                                    'Ninguém com esse nome.',
+                                    style: theme.textTheme.bodySmall
+                                        ?.copyWith(color: muted),
+                                  ),
+                                )
+                              else
+                                for (final m in visibleMembers)
+                                  _scopeMemberTile(
+                                    theme,
+                                    sheetContext,
+                                    name: m.name,
+                                    selected: selectedIds.contains(m.id),
+                                    onTap: () => refresh(() {
+                                      allCompany = false;
+                                      if (selectedIds.contains(m.id)) {
+                                        selectedIds = selectedIds
+                                            .where((x) => x != m.id)
+                                            .toList();
+                                      } else {
+                                        selectedIds = [...selectedIds, m.id];
+                                      }
+                                    }),
+                                  ),
+                            ],
+                          ),
+                        ),
+                        Container(height: 1, color: hairline),
+                        // ── Rodapé: Cancelar neutro | Aplicar verde ──────
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: TextButton(
+                                  onPressed: () =>
+                                      Navigator.of(sheetContext).pop(),
+                                  style: TextButton.styleFrom(
+                                      foregroundColor: muted),
+                                  child: const FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text('Cancelar',
+                                        maxLines: 1, softWrap: false),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: FilledButton(
+                                  onPressed: () async {
+                                    Navigator.of(sheetContext).pop();
+                                    await ctrl.setScope(
+                                      userIds: selectedIds,
+                                      allCompany: allCompany,
+                                    );
+                                    await ctrl.loadAppointments(reset: true);
+                                  },
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor:
+                                        const Color(0xFF059669),
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  child: const FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text('Aplicar',
+                                        maxLines: 1, softWrap: false),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             );
           },
         );
       },
+    ).whenComplete(memberSearchCtrl.dispose);
+  }
+
+  /// Tile rico de modo de escopo — roundel 40 tinted + label + subtítulo +
+  /// radio custom (nada de ListTile default).
+  Widget _scopeModeTile(
+    ThemeData theme,
+    BuildContext tileContext, {
+    required IconData icon,
+    required String label,
+    required String subtitle,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    final isDark = theme.brightness == Brightness.dark;
+    final muted = ThemeHelpers.textSecondaryColor(tileContext);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        splashColor: _scopeAccent.withValues(alpha: 0.16),
+        highlightColor: _scopeAccent.withValues(alpha: 0.08),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(6, 9, 6, 9),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  color:
+                      _scopeAccent.withValues(alpha: isDark ? 0.18 : 0.12),
+                  border: Border.all(
+                    color:
+                        _scopeAccent.withValues(alpha: isDark ? 0.34 : 0.22),
+                  ),
+                ),
+                child: Icon(icon, size: 19, color: _scopeAccent),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.15,
+                        color: ThemeHelpers.textColor(tileContext),
+                        fontSize: 14.5,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w500,
+                        color: muted,
+                        fontSize: 11.5,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              _scopeRadio(tileContext, selected),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
-  Widget _scopeOption(
+  /// Linha de membro — avatar-inicial 34px em cor estável + nome +
+  /// checkbox custom.
+  Widget _scopeMemberTile(
     ThemeData theme,
-    BuildContext optionContext, {
-    required IconData icon,
-    required String label,
+    BuildContext tileContext, {
+    required String name,
     required bool selected,
     required VoidCallback onTap,
-    bool checkbox = false,
   }) {
-    const accent = Color(0xFF4A90E2);
-    final muted = ThemeHelpers.textSecondaryColor(optionContext);
+    final avatarColor = _memberAvatarColor(name);
+    final trimmed = name.trim();
+    final initial = trimmed.isEmpty ? '?' : trimmed[0].toUpperCase();
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
+        splashColor: _scopeAccent.withValues(alpha: 0.14),
+        highlightColor: _scopeAccent.withValues(alpha: 0.07),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          padding: const EdgeInsets.fromLTRB(6, 7, 6, 7),
           child: Row(
             children: [
-              Icon(icon, size: 18, color: selected ? accent : muted),
+              Container(
+                width: 34,
+                height: 34,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: avatarColor.withValues(alpha: 0.16),
+                  border: Border.all(
+                    color: avatarColor.withValues(alpha: 0.38),
+                  ),
+                ),
+                child: Text(
+                  initial,
+                  style: TextStyle(
+                    color: avatarColor,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 14,
+                    height: 1,
+                  ),
+                ),
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  label,
+                  name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     fontWeight:
                         selected ? FontWeight.w800 : FontWeight.w600,
-                    color: selected
-                        ? ThemeHelpers.textColor(optionContext)
-                        : muted,
+                    letterSpacing: -0.1,
+                    color: ThemeHelpers.textColor(tileContext),
+                    fontSize: 14,
                   ),
                 ),
               ),
-              Icon(
-                checkbox
-                    ? (selected
-                        ? Icons.check_box_rounded
-                        : Icons.check_box_outline_blank_rounded)
-                    : (selected
-                        ? Icons.radio_button_checked_rounded
-                        : Icons.radio_button_off_rounded),
-                size: 20,
-                color: selected ? accent : muted.withValues(alpha: 0.6),
-              ),
+              const SizedBox(width: 10),
+              _scopeCheckbox(tileContext, selected),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  /// Radio custom 20px — círculo outline; ativo = preenchido azul + check.
+  Widget _scopeRadio(BuildContext radioContext, bool selected) {
+    final muted = ThemeHelpers.textSecondaryColor(radioContext);
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOut,
+      width: 20,
+      height: 20,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: selected ? _scopeAccent : Colors.transparent,
+        border: selected
+            ? null
+            : Border.all(color: muted.withValues(alpha: 0.55), width: 1.6),
+      ),
+      child: selected
+          ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
+          : null,
+    );
+  }
+
+  /// Checkbox custom 20px (quadrado radius 6) — pra seleção múltipla.
+  Widget _scopeCheckbox(BuildContext boxContext, bool selected) {
+    final muted = ThemeHelpers.textSecondaryColor(boxContext);
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOut,
+      width: 20,
+      height: 20,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(6),
+        color: selected ? _scopeAccent : Colors.transparent,
+        border: selected
+            ? null
+            : Border.all(color: muted.withValues(alpha: 0.55), width: 1.6),
+      ),
+      child: selected
+          ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
+          : null,
     );
   }
 
@@ -1152,80 +1484,21 @@ class _CalendarPageState extends State<CalendarPage>
   // VIEW MODE SECTION
   // ---------------------------------------------------------------------------
   Widget _buildViewModeSection(ThemeData theme) {
+    // O chip "Hoje" vive na ContextBar — aqui é só o seletor de modo.
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
-      child: Row(
-        children: [
-          Expanded(
-            child: ViewModeSelector(
-              value: _viewMode,
-              onChanged: (m) {
-                setState(() {
-                  _viewMode = m;
-                  if (m == CalendarViewMode.month) {
-                    _tableFormat = CalendarFormat.month;
-                  } else if (m == CalendarViewMode.week) {
-                    _tableFormat = CalendarFormat.week;
-                  }
-                });
-              },
-            ),
-          ),
-          const SizedBox(width: 10),
-          _todayButton(theme),
-        ],
-      ),
-    );
-  }
-
-  Widget _todayButton(ThemeData theme) {
-    final isDark = theme.brightness == Brightness.dark;
-    final today = DateTime.now();
-    final isOnToday = _isSameDay(_selectedDay, today);
-    return InkWell(
-      onTap: isOnToday
-          ? null
-          : () => setState(() {
-              _selectedDay = today;
-              _focusedDay = today;
-            }),
-      borderRadius: BorderRadius.circular(12),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          color: isOnToday
-              ? AppColors.primary.primary.withOpacity(0.10)
-              : (isDark ? Colors.white.withOpacity(0.04) : Colors.white),
-          border: Border.all(
-            color: isOnToday
-                ? AppColors.primary.primary.withOpacity(0.40)
-                : ThemeHelpers.borderColor(context),
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.gps_fixed_rounded,
-              size: 14,
-              color: isOnToday
-                  ? AppColors.primary.primary
-                  : ThemeHelpers.textSecondaryColor(context),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              'Hoje',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: isOnToday
-                    ? AppColors.primary.primary
-                    : ThemeHelpers.textSecondaryColor(context),
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      child: ViewModeSelector(
+        value: _viewMode,
+        onChanged: (m) {
+          setState(() {
+            _viewMode = m;
+            if (m == CalendarViewMode.month) {
+              _tableFormat = CalendarFormat.month;
+            } else if (m == CalendarViewMode.week) {
+              _tableFormat = CalendarFormat.week;
+            }
+          });
+        },
       ),
     );
   }
@@ -1233,257 +1506,162 @@ class _CalendarPageState extends State<CalendarPage>
   // ---------------------------------------------------------------------------
   // CALENDAR (MES / SEMANA)
   // ---------------------------------------------------------------------------
-  /// Calendário modernizado — mantém `TableCalendar` por baixo mas com
-  /// estética premium:
-  /// - Container com gradient sutil accent no topo (não sólido cinza)
-  /// - Header do mês em destaque com eyebrow + título grande
-  /// - Chevrons em pill accent semitransparente, com microinteração
-  /// - Days of week com letra única (`SEG TER QUA…`) em peso 900
-  /// - Cells com transição AnimatedContainer e bordas refinadas
-  /// - Markers de evento como mini-pills coloridas (não dots simples)
+  /// Calendário FLUSH — gramática do Apple Calendar: grid direto na
+  /// página (sem card, sem borda, sem sombra, sem gradiente), hoje é o
+  /// número no accent, selecionado é um disco sólido, eventos são dots
+  /// minúsculos na cor real do agendamento. Uma hairline fecha o bloco.
   Widget _buildCalendar(ThemeData theme) {
-    final isDark = theme.brightness == Brightness.dark;
-    final primary = AppColors.primary.primary;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final hairline =
+        ThemeHelpers.borderColor(context).withValues(alpha: 0.35);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(24),
-          color: isDark ? Colors.white.withValues(alpha: 0.03) : Colors.white,
-          border: Border.all(
-            color: ThemeHelpers.borderColor(
-              context,
-            ).withValues(alpha: isDark ? 0.55 : 0.7),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: isDark
-                  ? Colors.black.withValues(alpha: 0.18)
-                  : const Color(0xFF1A2340).withValues(alpha: 0.06),
-              blurRadius: 24,
-              offset: const Offset(0, 10),
-              spreadRadius: -8,
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
+      child: Column(
+        children: [
+          TableCalendar<Appointment>(
+            firstDay: DateTime.utc(2020, 1, 1),
+            lastDay: DateTime.utc(2032, 12, 31),
+            focusedDay: _focusedDay,
+            selectedDayPredicate: (day) => _isSameDay(_selectedDay, day),
+            calendarFormat: _tableFormat,
+            startingDayOfWeek: StartingDayOfWeek.monday,
+            locale: 'pt_BR',
+            rowHeight: 52,
+            daysOfWeekHeight: 30,
+            availableCalendarFormats: const {
+              CalendarFormat.month: 'Mês',
+              CalendarFormat.week: 'Semana',
+            },
+            eventLoader: _eventsFor,
+            headerStyle: HeaderStyle(
+              // Título à esquerda, navegação discreta — nada de pills.
+              titleCentered: false,
+              formatButtonVisible: false,
+              titleTextFormatter: (date, locale) {
+                final f = DateFormat('MMMM yyyy', 'pt_BR').format(date);
+                return AppointmentVisuals.capitalize(f);
+              },
+              titleTextStyle:
+                  theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.4,
+                    fontSize: 17,
+                  ) ??
+                  const TextStyle(),
+              leftChevronIcon: Icon(
+                Icons.chevron_left_rounded,
+                size: 26,
+                color: secondary,
+              ),
+              rightChevronIcon: Icon(
+                Icons.chevron_right_rounded,
+                size: 26,
+                color: secondary,
+              ),
+              leftChevronPadding: const EdgeInsets.all(6),
+              rightChevronPadding: const EdgeInsets.all(6),
+              headerPadding: const EdgeInsets.fromLTRB(8, 0, 0, 4),
             ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: Stack(
-            children: [
-              // Gradient sutil no topo do calendário — dá sensação de
-              // "luz" superior premium sem ser chamativo
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                height: 70,
-                child: IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          primary.withValues(alpha: isDark ? 0.10 : 0.05),
-                          primary.withValues(alpha: 0),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
+            daysOfWeekStyle: DaysOfWeekStyle(
+              weekdayStyle: TextStyle(
+                color: secondary.withValues(alpha: 0.8),
+                fontWeight: FontWeight.w700,
+                fontSize: 11,
+                letterSpacing: 0.4,
               ),
-              TableCalendar<Appointment>(
-                firstDay: DateTime.utc(2020, 1, 1),
-                lastDay: DateTime.utc(2032, 12, 31),
-                focusedDay: _focusedDay,
-                selectedDayPredicate: (day) => _isSameDay(_selectedDay, day),
-                calendarFormat: _tableFormat,
-                startingDayOfWeek: StartingDayOfWeek.monday,
-                locale: 'pt_BR',
-                rowHeight: 54,
-                daysOfWeekHeight: 36,
-                availableCalendarFormats: const {
-                  CalendarFormat.month: 'Mês',
-                  CalendarFormat.week: 'Semana',
-                },
-                eventLoader: _eventsFor,
-                headerStyle: HeaderStyle(
-                  titleCentered: true,
-                  formatButtonVisible: false,
-                  titleTextFormatter: (date, locale) {
-                    final f = DateFormat('MMMM yyyy', 'pt_BR').format(date);
-                    return AppointmentVisuals.capitalize(f);
-                  },
-                  titleTextStyle:
-                      theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.5,
-                        fontSize: 18,
-                      ) ??
-                      const TextStyle(),
-                  leftChevronIcon: _buildChevronButton(
-                    Icons.chevron_left_rounded,
-                    primary,
-                    isDark,
-                  ),
-                  rightChevronIcon: _buildChevronButton(
-                    Icons.chevron_right_rounded,
-                    primary,
-                    isDark,
-                  ),
-                  headerPadding: const EdgeInsets.symmetric(
-                    vertical: 8,
-                    horizontal: 4,
-                  ),
-                  headerMargin: const EdgeInsets.only(bottom: 6),
-                ),
-                daysOfWeekStyle: DaysOfWeekStyle(
-                  weekdayStyle: TextStyle(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    fontWeight: FontWeight.w900,
-                    fontSize: 10.5,
-                    letterSpacing: 1.6,
-                  ),
-                  weekendStyle: TextStyle(
-                    color: primary.withValues(alpha: 0.7),
-                    fontWeight: FontWeight.w900,
-                    fontSize: 10.5,
-                    letterSpacing: 1.6,
-                  ),
-                  dowTextFormatter: (date, locale) {
-                    // Iniciais fortes (S T Q…) em vez de "seg ter qua"
-                    // — visual mais limpo no calendário compacto.
-                    final raw = DateFormat.E(locale).format(date);
-                    return raw.length >= 3
-                        ? raw.substring(0, 3).toUpperCase()
-                        : raw.toUpperCase();
-                  },
-                ),
-                calendarStyle: CalendarStyle(
-                  outsideDaysVisible: false,
-                  cellMargin: const EdgeInsets.all(3),
-                  defaultTextStyle: TextStyle(
-                    color: ThemeHelpers.textColor(context),
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
-                  ),
-                  weekendTextStyle: TextStyle(
-                    color: ThemeHelpers.textColor(context),
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
-                  ),
-                ),
-                calendarBuilders: CalendarBuilders<Appointment>(
-                  defaultBuilder: (context, day, focused) =>
-                      _dayCell(day, false, false, false),
-                  todayBuilder: (context, day, focused) =>
-                      _dayCell(day, false, true, false),
-                  selectedBuilder: (context, day, focused) => _dayCell(
-                    day,
-                    true,
-                    _isSameDay(day, DateTime.now()),
-                    false,
-                  ),
-                  outsideBuilder: (context, day, focused) =>
-                      _dayCell(day, false, false, true),
-                  markerBuilder: (context, day, events) {
-                    if (events.isEmpty) return null;
-                    final isSelected = _isSameDay(_selectedDay, day);
-                    // Quando o dia está selecionado (fundo accent),
-                    // markers ficam brancos pra contrastar.
-                    final markerColor = (Color base) =>
-                        isSelected ? Colors.white : base;
-                    return Positioned(
-                      bottom: 5,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        mainAxisSize: MainAxisSize.min,
-                        children: events.take(3).map((e) {
-                          final c = AppointmentVisuals.colorFromHex(e.color);
-                          return Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 1.5),
-                            width: 5,
-                            height: 5,
-                            decoration: BoxDecoration(
-                              color: markerColor(c),
-                              shape: BoxShape.circle,
-                              boxShadow: isSelected
-                                  ? null
-                                  : [
-                                      BoxShadow(
-                                        color: c.withValues(alpha: 0.55),
-                                        blurRadius: 4,
-                                      ),
-                                    ],
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    );
-                  },
-                ),
-                onDaySelected: (selected, focused) {
-                  setState(() {
-                    _selectedDay = selected;
-                    _focusedDay = focused;
-                  });
-                },
-                onPageChanged: (focused) {
-                  _focusedDay = focused;
-                  // Janela de fetch derivada: navegou pra fora dela → ela
-                  // cresce (nunca encolhe) e recarrega o range novo.
-                  final ctrl = context.read<AppointmentController>();
-                  if (ctrl.ensureWindowCovers(focused)) {
-                    ctrl.loadAppointments(reset: true);
-                  }
-                },
-                onFormatChanged: (format) {
-                  setState(() {
-                    _tableFormat = format;
-                    _viewMode = format == CalendarFormat.week
-                        ? CalendarViewMode.week
-                        : CalendarViewMode.month;
-                  });
-                },
+              weekendStyle: TextStyle(
+                color: secondary.withValues(alpha: 0.5),
+                fontWeight: FontWeight.w700,
+                fontSize: 11,
+                letterSpacing: 0.4,
               ),
-            ],
+              dowTextFormatter: (date, locale) {
+                final raw = DateFormat.E(locale).format(date);
+                return raw.length >= 3
+                    ? raw.substring(0, 3).toUpperCase()
+                    : raw.toUpperCase();
+              },
+            ),
+            calendarStyle: const CalendarStyle(
+              outsideDaysVisible: false,
+              cellMargin: EdgeInsets.all(4),
+            ),
+            calendarBuilders: CalendarBuilders<Appointment>(
+              defaultBuilder: (context, day, focused) =>
+                  _dayCell(day, false, false, false),
+              todayBuilder: (context, day, focused) =>
+                  _dayCell(day, false, true, false),
+              selectedBuilder: (context, day, focused) => _dayCell(
+                day,
+                true,
+                _isSameDay(day, DateTime.now()),
+                false,
+              ),
+              outsideBuilder: (context, day, focused) =>
+                  _dayCell(day, false, false, true),
+              markerBuilder: (context, day, events) {
+                if (events.isEmpty) return null;
+                // Dots minúsculos na cor real de cada agendamento — sem
+                // glow. Ficam abaixo do disco, então não precisam trocar
+                // de cor quando o dia está selecionado.
+                return Positioned(
+                  bottom: 4,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: events.take(3).map((e) {
+                      final c = AppointmentVisuals.colorFromHex(e.color);
+                      return Container(
+                        margin:
+                            const EdgeInsets.symmetric(horizontal: 1.5),
+                        width: 4.5,
+                        height: 4.5,
+                        decoration: BoxDecoration(
+                          color: c,
+                          shape: BoxShape.circle,
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                );
+              },
+            ),
+            onDaySelected: (selected, focused) {
+              setState(() {
+                _selectedDay = selected;
+                _focusedDay = focused;
+              });
+            },
+            onPageChanged: (focused) {
+              _focusedDay = focused;
+              // Janela de fetch derivada: navegou pra fora dela → ela
+              // cresce (nunca encolhe) e recarrega o range novo.
+              final ctrl = context.read<AppointmentController>();
+              if (ctrl.ensureWindowCovers(focused)) {
+                ctrl.loadAppointments(reset: true);
+              }
+            },
+            onFormatChanged: (format) {
+              setState(() {
+                _tableFormat = format;
+                _viewMode = format == CalendarFormat.week
+                    ? CalendarViewMode.week
+                    : CalendarViewMode.month;
+              });
+            },
           ),
-        ),
+          const SizedBox(height: 6),
+          Container(height: 1, color: hairline),
+        ],
       ),
     );
   }
 
-  /// Botão chevron premium para navegação de mês — pill accent
-  /// semitransparente com sombra sutil.
-  Widget _buildChevronButton(IconData icon, Color accent, bool isDark) {
-    return Container(
-      width: 36,
-      height: 36,
-      margin: const EdgeInsets.symmetric(horizontal: 2),
-      decoration: BoxDecoration(
-        color: accent.withValues(alpha: isDark ? 0.16 : 0.10),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: accent.withValues(alpha: isDark ? 0.32 : 0.22),
-        ),
-      ),
-      child: Icon(icon, color: accent, size: 22),
-    );
-  }
-
-  /// Célula de dia do calendário.
-  ///
-  /// Estados:
-  /// - **Selecionado**: gradient accent diagonal + sombra accent + texto branco
-  /// - **Hoje (não selecionado)**: ring accent ao redor + accent suave de fundo
-  /// - **Fim de semana**: cor secondary suave (não compete com dias úteis)
-  /// - **Fora do mês**: opacity 0.4
-  /// - **Default**: texto normal
-  ///
-  /// Tudo animado com `AnimatedContainer` 200ms — sensação de calendário
-  /// "vivo" ao trocar seleção.
+  /// Célula de dia — gramática Apple Calendar:
+  /// - **Hoje**: número no accent da marca (o único vermelho do grid).
+  /// - **Selecionado**: disco sólido — accent quando é hoje; tinta do tema
+  ///   (preto no claro / branco no escuro) nos demais dias.
+  /// - Sem ring, sem gradiente, sem sombra, sem fundo tinted.
   Widget _dayCell(DateTime day, bool selected, bool isToday, bool outside) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
@@ -1491,65 +1669,44 @@ class _CalendarPageState extends State<CalendarPage>
     final isWeekend =
         day.weekday == DateTime.saturday || day.weekday == DateTime.sunday;
 
-    Color textColor;
+    Color? disc;
+    Color text;
     if (selected) {
-      textColor = Colors.white;
+      disc = isToday
+          ? primary
+          : (isDark ? Colors.white : const Color(0xFF111827));
+      text = isToday
+          ? Colors.white
+          : (isDark ? const Color(0xFF111827) : Colors.white);
     } else if (outside) {
-      textColor = ThemeHelpers.textSecondaryColor(
-        context,
-      ).withValues(alpha: 0.4);
+      text =
+          ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.35);
     } else if (isToday) {
-      textColor = primary;
+      text = primary;
     } else if (isWeekend) {
-      textColor = ThemeHelpers.textSecondaryColor(
-        context,
-      ).withValues(alpha: 0.85);
+      text = ThemeHelpers.textSecondaryColor(context);
     } else {
-      textColor = ThemeHelpers.textColor(context);
+      text = ThemeHelpers.textColor(context);
     }
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeOutCubic,
-      margin: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        gradient: selected
-            ? LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  primary,
-                  Color.lerp(primary, Colors.black, 0.18) ?? primary,
-                ],
-              )
-            : null,
-        color: !selected && isToday
-            ? primary.withValues(alpha: isDark ? 0.16 : 0.08)
-            : null,
-        borderRadius: BorderRadius.circular(13),
-        border: !selected && isToday
-            ? Border.all(color: primary.withValues(alpha: 0.55), width: 1.4)
-            : null,
-        boxShadow: selected
-            ? [
-                BoxShadow(
-                  color: primary.withValues(alpha: 0.42),
-                  blurRadius: 14,
-                  offset: const Offset(0, 5),
-                  spreadRadius: -2,
-                ),
-              ]
-            : null,
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        '${day.day}',
-        style: TextStyle(
-          color: textColor,
-          fontWeight: selected || isToday ? FontWeight.w900 : FontWeight.w600,
-          fontSize: 14.5,
-          letterSpacing: -0.2,
-          fontFeatures: const [FontFeature.tabularFigures()],
+    return Center(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(color: disc, shape: BoxShape.circle),
+        alignment: Alignment.center,
+        child: Text(
+          '${day.day}',
+          style: TextStyle(
+            color: text,
+            fontWeight:
+                selected || isToday ? FontWeight.w800 : FontWeight.w500,
+            fontSize: 15.5,
+            letterSpacing: -0.2,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
         ),
       ),
     );
@@ -1558,68 +1715,102 @@ class _CalendarPageState extends State<CalendarPage>
   // ---------------------------------------------------------------------------
   // SELECTED DAY HEADER
   // ---------------------------------------------------------------------------
+  /// Rótulo caps do dia — mesma gramática do header da vista Agenda:
+  /// "HOJE · TER, 5 DE AGO".
+  String _dayCapsLabel(DateTime day) {
+    final now = DateTime.now();
+    final isToday = _isSameDay(day, now);
+    final isTomorrow = _isSameDay(day, now.add(const Duration(days: 1)));
+    final dateLabel = DateFormat("EEE, d 'de' MMM", 'pt_BR')
+        .format(day)
+        .toUpperCase()
+        .replaceAll('.', '');
+    final prefix = isToday
+        ? 'HOJE · '
+        : isTomorrow
+            ? 'AMANHÃ · '
+            : '';
+    return '$prefix$dateLabel';
+  }
+
+  /// Header flush do dia selecionado — small caps sobre hairline (mesma
+  /// gramática do `_agendaDayHeader`), contagem tabular e ação "Novo" no
+  /// lugar da pill + botão tonal encaixotados.
   Widget _buildSelectedDayHeader(ThemeData theme) {
     final events = _eventsFor(_selectedDay);
     final isToday = _isSameDay(_selectedDay, DateTime.now());
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final accent = isToday ? AppColors.primary.primary : secondary;
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 22, 20, 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      padding: const EdgeInsets.fromLTRB(16, 22, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 4,
-            height: 28,
-            decoration: BoxDecoration(
-              color: AppColors.primary.primary,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  isToday
-                      ? 'Hoje'
-                      : AppointmentVisuals.formattedFullDate(_selectedDay),
-                  style: theme.textTheme.titleMedium?.copyWith(
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _dayCapsLabel(_selectedDay),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: accent,
                     fontWeight: FontWeight.w800,
-                    letterSpacing: -0.3,
+                    letterSpacing: 1.1,
+                    fontSize: 11,
                   ),
                 ),
-                if (!isToday)
-                  Text(
-                    DateFormat('dd/MM/yyyy').format(_selectedDay),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
-                      fontWeight: FontWeight.w600,
-                    ),
+              ),
+              if (events.isNotEmpty) ...[
+                Text(
+                  '${events.length}',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: secondary,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 11,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
+                ),
+                const SizedBox(width: 14),
               ],
-            ),
-          ),
-          if (events.isNotEmpty)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppColors.primary.primary.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                '${events.length} ${events.length == 1 ? 'item' : 'itens'}',
-                style: TextStyle(
-                  color: AppColors.primary.primary,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 12,
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => _openCreate(date: _selectedDay),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 2,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.add_rounded,
+                        size: 15,
+                        color: AppColors.primary.primary,
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        'Novo',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: AppColors.primary.primary,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.3,
+                          fontSize: 11,
+                          height: 1,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          const SizedBox(width: 8),
-          IconButton.filledTonal(
-            onPressed: () => _openCreate(date: _selectedDay),
-            icon: const Icon(Icons.add_rounded, size: 20),
-            tooltip: 'Novo agendamento neste dia',
+            ],
+          ),
+          const SizedBox(height: 6),
+          Container(
+            height: 1,
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
           ),
         ],
       ),
@@ -1634,6 +1825,7 @@ class _CalendarPageState extends State<CalendarPage>
     if (events.isEmpty) {
       return _buildDayEmptyState(theme);
     }
+    final hairline = ThemeHelpers.borderColor(context).withValues(alpha: 0.35);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1642,67 +1834,92 @@ class _CalendarPageState extends State<CalendarPage>
           for (int i = 0; i < events.length; i++) ...[
             _TimelineRow(
               appointment: events[i],
-              isLast: i == events.length - 1,
               onTap: () => _openDetails(events[i]),
             ),
+            if (i != events.length - 1)
+              Padding(
+                // Recuo até a coluna do título (44 + 12 + 3 + 12).
+                padding: const EdgeInsets.only(left: 71),
+                child: Container(height: 1, color: hairline),
+              ),
           ],
         ],
       ),
     );
   }
 
+  /// Empty state do dia — neutro (slate) e flush: roundel + título +
+  /// subtítulo + ação em texto. Sem card com borda, sem tom de marca.
   Widget _buildDayEmptyState(ThemeData theme) {
+    const slate = Color(0xFF64748B);
+    final muted = ThemeHelpers.textSecondaryColor(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 20),
-        decoration: BoxDecoration(
-          color: ThemeHelpers.cardBackgroundColor(context),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: ThemeHelpers.borderColor(context)),
-        ),
-        child: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppColors.primary.primary.withOpacity(0.08),
-                border: Border.all(
-                  color: AppColors.primary.primary.withOpacity(0.20),
-                  width: 1.5,
-                ),
-              ),
-              child: Icon(
-                Icons.event_available_rounded,
-                size: 32,
-                color: AppColors.primary.primary,
+      padding: const EdgeInsets.fromLTRB(20, 28, 20, 8),
+      child: Column(
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: slate.withValues(alpha: 0.10),
+              border: Border.all(color: slate.withValues(alpha: 0.22)),
+            ),
+            child: const Icon(
+              Icons.event_available_rounded,
+              size: 24,
+              color: slate,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Dia livre',
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.2,
+              color: ThemeHelpers.textColor(context),
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            'Nenhum agendamento em '
+            '${DateFormat('dd/MM/yyyy').format(_selectedDay)}.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: muted,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 12),
+          InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => _openCreate(date: _selectedDay),
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.add_rounded,
+                    size: 15,
+                    color: AppColors.primary.primary,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Criar agendamento',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: AppColors.primary.primary,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12,
+                      height: 1,
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 16),
-            Text(
-              'Dia livre',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Nenhum agendamento em ${DateFormat('dd/MM/yyyy').format(_selectedDay)}.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: ThemeHelpers.textSecondaryColor(context),
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 16),
-            CustomButton(
-              text: 'Criar agendamento',
-              icon: Icons.add_rounded,
-              onPressed: () => _openCreate(date: _selectedDay),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -1712,62 +1929,89 @@ class _CalendarPageState extends State<CalendarPage>
   // ---------------------------------------------------------------------------
   Widget _buildAgendaList(List<Appointment> filtered, ThemeData theme) {
     if (filtered.isEmpty) {
+      // Empty state neutro (slate) e flush — sem card, sem tom de alerta.
+      const slate = Color(0xFF64748B);
+      final muted = ThemeHelpers.textSecondaryColor(context);
+      final hasFilters = _filters.hasActiveFilters;
       return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 38, horizontal: 20),
-          decoration: BoxDecoration(
-            color: ThemeHelpers.cardBackgroundColor(context),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: ThemeHelpers.borderColor(context)),
-          ),
-          child: Column(
-            children: [
-              Icon(
+        padding: const EdgeInsets.fromLTRB(20, 44, 20, 0),
+        child: Column(
+          children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: slate.withValues(alpha: 0.10),
+                border: Border.all(color: slate.withValues(alpha: 0.22)),
+              ),
+              child: const Icon(
                 Icons.event_busy_rounded,
-                size: 48,
-                color: ThemeHelpers.textSecondaryColor(
-                  context,
-                ).withOpacity(0.6),
+                size: 24,
+                color: slate,
               ),
-              const SizedBox(height: 12),
-              Text(
-                'Nenhum agendamento encontrado',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Nenhum agendamento encontrado',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.2,
+                color: ThemeHelpers.textColor(context),
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              hasFilters
+                  ? 'Tente ajustar ou remover os filtros aplicados.'
+                  : 'Crie um novo agendamento para começar.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: muted,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 12),
+            InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: hasFilters
+                  ? () {
+                      setState(() => _filters = const CalendarFiltersState());
+                      final ctrl = context.read<AppointmentController>();
+                      ctrl.clearFilters();
+                      ctrl.loadAppointments(reset: true);
+                    }
+                  : () => _openCreate(),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      hasFilters
+                          ? Icons.refresh_rounded
+                          : Icons.add_rounded,
+                      size: 15,
+                      color: hasFilters ? slate : AppColors.primary.primary,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      hasFilters ? 'Limpar filtros' : 'Novo agendamento',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color:
+                            hasFilters ? slate : AppColors.primary.primary,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                        height: 1,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 4),
-              Text(
-                _filters.hasActiveFilters
-                    ? 'Tente ajustar ou remover os filtros aplicados'
-                    : 'Crie um novo agendamento para começar',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                ),
-              ),
-              const SizedBox(height: 18),
-              if (_filters.hasActiveFilters)
-                CustomButton(
-                  text: 'Limpar filtros',
-                  variant: ButtonVariant.secondary,
-                  icon: Icons.refresh_rounded,
-                  onPressed: () {
-                    setState(() => _filters = const CalendarFiltersState());
-                    final ctrl = context.read<AppointmentController>();
-                    ctrl.clearFilters();
-                    ctrl.loadAppointments(reset: true);
-                  },
-                )
-              else
-                CustomButton(
-                  text: 'Novo agendamento',
-                  icon: Icons.add_rounded,
-                  onPressed: () => _openCreate(),
-                ),
-            ],
-          ),
+            ),
+          ],
         ),
       );
     }
@@ -1802,86 +2046,60 @@ class _CalendarPageState extends State<CalendarPage>
     );
   }
 
+  /// Header de dia da lista — flush, à la Apple Calendar: "HOJE · TER, 5 DE
+  /// AGO" em small caps sobre hairline. Só HOJE fala no accent da marca.
   Widget _agendaDayHeader(ThemeData theme, DateTime day, int count) {
     final isToday = _isSameDay(day, DateTime.now());
     final tomorrow = DateTime.now().add(const Duration(days: 1));
     final isTomorrow = _isSameDay(day, tomorrow);
-    final isPast = day.isBefore(
-      DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day),
-    );
+    final secondary = ThemeHelpers.textSecondaryColor(context);
 
-    final accent = isToday
-        ? AppColors.primary.primary
-        : isPast
-        ? ThemeHelpers.textSecondaryColor(context)
-        : AppColors.status.info;
-
-    final label = isToday
-        ? 'HOJE'
+    final accent = isToday ? AppColors.primary.primary : secondary;
+    final dateLabel = DateFormat("EEE, d 'de' MMM", 'pt_BR')
+        .format(day)
+        .toUpperCase()
+        .replaceAll('.', '');
+    final prefix = isToday
+        ? 'HOJE · '
         : isTomorrow
-        ? 'AMANHÃ'
-        : DateFormat('EEEE', 'pt_BR').format(day).toUpperCase();
+            ? 'AMANHÃ · '
+            : '';
 
     return Padding(
       padding: const EdgeInsets.only(top: 4),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 50,
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            decoration: BoxDecoration(
-              color: accent.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: accent.withOpacity(0.25)),
-            ),
-            child: Column(
-              children: [
-                Text(
-                  '${day.day}',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: accent,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.5,
-                  ),
-                ),
-                Text(
-                  AppointmentVisuals.capitalize(
-                    DateFormat('MMM', 'pt_BR').format(day),
-                  ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '$prefix$dateLabel',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: accent,
                     fontWeight: FontWeight.w800,
-                    fontSize: 10,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: accent,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.2,
+                    letterSpacing: 1.1,
                     fontSize: 11,
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  '${count} agendamento${count > 1 ? 's' : ''}',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    fontWeight: FontWeight.w600,
-                  ),
+              ),
+              Text(
+                '$count',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: secondary,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 11,
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
-              ],
-            ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Container(
+            height: 1,
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
           ),
         ],
       ),
@@ -1902,7 +2120,7 @@ class _CalendarPageState extends State<CalendarPage>
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: AppColors.status.error.withOpacity(0.10),
+                color: AppColors.status.error.withValues(alpha: 0.10),
               ),
               child: Icon(
                 Icons.cloud_off_rounded,
@@ -1938,37 +2156,45 @@ class _CalendarPageState extends State<CalendarPage>
     );
   }
 
+  /// Skeleton fiel ao layout flush: linha do dia + contagens + chips de
+  /// atalho, seletor de modo, grade do calendário, header hairline do dia
+  /// e linhas da timeline (sem os cards encaixotados do modelo antigo).
   Widget _buildSkeleton(ThemeData theme) {
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SkeletonBox(height: 110, borderRadius: 22),
-          const SizedBox(height: 14),
-          SizedBox(
-            height: 92,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: List.generate(
-                4,
-                (_) => Padding(
-                  padding: const EdgeInsets.only(right: 10),
-                  child: SkeletonBox(width: 124, borderRadius: 16),
-                ),
-              ),
-            ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SkeletonBox(height: 18, width: 210, borderRadius: 6),
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SkeletonBox(height: 11, width: 250, borderRadius: 6),
           ),
           const SizedBox(height: 14),
-          SkeletonBox(height: 50, borderRadius: 14),
-          const SizedBox(height: 14),
-          SkeletonBox(height: 320, borderRadius: 22),
+          Row(
+            children: [
+              Expanded(child: SkeletonBox(height: 33, borderRadius: 11)),
+              const SizedBox(width: 8),
+              Expanded(child: SkeletonBox(height: 33, borderRadius: 11)),
+            ],
+          ),
           const SizedBox(height: 18),
-          SkeletonBox(height: 24, width: 160, borderRadius: 8),
-          const SizedBox(height: 12),
+          SkeletonBox(height: 44, borderRadius: 14),
+          const SizedBox(height: 16),
+          SkeletonBox(height: 300, borderRadius: 18),
+          const SizedBox(height: 24),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SkeletonBox(height: 11, width: 150, borderRadius: 6),
+          ),
+          const SizedBox(height: 14),
           for (int i = 0; i < 3; i++) ...[
-            SkeletonBox(height: 96, borderRadius: 18),
-            const SizedBox(height: 10),
+            SkeletonBox(height: 52, borderRadius: 12),
+            const SizedBox(height: 12),
           ],
         ],
       ),
@@ -1981,78 +2207,127 @@ class _CalendarPageState extends State<CalendarPage>
 }
 
 
-/// Linha de timeline para um agendamento dentro do dia selecionado.
+/// Linha FLUSH da timeline do dia selecionado — hora início/fim em coluna
+/// tabular à esquerda, barra vertical 3px na cor do agendamento, título +
+/// "tipo · local" e chevron. Sem card, sem borda: o ritmo vem das
+/// hairlines entre as linhas. Cancelado/não compareceu fala apagado.
 class _TimelineRow extends StatelessWidget {
   final Appointment appointment;
-  final bool isLast;
   final VoidCallback onTap;
 
-  const _TimelineRow({
-    required this.appointment,
-    required this.isLast,
-    required this.onTap,
-  });
+  const _TimelineRow({required this.appointment, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = ThemeHelpers.textSecondaryColor(context);
     final accent = AppointmentVisuals.colorFromHex(appointment.color);
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Faixa lateral com bullet
-          SizedBox(
-            width: 18,
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 16),
-                  child: Container(
-                    width: 12,
-                    height: 12,
-                    decoration: BoxDecoration(
-                      color: accent,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: accent.withOpacity(0.55),
-                          blurRadius: 6,
-                          spreadRadius: 1,
-                        ),
-                      ],
-                      border: Border.all(
-                        color: ThemeHelpers.cardBackgroundColor(context),
-                        width: 2,
+    final isDead = appointment.status == AppointmentStatus.cancelled ||
+        appointment.status == AppointmentStatus.noShow;
+
+    final subtitle = [
+      appointment.type.label,
+      if ((appointment.location ?? '').trim().isNotEmpty)
+        appointment.location!.trim(),
+    ].join(' · ');
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        splashColor: accent.withValues(alpha: 0.10),
+        highlightColor: accent.withValues(alpha: 0.05),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 44,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      AppointmentVisuals.formattedTime(appointment.startDate),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13,
+                        letterSpacing: -0.2,
+                        color:
+                            isDead ? muted : ThemeHelpers.textColor(context),
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                        height: 1.2,
                       ),
                     ),
-                  ),
+                    Text(
+                      AppointmentVisuals.formattedTime(appointment.endDate),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 11,
+                        color: muted,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
                 ),
-                if (!isLast)
-                  Expanded(
-                    child: Container(
-                      width: 2,
-                      margin: const EdgeInsets.symmetric(vertical: 4),
-                      decoration: BoxDecoration(
-                        color: accent.withOpacity(0.20),
-                        borderRadius: BorderRadius.circular(1),
+              ),
+              const SizedBox(width: 12),
+              Container(
+                width: 3,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: isDead ? 0.35 : 1),
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      appointment.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.2,
+                        fontSize: 14.5,
+                        color:
+                            isDead ? muted : ThemeHelpers.textColor(context),
+                        decoration:
+                            isDead ? TextDecoration.lineThrough : null,
+                        decorationColor: muted,
                       ),
                     ),
-                  ),
-              ],
-            ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w500,
+                        fontSize: 11.5,
+                        color: muted,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: muted.withValues(alpha: 0.6),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(bottom: isLast ? 0 : 10),
-              child: AppointmentCard(appointment: appointment, onTap: onTap),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 }
-
-/// Tile da linha de stats do calendário — um item da "manchete editorial"
-/// que substitui o row de cards encapsulados.

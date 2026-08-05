@@ -20,14 +20,56 @@ import '../widgets/appointment_helpers.dart';
 // ─── Novo modelo de agenda (paridade com EditAppointmentPage do web) ─────────
 const Color _kGuestsAccent = Color(0xFF4A90E2); // seção CONVIDADOS
 const Color _kTagsAccent = Color(0xFF64748B); // seção ETIQUETAS
-const Color _kApplyGreen = Color(0xFF059669); // botão Aplicar do sheet
+const Color _kApplyGreen = Color(0xFF059669); // salvar/confirmar (canon)
 const Color _kFreeGreen = Color(0xFF10B981); // "horário livre para todos"
 const Color _kOverlapRed = Color(0xFFDC2626); // conflito de agenda
 const Color _kScheduleAmber = Color(0xFFE6B84C); // fora da grade / sem gap
 const String _kManualTimeChoice = '__manual__';
 
-/// Página premium de edição de agendamento — espelha a UX da criação,
-/// mas adiciona controle de Status (fluxo do compromisso).
+// ─── Paleta por seção (coerência ≠ uniformidade: cada seção fala na sua
+// família; vermelho da marca fica pra seleção de tipo/atalhos, não pra tudo) ──
+const Color _kIdentityAccent = Color(0xFF6366F1); // indigo — texto editorial
+const Color _kTypeAccent = Color(0xFF0891B2); // cyan — categoria/dado
+const Color _kWhenAccent = Color(0xFF3FA66B); // verde agenda (Meus horários)
+const Color _kPlaceAccent = Color(0xFF0EA5E9); // sky — localização
+const Color _kNotesAccent = Color(0xFFD97706); // âmbar — nota privada
+const Color _kVisibilityAccent = Color(0xFF8B5CF6); // violeta — alcance
+
+/// Cor semântica canônica do status (spec do redesign da agenda):
+/// agendado azul, confirmado verde, em andamento âmbar, concluído verde
+/// selado, cancelado vermelho, não compareceu slate.
+Color _statusTone(AppointmentStatus s) {
+  switch (s) {
+    case AppointmentStatus.scheduled:
+      return const Color(0xFF3B82F6);
+    case AppointmentStatus.confirmed:
+      return const Color(0xFF10B981);
+    case AppointmentStatus.inProgress:
+      return const Color(0xFFF59E0B);
+    case AppointmentStatus.completed:
+      return const Color(0xFF059669);
+    case AppointmentStatus.cancelled:
+      return const Color(0xFFEF4444);
+    case AppointmentStatus.noShow:
+      return const Color(0xFF64748B);
+  }
+}
+
+/// Rótulo humano da visibilidade (paridade com o create: Particular/Pública).
+String _visibilityLabel(AppointmentVisibility v) {
+  switch (v) {
+    case AppointmentVisibility.private:
+      return 'Particular';
+    case AppointmentVisibility.public:
+      return 'Pública';
+    case AppointmentVisibility.team:
+      return 'Equipe';
+  }
+}
+
+/// Página de edição de agendamento — espelha a UX flush da criação
+/// (header de seção com barrinha + overline + título, conteúdo direto,
+/// hairlines) e adiciona o controle de Status (fluxo do compromisso).
 class EditAppointmentPage extends StatefulWidget {
   final String appointmentId;
 
@@ -54,6 +96,11 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
   bool _saving = false;
   bool _booting = true;
 
+  /// Compromisso legado com visibilidade "Equipe": a opção continua
+  /// disponível na lista (senão ela sumiria assim que o usuário tocasse
+  /// em outra e não haveria volta sem cancelar a edição).
+  bool _hadTeamVisibility = false;
+
   // ── Novo modelo: convidados, etiquetas e disponibilidade ──
   final List<_MemberOption> _invited = [];
   bool _invitesTouched = false; // só reenviamos convites se o usuário mexeu
@@ -64,7 +111,6 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
   bool _checkingAvailability = false;
   bool _availabilityCheckFailed = false;
   AvailabilityCheckResult? _availability;
-  bool _loadingSlots = false;
 
   @override
   void initState() {
@@ -85,6 +131,7 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
       _type = a.type;
       _status = a.status;
       _visibility = a.visibility;
+      _hadTeamVisibility = a.visibility == AppointmentVisibility.team;
       _color = a.color;
       _start = a.startDate;
       _end = a.endDate;
@@ -168,7 +215,8 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
   }
 
   // ---------------------------------------------------------------------------
-  // Date pickers
+  // Date pickers — nativos SEMPRE com primary verde (confirmar = verde) e
+  // relógio em 24h.
   // ---------------------------------------------------------------------------
   Future<void> _pickDate({required bool isStart}) async {
     final base = isStart ? _start! : _end!;
@@ -182,7 +230,7 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
         data: Theme.of(ctx).copyWith(
           colorScheme: Theme.of(ctx)
               .colorScheme
-              .copyWith(primary: AppColors.primary.primary),
+              .copyWith(primary: _kApplyGreen),
         ),
         child: child!,
       ),
@@ -207,13 +255,16 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
     final picked = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.fromDateTime(base),
-      builder: (ctx, child) => Theme(
-        data: Theme.of(ctx).copyWith(
-          colorScheme: Theme.of(ctx)
-              .colorScheme
-              .copyWith(primary: AppColors.primary.primary),
+      builder: (ctx, child) => MediaQuery(
+        data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
+        child: Theme(
+          data: Theme.of(ctx).copyWith(
+            colorScheme: Theme.of(ctx)
+                .colorScheme
+                .copyWith(primary: _kApplyGreen),
+          ),
+          child: child!,
         ),
-        child: child!,
       ),
     );
     if (picked == null) return;
@@ -338,18 +389,160 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
         showDrawer: false,
         showBottomNavigation: false,
         body: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 110),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 110),
           children: [
-            SkeletonBox(height: 110, borderRadius: 22),
-            const SizedBox(height: 18),
+            SkeletonBox(height: 86, borderRadius: 12),
+            const SizedBox(height: 26),
             for (int i = 0; i < 4; i++) ...[
-              SkeletonBox(height: 120, borderRadius: 18),
-              const SizedBox(height: 14),
+              SkeletonBox(width: 180, height: 14, borderRadius: 4),
+              const SizedBox(height: 12),
+              SkeletonBox(height: 88, borderRadius: 12),
+              const SizedBox(height: 26),
             ],
           ],
         ),
       );
     }
+
+    // Ordem espelha o create (Status logo após a identificação — é o que
+    // diferencia a edição).
+    final sections = <Widget>[
+      _section(
+        header: _sectionHeader(
+          accent: _kIdentityAccent,
+          overline: 'IDENTIFICAÇÃO',
+          title: 'O que é o compromisso',
+        ),
+        child: Column(
+          children: [
+            CustomTextField(
+              label: 'Título *',
+              controller: _titleController,
+              textInputAction: TextInputAction.next,
+              validator: (v) => (v == null || v.trim().isEmpty)
+                  ? 'Informe um título'
+                  : null,
+            ),
+            const SizedBox(height: 14),
+            CustomTextField(
+              label: 'Descrição',
+              controller: _descriptionController,
+              maxLines: 3,
+              maxLength: 300,
+              validator: (v) => (v != null && v.length > 300)
+                  ? 'Máximo de 300 caracteres'
+                  : null,
+            ),
+          ],
+        ),
+      ),
+      _section(
+        header: _sectionHeader(
+          accent: _statusTone(_status),
+          overline: 'STATUS',
+          title: 'Fluxo do compromisso',
+        ),
+        child: _buildStatusFlow(theme),
+      ),
+      _section(
+        header: _sectionHeader(
+          accent: _kTypeAccent,
+          overline: 'TIPO',
+          title: 'Como aparece na agenda',
+        ),
+        child: _buildTypeGrid(theme),
+      ),
+      _section(
+        header: _sectionHeader(
+          accent: _kTagsAccent,
+          overline: 'ETIQUETAS',
+          title: 'O que levar e preparar',
+        ),
+        child: _buildTagChips(theme),
+      ),
+      _section(
+        header: _sectionHeader(
+          accent: _kWhenAccent,
+          overline: 'QUANDO',
+          title: 'Data e horário',
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Dia inteiro',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: ThemeHelpers.textSecondaryColor(context),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Switch.adaptive(
+                activeColor: _kWhenAccent,
+                value: _allDay,
+                onChanged: _toggleAllDay,
+              ),
+            ],
+          ),
+        ),
+        child: _buildWhen(theme),
+      ),
+      _section(
+        header: _sectionHeader(
+          accent: _kPlaceAccent,
+          overline: 'LOCALIZAÇÃO',
+          title: 'Onde acontece',
+        ),
+        child: CustomTextField(
+          hint: 'Ex.: Av. Paulista, 1000',
+          controller: _locationController,
+          prefixIcon: const Icon(
+            Icons.location_on_outlined,
+            color: _kPlaceAccent,
+          ),
+        ),
+      ),
+      _section(
+        header: _sectionHeader(
+          accent: _kGuestsAccent,
+          overline: 'CONVIDADOS',
+          title: 'Quem participa',
+          trailing: _addGuestButton(),
+        ),
+        child: _buildGuestsBody(theme),
+      ),
+      _section(
+        header: _sectionHeader(
+          accent: _kNotesAccent,
+          overline: 'OBSERVAÇÕES',
+          title: 'Notas privadas',
+        ),
+        child: CustomTextField(
+          controller: _notesController,
+          maxLines: 4,
+          maxLength: 300,
+          validator: (v) => (v != null && v.length > 300)
+              ? 'Máximo de 300 caracteres'
+              : null,
+        ),
+      ),
+      _section(
+        header: _sectionHeader(
+          accent: _kVisibilityAccent,
+          overline: 'VISIBILIDADE',
+          title: 'Quem pode ver',
+        ),
+        child: _buildVisibilityList(theme),
+      ),
+      _section(
+        header: _sectionHeader(
+          // Accent vivo: a própria cor escolhida pinta o header da seção.
+          accent: AppointmentVisuals.colorFromHex(_color),
+          overline: 'COR',
+          title: 'Identificação no calendário',
+        ),
+        child: _buildColorPalette(theme),
+      ),
+    ];
 
     return AppScaffold(
       title: 'Editar agendamento',
@@ -361,126 +554,18 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
         child: Stack(
           children: [
             ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 110),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
               children: [
                 _buildLivePreview(theme),
-                const SizedBox(height: 18),
-                _buildSection(
-                  theme,
-                  icon: Icons.title_rounded,
-                  title: 'Identificação',
-                  child: Column(
-                    children: [
-                      CustomTextField(
-                        label: 'Título *',
-                        controller: _titleController,
-                        textInputAction: TextInputAction.next,
-                        validator: (v) =>
-                            (v == null || v.trim().isEmpty)
-                                ? 'Informe um título'
-                                : null,
-                      ),
-                      const SizedBox(height: 14),
-                      CustomTextField(
-                        label: 'Descrição',
-                        controller: _descriptionController,
-                        maxLines: 3,
-                        maxLength: 300,
-                        validator: (v) =>
-                            (v != null && v.length > 300)
-                                ? 'Máximo de 300 caracteres'
-                                : null,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 18),
-                _buildSection(
-                  theme,
-                  icon: Icons.flag_rounded,
-                  title: 'Status do compromisso',
-                  subtitle: 'Avance pelo fluxo conforme acontece',
-                  child: _buildStatusFlow(theme),
-                ),
-                const SizedBox(height: 18),
-                _buildSection(
-                  theme,
-                  icon: Icons.category_rounded,
-                  title: 'Tipo',
-                  child: _buildTypeGrid(theme),
-                ),
-                const SizedBox(height: 18),
-                _buildTagsSection(theme),
-                const SizedBox(height: 18),
-                _buildSection(
-                  theme,
-                  icon: Icons.event_rounded,
-                  title: 'Quando?',
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Dia inteiro',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: ThemeHelpers.textSecondaryColor(context),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Switch.adaptive(
-                        activeColor: AppColors.primary.primary,
-                        value: _allDay,
-                        onChanged: _toggleAllDay,
-                      ),
-                    ],
-                  ),
-                  child: _buildWhen(theme),
-                ),
-                const SizedBox(height: 18),
-                _buildSection(
-                  theme,
-                  icon: Icons.place_rounded,
-                  title: 'Localização',
-                  child: CustomTextField(
-                    hint: 'Ex.: Av. Paulista, 1000',
-                    controller: _locationController,
-                    prefixIcon: Icon(
-                      Icons.location_on_outlined,
-                      color: AppColors.primary.primary,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                _buildGuestsSection(theme),
-                const SizedBox(height: 18),
-                _buildSection(
-                  theme,
-                  icon: Icons.sticky_note_2_rounded,
-                  title: 'Observações',
-                  child: CustomTextField(
-                    controller: _notesController,
-                    maxLines: 4,
-                    maxLength: 300,
-                    validator: (v) =>
-                        (v != null && v.length > 300)
-                            ? 'Máximo de 300 caracteres'
-                            : null,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                _buildSection(
-                  theme,
-                  icon: Icons.visibility_rounded,
-                  title: 'Visibilidade',
-                  child: _buildVisibilityList(theme),
-                ),
-                const SizedBox(height: 18),
-                _buildSection(
-                  theme,
-                  icon: Icons.palette_rounded,
-                  title: 'Cor',
-                  child: _buildColorPalette(theme),
-                ),
+                const SizedBox(height: 22),
+                for (int i = 0; i < sections.length; i++) ...[
+                  if (i > 0) ...[
+                    const SizedBox(height: 20),
+                    _hairline(),
+                    const SizedBox(height: 20),
+                  ],
+                  sections[i],
+                ],
                 const SizedBox(height: 8),
               ],
             ),
@@ -495,207 +580,218 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
   }
 
   // ---------------------------------------------------------------------------
-  // SECTION
+  // GRAMÁTICA FLUSH: header de seção (barrinha + overline + título) + hairline
   // ---------------------------------------------------------------------------
-  Widget _buildSection(
-    ThemeData theme, {
-    required IconData icon,
+  Widget _section({required Widget header, required Widget child}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        header,
+        const SizedBox(height: 12),
+        child,
+      ],
+    );
+  }
+
+  Widget _sectionHeader({
+    required Color accent,
+    required String overline,
     required String title,
-    String? subtitle,
     Widget? trailing,
-    required Widget child,
   }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: ThemeHelpers.borderColor(context)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    return Row(
+      children: [
+        Container(
+          width: 3.5,
+          height: 24,
+          decoration: BoxDecoration(
+            color: accent,
+            borderRadius: BorderRadius.circular(999),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.primary.withOpacity(0.10),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(icon,
-                    color: AppColors.primary.primary, size: 18),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    if (subtitle != null)
-                      Text(
-                        subtitle,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                  ],
+              Text(
+                overline,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.4,
+                  color: accent,
                 ),
               ),
-              if (trailing != null) trailing,
+              const SizedBox(height: 2),
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.2,
+                  color: ThemeHelpers.textColor(context),
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 14),
-          child,
+        ),
+        if (trailing != null) ...[
+          const SizedBox(width: 8),
+          trailing,
         ],
-      ),
+      ],
+    );
+  }
+
+  Widget _hairline() {
+    return Container(
+      height: 1,
+      color: ThemeHelpers.borderColor(context).withValues(alpha: 0.6),
     );
   }
 
   // ---------------------------------------------------------------------------
-  // LIVE PREVIEW
+  // LIVE PREVIEW FLUSH — barra de acento + eyebrow + título + metas
+  // (hero nunca é banner: a cor escolhida "vive" na tinta, não num gradiente)
   // ---------------------------------------------------------------------------
   Widget _buildLivePreview(ThemeData theme) {
     final accent = AppointmentVisuals.colorFromHex(_color);
-    final isDark = theme.brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(22),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            accent.withOpacity(isDark ? 0.18 : 0.12),
-            accent.withOpacity(isDark ? 0.05 : 0.03),
-          ],
-        ),
-        border: Border.all(color: accent.withOpacity(0.30)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    final title = _titleController.text.trim();
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: accent.withOpacity(0.18),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  AppointmentVisuals.iconFor(_type),
-                  color: accent,
-                  size: 22,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          Container(
+            width: 3.5,
+            decoration: BoxDecoration(
+              color: accent,
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
                   children: [
-                    Text(
-                      'EDITANDO',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: accent,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1.2,
-                        fontSize: 10.5,
+                    Icon(
+                      AppointmentVisuals.iconFor(_type),
+                      size: 14,
+                      color: accent,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'EDITANDO · ${_type.label.toUpperCase()}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: accent,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.4,
+                          fontSize: 10,
+                        ),
                       ),
                     ),
-                    Text(
-                      _titleController.text.trim().isEmpty
-                          ? 'Sem título'
-                          : _titleController.text.trim(),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.2,
+                    const SizedBox(width: 8),
+                    _statusPill(_status),
+                  ],
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  title.isEmpty ? 'Sem título' : title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.4,
+                    height: 1.15,
+                    color: title.isEmpty
+                        ? ThemeHelpers.textSecondaryColor(context)
+                            .withValues(alpha: 0.6)
+                        : ThemeHelpers.textColor(context),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 6,
+                  children: [
+                    _previewMeta(
+                      Icons.event_rounded,
+                      AppointmentVisuals
+                          .formattedShortDate(_start ?? DateTime.now()),
+                    ),
+                    _previewMeta(
+                      Icons.schedule_rounded,
+                      _allDay
+                          ? 'Dia inteiro'
+                          : '${AppointmentVisuals.formattedTime(_start ?? DateTime.now())} – ${AppointmentVisuals.formattedTime(_end ?? DateTime.now())}',
+                    ),
+                    _previewMeta(
+                      Icons.timer_outlined,
+                      AppointmentVisuals.durationLabel(
+                        _start ?? DateTime.now(),
+                        _end ?? DateTime.now(),
                       ),
                     ),
                   ],
                 ),
-              ),
-              _statusPill(theme, _status),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 10,
-            runSpacing: 8,
-            children: [
-              _previewMeta(
-                Icons.event_rounded,
-                AppointmentVisuals.formattedShortDate(_start ?? DateTime.now()),
-                accent,
-              ),
-              _previewMeta(
-                Icons.schedule_rounded,
-                _allDay
-                    ? 'Dia inteiro'
-                    : '${AppointmentVisuals.formattedTime(_start ?? DateTime.now())} – ${AppointmentVisuals.formattedTime(_end ?? DateTime.now())}',
-                accent,
-              ),
-              _previewMeta(
-                Icons.timer_outlined,
-                AppointmentVisuals.durationLabel(
-                  _start ?? DateTime.now(),
-                  _end ?? DateTime.now(),
-                ),
-                accent,
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _previewMeta(IconData icon, String text, Color color) {
+  Widget _previewMeta(IconData icon, String text) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 14, color: color),
+        Icon(icon, size: 13, color: secondary),
         const SizedBox(width: 4),
         Text(
           text,
           style: TextStyle(
-            color: color,
+            color: secondary,
             fontWeight: FontWeight.w700,
-            fontSize: 12.5,
+            fontSize: 12,
           ),
         ),
       ],
     );
   }
 
-  Widget _statusPill(ThemeData theme, AppointmentStatus s) {
-    final color = AppointmentVisuals.colorForStatus(s);
+  Widget _statusPill(AppointmentStatus s) {
+    final color = _statusTone(s);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.14),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withOpacity(0.40)),
+        border: Border.all(color: color.withValues(alpha: 0.40)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(AppointmentVisuals.iconForStatus(s), size: 12, color: color),
+          Icon(AppointmentVisuals.iconForStatus(s), size: 11, color: color),
           const SizedBox(width: 4),
           Text(
             s.label,
             style: TextStyle(
               color: color,
               fontWeight: FontWeight.w800,
-              fontSize: 11,
+              fontSize: 10.5,
             ),
           ),
         ],
@@ -704,7 +800,7 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
   }
 
   // ---------------------------------------------------------------------------
-  // STATUS FLOW (chips coloridos por status)
+  // STATUS FLOW — chips semânticos: ativo preenchido, inativo outline
   // ---------------------------------------------------------------------------
   Widget _buildStatusFlow(ThemeData theme) {
     return Wrap(
@@ -712,25 +808,23 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
       runSpacing: 8,
       children: AppointmentStatus.values.map((s) {
         final selected = _status == s;
-        final color = AppointmentVisuals.colorForStatus(s);
+        final color = _statusTone(s);
         return InkWell(
           onTap: () {
             HapticFeedback.selectionClick();
             setState(() => _status = s);
           },
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(999),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
             decoration: BoxDecoration(
-              color:
-                  selected ? color.withOpacity(0.14) : Colors.transparent,
-              borderRadius: BorderRadius.circular(14),
+              color: selected ? color : Colors.transparent,
+              borderRadius: BorderRadius.circular(999),
               border: Border.all(
                 color: selected
-                    ? color.withOpacity(0.55)
+                    ? color
                     : ThemeHelpers.borderColor(context),
-                width: selected ? 1.4 : 1,
               ),
             ),
             child: Row(
@@ -738,19 +832,21 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
               children: [
                 Icon(
                   AppointmentVisuals.iconForStatus(s),
-                  size: 16,
+                  size: 15,
                   color: selected
-                      ? color
+                      ? Colors.white
                       : ThemeHelpers.textSecondaryColor(context),
                 ),
                 const SizedBox(width: 6),
                 Text(
                   s.label,
                   style: TextStyle(
-                    color: selected ? color : ThemeHelpers.textColor(context),
+                    color: selected
+                        ? Colors.white
+                        : ThemeHelpers.textColor(context),
                     fontWeight:
                         selected ? FontWeight.w800 : FontWeight.w600,
-                    fontSize: 13,
+                    fontSize: 12.5,
                   ),
                 ),
               ],
@@ -762,7 +858,7 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
   }
 
   // ---------------------------------------------------------------------------
-  // TYPE / WHEN / VIS / COLOR (clones from create)
+  // TYPE / WHEN / VIS / COLOR (mesma gramática do create)
   // ---------------------------------------------------------------------------
   Widget _buildTypeGrid(ThemeData theme) {
     return Wrap(
@@ -781,11 +877,13 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
             duration: const Duration(milliseconds: 180),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: selected ? color.withOpacity(0.10) : Colors.transparent,
+              color: selected
+                  ? color.withValues(alpha: 0.10)
+                  : Colors.transparent,
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
                 color: selected
-                    ? color.withOpacity(0.55)
+                    ? color.withValues(alpha: 0.55)
                     : ThemeHelpers.borderColor(context),
                 width: selected ? 1.4 : 1,
               ),
@@ -868,9 +966,11 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: AppColors.status.error.withOpacity(0.08),
+              color: AppColors.status.error.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.status.error.withOpacity(0.32)),
+              border: Border.all(
+                color: AppColors.status.error.withValues(alpha: 0.32),
+              ),
             ),
             child: Row(
               children: [
@@ -905,11 +1005,13 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? primary.withOpacity(0.12) : Colors.transparent,
+          color: selected
+              ? primary.withValues(alpha: 0.12)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(999),
           border: Border.all(
             color: selected
-                ? primary.withOpacity(0.55)
+                ? primary.withValues(alpha: 0.55)
                 : ThemeHelpers.borderColor(context),
           ),
         ),
@@ -937,7 +1039,7 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: isDark
-            ? Colors.white.withOpacity(0.03)
+            ? Colors.white.withValues(alpha: 0.03)
             : AppColors.background.background,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: ThemeHelpers.borderColor(context)),
@@ -970,13 +1072,17 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
                 padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
                 child: Row(
                   children: [
-                    Icon(Icons.event_rounded,
-                        size: 16, color: AppColors.primary.primary),
+                    const Icon(Icons.event_rounded,
+                        size: 16, color: _kWhenAccent),
                     const SizedBox(width: 6),
-                    Text(
-                      AppointmentVisuals.formattedShortDate(date),
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
+                    Flexible(
+                      child: Text(
+                        AppointmentVisuals.formattedShortDate(date),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ],
@@ -998,13 +1104,14 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
                 padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
                 child: Row(
                   children: [
-                    Icon(Icons.schedule_rounded,
-                        size: 16, color: AppColors.primary.primary),
+                    const Icon(Icons.schedule_rounded,
+                        size: 16, color: _kWhenAccent),
                     const SizedBox(width: 6),
                     Text(
                       AppointmentVisuals.formattedTime(date),
                       style: theme.textTheme.bodyMedium?.copyWith(
                         fontWeight: FontWeight.w700,
+                        fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
                   ],
@@ -1018,95 +1125,94 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
     );
   }
 
+  /// Linhas de opção flush (sem caixa por item): ícone + textos + radio,
+  /// hairline entre as linhas — paridade de opções com o create
+  /// (Particular/Pública; "Equipe" só aparece em compromisso legado).
   Widget _buildVisibilityList(ThemeData theme) {
-    return Column(
-      children: AppointmentVisibility.values.map((v) {
-        final selected = _visibility == v;
-        final isLast = v == AppointmentVisibility.values.last;
-        return Padding(
-          padding: EdgeInsets.only(bottom: isLast ? 0 : 8),
-          child: InkWell(
-            onTap: () {
-              HapticFeedback.selectionClick();
-              setState(() => _visibility = v);
-            },
-            borderRadius: BorderRadius.circular(14),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: selected
-                    ? AppColors.primary.primary.withOpacity(0.06)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: selected
-                      ? AppColors.primary.primary.withOpacity(0.55)
-                      : ThemeHelpers.borderColor(context),
-                  width: selected ? 1.4 : 1,
-                ),
-              ),
-              child: Row(
+    final options = <AppointmentVisibility>[
+      AppointmentVisibility.private,
+      AppointmentVisibility.public,
+      if (_hadTeamVisibility) AppointmentVisibility.team,
+    ];
+    final children = <Widget>[];
+    for (int i = 0; i < options.length; i++) {
+      if (i > 0) {
+        children.add(Container(
+          height: 1,
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
+        ));
+      }
+      children.add(_visibilityRow(theme, options[i]));
+    }
+    return Column(children: children);
+  }
+
+  Widget _visibilityRow(ThemeData theme, AppointmentVisibility v) {
+    final selected = _visibility == v;
+    return InkWell(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        setState(() => _visibility = v);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Row(
+          children: [
+            Icon(
+              AppointmentVisuals.iconForVisibility(v),
+              size: 18,
+              color: selected
+                  ? _kVisibilityAccent
+                  : ThemeHelpers.textSecondaryColor(context),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.primary.withOpacity(0.10),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(
-                      AppointmentVisuals.iconForVisibility(v),
-                      color: AppColors.primary.primary,
-                      size: 18,
+                  Text(
+                    _visibilityLabel(v),
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
+                      color: ThemeHelpers.textColor(context),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          v.label,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        Text(
-                          AppointmentVisuals.visibilityDescription(v),
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: ThemeHelpers.textSecondaryColor(context),
-                          ),
-                        ),
-                      ],
+                  const SizedBox(height: 2),
+                  Text(
+                    AppointmentVisuals.visibilityDescription(v),
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: ThemeHelpers.textSecondaryColor(context),
                     ),
-                  ),
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    width: 22,
-                    height: 22,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: selected
-                          ? AppColors.primary.primary
-                          : Colors.transparent,
-                      border: Border.all(
-                        color: selected
-                            ? AppColors.primary.primary
-                            : ThemeHelpers.borderColor(context),
-                        width: selected ? 1.5 : 1.2,
-                      ),
-                    ),
-                    child: selected
-                        ? const Icon(Icons.check_rounded,
-                            color: Colors.white, size: 14)
-                        : null,
                   ),
                 ],
               ),
             ),
-          ),
-        );
-      }).toList(),
+            const SizedBox(width: 10),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: selected ? _kVisibilityAccent : Colors.transparent,
+                border: Border.all(
+                  color: selected
+                      ? _kVisibilityAccent
+                      : ThemeHelpers.borderColor(context),
+                  width: selected ? 1.5 : 1.2,
+                ),
+              ),
+              child: selected
+                  ? const Icon(Icons.check_rounded,
+                      color: Colors.white, size: 14)
+                  : null,
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1131,14 +1237,16 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
               color: color,
               boxShadow: [
                 BoxShadow(
-                  color: color.withOpacity(0.45),
+                  color: color.withValues(alpha: 0.45),
                   blurRadius: selected ? 12 : 6,
                   spreadRadius: selected ? 2 : 0,
                   offset: const Offset(0, 3),
                 ),
               ],
               border: Border.all(
-                color: selected ? Colors.white : color.withOpacity(0.0),
+                color: selected
+                    ? Colors.white
+                    : color.withValues(alpha: 0.0),
                 width: selected ? 3 : 0,
               ),
             ),
@@ -1153,19 +1261,18 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
   }
 
   // ---------------------------------------------------------------------------
-  // BOTTOM BAR
+  // BOTTOM BAR — Cancelar neutro (nunca vermelho) / Salvar verde
   // ---------------------------------------------------------------------------
   Widget _buildBottomBar(ThemeData theme) {
-    final primary = AppColors.primary.primary;
     return Container(
       decoration: BoxDecoration(
-        color: theme.scaffoldBackgroundColor.withOpacity(0.96),
+        color: theme.scaffoldBackgroundColor.withValues(alpha: 0.96),
         border: Border(
           top: BorderSide(color: ThemeHelpers.borderColor(context)),
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 16,
             offset: const Offset(0, -4),
           ),
@@ -1214,7 +1321,10 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
               Expanded(
                 child: TextButton.icon(
                   icon: const Icon(Icons.close_rounded, size: 18),
-                  label: const Text('Cancelar'),
+                  label: const FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('Cancelar'),
+                  ),
                   style: TextButton.styleFrom(
                     // Cancelar nunca em vermelho: neutro forçado.
                     foregroundColor: ThemeHelpers.textSecondaryColor(context),
@@ -1236,9 +1346,18 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
                           ),
                         )
                       : const Icon(Icons.save_rounded, size: 18),
-                  label: Text(_saving ? 'Salvando…' : 'Salvar alterações'),
+                  label: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child:
+                        Text(_saving ? 'Salvando…' : 'Salvar alterações'),
+                  ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: _formValid && !_saving ? primary : null,
+                    backgroundColor: _kApplyGreen,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor:
+                        _kApplyGreen.withValues(alpha: 0.35),
+                    disabledForegroundColor:
+                        Colors.white.withValues(alpha: 0.85),
                   ),
                   onPressed: _formValid && !_saving ? _save : null,
                 ),
@@ -1523,16 +1642,15 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
   // ---------------------------------------------------------------------------
   // SLOTS DO DIA (hora de início)
   // ---------------------------------------------------------------------------
-  /// Abre o sheet "Horários do dia" com os slots reais de início. O
-  /// showTimePicker antigo vira fallback (rodapé do sheet ou erro no fetch).
+  /// Abre o sheet "Horários do dia" NA HORA (skeleton enquanto os slots
+  /// carregam). O showTimePicker antigo vira fallback (rodapé do sheet).
   Future<void> _pickStartTime() async {
     final start = _start;
     final end = _end;
-    if (start == null || end == null || _loadingSlots) return;
-    setState(() => _loadingSlots = true);
+    if (start == null || end == null) return;
     var duration = end.difference(start).inMinutes;
     if (duration <= 0) duration = 60;
-    final res = await AppointmentScheduleService.instance.getDaySlots(
+    final future = AppointmentScheduleService.instance.getDaySlots(
       date: AppointmentVisuals.dayKey(start),
       durationMinutes: duration,
       userIds: _invited.map((m) => m.id).toList(),
@@ -1540,20 +1658,15 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
       // que ele ocupa hoje apareceriam bloqueados por ele mesmo.
       excludeAppointmentId: widget.appointmentId,
     );
-    if (!mounted) return;
-    setState(() => _loadingSlots = false);
-    if (!res.success || res.data == null) {
-      // Fetch falhou → direto pro picker manual, sem bloquear ninguém.
-      await _pickTime(isStart: true);
-      return;
-    }
     final choice = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => _DaySlotsSheet(
-        result: res.data!,
+        slotsFuture: future,
         dayLabel: AppointmentVisuals.formattedShortDate(start),
+        durationMinutes: duration,
+        selectedTime: AppointmentVisuals.formattedTime(start),
       ),
     );
     if (!mounted || choice == null) return;
@@ -1580,43 +1693,8 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
   }
 
   // ---------------------------------------------------------------------------
-  // SEÇÕES FLUSH: ETIQUETAS + CONVIDADOS
+  // CONVIDADOS + ETIQUETAS (apresentação idêntica à do create)
   // ---------------------------------------------------------------------------
-  Widget _flushHeader(
-    ThemeData theme, {
-    required Color accent,
-    required String title,
-    Widget? trailing,
-  }) {
-    return Row(
-      children: [
-        Container(
-          width: 3.5,
-          height: 14,
-          decoration: BoxDecoration(
-            color: accent,
-            borderRadius: BorderRadius.circular(2),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: accent,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.2,
-              fontSize: 11,
-            ),
-          ),
-        ),
-        if (trailing != null) trailing,
-      ],
-    );
-  }
-
   /// Tags na ordem do catálogo (+ valores desconhecidos preservados no fim).
   /// Lista vazia É enviada — é assim que o usuário limpa as etiquetas.
   List<String> _selectedTags() {
@@ -1630,103 +1708,92 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
     return ordered;
   }
 
-  Widget _buildTagsSection(ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _flushHeader(theme, accent: _kTagsAccent, title: 'ETIQUETAS'),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: kAppointmentTags.map((t) {
-            final selected = _tags.contains(t.value);
-            return InkWell(
-              onTap: () {
-                HapticFeedback.selectionClick();
-                setState(() {
-                  if (selected) {
-                    _tags.remove(t.value);
-                  } else {
-                    _tags.add(t.value);
-                  }
-                });
-              },
+  Widget _buildTagChips(ThemeData theme) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: kAppointmentTags.map((t) {
+        final selected = _tags.contains(t.value);
+        return InkWell(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            setState(() {
+              if (selected) {
+                _tags.remove(t.value);
+              } else {
+                _tags.add(t.value);
+              }
+            });
+          },
+          borderRadius: BorderRadius.circular(999),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: selected
+                  ? t.tone.withValues(alpha: 0.14)
+                  : Colors.transparent,
               borderRadius: BorderRadius.circular(999),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 160),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: selected
-                      ? t.tone.withValues(alpha: 0.14)
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(
-                    color: selected
-                        ? t.tone.withValues(alpha: 0.55)
-                        : ThemeHelpers.borderColor(context),
-                  ),
-                ),
-                child: Text(
-                  t.label,
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                    color:
-                        selected ? t.tone : ThemeHelpers.textColor(context),
-                  ),
-                ),
+              border: Border.all(
+                color: selected
+                    ? t.tone.withValues(alpha: 0.55)
+                    : ThemeHelpers.borderColor(context),
               ),
-            );
-          }).toList(),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildGuestsSection(ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _flushHeader(
-          theme,
-          accent: _kGuestsAccent,
-          title: 'CONVIDADOS',
-          trailing: InkWell(
-            onTap: _openInvitePicker,
-            borderRadius: BorderRadius.circular(999),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(
-                  color: _kGuestsAccent.withValues(alpha: 0.45),
-                ),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.person_add_alt_1_rounded,
-                    size: 14,
-                    color: _kGuestsAccent,
-                  ),
-                  SizedBox(width: 5),
-                  Text(
-                    'Adicionar',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: _kGuestsAccent,
-                    ),
-                  ),
-                ],
+            ),
+            child: Text(
+              t.label,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                color: selected ? t.tone : ThemeHelpers.textColor(context),
               ),
             ),
           ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _addGuestButton() {
+    return InkWell(
+      onTap: _openInvitePicker,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: _kGuestsAccent.withValues(alpha: 0.45),
+          ),
         ),
-        const SizedBox(height: 12),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.person_add_alt_1_rounded,
+              size: 14,
+              color: _kGuestsAccent,
+            ),
+            SizedBox(width: 5),
+            Text(
+              'Adicionar',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: _kGuestsAccent,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGuestsBody(ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
         if (_invited.isNotEmpty) ...[
           Wrap(
             spacing: 8,
@@ -2200,20 +2267,81 @@ class _InviteMembersSheetState extends State<_InviteMembersSheet> {
   }
 }
 
-/// Sheet "Horários do dia" — grid dos slots reais de início; slot ocupado
-/// aparece riscado com tooltip de quem bloqueia. O rodapé devolve
-/// [_kManualTimeChoice] para cair no showTimePicker antigo.
-class _DaySlotsSheet extends StatelessWidget {
-  final AvailabilitySlotsResult result;
+/// Sheet "Horários do dia" — abre imediatamente com skeleton, agrupa os
+/// slots reais de início em MANHÃ/TARDE/NOITE, risca os ocupados (tooltip
+/// "Ocupado: nomes" no toque), preenche de verde o horário atual e traz
+/// legenda + fallback "Escolher outro horário…" no rodapé (devolve
+/// [_kManualTimeChoice] para cair no showTimePicker).
+class _DaySlotsSheet extends StatefulWidget {
+  final Future<ApiResponse<AvailabilitySlotsResult>> slotsFuture;
   final String dayLabel;
+  final int durationMinutes;
 
-  const _DaySlotsSheet({required this.result, required this.dayLabel});
+  /// 'HH:mm' do início atual do compromisso — destacado como selecionado.
+  final String? selectedTime;
+
+  const _DaySlotsSheet({
+    required this.slotsFuture,
+    required this.dayLabel,
+    required this.durationMinutes,
+    this.selectedTime,
+  });
+
+  @override
+  State<_DaySlotsSheet> createState() => _DaySlotsSheetState();
+}
+
+class _DaySlotsSheetState extends State<_DaySlotsSheet> {
+  bool _loading = true;
+  bool _failed = false;
+  AvailabilitySlotsResult? _result;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.slotsFuture.then((res) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        if (res.success && res.data != null) {
+          _result = res.data;
+        } else {
+          _failed = true;
+        }
+      });
+    });
+  }
+
+  /// Agrupa por período do dia preservando a ordem da API.
+  List<(String, List<AvailabilitySlot>)> _groups(
+      List<AvailabilitySlot> slots) {
+    final morning = <AvailabilitySlot>[];
+    final afternoon = <AvailabilitySlot>[];
+    final evening = <AvailabilitySlot>[];
+    for (final s in slots) {
+      final hour = int.tryParse(s.time.split(':').first) ?? 0;
+      if (hour < 12) {
+        morning.add(s);
+      } else if (hour < 18) {
+        afternoon.add(s);
+      } else {
+        evening.add(s);
+      }
+    }
+    return [
+      if (morning.isNotEmpty) ('MANHÃ', morning),
+      if (afternoon.isNotEmpty) ('TARDE', afternoon),
+      if (evening.isNotEmpty) ('NOITE', evening),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final media = MediaQuery.of(context);
-    final hasBlocked = result.slots.any((s) => !s.available);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final duration =
+        _result?.durationMinutes ?? widget.durationMinutes;
 
     return Container(
       constraints: BoxConstraints(maxHeight: media.size.height * 0.85),
@@ -2231,30 +2359,29 @@ class _DaySlotsSheet extends StatelessWidget {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: ThemeHelpers.textSecondaryColor(context)
-                    .withValues(alpha: 0.30),
+                color: secondary.withValues(alpha: 0.30),
                 borderRadius: BorderRadius.circular(999),
               ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 10),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              padding: const EdgeInsets.only(left: 16, right: 6),
+              child: Row(
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 3.5,
-                        height: 14,
-                        decoration: BoxDecoration(
-                          color: _kGuestsAccent,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
+                  Container(
+                    width: 3.5,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: _kGuestsAccent,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
                           'HORÁRIOS DO DIA',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -2265,64 +2392,36 @@ class _DaySlotsSheet extends StatelessWidget {
                             fontSize: 11,
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '$dayLabel · compromisso de ${formatGapLabel(result.durationMinutes)}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: ThemeHelpers.textSecondaryColor(context),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${widget.dayLabel} · compromisso de ${formatGapLabel(duration)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: secondary,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  if (hasBlocked) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      'Toque em um horário riscado para ver quem está ocupado.',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w500,
-                        color: ThemeHelpers.textSecondaryColor(context)
-                            .withValues(alpha: 0.85),
-                      ),
-                    ),
-                  ],
+                  IconButton(
+                    icon: Icon(Icons.close_rounded, color: secondary),
+                    onPressed: () => Navigator.pop(context),
+                  ),
                 ],
               ),
             ),
             Flexible(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                child: result.slots.isEmpty
-                    ? Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 20),
-                        child: Text(
-                          'Nenhum horário disponível na grade deste dia.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600,
-                            color: ThemeHelpers.textSecondaryColor(context),
-                          ),
-                        ),
-                      )
-                    : Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: result.slots
-                            .map((s) => _slotChip(context, s))
-                            .toList(),
-                      ),
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                child: _buildBody(theme, secondary),
               ),
             ),
+            _buildLegend(secondary),
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+              padding: const EdgeInsets.fromLTRB(16, 2, 16, 10),
               child: TextButton.icon(
                 icon: const Icon(Icons.schedule_rounded, size: 16),
                 label: const Text(
@@ -2333,7 +2432,7 @@ class _DaySlotsSheet extends StatelessWidget {
                   ),
                 ),
                 style: TextButton.styleFrom(
-                  foregroundColor: ThemeHelpers.textSecondaryColor(context),
+                  foregroundColor: secondary,
                 ),
                 onPressed: () =>
                     Navigator.pop(context, _kManualTimeChoice),
@@ -2345,7 +2444,128 @@ class _DaySlotsSheet extends StatelessWidget {
     );
   }
 
+  Widget _buildBody(ThemeData theme, Color secondary) {
+    if (_loading) return _buildSkeleton();
+    if (_failed) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 24),
+        child: Column(
+          children: [
+            Icon(Icons.wifi_off_rounded, size: 22, color: secondary),
+            const SizedBox(height: 8),
+            Text(
+              'Não deu pra carregar os horários do dia.\nUse "Escolher outro horário…" abaixo.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                height: 1.4,
+                color: secondary,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    final slots = _result?.slots ?? const <AvailabilitySlot>[];
+    if (slots.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        child: Text(
+          'Nenhum horário disponível na grade deste dia.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+            color: secondary,
+          ),
+        ),
+      );
+    }
+    final groups = _groups(slots);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (int g = 0; g < groups.length; g++) ...[
+          if (g > 0) const SizedBox(height: 16),
+          Text(
+            groups[g].$1,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.4,
+              color: secondary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children:
+                groups[g].$2.map((s) => _slotChip(context, s)).toList(),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// Skeleton fiel ao layout final: overline + grade de chips por período.
+  Widget _buildSkeleton() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (int g = 0; g < 2; g++) ...[
+          if (g > 0) const SizedBox(height: 16),
+          SkeletonBox(width: 56, height: 10, borderRadius: 3),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (int i = 0; i < 8; i++)
+                SkeletonBox(width: 62, height: 34, borderRadius: 10),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
   Widget _slotChip(BuildContext context, AvailabilitySlot s) {
+    final selected = s.available && s.time == widget.selectedTime;
+    if (selected) {
+      // Horário atual do compromisso: preenchido verde.
+      return InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          Navigator.pop(context, s.time);
+        },
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            color: _kApplyGreen,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.check_rounded, size: 13, color: Colors.white),
+              const SizedBox(width: 4),
+              Text(
+                s.time,
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                  color: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     if (s.available) {
       return InkWell(
         onTap: () {
@@ -2400,6 +2620,74 @@ class _DaySlotsSheet extends StatelessWidget {
                 .withValues(alpha: 0.60),
           ),
         ),
+      ),
+    );
+  }
+
+  /// Legenda do rodapé: disponível (outline) · ocupado (riscado) ·
+  /// selecionado (verde preenchido).
+  Widget _buildLegend(Color secondary) {
+    Widget item(Widget marker, String label) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          marker,
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              color: secondary,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Wrap(
+        spacing: 14,
+        runSpacing: 6,
+        alignment: WrapAlignment.center,
+        children: [
+          item(
+            Container(
+              width: 11,
+              height: 11,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(4),
+                border:
+                    Border.all(color: ThemeHelpers.borderColor(context)),
+              ),
+            ),
+            'Disponível',
+          ),
+          item(
+            Text(
+              '00:00',
+              style: TextStyle(
+                fontSize: 9.5,
+                fontWeight: FontWeight.w600,
+                decoration: TextDecoration.lineThrough,
+                color: secondary.withValues(alpha: 0.6),
+              ),
+            ),
+            'Ocupado',
+          ),
+          item(
+            Container(
+              width: 11,
+              height: 11,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(4),
+                color: _kApplyGreen,
+              ),
+            ),
+            'Selecionado',
+          ),
+        ],
       ),
     );
   }
