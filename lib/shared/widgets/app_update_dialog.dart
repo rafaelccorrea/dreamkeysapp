@@ -25,13 +25,10 @@ Future<bool> openPrivacyPolicyUrl() async {
   return launchUrl(uri, mode: LaunchMode.externalApplication);
 }
 
-/// Abre o link público do TestFlight (instala/atualiza o app beta).
-Future<bool> openTestFlightUpdateUrl([String? url]) async {
-  final uri = Uri.tryParse(
-    (url != null && url.isNotEmpty)
-        ? url
-        : AppUpdateService.defaultTestFlightUrl,
-  );
+/// Abre a página do app na App Store (produção — TestFlight morreu).
+Future<bool> openAppStoreUpdateUrl(String url) async {
+  if (url.isEmpty) return false;
+  final uri = Uri.tryParse(url);
   if (uri == null) return false;
   return launchUrl(uri, mode: LaunchMode.externalApplication);
 }
@@ -77,7 +74,7 @@ Future<void> showAppUpdateDialog(
                   const SizedBox(width: 14),
                   Expanded(
                     child: Text(
-                      'Atualização no TestFlight',
+                      'Atualização disponível',
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w800,
                         color: ThemeHelpers.textColor(ctx),
@@ -88,9 +85,9 @@ Future<void> showAppUpdateDialog(
               ),
               const SizedBox(height: 16),
               Text(
-                'Há uma versão mais recente (${info.latestLabel}). '
-                'Você está na ${info.currentLabel}. '
-                'Toque em Atualizar para abrir o TestFlight e instalar o build novo.',
+                'A versão ${info.latestLabel} já está na App Store — '
+                'você está na ${info.currentLabel}. '
+                'Toque em Atualizar para baixar a mais recente.',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: ThemeHelpers.textSecondaryColor(ctx),
                   height: 1.5,
@@ -124,9 +121,9 @@ Future<void> showAppUpdateDialog(
                     ),
                     onPressed: () async {
                       Navigator.of(ctx).pop();
-                      await openTestFlightUpdateUrl(info.updateUrl);
+                      await openAppStoreUpdateUrl(info.updateUrl);
                     },
-                    icon: const Icon(Icons.flight_takeoff_rounded, size: 18),
+                    icon: const Icon(Icons.open_in_new_rounded, size: 18),
                     label: const Text(
                       'Atualizar',
                       style: TextStyle(fontWeight: FontWeight.w800),

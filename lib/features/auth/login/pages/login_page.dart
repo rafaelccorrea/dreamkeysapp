@@ -11,6 +11,7 @@ import '../../../../shared/services/login_flow_service.dart';
 import '../../../../core/constants/app_assets.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/routes/app_routes.dart';
+import '../../../../shared/widgets/app_update_dialog.dart';
 import '../../../../shared/widgets/brand_wordmark_logo.dart';
 import '../../../../shared/widgets/image_curve_clipper.dart';
 import '../../../../shared/widgets/loading_overlay.dart';
@@ -59,6 +60,11 @@ class _LoginPageState extends State<LoginPage> {
     _emailFocusNode.addListener(_onFocusChange);
     _passwordFocusNode.addListener(_onFocusChange);
     _initializeBiometrics();
+    // Aviso de atualização ANTES do login: se a App Store tem versão mais
+    // nova, o pop-up aparece aqui e leva pra página do app na loja.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) maybePromptAppUpdate(context);
+    });
   }
 
   void _onFocusChange() {

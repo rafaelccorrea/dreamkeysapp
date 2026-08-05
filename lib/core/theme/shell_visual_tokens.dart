@@ -80,20 +80,15 @@ class ShellVisualTokens {
             ? accent.withValues(alpha: 0.12)
             : ThemeHelpers.borderColor(context).withValues(alpha: 0.40),
       ),
+      // Modo claro reformado: sombra difusa fora — só crisp de 1px; a
+      // definição do tile é a borda.
       boxShadow: isDark
           ? null
           : [
               BoxShadow(
-                color: const Color(0xFF334155).withValues(alpha: 0.05),
-                blurRadius: 18,
-                offset: const Offset(0, 4),
-                spreadRadius: -5,
-              ),
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.02),
-                blurRadius: 6,
+                color: const Color(0xFF0F172A).withValues(alpha: 0.04),
+                blurRadius: 2,
                 offset: const Offset(0, 1),
-                spreadRadius: -1,
               ),
             ],
     );
@@ -150,18 +145,12 @@ class ShellVisualTokens {
         stops: [0.0, 1.0],
       ),
       border: Border.all(color: edge.withValues(alpha: 0.55)),
+      // Modo claro reformado: crisp de 1px no lugar do par difuso.
       boxShadow: [
         BoxShadow(
-          color: const Color(0xFF475569).withValues(alpha: 0.07),
-          blurRadius: accentBlur * 0.78,
-          offset: Offset(0, accentDy * 0.72),
-          spreadRadius: -6,
-        ),
-        BoxShadow(
-          color: Colors.black.withValues(alpha: 0.028),
-          blurRadius: neutralBlur * 0.45,
-          offset: Offset(0, neutralDy * 0.42),
-          spreadRadius: -2,
+          color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+          blurRadius: 2,
+          offset: const Offset(0, 1),
         ),
       ],
     );

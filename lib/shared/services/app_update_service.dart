@@ -8,16 +8,16 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/constants/api_constants.dart';
 
-/// Metadados da versão mais recente (TestFlight / backend).
+/// Metadados da versão mais recente publicada (App Store / backend).
 class MobileLatestVersion {
   final String version;
   final int build;
-  final String testFlightUrl;
+  final String updateUrl;
 
   const MobileLatestVersion({
     required this.version,
     required this.build,
-    required this.testFlightUrl,
+    required this.updateUrl,
   });
 }
 
@@ -40,24 +40,30 @@ class AppUpdateInfo {
   String get currentLabel =>
       latestBuild > 0 ? '$currentVersion ($currentBuild)' : currentVersion;
 
-  String get latestLabel => '$latestVersion ($latestBuild)';
+  String get latestLabel =>
+      latestBuild > 0 ? '$latestVersion ($latestBuild)' : latestVersion;
 }
 
-/// Verifica se há build mais novo (TestFlight) consultando a API e, em fallback,
-/// `assets/config/app_update.txt`. Aviso "soft": apenas informa.
+/// Verifica se há versão mais nova em PRODUÇÃO.
+///
+/// Fonte da verdade no iOS: a PRÓPRIA App Store, via iTunes Lookup pelo
+/// bundle id (sem depender de backend). Fallbacks: endpoint
+/// `/app/mobile-version` do backend e, por último, o asset
+/// `assets/config/app_update.txt`. Aviso "soft": apenas informa — o botão
+/// leva pra página do app na loja. (TestFlight morreu: o app está em
+/// produção; não reintroduzir.)
 class AppUpdateService {
   AppUpdateService._();
   static final AppUpdateService instance = AppUpdateService._();
 
-  static const String defaultTestFlightUrl =
-      'https://testflight.apple.com/join/V5dUfzYF';
-
   /// Evita repetir o popup na mesma sessão (exceto [checkForUpdate] com force).
   bool _checkedThisSession = false;
 
-  /// Retorna info de atualização se houver versão/build mais novo; senão `null`.
+  /// Retorna info de atualização se houver versão mais nova; senão `null`.
   Future<AppUpdateInfo?> checkForUpdate({bool force = false}) async {
     if (_checkedThisSession && !force) return null;
+    // Android fica de fora por ora: a Play não expõe lookup público e o
+    // update lá já é empurrado pela própria loja.
     if (!Platform.isIOS) return null;
 
     try {
@@ -65,7 +71,7 @@ class AppUpdateService {
       final currentVersion = info.version.trim();
       final currentBuild = int.tryParse(info.buildNumber.trim()) ?? 0;
 
-      final latest = await _resolveLatestIos();
+      final latest = await _resolveLatestIos(info.packageName);
       if (latest == null) {
         if (!force) _checkedThisSession = true;
         return null;
@@ -87,7 +93,7 @@ class AppUpdateService {
         currentBuild: info.buildNumber.trim(),
         latestVersion: latest.version,
         latestBuild: latest.build,
-        updateUrl: latest.testFlightUrl,
+        updateUrl: latest.updateUrl,
       );
     } catch (e) {
       debugPrint('[AppUpdate] checagem falhou: $e');
@@ -103,13 +109,43 @@ class AppUpdateService {
     final versionCmp = _compareVersions(latest.version, currentVersion);
     if (versionCmp > 0) return true;
     if (versionCmp < 0) return false;
+    // A App Store não expõe o número de build — quando a fonte tem build
+    // (backend/asset), desempata por ele; lookup manda build 0 (= empate).
     return latest.build > currentBuild;
   }
 
-  Future<MobileLatestVersion?> _resolveLatestIos() async {
+  Future<MobileLatestVersion?> _resolveLatestIos(String bundleId) async {
+    final store = await _fetchFromAppStore(bundleId);
+    if (store != null) return store;
     final remote = await _fetchFromApi();
     if (remote != null) return remote;
     return _loadFromAsset();
+  }
+
+  /// iTunes Lookup — a versão que está NO AR na App Store + o link da
+  /// página do app (`trackViewUrl`).
+  Future<MobileLatestVersion?> _fetchFromAppStore(String bundleId) async {
+    try {
+      final uri = Uri.parse(
+        'https://itunes.apple.com/lookup?bundleId=$bundleId&country=br',
+      );
+      final res = await http.get(uri).timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) return null;
+      final body = jsonDecode(res.body);
+      if (body is! Map) return null;
+      final results = body['results'];
+      if (results is! List || results.isEmpty) return null;
+      final app = results.first;
+      if (app is! Map) return null;
+      final version = app['version']?.toString().trim();
+      final url = app['trackViewUrl']?.toString().trim();
+      if (version == null || version.isEmpty) return null;
+      if (url == null || url.isEmpty) return null;
+      return MobileLatestVersion(version: version, build: 0, updateUrl: url);
+    } catch (e) {
+      debugPrint('[AppUpdate] iTunes lookup indisponível: $e');
+      return null;
+    }
   }
 
   Future<MobileLatestVersion?> _fetchFromApi() async {
@@ -127,15 +163,15 @@ class AppUpdateService {
       final build = buildRaw is int
           ? buildRaw
           : int.tryParse(buildRaw?.toString() ?? '') ?? 0;
-      if (version == null || version.isEmpty || build <= 0) return null;
-      final url = (ios['testFlightUrl'] ?? ios['testflightUrl'])
-              ?.toString()
-              .trim() ??
-          defaultTestFlightUrl;
+      if (version == null || version.isEmpty) return null;
+      final url = (ios['appStoreUrl'] ?? ios['updateUrl'])
+          ?.toString()
+          .trim();
+      if (url == null || url.isEmpty) return null;
       return MobileLatestVersion(
         version: version,
         build: build,
-        testFlightUrl: url.isNotEmpty ? url : defaultTestFlightUrl,
+        updateUrl: url,
       );
     } catch (e) {
       debugPrint('[AppUpdate] API indisponível: $e');
@@ -151,17 +187,14 @@ class AppUpdateService {
           .map((l) => l.trim())
           .where((l) => l.isNotEmpty && !l.startsWith('#'))
           .toList();
-      if (lines.length < 2) return null;
+      // Formato: versão / build / URL da página na App Store (obrigatória).
+      if (lines.length < 3 || lines[2].isEmpty) return null;
       final version = lines[0];
       final build = int.tryParse(lines[1]) ?? 0;
-      if (build <= 0) return null;
-      final url = lines.length >= 3 && lines[2].isNotEmpty
-          ? lines[2]
-          : defaultTestFlightUrl;
       return MobileLatestVersion(
         version: version,
         build: build,
-        testFlightUrl: url,
+        updateUrl: lines[2],
       );
     } catch (e) {
       debugPrint('[AppUpdate] asset app_update.txt: $e');

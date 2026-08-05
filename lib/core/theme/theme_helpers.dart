@@ -79,18 +79,14 @@ class ThemeHelpers {
         ),
       ];
     }
+    // MODO CLARO (reforma 2026-08): sombra difusa morreu — no fundo branco
+    // ela virava mancha e dava a sensação de "itens flutuando". Sobra um
+    // crisp de 1px que só assenta o elemento; a separação real é a borda.
     return [
       BoxShadow(
-        color: const Color(0xFF1A2340).withValues(alpha: 0.07 * strength),
-        blurRadius: 16,
-        offset: const Offset(0, 6),
-        spreadRadius: -8,
-      ),
-      BoxShadow(
-        color: const Color(0xFF1A2340).withValues(alpha: 0.04 * strength),
-        blurRadius: 3,
+        color: const Color(0xFF0F172A).withValues(alpha: 0.05 * strength),
+        blurRadius: 2,
         offset: const Offset(0, 1),
-        spreadRadius: -1,
       ),
     ];
   }
@@ -121,9 +117,10 @@ class ThemeHelpers {
         stops: const [0.0, 0.42, 1.0],
         colors: isDark
             ? const [Color(0xFF06060C), Color(0xFF0C0A12), Color(0xFF141018)]
-            // Cinza frio (não quase-branco) para os cards brancos ganharem
-            // contraste no shell do dashboard — alinhado ao novo `background`.
-            : const [Color(0xFFE7EAF1), Color(0xFFEEF0F6), Color(0xFFE2E6EF)],
+            // MODO CLARO reformado: BRANCO SÓLIDO (o gradiente gelo dava a
+            // sensação desbotada/flutuante). Mantido como "gradiente" de
+            // uma cor só pra não mexer na assinatura do helper.
+            : const [Color(0xFFFFFFFF), Color(0xFFFFFFFF), Color(0xFFFFFFFF)],
       ),
     );
   }

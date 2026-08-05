@@ -48,28 +48,33 @@ class SecondaryColors {
 class TextColors {
   TextColors._();
 
-  final Color text = const Color(0xFF1F2937);
+  // Contraste de modo claro DE FATO: principal quase-preto, secundário
+  // um degrau mais escuro que o antigo (#4B5563 lia fraco no branco).
+  final Color text = const Color(0xFF0F172A);
   final Color textDarkMode = const Color(0xFFE6E6E6);
 
-  final Color textSecondary = const Color(0xFF4B5563);
+  final Color textSecondary = const Color(0xFF475569);
   final Color textSecondaryDarkMode = const Color(0xFFB3B3B3);
 
-  final Color textLight = const Color(0xFF6B7280);
+  final Color textLight = const Color(0xFF64748B);
   final Color textLightDarkMode = const Color(0xFF9CA3AF);
 }
 
 class BackgroundColors {
   BackgroundColors._();
 
-  // Cinza frio (não quase-branco): dá contraste para os cards brancos
-  // "pularem" no light — antes era #F8FAFC e o app ficava chapado/morto.
-  final Color background = const Color(0xFFE9ECF3);
+  // MODO CLARO DE FATO (reforma 2026-08): fundo BRANCO sólido — o cinza
+  // "gelo" (#E9ECF3) dava sensação desbotada e de itens flutuando. No
+  // branco, a separação vem de BORDAS/hairlines sólidas e tipografia
+  // escura (não de sombras). Não voltar ao gelo.
+  final Color background = const Color(0xFFFFFFFF);
   final Color backgroundDarkMode = const Color(0xFF0C0C16);
 
-  final Color backgroundSecondary = const Color(0xFFF5F7FA);
+  final Color backgroundSecondary = const Color(0xFFF4F5F7);
   final Color backgroundSecondaryDarkMode = const Color(0xFF13131F);
 
-  final Color backgroundTertiary = const Color(0xFFF0F4F8);
+  // Fill sólido de inputs/chips — legível SOBRE branco.
+  final Color backgroundTertiary = const Color(0xFFEEF0F3);
   final Color backgroundTertiaryDarkMode = const Color(0xFF1A1A2A);
 
   final Color cardBackground = const Color(0xFFFFFFFF);
@@ -82,12 +87,12 @@ class BackgroundColors {
 class BorderColors {
   BorderColors._();
 
-  // Um pouco mais definida (cool) que #E5E7EB para o contorno do card ler
-  // limpo contra o fundo cinza — parte do refino de contraste no light.
-  final Color border = const Color(0xFFDDE1E9);
+  // Com fundo branco, a borda É a separação (não a sombra) — sólida e
+  // nítida, sem virar grade pesada.
+  final Color border = const Color(0xFFD6DAE1);
   final Color borderDarkMode = const Color(0xFF1E1E30);
 
-  final Color borderLight = const Color(0xFFF3F4F6);
+  final Color borderLight = const Color(0xFFE8EAEE);
   final Color borderLightDarkMode = const Color(0xFF252538);
 }
 

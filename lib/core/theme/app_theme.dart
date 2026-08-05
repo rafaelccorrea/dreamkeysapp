@@ -168,9 +168,10 @@ class AppTheme {
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      // Branco (superfície de card) para o campo "pular" sobre o novo fundo
-      // cinza — antes era o próprio fundo e o input sumia na página.
-      fillColor: AppColors.background.cardBackground,
+      // Fill cinza SÓLIDO sobre o fundo branco (reforma do modo claro):
+      // com o fundo branco, input branco sumia — o fill terciário delimita
+      // o campo sem depender de sombra.
+      fillColor: AppColors.background.backgroundTertiary,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
         borderSide: BorderSide(color: AppColors.border.border, width: 1.5),
