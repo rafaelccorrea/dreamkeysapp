@@ -2,7 +2,7 @@ name: Intellisys
 description: "Intellisys - Sistema Imobiliário"
 publish_to: 'none'
 
-version: 2.0.0+57
+version: 2.1.0+58
 
 environment:
   sdk: ^3.9.2
@@ -25,17 +25,16 @@ dependencies:
   local_auth: ^3.0.1
   image_picker: ^1.1.2
   image_cropper: ^12.2.1
-  # Mantido na linha 12.0.0-beta de propósito: é a única do file_picker que
-  # usa `win32 ^6`, exigido pela família *_plus (package_info_plus 10 /
-  # device_info_plus 13). Baixar para a 11.x estável (win32 ^5) conflita o
-  # solver. API usada: estática `FilePicker.pickFiles(...)`. Se o build do
-  # Android falhar com "Unresolved reference 'FileUtils'", é cache de Kotlin
-  # velho — rode `flutter clean` antes do `flutter build`.
   file_picker: ^12.0.0-beta.2
   google_fonts: ^8.1.0
   table_calendar: ^3.0.9
   socket_io_client: ^3.1.4
   url_launcher: ^6.2.5
+  # Share sheet NATIVO (compartilhar link do imóvel). Antes o "compartilhar"
+  # abria um rascunho de e-mail via mailto: — péssimo pro corretor.
+  # ^13.3.0 é a linha que usa `win32 ^6` (exigido pela família *_plus);
+  # 10.x–12.x usam win32 ^5 e conflitam o solver.
+  share_plus: ^13.3.0
   # Substitui o antigo `lucide_icons` (0.257.0, abandonado): aquela versão
   # estendia `IconData`, que virou `final class` no Flutter 3.44+ — o build
   # iOS quebrava com "The class 'IconData' can't be extended outside of its
