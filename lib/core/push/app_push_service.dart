@@ -354,7 +354,7 @@ class AppPushService {
     }
 
     final messaging = FirebaseMessaging.instance;
-    final token = await messaging.getToken();
+    final token = await _getFcmTokenSafely(messaging);
     if (token == null || token.isEmpty) {
       debugPrint('📱 [PUSH] FCM getToken vazio');
       return;
@@ -365,6 +365,49 @@ class AppPushService {
     );
 
     await _registerTokenOnBackend(token);
+  }
+
+  /// Obtém o token FCM tratando a CORRIDA do iOS: o token FCM depende do
+  /// token APNs, que a Apple entrega de forma ASSÍNCRONA depois da
+  /// permissão. Chamar `getToken()` cedo demais no iOS lança
+  /// `apns-token-not-set` (e sem catch o registro do device morria aí —
+  /// era por isso que iPhone não recebia push, só Android).
+  ///
+  /// Estratégia: espera o APNs chegar (até ~15s, backoff curto) e só então
+  /// pede o FCM. Se o APNs não vier, loga diagnóstico e desiste em
+  /// silêncio — o `onTokenRefresh` registra depois se o token nascer.
+  Future<String?> _getFcmTokenSafely(FirebaseMessaging messaging) async {
+    if (!kIsWeb && Platform.isIOS) {
+      String? apns;
+      for (var attempt = 0; attempt < 10; attempt++) {
+        try {
+          apns = await messaging.getAPNSToken();
+        } catch (e) {
+          debugPrint('📱 [PUSH][iOS] getAPNSToken tentativa $attempt: $e');
+        }
+        if (apns != null && apns.isNotEmpty) break;
+        await Future.delayed(
+          Duration(seconds: attempt < 4 ? 1 : 2),
+        );
+      }
+      if (apns == null || apns.isEmpty) {
+        debugPrint(
+          '📱 [PUSH][iOS] APNs token NÃO chegou após a espera. Push remoto '
+          'indisponível neste boot. Causas prováveis: (1) chave APNs (.p8) '
+          'não cadastrada no Firebase Console → Cloud Messaging; '
+          '(2) aps-environment ausente/errado no build; (3) sem rede com a '
+          'Apple. O onTokenRefresh registra sozinho se o token sair depois.',
+        );
+        return null;
+      }
+      debugPrint('📱 [PUSH][iOS] APNs ok — pedindo token FCM.');
+    }
+    try {
+      return await messaging.getToken();
+    } catch (e) {
+      debugPrint('📱 [PUSH] getToken falhou: $e');
+      return null;
+    }
   }
 
   Future<void> unregisterFromBackendIfNeeded() async {

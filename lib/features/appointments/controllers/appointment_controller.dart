@@ -1,4 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../models/appointment_model.dart';
 import '../services/appointment_service.dart';
 
@@ -20,8 +24,6 @@ class AppointmentController extends ChangeNotifier {
   bool _loadingMore = false;
   String? _error;
   bool _hasMore = true;
-  int _currentPage = 1;
-  static const int _pageLimit = 20;
 
   // Filtros
   String? _filterStatus;
@@ -32,6 +34,20 @@ class AppointmentController extends ChangeNotifier {
   String? _filterClientId;
   bool _onlyMyData = false;
   String _searchTerm = '';
+
+  // ── Novo modelo da agenda ──────────────────────────────────────────────────
+  // Escopo de pessoas (mutuamente exclusivo, prioridade empresa > seleção >
+  // meus) — persistido em SharedPreferences como no web (calendar:scope).
+  List<String> _scopeUserIds = [];
+  bool _scopeAllCompany = false;
+
+  // Janela de fetch derivada da navegação do calendário: do dia 1 do mês
+  // anterior até o fim de +2 meses; ao navegar pra fora ela CRESCE (nunca
+  // encolhe) — evita refetch a cada passo (paridade com o web).
+  DateTime? _windowStart;
+  DateTime? _windowEnd;
+
+  static const String _scopePrefsKey = 'calendar:scope';
 
   // Getters
   List<Appointment> get appointments => List.unmodifiable(_appointments);
@@ -50,6 +66,11 @@ class AppointmentController extends ChangeNotifier {
   String? get filterClientId => _filterClientId;
   bool get onlyMyData => _onlyMyData;
   String get searchTerm => _searchTerm;
+  List<String> get scopeUserIds => List.unmodifiable(_scopeUserIds);
+  bool get scopeAllCompany => _scopeAllCompany;
+
+  /// Escopo diferente de "meus agendamentos"?
+  bool get hasCustomScope => _scopeAllCompany || _scopeUserIds.isNotEmpty;
 
   /// Lista de agendamentos filtrados por busca
   List<Appointment> get filteredAppointments {
@@ -63,21 +84,68 @@ class AppointmentController extends ChangeNotifier {
     }).toList();
   }
 
-  /// Carrega lista de agendamentos
+  /// Restaura o escopo persistido (chamar uma vez, antes do primeiro load).
+  Future<void> restoreScope() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_scopePrefsKey);
+      if (raw == null || raw.isEmpty) return;
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        _scopeUserIds = (decoded['userIds'] as List? ?? const [])
+            .map((e) => e.toString())
+            .toList();
+        _scopeAllCompany = decoded['allCompany'] == true;
+        notifyListeners();
+      }
+    } catch (_) {
+      // JSON corrompido → ignora e segue no default "meus" (paridade web).
+    }
+  }
+
+  /// Define o escopo de pessoas e persiste.
+  Future<void> setScope({
+    required List<String> userIds,
+    required bool allCompany,
+  }) async {
+    _scopeUserIds = List.of(userIds);
+    _scopeAllCompany = allCompany;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _scopePrefsKey,
+        jsonEncode({'userIds': _scopeUserIds, 'allCompany': _scopeAllCompany}),
+      );
+    } catch (_) {}
+  }
+
+  /// Garante que a janela de fetch cobre o mês visível (mês−1 .. mês+2).
+  /// Só cresce. Retorna `true` quando mudou — o chamador decide recarregar.
+  bool ensureWindowCovers(DateTime visibleMonth) {
+    final start = DateTime(visibleMonth.year, visibleMonth.month - 1, 1);
+    final end =
+        DateTime(visibleMonth.year, visibleMonth.month + 3, 0, 23, 59, 59);
+    var changed = false;
+    if (_windowStart == null || start.isBefore(_windowStart!)) {
+      _windowStart = start;
+      changed = true;
+    }
+    if (_windowEnd == null || end.isAfter(_windowEnd!)) {
+      _windowEnd = end;
+      changed = true;
+    }
+    return changed;
+  }
+
+  /// Carrega os agendamentos da JANELA (novo modelo: range query, sem
+  /// paginação de 20 — a agenda precisa do período inteiro).
   Future<void> loadAppointments({bool reset = false}) async {
-    if (reset) {
-      _currentPage = 1;
-      _appointments.clear();
-      _hasMore = true;
-    }
+    if (_loading) return;
+    // Janela default caso ninguém tenha chamado ensureWindowCovers ainda.
+    ensureWindowCovers(DateTime.now());
 
-    if (_loading || _loadingMore || !_hasMore) return;
-
-    if (reset) {
-      _loading = true;
-    } else {
-      _loadingMore = true;
-    }
+    _loading = true;
     _error = null;
     notifyListeners();
 
@@ -85,24 +153,19 @@ class AppointmentController extends ChangeNotifier {
       final response = await _appointmentService.listAppointments(
         status: _filterStatus,
         type: _filterType,
-        startDate: _filterStartDate?.toIso8601String(),
-        endDate: _filterEndDate?.toIso8601String(),
+        startDate: _windowStart?.toIso8601String(),
+        endDate: _windowEnd?.toIso8601String(),
         propertyId: _filterPropertyId,
         clientId: _filterClientId,
-        page: _currentPage,
-        limit: _pageLimit,
-        onlyMyData: _onlyMyData,
+        // Escopo exclusivo: empresa > seleção > meus (default do modelo).
+        viewAllCompany: _scopeAllCompany,
+        targetUserIds: _scopeUserIds,
+        onlyMyData: true,
       );
 
       if (response.success && response.data != null) {
-        if (reset) {
-          _appointments = response.data!.appointments;
-        } else {
-          _appointments.addAll(response.data!.appointments);
-        }
-
-        _hasMore = response.data!.pagination.page < response.data!.pagination.totalPages;
-        _currentPage++;
+        _appointments = response.data!.appointments;
+        _hasMore = false;
         _error = null;
       } else {
         _error = response.message ?? 'Erro ao carregar agendamentos';
@@ -447,7 +510,8 @@ class AppointmentController extends ChangeNotifier {
     _loading = false;
     _loadingMore = false;
     _hasMore = true;
-    _currentPage = 1;
+    _windowStart = null;
+    _windowEnd = null;
     clearFilters();
     notifyListeners();
   }

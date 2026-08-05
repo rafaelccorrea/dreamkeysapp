@@ -14,6 +14,10 @@ class Appointment {
   final String? location;
   final String? notes;
   final String color;
+
+  /// Tags do compromisso — valores do catálogo fixo do backend
+  /// (`appointmentTags.ts` no web). Valor fora do catálogo volta 400.
+  final List<String> tags;
   final bool isRecurring;
   final String userId;
   final String companyId;
@@ -42,6 +46,7 @@ class Appointment {
     this.location,
     this.notes,
     required this.color,
+    this.tags = const [],
     this.isRecurring = false,
     required this.userId,
     required this.companyId,
@@ -71,6 +76,9 @@ class Appointment {
       location: json['location']?.toString(),
       notes: json['notes']?.toString(),
       color: json['color']?.toString() ?? '#3B82F6',
+      tags: json['tags'] != null
+          ? List<String>.from((json['tags'] as List).map((e) => e.toString()))
+          : const [],
       isRecurring: json['isRecurring'] as bool? ?? false,
       userId: json['userId']?.toString() ?? '',
       companyId: json['companyId']?.toString() ?? '',
@@ -408,10 +416,14 @@ class CreateAppointmentData {
   final String? location;
   final String? notes;
   final String? color;
+  final List<String>? tags;
   final bool? isRecurring;
   final String? propertyId;
   final String? clientId;
   final List<String>? participantIds;
+
+  /// Convidados vão no PRÓPRIO POST — o backend cria os convites junto
+  /// (sem segundo passo do cliente, paridade com o web).
   final List<String>? inviteUserIds;
 
   CreateAppointmentData({
@@ -425,6 +437,7 @@ class CreateAppointmentData {
     this.location,
     this.notes,
     this.color,
+    this.tags,
     this.isRecurring,
     this.propertyId,
     this.clientId,
@@ -444,6 +457,7 @@ class CreateAppointmentData {
       if (location != null) 'location': location,
       if (notes != null) 'notes': notes,
       if (color != null) 'color': color,
+      if (tags != null) 'tags': tags,
       if (isRecurring != null) 'isRecurring': isRecurring,
       if (propertyId != null) 'propertyId': propertyId,
       if (clientId != null) 'clientId': clientId,
@@ -465,6 +479,7 @@ class UpdateAppointmentData {
   final String? location;
   final String? notes;
   final String? color;
+  final List<String>? tags;
   final bool? isRecurring;
   final String? propertyId;
   final String? clientId;
@@ -482,6 +497,7 @@ class UpdateAppointmentData {
     this.location,
     this.notes,
     this.color,
+    this.tags,
     this.isRecurring,
     this.propertyId,
     this.clientId,
@@ -501,6 +517,7 @@ class UpdateAppointmentData {
     if (location != null) map['location'] = location;
     if (notes != null) map['notes'] = notes;
     if (color != null) map['color'] = color;
+    if (tags != null) map['tags'] = tags;
     if (isRecurring != null) map['isRecurring'] = isRecurring;
     if (propertyId != null) map['propertyId'] = propertyId;
     if (clientId != null) map['clientId'] = clientId;

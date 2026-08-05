@@ -15,6 +15,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/shell_visual_tokens.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../widgets/property_filters_drawer.dart';
+import '../widgets/property_share_sheet.dart';
 import '../widgets/intelligent_search_modal.dart';
 import '../widgets/export_import_dialog.dart';
 import '../services/property_local_draft_storage.dart';
@@ -3312,6 +3313,16 @@ class _PropertiesPageState extends State<PropertiesPage> {
           if (!mounted || !parentContext.mounted) return;
           await _confirmAndDeleteProperty(parentContext, property);
         },
+        // Mesmo gate do web: só imóvel publicado no site tem link público.
+        onShare: property.isAvailableForSite == true
+            ? () {
+                Navigator.of(sheetContext).pop();
+                Future.microtask(() {
+                  if (!mounted || !parentContext.mounted) return;
+                  showPropertyShareSheet(parentContext, property);
+                });
+              }
+            : null,
       ),
     );
   }
@@ -5824,6 +5835,9 @@ class _PropertyQuickActionsSheet extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
+  /// Compartilhar link público — null quando o imóvel não está no site.
+  final VoidCallback? onShare;
+
   const _PropertyQuickActionsSheet({
     required this.property,
     required this.canMatches,
@@ -5835,6 +5849,7 @@ class _PropertyQuickActionsSheet extends StatelessWidget {
     required this.onOpenMatches,
     required this.onEdit,
     required this.onDelete,
+    this.onShare,
   });
 
   @override
@@ -5848,7 +5863,9 @@ class _PropertyQuickActionsSheet extends StatelessWidget {
       child: Container(
         // Sheet "atracado" no rodapé — bordas só no topo, sem margens
         // laterais (full width). Sombra projetando pra cima coerente com
-        // a posição.
+        // a posição. Teto de altura: em tela compacta/fonte grande os
+        // tiles rolam em vez de estourar o Column.
+        constraints: BoxConstraints(maxHeight: mq.size.height * 0.88),
         decoration: BoxDecoration(
           color: ThemeHelpers.cardBackgroundColor(context),
           borderRadius: const BorderRadius.vertical(
@@ -6020,8 +6037,11 @@ class _PropertyQuickActionsSheet extends StatelessWidget {
                     ),
                   ),
                 ),
-                // ── Tiles de ação ──────────────────────────────────────
-                Padding(
+                // ── Tiles de ação (roláveis se a tela for baixa) ───────
+                Flexible(
+                  child: SingleChildScrollView(
+                    physics: const ClampingScrollPhysics(),
+                    child: Padding(
                   padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -6034,6 +6054,15 @@ class _PropertyQuickActionsSheet extends StatelessWidget {
                         color: const Color(0xFF0891B2), // cyan
                         onTap: onOpenDetails,
                       ),
+                      if (onShare != null)
+                        _PropertyQuickActionTile(
+                          icon: LucideIcons.share2,
+                          label: 'Compartilhar link',
+                          subtitle:
+                              'WhatsApp, link do site e mensagem pronta',
+                          color: const Color(0xFF25D366), // WhatsApp
+                          onTap: onShare!,
+                        ),
                       if (canMatches)
                         _PropertyQuickActionTile(
                           icon: LucideIcons.sparkles,
@@ -6063,6 +6092,8 @@ class _PropertyQuickActionsSheet extends StatelessWidget {
                           onTap: onDelete,
                         ),
                     ],
+                  ),
+                ),
                   ),
                 ),
               ],

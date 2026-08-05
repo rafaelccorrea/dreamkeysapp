@@ -19,11 +19,14 @@ class BrokerMessageTemplates {
     required String propertyTitle,
     String? address,
     String? code,
+    String? priceLine,
   }) {
     final parts = <String>[
       '🏠 *$propertyTitle*',
       if (code != null && code.trim().isNotEmpty) 'Código: ${code.trim()}',
       if (address != null && address.trim().isNotEmpty) address.trim(),
+      if (priceLine != null && priceLine.trim().isNotEmpty)
+        '💰 ${priceLine.trim()}',
       '',
       'Ficou interessado(a)? Me chama que agendo uma visita!',
     ];

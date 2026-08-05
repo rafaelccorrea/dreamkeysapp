@@ -10,7 +10,13 @@ class AppointmentService {
   static final AppointmentService instance = AppointmentService._();
   final ApiService _apiService = ApiService.instance;
 
-  /// Lista agendamentos com filtros opcionais
+  /// Lista agendamentos com filtros opcionais.
+  ///
+  /// Escopo de pessoas (novo modelo — mutuamente exclusivo, nesta ordem de
+  /// prioridade, igual ao `useAppointments.ts` do web):
+  /// 1. `viewAllCompany: true` → agenda da empresa toda (só master/admin/manager)
+  /// 2. `targetUserIds` → agendas dos usuários selecionados (CSV)
+  /// 3. `onlyMyData: true` → só os meus (default da tela)
   Future<ApiResponse<AppointmentListResponse>> listAppointments({
     String? status,
     String? type,
@@ -21,6 +27,8 @@ class AppointmentService {
     int? page,
     int? limit,
     bool? onlyMyData,
+    List<String>? targetUserIds,
+    bool? viewAllCompany,
   }) async {
     try {
       final params = <String, String>{};
@@ -38,7 +46,15 @@ class AppointmentService {
       }
       if (page != null) params['page'] = page.toString();
       if (limit != null) params['limit'] = limit.toString();
-      if (onlyMyData != null) params['onlyMyData'] = onlyMyData.toString();
+
+      // Escopo mutuamente exclusivo (prioridade: empresa > seleção > meus).
+      if (viewAllCompany == true) {
+        params['viewAllCompany'] = 'true';
+      } else if (targetUserIds != null && targetUserIds.isNotEmpty) {
+        params['targetUserIds'] = targetUserIds.join(',');
+      } else if (onlyMyData != null) {
+        params['onlyMyData'] = onlyMyData.toString();
+      }
 
       final response = await _apiService.get(
         ApiConstants.appointments,

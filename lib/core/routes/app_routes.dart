@@ -19,10 +19,12 @@ import '../../features/properties/pages/property_drafts_list_page.dart';
 import '../../features/properties/pages/property_offers_page.dart';
 import '../../features/properties/pages/offer_details_page.dart';
 import '../../features/properties/pages/property_approvals_page.dart';
+import '../../features/appointments/pages/appointment_invites_page.dart';
 import '../../features/appointments/pages/calendar_page.dart';
 import '../../features/appointments/pages/create_appointment_page.dart';
 import '../../features/appointments/pages/edit_appointment_page.dart';
 import '../../features/appointments/pages/appointment_details_page.dart';
+import '../../features/appointments/pages/schedule_settings_page.dart';
 import '../../features/profile/pages/profile_page.dart';
 import '../../features/profile/pages/edit_profile_page.dart';
 import '../../features/clients/pages/clients_page.dart';
@@ -156,8 +158,17 @@ class AppRoutes {
   static const String notifications = '/notifications';
   static const String calendar = '/calendar';
   static const String calendarCreate = '/calendar/create';
+
+  /// Caixa de convites da agenda (aceitar/recusar). Precisa de case EXATO no
+  /// `generateRoute` ANTES do prefixo genérico `/calendar/` — senão "convites"
+  /// seria lido como action de edit/details e cairia em rota não encontrada.
+  static const String calendarInvites = '/calendar/convites';
   static String calendarEdit(String id) => '/calendar/edit/$id';
   static String calendarDetails(String id) => '/calendar/details/$id';
+
+  /// "Meus horários" — regra de horários da agenda (paridade com o
+  /// ScheduleSettingsPanel do imobx-front).
+  static const String calendarSchedule = '/calendar/horarios';
 
   static const String clients = '/clients';
   static const String clientCreate = '/clients/new';
@@ -427,6 +438,15 @@ class AppRoutes {
         ),
         settings,
       );
+    } else if (routeName == AppRoutes.calendarSchedule) {
+      // IMPORTANTE: deve vir ANTES do startsWith('/calendar/') genérico,
+      // senão "horarios" é tratado como action de edit/details.
+      return _buildRoute(const ScheduleSettingsPage(), settings);
+    } else if (routeName == AppRoutes.calendarInvites) {
+      // IMPORTANTE: também ANTES do startsWith('/calendar/') genérico.
+      // O chamador deve recarregar a agenda no `.then()` da navegação —
+      // convites aceitos criam compromissos novos (ver doc da página).
+      return _buildRoute(const AppointmentInvitesPage(), settings);
     } else if (routeName == AppRoutes.clients) {
       return _buildRoute(const ClientsPage(), settings);
     } else if (routeName == AppRoutes.clientCreate) {

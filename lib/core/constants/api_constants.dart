@@ -241,14 +241,27 @@ class ApiConstants {
   static String appointmentDelete(String id) => '/appointments/$id';
   static String appointmentParticipant(String appointmentId, String userId) =>
       '/appointments/$appointmentId/participants/$userId';
-  static const String appointmentInvites = '/appointments/invites';
+  // Convites: o novo modelo da agenda usa recurso próprio `/appointment-invites`
+  // (paridade com useAppointmentInvites.ts do web — as rotas antigas
+  // `/appointments/invites/*` são do modelo anterior).
+  static const String appointmentInvites = '/appointment-invites';
   static const String appointmentInvitesMyInvites =
-      '/appointments/invites/my-invites';
+      '/appointment-invites/my-invites';
   static const String appointmentInvitesPending =
-      '/appointments/invites/pending';
-  static String appointmentInviteById(String id) => '/appointments/invites/$id';
+      '/appointment-invites/pending';
+  static String appointmentInviteById(String id) => '/appointment-invites/$id';
   static String appointmentInviteRespond(String id) =>
-      '/appointments/invites/$id/respond';
+      '/appointment-invites/$id/respond';
+
+  // Regra de horários + disponibilidade (novo modelo da agenda — paridade
+  // com appointmentScheduleApi.ts do web).
+  static const String appointmentScheduleSettings =
+      '/appointments/schedule-settings';
+  static const String appointmentAvailabilityCheck =
+      '/appointments/availability/check';
+  static const String appointmentAvailabilitySlots =
+      '/appointments/availability/slots';
+  static String appointmentSnooze(String id) => '/appointments/$id/snooze';
 
   // Endpoints de Clientes
   static const String clients = '/clients';

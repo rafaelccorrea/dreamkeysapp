@@ -1,15 +1,30 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/services/api_service.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/custom_text_field.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../controllers/appointment_controller.dart';
 import '../models/appointment_model.dart';
+import '../models/appointment_tags.dart';
+import '../services/appointment_schedule_service.dart';
 import '../widgets/appointment_helpers.dart';
+
+// ─── Novo modelo de agenda (paridade com EditAppointmentPage do web) ─────────
+const Color _kGuestsAccent = Color(0xFF4A90E2); // seção CONVIDADOS
+const Color _kTagsAccent = Color(0xFF64748B); // seção ETIQUETAS
+const Color _kApplyGreen = Color(0xFF059669); // botão Aplicar do sheet
+const Color _kFreeGreen = Color(0xFF10B981); // "horário livre para todos"
+const Color _kOverlapRed = Color(0xFFDC2626); // conflito de agenda
+const Color _kScheduleAmber = Color(0xFFE6B84C); // fora da grade / sem gap
+const String _kManualTimeChoice = '__manual__';
 
 /// Página premium de edição de agendamento — espelha a UX da criação,
 /// mas adiciona controle de Status (fluxo do compromisso).
@@ -39,6 +54,18 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
   bool _saving = false;
   bool _booting = true;
 
+  // ── Novo modelo: convidados, etiquetas e disponibilidade ──
+  final List<_MemberOption> _invited = [];
+  bool _invitesTouched = false; // só reenviamos convites se o usuário mexeu
+  List<_MemberOption>? _membersCache; // membros da empresa, carregados 1x
+  final Set<String> _tags = {};
+  Timer? _availabilityDebounce;
+  int _availabilitySeq = 0; // descarta resposta atrasada de um check antigo
+  bool _checkingAvailability = false;
+  bool _availabilityCheckFailed = false;
+  AvailabilityCheckResult? _availability;
+  bool _loadingSlots = false;
+
   @override
   void initState() {
     super.initState();
@@ -62,9 +89,36 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
       _start = a.startDate;
       _end = a.endDate;
       _allDay = _isAllDay(a.startDate, a.endDate);
+      // Etiquetas existentes pré-selecionadas.
+      _tags
+        ..clear()
+        ..addAll(a.tags);
+      // Convidados atuais = convites vivos (pendentes/aceitos).
+      final invites = a.invites;
+      if (invites != null) {
+        for (final inv in invites) {
+          if (inv.status != InviteStatus.pending &&
+              inv.status != InviteStatus.accepted) {
+            continue;
+          }
+          if (inv.invitedUserId.isEmpty) continue;
+          if (_invited.any((m) => m.id == inv.invitedUserId)) continue;
+          final name = inv.invitedUser?['name']?.toString() ?? '';
+          _invited.add(
+            _MemberOption(
+              id: inv.invitedUserId,
+              name: name.isEmpty ? 'Convidado' : name,
+            ),
+          );
+        }
+      }
     }
     if (mounted) {
       setState(() => _booting = false);
+      if (a != null) {
+        // Check inicial com o horário carregado do compromisso.
+        _scheduleAvailabilityCheck();
+      }
     }
   }
 
@@ -78,6 +132,7 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
 
   @override
   void dispose() {
+    _availabilityDebounce?.cancel();
     _titleController.dispose();
     _descriptionController.dispose();
     _locationController.dispose();
@@ -102,6 +157,13 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
     if (_notesController.text.length > 300) return false;
     if (_start == null || _end == null) return false;
     if (_dateError() != null) return false;
+    // Novo modelo: não salva com o check em andamento nem com alguém
+    // indisponível. Erro de rede NÃO bloqueia (só avisa).
+    if (_checkingAvailability) return false;
+    final availability = _availability;
+    if (availability != null && availability.unavailable.isNotEmpty) {
+      return false;
+    }
     return true;
   }
 
@@ -137,6 +199,7 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
             _end!.hour, _end!.minute);
       }
     });
+    _scheduleAvailabilityCheck();
   }
 
   Future<void> _pickTime({required bool isStart}) async {
@@ -165,10 +228,12 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
             picked.hour, picked.minute);
       }
     });
+    _scheduleAvailabilityCheck();
   }
 
   void _quickDuration(Duration d) {
     setState(() => _end = _start!.add(d));
+    _scheduleAvailabilityCheck();
   }
 
   void _toggleAllDay(bool value) {
@@ -184,6 +249,7 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
         _end = _start!.add(const Duration(hours: 1));
       }
     });
+    _scheduleAvailabilityCheck();
   }
 
   // ---------------------------------------------------------------------------
@@ -217,6 +283,11 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
             ? null
             : _notesController.text.trim(),
         color: _color,
+        tags: _selectedTags(),
+        // Convidados só entram no PUT se o usuário mexeu na lista — evita
+        // reconciliar (e cancelar) convites por engano quando nada mudou.
+        inviteUserIds:
+            _invitesTouched ? _invited.map((m) => m.id).toList() : null,
       ),
     );
 
@@ -339,6 +410,8 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
                   child: _buildTypeGrid(theme),
                 ),
                 const SizedBox(height: 18),
+                _buildTagsSection(theme),
+                const SizedBox(height: 18),
                 _buildSection(
                   theme,
                   icon: Icons.event_rounded,
@@ -377,6 +450,8 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 18),
+                _buildGuestsSection(theme),
                 const SizedBox(height: 18),
                 _buildSection(
                   theme,
@@ -751,7 +826,8 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
           label: 'Início',
           date: _start ?? DateTime.now(),
           onPickDate: () => _pickDate(isStart: true),
-          onPickTime: _allDay ? null : () => _pickTime(isStart: true),
+          // Início passa pelos slots reais do dia (picker manual é fallback).
+          onPickTime: _allDay ? null : _pickStartTime,
         ),
         const SizedBox(height: 10),
         _dateTimeTile(
@@ -814,7 +890,8 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
               ],
             ),
           ),
-        ]
+        ],
+        _buildAvailabilityFeedback(theme),
       ],
     );
   }
@@ -1100,37 +1177,1229 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
         16,
         12 + MediaQuery.of(context).padding.bottom,
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: OutlinedButton.icon(
-              icon: const Icon(Icons.close_rounded, size: 18),
-              label: const Text('Cancelar'),
-              onPressed: _saving ? null : () => Navigator.pop(context),
+          if (_saveBlockReason != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    _checkingAvailability
+                        ? Icons.hourglass_top_rounded
+                        : Icons.event_busy_rounded,
+                    size: 13,
+                    color: _blockNoticeColor(context),
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      _saveBlockReason!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: _blockNoticeColor(context),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          Row(
+            children: [
+              Expanded(
+                child: TextButton.icon(
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                  label: const Text('Cancelar'),
+                  style: TextButton.styleFrom(
+                    // Cancelar nunca em vermelho: neutro forçado.
+                    foregroundColor: ThemeHelpers.textSecondaryColor(context),
+                  ),
+                  onPressed: _saving ? null : () => Navigator.pop(context),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                flex: 2,
+                child: ElevatedButton.icon(
+                  icon: _saving
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.save_rounded, size: 18),
+                  label: Text(_saving ? 'Salvando…' : 'Salvar alterações'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _formValid && !_saving ? primary : null,
+                  ),
+                  onPressed: _formValid && !_saving ? _save : null,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // DISPONIBILIDADE EM TEMPO REAL (novo modelo de agenda)
+  // ---------------------------------------------------------------------------
+  /// Reagenda o check com debounce de 350ms sempre que início/fim/convidados
+  /// mudarem. O resultado anterior é descartado na hora (ficou obsoleto).
+  void _scheduleAvailabilityCheck() {
+    _availabilityDebounce?.cancel();
+    setState(() {
+      _checkingAvailability = true;
+      _availability = null;
+      _availabilityCheckFailed = false;
+    });
+    _availabilityDebounce =
+        Timer(const Duration(milliseconds: 350), _runAvailabilityCheck);
+  }
+
+  Future<void> _runAvailabilityCheck() async {
+    if (!mounted) return;
+    final start = _start;
+    final end = _end;
+    if (start == null || end == null || _dateError() != null) {
+      // Par ausente/inválido: o próprio formulário já bloqueia o salvar.
+      setState(() {
+        _checkingAvailability = false;
+        _availability = null;
+      });
+      return;
+    }
+    final seq = ++_availabilitySeq;
+    final fmt = DateFormat("yyyy-MM-dd'T'HH:mm");
+    final res = await AppointmentScheduleService.instance.checkAvailability(
+      startDate: fmt.format(start),
+      endDate: fmt.format(end),
+      userIds: _invited.map((m) => m.id).toList(),
+      // OBRIGATÓRIO na edição: sem excluir o próprio compromisso, o par
+      // início/fim "colide consigo mesmo" e o check reprovaria sempre.
+      excludeAppointmentId: widget.appointmentId,
+    );
+    if (!mounted || seq != _availabilitySeq) return;
+    setState(() {
+      _checkingAvailability = false;
+      if (res.success && res.data != null) {
+        _availability = res.data;
+        _availabilityCheckFailed = false;
+      } else {
+        // Erro de rede/API ≠ "livre": avisa, mas NÃO bloqueia o submit.
+        _availability = null;
+        _availabilityCheckFailed = true;
+      }
+    });
+  }
+
+  /// Motivo (se houver) de o salvar estar travado pelo check de agenda.
+  String? get _saveBlockReason {
+    if (_checkingAvailability) return 'Verificando disponibilidade…';
+    final availability = _availability;
+    if (availability != null && availability.unavailable.isNotEmpty) {
+      return 'Há conflito de agenda — ajuste o horário para salvar';
+    }
+    return null;
+  }
+
+  Color _blockNoticeColor(BuildContext context) {
+    if (_checkingAvailability) return ThemeHelpers.textSecondaryColor(context);
+    return _amberInk(context);
+  }
+
+  /// Âmbar com tinta legível nos dois temas (o tom claro some no light).
+  Color _amberInk(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? _kScheduleAmber
+          : const Color(0xFFA16207);
+
+  Color _issueInk(BuildContext context, String code) =>
+      code == 'overlap' ? _kOverlapRed : _amberInk(context);
+
+  /// Extrai 'HH:mm' de uma data "relógio de parede" — defensivo: aceita
+  /// 'YYYY-MM-DDTHH:mm', 'HH:mm:ss' ou lixo (retorna null quando não dá).
+  String? _wallClockHm(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    final t = raw.contains('T') ? raw.split('T').last : raw;
+    final match = RegExp(r'^(\d{1,2}):(\d{2})').firstMatch(t);
+    if (match == null) return null;
+    return '${match.group(1)!.padLeft(2, '0')}:${match.group(2)}';
+  }
+
+  Widget _buildAvailabilityFeedback(ThemeData theme) {
+    if (_checkingAvailability) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(strokeWidth: 1.6),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Verificando disponibilidade…',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: ThemeHelpers.textSecondaryColor(context),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    if (_availabilityCheckFailed) {
+      // Aviso neutro: rede falhou, mas o salvar segue liberado.
+      return Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: InkWell(
+          onTap: _scheduleAvailabilityCheck,
+          borderRadius: BorderRadius.circular(8),
+          child: Row(
+            children: [
+              Icon(
+                Icons.wifi_off_rounded,
+                size: 14,
+                color: ThemeHelpers.textSecondaryColor(context),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Não foi possível verificar — tente novamente',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: ThemeHelpers.textSecondaryColor(context),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    final availability = _availability;
+    if (availability == null) return const SizedBox.shrink();
+    final unavailable = availability.unavailable;
+    if (unavailable.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: Row(
+          children: [
+            const Icon(Icons.check_rounded, size: 14, color: _kFreeGreen),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Horário livre para todos',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: _kFreeGreen,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    final hasOverlap = unavailable
+        .any((r) => r.issues.any((issue) => issue.code == 'overlap'));
+    final frame = hasOverlap ? _kOverlapRed : _kScheduleAmber;
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: frame.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: frame.withValues(alpha: 0.30)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (int i = 0; i < unavailable.length; i++) ...[
+            if (i > 0) const SizedBox(height: 8),
+            ..._issueLines(unavailable[i]),
+          ],
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _issueLines(AvailabilityUserResult r) {
+    final issues = r.issues.isEmpty
+        ? const [AvailabilityIssue(code: '', message: 'Indisponível')]
+        : r.issues;
+    final lines = <Widget>[];
+    for (int i = 0; i < issues.length; i++) {
+      if (i > 0) lines.add(const SizedBox(height: 4));
+      lines.add(_issueLine(r, issues[i]));
+    }
+    return lines;
+  }
+
+  Widget _issueLine(AvailabilityUserResult r, AvailabilityIssue issue) {
+    final ink = _issueInk(context, issue.code);
+    final start = _wallClockHm(issue.conflictStart);
+    final end = _wallClockHm(issue.conflictEnd);
+    final title = issue.conflictTitle;
+    final String? conflict;
+    if (title == null || title.isEmpty) {
+      conflict = null;
+    } else if (start != null && end != null) {
+      conflict = 'conflita com $title ($start–$end)';
+    } else {
+      conflict = 'conflita com $title';
+    }
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 1.5),
+              child: Icon(
+                issue.code == 'overlap'
+                    ? Icons.event_busy_rounded
+                    : Icons.schedule_rounded,
+                size: 13,
+                color: ink,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                '${r.userName} — ${issue.label}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: ink,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (conflict != null)
+          Padding(
+            padding: const EdgeInsets.only(left: 19, top: 2),
+            child: Text(
+              conflict,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: ink.withValues(alpha: 0.85),
+              ),
             ),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            flex: 2,
-            child: ElevatedButton.icon(
-              icon: _saving
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.save_rounded, size: 18),
-              label: Text(_saving ? 'Salvando…' : 'Salvar alterações'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _formValid && !_saving ? primary : null,
+      ],
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // SLOTS DO DIA (hora de início)
+  // ---------------------------------------------------------------------------
+  /// Abre o sheet "Horários do dia" com os slots reais de início. O
+  /// showTimePicker antigo vira fallback (rodapé do sheet ou erro no fetch).
+  Future<void> _pickStartTime() async {
+    final start = _start;
+    final end = _end;
+    if (start == null || end == null || _loadingSlots) return;
+    setState(() => _loadingSlots = true);
+    var duration = end.difference(start).inMinutes;
+    if (duration <= 0) duration = 60;
+    final res = await AppointmentScheduleService.instance.getDaySlots(
+      date: AppointmentVisuals.dayKey(start),
+      durationMinutes: duration,
+      userIds: _invited.map((m) => m.id).toList(),
+      // OBRIGATÓRIO na edição: sem excluir o próprio compromisso, os slots
+      // que ele ocupa hoje apareceriam bloqueados por ele mesmo.
+      excludeAppointmentId: widget.appointmentId,
+    );
+    if (!mounted) return;
+    setState(() => _loadingSlots = false);
+    if (!res.success || res.data == null) {
+      // Fetch falhou → direto pro picker manual, sem bloquear ninguém.
+      await _pickTime(isStart: true);
+      return;
+    }
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _DaySlotsSheet(
+        result: res.data!,
+        dayLabel: AppointmentVisuals.formattedShortDate(start),
+      ),
+    );
+    if (!mounted || choice == null) return;
+    if (choice == _kManualTimeChoice) {
+      await _pickTime(isStart: true);
+      return;
+    }
+    final parts = choice.split(':');
+    final hh = int.tryParse(parts.isNotEmpty ? parts[0] : '');
+    final mm = int.tryParse(parts.length > 1 ? parts[1] : '');
+    if (hh == null || mm == null) return;
+    HapticFeedback.selectionClick();
+    setState(() {
+      final base = _start!;
+      final keep = _end!.difference(base);
+      _start = DateTime(base.year, base.month, base.day, hh, mm);
+      _end = _start!.add(
+        keep.isNegative || keep.inMinutes == 0
+            ? const Duration(hours: 1)
+            : keep,
+      );
+    });
+    _scheduleAvailabilityCheck();
+  }
+
+  // ---------------------------------------------------------------------------
+  // SEÇÕES FLUSH: ETIQUETAS + CONVIDADOS
+  // ---------------------------------------------------------------------------
+  Widget _flushHeader(
+    ThemeData theme, {
+    required Color accent,
+    required String title,
+    Widget? trailing,
+  }) {
+    return Row(
+      children: [
+        Container(
+          width: 3.5,
+          height: 14,
+          decoration: BoxDecoration(
+            color: accent,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: accent,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.2,
+              fontSize: 11,
+            ),
+          ),
+        ),
+        if (trailing != null) trailing,
+      ],
+    );
+  }
+
+  /// Tags na ordem do catálogo (+ valores desconhecidos preservados no fim).
+  /// Lista vazia É enviada — é assim que o usuário limpa as etiquetas.
+  List<String> _selectedTags() {
+    final ordered = <String>[
+      for (final t in kAppointmentTags)
+        if (_tags.contains(t.value)) t.value,
+    ];
+    for (final v in _tags) {
+      if (!ordered.contains(v)) ordered.add(v);
+    }
+    return ordered;
+  }
+
+  Widget _buildTagsSection(ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _flushHeader(theme, accent: _kTagsAccent, title: 'ETIQUETAS'),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: kAppointmentTags.map((t) {
+            final selected = _tags.contains(t.value);
+            return InkWell(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                setState(() {
+                  if (selected) {
+                    _tags.remove(t.value);
+                  } else {
+                    _tags.add(t.value);
+                  }
+                });
+              },
+              borderRadius: BorderRadius.circular(999),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? t.tone.withValues(alpha: 0.14)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: selected
+                        ? t.tone.withValues(alpha: 0.55)
+                        : ThemeHelpers.borderColor(context),
+                  ),
+                ),
+                child: Text(
+                  t.label,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                    color:
+                        selected ? t.tone : ThemeHelpers.textColor(context),
+                  ),
+                ),
               ),
-              onPressed: _formValid && !_saving ? _save : null,
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGuestsSection(ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _flushHeader(
+          theme,
+          accent: _kGuestsAccent,
+          title: 'CONVIDADOS',
+          trailing: InkWell(
+            onTap: _openInvitePicker,
+            borderRadius: BorderRadius.circular(999),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: _kGuestsAccent.withValues(alpha: 0.45),
+                ),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.person_add_alt_1_rounded,
+                    size: 14,
+                    color: _kGuestsAccent,
+                  ),
+                  SizedBox(width: 5),
+                  Text(
+                    'Adicionar',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: _kGuestsAccent,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (_invited.isNotEmpty) ...[
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _invited.map((m) => _guestChip(theme, m)).toList(),
+          ),
+          const SizedBox(height: 8),
+        ],
+        Text(
+          'Cada convidado recebe um convite para aceitar ou recusar.',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+            color: ThemeHelpers.textSecondaryColor(context),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _guestChip(ThemeData theme, _MemberOption m) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 240),
+      padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
+      decoration: BoxDecoration(
+        color: _kGuestsAccent.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: _kGuestsAccent.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              m.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+                color: ThemeHelpers.textColor(context),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          InkWell(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              setState(() {
+                _invited.removeWhere((e) => e.id == m.id);
+                _invitesTouched = true;
+              });
+              _scheduleAvailabilityCheck();
+            },
+            borderRadius: BorderRadius.circular(999),
+            child: Padding(
+              padding: const EdgeInsets.all(2),
+              child: Icon(
+                Icons.close_rounded,
+                size: 14,
+                color: ThemeHelpers.textSecondaryColor(context),
+              ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Membros da empresa — carregados 1x e cacheados no State.
+  /// Retorna null em erro (o sheet diferencia "vazio" de "falhou").
+  Future<List<_MemberOption>?> _loadMembers() async {
+    final cached = _membersCache;
+    if (cached != null) return cached;
+    try {
+      final res = await ApiService.instance
+          .get<dynamic>('/users/company-members/simple');
+      if (!res.success) return null;
+      final raw = res.data;
+      final List<dynamic> list;
+      if (raw is List) {
+        list = raw;
+      } else if (raw is Map && raw['data'] is List) {
+        list = raw['data'] as List;
+      } else {
+        list = const [];
+      }
+      final parsed = <_MemberOption>[];
+      for (final e in list) {
+        if (e is! Map) continue;
+        final id = e['id']?.toString() ?? '';
+        if (id.isEmpty) continue;
+        final name = e['name']?.toString() ?? '';
+        parsed.add(
+          _MemberOption(id: id, name: name.isEmpty ? 'Sem nome' : name),
+        );
+      }
+      parsed.sort(
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
+      _membersCache = parsed;
+      return parsed;
+    } catch (e) {
+      debugPrint('❌ [EDIT_APPOINTMENT] company-members: $e');
+      return null;
+    }
+  }
+
+  Future<void> _openInvitePicker() async {
+    HapticFeedback.selectionClick();
+    final result = await showModalBottomSheet<List<_MemberOption>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _InviteMembersSheet(
+        membersFuture: _loadMembers(),
+        initialMembers: List<_MemberOption>.of(_invited),
+      ),
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      _invited
+        ..clear()
+        ..addAll(result);
+      _invitesTouched = true;
+    });
+    _scheduleAvailabilityCheck();
+  }
+}
+
+/// Membro da empresa no formato mínimo do endpoint `company-members/simple`.
+class _MemberOption {
+  final String id;
+  final String name;
+
+  const _MemberOption({required this.id, required this.name});
+
+  String get initial {
+    final t = name.trim();
+    return t.isEmpty ? '?' : t[0].toUpperCase();
+  }
+}
+
+/// Bottom sheet multi-select de membros — busca por nome, checkboxes e
+/// botão Aplicar verde. Devolve a lista final via `Navigator.pop`.
+class _InviteMembersSheet extends StatefulWidget {
+  final Future<List<_MemberOption>?> membersFuture;
+  final List<_MemberOption> initialMembers;
+
+  const _InviteMembersSheet({
+    required this.membersFuture,
+    required this.initialMembers,
+  });
+
+  @override
+  State<_InviteMembersSheet> createState() => _InviteMembersSheetState();
+}
+
+class _InviteMembersSheetState extends State<_InviteMembersSheet> {
+  late final Set<String> _selected = {
+    for (final m in widget.initialMembers) m.id,
+  };
+  final _searchController = TextEditingController();
+  String _query = '';
+  List<_MemberOption>? _members;
+  bool _loading = true;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.membersFuture.then((value) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _failed = value == null;
+        _members = value;
+      });
+    });
+    _searchController.addListener(() {
+      setState(() => _query = _searchController.text.trim().toLowerCase());
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _toggle(String id) {
+    HapticFeedback.selectionClick();
+    setState(() {
+      if (!_selected.add(id)) _selected.remove(id);
+    });
+  }
+
+  void _apply() {
+    final members = _members ?? const <_MemberOption>[];
+    final byId = <String, _MemberOption>{for (final m in members) m.id: m};
+    // Preserva convidados que não estão (mais) na lista de membros.
+    for (final m in widget.initialMembers) {
+      byId.putIfAbsent(m.id, () => m);
+    }
+    final picked = <_MemberOption>[
+      for (final id in _selected)
+        if (byId.containsKey(id)) byId[id]!,
+    ];
+    picked.sort(
+      (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+    );
+    Navigator.pop(context, picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final media = MediaQuery.of(context);
+    final members = _members ?? const <_MemberOption>[];
+    final filtered = _query.isEmpty
+        ? members
+        : members
+            .where((m) => m.name.toLowerCase().contains(_query))
+            .toList();
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+      child: Container(
+        constraints: BoxConstraints(maxHeight: media.size.height * 0.85),
+        decoration: BoxDecoration(
+          color: ThemeHelpers.cardBackgroundColor(context),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 10),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: ThemeHelpers.textSecondaryColor(context)
+                      .withValues(alpha: 0.30),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 3.5,
+                      height: 14,
+                      decoration: BoxDecoration(
+                        color: _kGuestsAccent,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'CONVIDAR MEMBROS',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: _kGuestsAccent,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.2,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      _selected.isEmpty
+                          ? 'Ninguém selecionado'
+                          : '${_selected.length} selecionado${_selected.length == 1 ? '' : 's'}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: ThemeHelpers.textSecondaryColor(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: TextField(
+                  controller: _searchController,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: ThemeHelpers.textColor(context),
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'Buscar por nome…',
+                    hintStyle: TextStyle(
+                      fontSize: 13,
+                      color: ThemeHelpers.textSecondaryColor(context),
+                    ),
+                    prefixIcon: Icon(
+                      Icons.search_rounded,
+                      size: 18,
+                      color: ThemeHelpers.textSecondaryColor(context),
+                    ),
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    filled: true,
+                    fillColor: ThemeHelpers.backgroundColor(context),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: ThemeHelpers.borderColor(context),
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: _kGuestsAccent),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Flexible(child: _buildList(theme, filtered)),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.check_rounded, size: 18),
+                    label: Text(
+                      _selected.isEmpty
+                          ? 'Aplicar'
+                          : 'Aplicar (${_selected.length})',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _kApplyGreen,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor:
+                          _kApplyGreen.withValues(alpha: 0.35),
+                      disabledForegroundColor:
+                          Colors.white.withValues(alpha: 0.85),
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    onPressed: _loading || _failed ? null : _apply,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildList(ThemeData theme, List<_MemberOption> filtered) {
+    if (_loading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 36),
+        child: Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+    if (_failed) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 28),
+        child: Text(
+          'Não foi possível carregar os membros — feche e tente de novo.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+            color: ThemeHelpers.textSecondaryColor(context),
+          ),
+        ),
+      );
+    }
+    if (filtered.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 28),
+        child: Text(
+          'Nenhum membro encontrado.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+            color: ThemeHelpers.textSecondaryColor(context),
+          ),
+        ),
+      );
+    }
+    return ListView.builder(
+      shrinkWrap: true,
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      itemCount: filtered.length,
+      itemBuilder: (ctx, i) {
+        final m = filtered[i];
+        final selected = _selected.contains(m.id);
+        return InkWell(
+          onTap: () => _toggle(m.id),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _kGuestsAccent
+                        .withValues(alpha: selected ? 0.18 : 0.10),
+                  ),
+                  child: Text(
+                    m.initial,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: _kGuestsAccent,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    m.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight:
+                          selected ? FontWeight.w800 : FontWeight.w600,
+                      color: ThemeHelpers.textColor(context),
+                    ),
+                  ),
+                ),
+                Checkbox(
+                  value: selected,
+                  activeColor: _kGuestsAccent,
+                  side: BorderSide(
+                    color: ThemeHelpers.borderColor(context),
+                    width: 1.4,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  onChanged: (_) => _toggle(m.id),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Sheet "Horários do dia" — grid dos slots reais de início; slot ocupado
+/// aparece riscado com tooltip de quem bloqueia. O rodapé devolve
+/// [_kManualTimeChoice] para cair no showTimePicker antigo.
+class _DaySlotsSheet extends StatelessWidget {
+  final AvailabilitySlotsResult result;
+  final String dayLabel;
+
+  const _DaySlotsSheet({required this.result, required this.dayLabel});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final media = MediaQuery.of(context);
+    final hasBlocked = result.slots.any((s) => !s.available);
+
+    return Container(
+      constraints: BoxConstraints(maxHeight: media.size.height * 0.85),
+      decoration: BoxDecoration(
+        color: ThemeHelpers.cardBackgroundColor(context),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: ThemeHelpers.textSecondaryColor(context)
+                    .withValues(alpha: 0.30),
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 3.5,
+                        height: 14,
+                        decoration: BoxDecoration(
+                          color: _kGuestsAccent,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'HORÁRIOS DO DIA',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: _kGuestsAccent,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.2,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '$dayLabel · compromisso de ${formatGapLabel(result.durationMinutes)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: ThemeHelpers.textSecondaryColor(context),
+                    ),
+                  ),
+                  if (hasBlocked) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Toque em um horário riscado para ver quem está ocupado.',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w500,
+                        color: ThemeHelpers.textSecondaryColor(context)
+                            .withValues(alpha: 0.85),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                child: result.slots.isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 20),
+                        child: Text(
+                          'Nenhum horário disponível na grade deste dia.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: ThemeHelpers.textSecondaryColor(context),
+                          ),
+                        ),
+                      )
+                    : Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: result.slots
+                            .map((s) => _slotChip(context, s))
+                            .toList(),
+                      ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+              child: TextButton.icon(
+                icon: const Icon(Icons.schedule_rounded, size: 16),
+                label: const Text(
+                  'Escolher outro horário…',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                style: TextButton.styleFrom(
+                  foregroundColor: ThemeHelpers.textSecondaryColor(context),
+                ),
+                onPressed: () =>
+                    Navigator.pop(context, _kManualTimeChoice),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _slotChip(BuildContext context, AvailabilitySlot s) {
+    if (s.available) {
+      return InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          Navigator.pop(context, s.time);
+        },
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: ThemeHelpers.borderColor(context)),
+          ),
+          child: Text(
+            s.time,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              fontFeatures: const [FontFeature.tabularFigures()],
+              color: ThemeHelpers.textColor(context),
+            ),
+          ),
+        ),
+      );
+    }
+    final busy = s.blockedFor.isEmpty
+        ? ((s.reason == null || s.reason!.isEmpty)
+            ? 'horário indisponível'
+            : s.reason!)
+        : s.blockedFor.join(', ');
+    return Tooltip(
+      message: 'Ocupado: $busy',
+      triggerMode: TooltipTriggerMode.tap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          color: ThemeHelpers.textSecondaryColor(context)
+              .withValues(alpha: 0.07),
+          border: Border.all(
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.6),
+          ),
+        ),
+        child: Text(
+          s.time,
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+            decoration: TextDecoration.lineThrough,
+            fontFeatures: const [FontFeature.tabularFigures()],
+            color: ThemeHelpers.textSecondaryColor(context)
+                .withValues(alpha: 0.60),
+          ),
+        ),
       ),
     );
   }

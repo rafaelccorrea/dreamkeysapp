@@ -15,7 +15,6 @@ import '../services/property_activity_service.dart';
 import '../../matches/widgets/matches_badge.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../../../../shared/utils/broker_contact_actions.dart';
-import '../../../../shared/utils/broker_message_templates.dart';
 import '../../appointments/pages/create_appointment_page.dart';
 import '../../appointments/models/appointment_model.dart';
 import '../../documents/services/document_service.dart';
@@ -34,7 +33,9 @@ import '../widgets/approval_action_sheets.dart';
 import '../utils/property_edit_permissions.dart';
 import '../utils/property_status_visual.dart';
 import '../utils/compute_property_score.dart';
+import '../utils/public_property_link.dart';
 import '../widgets/property_score_panel.dart';
+import '../widgets/property_share_sheet.dart';
 
 // Formatter de moeda
 final _currencyFormatter = NumberFormat.currency(
@@ -450,39 +451,19 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     _detailsScrollController.addListener(_handleDetailsScroll);
   }
 
-  /// Base pública do site da empresa (custom domain ou subdomínio), do endpoint
-  /// `/public-site-config` — espelha o web (`publicUrl || subdomainUrl`). Usada
-  /// para montar o link compartilhável correto do imóvel. Fica null quando a
-  /// empresa não tem site/permite ver a config; nesse caso a seção de
-  /// "Compartilhar" nem aparece.
+  /// Base pública do site da empresa via [PublicPropertyLink] (cache por
+  /// sessão + fallback União para corretor sem `public_site:view`). Null →
+  /// seção/botão de compartilhar não aparecem.
   Future<void> _loadSiteBaseUrl() async {
-    try {
-      final response =
-          await _apiService.get<Map<String, dynamic>>('/public-site-config');
-      if (!mounted || !response.success || response.data == null) return;
-      final data = response.data!;
-      final pub = (data['publicUrl'] as String?)?.trim();
-      final sub = (data['subdomainUrl'] as String?)?.trim();
-      final base = (pub != null && pub.isNotEmpty)
-          ? pub
-          : ((sub != null && sub.isNotEmpty) ? sub : null);
-      if (base == null) return;
-      setState(() => _siteBaseUrl = base.replaceAll(RegExp(r'/+$'), ''));
-    } catch (_) {
-      // Sem base → seção de compartilhar permanece oculta. Silencioso.
-    }
+    final base = await PublicPropertyLink.resolveBaseUrl();
+    if (!mounted || base == null) return;
+    setState(() => _siteBaseUrl = base);
   }
 
   /// URL pública completa do imóvel no site (ex.: `https://site/imovel/31020`).
   /// `null` quando não há base do site.
-  String? _publicPropertyUrl(Property property) {
-    final base = _siteBaseUrl;
-    if (base == null || base.isEmpty) return null;
-    final id = (property.code != null && property.code!.trim().isNotEmpty)
-        ? property.code!.trim()
-        : property.id;
-    return '$base/imovel/${Uri.encodeComponent(id)}';
-  }
+  String? _publicPropertyUrl(Property property) =>
+      PublicPropertyLink.buildUrl(property, _siteBaseUrl);
 
   void _handleDetailsScroll() {
     if (!_detailsScrollController.hasClients) return;
@@ -1136,6 +1117,16 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       currentBottomNavIndex: 1,
       showBottomNavigation: true,
       actions: [
+        // Compartilhar sempre à mão (sem rolar até o rodapé) — só quando o
+        // imóvel está publicado no site e temos link (mesmo gate do web).
+        if (_property != null &&
+            _property!.isAvailableForSite == true &&
+            _siteBaseUrl != null)
+          IconButton(
+            icon: const Icon(Icons.share_rounded),
+            tooltip: 'Compartilhar imóvel',
+            onPressed: () => showPropertyShareSheet(context, _property!),
+          ),
         if (_property != null && _property!.hasPendingOffers == true)
           Stack(
             children: [
@@ -4195,80 +4186,116 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ? AppColors.background.backgroundTertiaryDarkMode
         : AppColors.background.backgroundTertiary;
 
+    const whatsappGreen = Color(0xFF25D366);
+    final message = PublicPropertyLink.shareMessage(property, url);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Copie o link público deste imóvel para enviar ao cliente.',
+          'Envie o link público deste imóvel para o cliente — a mensagem '
+          'já vai pronta com título, código e valor.',
           style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.45),
         ),
         const SizedBox(height: 12),
-        // Link em pill — selecionável.
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-          decoration: BoxDecoration(
-            color: fieldFill,
+        // Link em pill — tap copia (ícone deixa a ação óbvia).
+        Material(
+          color: fieldFill,
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: ThemeHelpers.borderLightColor(context)),
-          ),
-          child: SelectableText(
-            url,
-            maxLines: 2,
-            style: theme.textTheme.bodySmall?.copyWith(
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.1,
-              color: ThemeHelpers.textColor(context),
+            onTap: () {
+              Clipboard.setData(ClipboardData(text: url));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Link copiado'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            },
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border:
+                    Border.all(color: ThemeHelpers.borderLightColor(context)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      url,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.1,
+                        color: ThemeHelpers.textColor(context),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Icon(Icons.content_copy_rounded, size: 16, color: muted),
+                ],
+              ),
             ),
           ),
         ),
         const SizedBox(height: 12),
         Row(
           children: [
-            // Copiar — neutro.
+            // WhatsApp — o caminho nº 1 do corretor (verde da marca).
             Expanded(
-              child: OutlinedButton.icon(
-                onPressed: () {
-                  Clipboard.setData(ClipboardData(text: url));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Link copiado'),
-                      duration: Duration(seconds: 2),
-                    ),
-                  );
-                },
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: ThemeHelpers.textColor(context),
-                  side: BorderSide(color: ThemeHelpers.borderColor(context)),
+              child: FilledButton.icon(
+                onPressed: () =>
+                    BrokerContactActions.shareViaWhatsApp(context, message),
+                style: FilledButton.styleFrom(
+                  backgroundColor: whatsappGreen,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
                 ),
-                icon: const Icon(Icons.content_copy_rounded, size: 18),
-                label: const Text('Copiar link'),
+                icon: const Icon(Icons.chat_rounded, size: 18),
+                // FittedBox: nunca clipar/quebrar o rótulo em tela estreita.
+                label: const FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text('WhatsApp', maxLines: 1, softWrap: false),
+                ),
               ),
             ),
             const SizedBox(width: 8),
-            // Compartilhar — azul (comunicação), com o link real na mensagem.
+            // Share sheet nativo — azul (comunicação).
             Expanded(
               child: FilledButton.icon(
-                onPressed: () {
-                  final base = BrokerMessageTemplates.propertyShare(
-                    propertyTitle: property.title,
-                    address: [
-                      property.address,
-                      property.city,
-                    ].where((s) => s.trim().isNotEmpty).join(', '),
-                    code: property.code,
-                  );
-                  BrokerContactActions.shareText(context, '$base\n$url');
-                },
+                onPressed: () =>
+                    BrokerContactActions.shareText(context, message),
                 style: FilledButton.styleFrom(
                   backgroundColor: blue,
                   foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
                 ),
                 icon: const Icon(Icons.share_rounded, size: 18),
-                label: const Text('Compartilhar'),
+                label: const FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text('Compartilhar', maxLines: 1, softWrap: false),
+                ),
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 4),
+        // Conferir como o cliente vê — discreto, alinhado à direita.
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            onPressed: () => launchUrl(
+              Uri.parse(url),
+              mode: LaunchMode.externalApplication,
+            ),
+            style: TextButton.styleFrom(foregroundColor: muted),
+            icon: const Icon(Icons.open_in_new_rounded, size: 15),
+            label: const Text('Ver no site'),
+          ),
         ),
       ],
     );

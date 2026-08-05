@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// Ações de contato usadas pelo corretor (ligar, WhatsApp, maps).
@@ -80,13 +81,34 @@ class BrokerContactActions {
     return true;
   }
 
+  /// Share sheet NATIVO do sistema (WhatsApp, Instagram, SMS, e-mail…).
+  /// Fallback: copia pro clipboard se o share nativo falhar.
   static Future<bool> shareText(BuildContext context, String text) async {
     final t = text.trim();
     if (t.isEmpty) return false;
-    final uri = Uri.parse('mailto:?body=${Uri.encodeComponent(t)}');
-    if (await launchUrl(uri)) return true;
-    await Clipboard.setData(ClipboardData(text: t));
-    _snack(context, 'Texto copiado — cole no WhatsApp ou e-mail.');
+    try {
+      await SharePlus.instance.share(ShareParams(text: t));
+      return true;
+    } catch (_) {
+      await Clipboard.setData(ClipboardData(text: t));
+      _snack(context, 'Texto copiado — cole onde quiser enviar.');
+      return true;
+    }
+  }
+
+  /// Abre o WhatsApp SEM destinatário com a mensagem pronta — o corretor
+  /// só escolhe o contato. (`wa.me/?text=` abre o picker de conversa.)
+  static Future<bool> shareViaWhatsApp(
+    BuildContext context,
+    String message,
+  ) async {
+    final t = message.trim();
+    if (t.isEmpty) return false;
+    final uri = Uri.parse('https://wa.me/?text=${Uri.encodeComponent(t)}');
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      _snack(context, 'Não foi possível abrir o WhatsApp.');
+      return false;
+    }
     return true;
   }
 

@@ -8,6 +8,8 @@ import 'package:table_calendar/table_calendar.dart';
 import '../../../core/navigation/adaptive_page_route.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/services/api_service.dart';
+import '../../../shared/services/module_access_service.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/custom_button.dart';
 import '../../../shared/widgets/minimal_body_chrome.dart';
@@ -52,10 +54,13 @@ class _CalendarPageState extends State<CalendarPage>
   void initState() {
     super.initState();
     _searchFocusNode = FocusNode();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       final ctrl = context.read<AppointmentController>();
-      ctrl.loadAppointments(reset: true);
-      ctrl.loadPendingInvites();
+      // Novo modelo: escopo persistido + janela derivada da navegação.
+      await ctrl.restoreScope();
+      ctrl.ensureWindowCovers(_focusedDay);
+      await ctrl.loadAppointments(reset: true);
+      await ctrl.loadPendingInvites();
     });
   }
 
@@ -125,6 +130,16 @@ class _CalendarPageState extends State<CalendarPage>
   void _openCreate({DateTime? date}) {
     final base = date ?? _selectedDay;
     final now = DateTime.now();
+
+    // Guard do novo modelo: dia no PASSADO não abre o formulário — explica
+    // e oferece o dia de hoje (paridade com o aviso âmbar do web).
+    final baseDay = DateTime(base.year, base.month, base.day);
+    final today = DateTime(now.year, now.month, now.day);
+    if (baseDay.isBefore(today)) {
+      _showPastDayNotice(baseDay);
+      return;
+    }
+
     final start = DateTime(
       base.year,
       base.month,
@@ -214,6 +229,36 @@ class _CalendarPageState extends State<CalendarPage>
           tooltip: _searchOpen ? 'Fechar busca' : 'Buscar',
           onPressed: _toggleSearch,
         ),
+        // Escopo de pessoas (novo modelo): minha agenda / seleção / empresa.
+        Consumer<AppointmentController>(
+          builder: (context, ctrl, _) => Stack(
+            clipBehavior: Clip.none,
+            children: [
+              ChromeToolbarIconButton(
+                icon: Icons.group_rounded,
+                tooltip: 'Agendas de outras pessoas',
+                onPressed: _openScopeSheet,
+              ),
+              if (ctrl.hasCustomScope)
+                Positioned(
+                  top: 6,
+                  right: 6,
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF4A90E2),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: theme.scaffoldBackgroundColor,
+                        width: 1.5,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
         Consumer<AppointmentController>(
           builder: (context, _, _) => Stack(
             clipBehavior: Clip.none,
@@ -274,12 +319,10 @@ class _CalendarPageState extends State<CalendarPage>
                         : const SizedBox.shrink(),
                   ),
                 ),
-                SliverToBoxAdapter(child: _buildHero(ctrl, theme, filtered)),
+                // Novo modelo (paridade com o web): sem hero nem cards de
+                // stats — "uma barra de contexto e a grade".
                 SliverToBoxAdapter(
-                  child: _buildStatsRow(ctrl, theme, filtered),
-                ),
-                SliverToBoxAdapter(
-                  child: _buildPendingInvitesPill(ctrl, theme),
+                  child: _buildContextBar(ctrl, theme, filtered),
                 ),
                 SliverToBoxAdapter(child: _buildViewModeSection(theme)),
                 if (_viewMode == CalendarViewMode.month ||
@@ -364,64 +407,24 @@ class _CalendarPageState extends State<CalendarPage>
   }
 
   // ---------------------------------------------------------------------------
-  // HERO HEADER (delegated to _PremiumHero — fluid + responsive)
+  // CONTEXT BAR — novo modelo ("uma barra de contexto e a grade")
   // ---------------------------------------------------------------------------
-  Widget _buildHero(
-    AppointmentController ctrl,
-    ThemeData theme,
-    List<Appointment> filtered,
-  ) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final tomorrow = today.add(const Duration(days: 1));
 
-    final todayAppts =
-        filtered.where((a) => _isSameDay(a.startDate, today)).toList()
-          ..sort((a, b) => a.startDate.compareTo(b.startDate));
-    final upcomingToday = todayAppts
-        .where((a) => !a.endDate.isBefore(now))
-        .toList();
-    final next = upcomingToday.isNotEmpty
-        ? upcomingToday.first
-        : filtered
-              .where((a) => a.startDate.isAfter(now))
-              .fold<Appointment?>(
-                null,
-                (acc, a) => acc == null || a.startDate.isBefore(acc.startDate)
-                    ? a
-                    : acc,
-              );
+  /// Tons da barra de contexto — EXATOS do web (`CONTEXT_TONES`):
+  /// quente → fria → neutra; a cor só acende quando o valor > 0.
+  static const Color _toneToday = Color(0xFFE6B84C);
+  static const Color _toneWeek = Color(0xFF0D9488);
+  static const Color _toneRange = Color(0xFF64748B);
+  static const Color _toneInvites = Color(0xFF4A90E2);
+  static const Color _toneSchedule = Color(0xFF3FA66B);
 
-    final tomorrowCount = filtered
-        .where((a) => _isSameDay(a.startDate, tomorrow))
-        .length;
+  static String _capitalizeFirst(String s) =>
+      s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
-    return _PremiumHero(
-      next: next,
-      todayCount: todayAppts.length,
-      tomorrowCount: tomorrowCount,
-      onTapNext: () {
-        if (next != null) _openDetails(next);
-      },
-      onTapEmpty: () => _openCreate(),
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // STATS ROW
-  // ---------------------------------------------------------------------------
-  /// Linha tipográfica de stats — substitui o row de 5 cards horizontais
-  /// que parecia "lista de cards iguais" e poluía o topo da tela.
-  ///
-  /// Design editorial:
-  /// - Cada coluna divide o espaço com `Expanded` (cabe 4 colunas em
-  ///   telas estreitas; "Total" é dropado no menor breakpoint).
-  /// - Número grande peso 900 com cor temática
-  /// - Label uppercase fino abaixo
-  /// - Linha accent sob o label como assinatura visual
-  /// - Separadores verticais sutis entre colunas (não cards)
-  /// - Tap em "Hoje" continua funcionando (foca o dia)
-  Widget _buildStatsRow(
+  /// Barra de contexto flush: hoje por extenso + pílulas de contagem +
+  /// próximo compromisso + atalhos (Convites com badge / Meus horários).
+  /// Substitui o hero premium + 5 stats + pill morta do modelo antigo.
+  Widget _buildContextBar(
     AppointmentController ctrl,
     ThemeData theme,
     List<Appointment> filtered,
@@ -429,139 +432,717 @@ class _CalendarPageState extends State<CalendarPage>
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final weekEnd = today.add(const Duration(days: 7));
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final hairline =
+        ThemeHelpers.borderColor(context).withValues(alpha: 0.35);
 
-    final todayCount = filtered
-        .where((a) => _isSameDay(a.startDate, today))
-        .length;
+    final todayCount =
+        filtered.where((a) => _isSameDay(a.startDate, today)).length;
     final weekCount = filtered
         .where(
           (a) => !a.startDate.isBefore(today) && a.startDate.isBefore(weekEnd),
         )
         .length;
-    final pendingCount = filtered
-        .where(
-          (a) =>
-              a.status == AppointmentStatus.scheduled ||
-              a.status == AppointmentStatus.confirmed,
-        )
-        .length;
-    final completedCount = filtered
-        .where((a) => a.status == AppointmentStatus.completed)
-        .length;
+    final rangeCount = filtered.length;
+
+    final next = filtered
+        .where((a) => !a.endDate.isBefore(now))
+        .fold<Appointment?>(
+          null,
+          (acc, a) =>
+              acc == null || a.startDate.isBefore(acc.startDate) ? a : acc,
+        );
+
+    final pending = ctrl.pendingInvites.length;
+    final isTodaySelected = _isSameDay(_selectedDay, today);
+    final todayLine = _capitalizeFirst(
+      DateFormat("EEEE, d 'de' MMMM", 'pt_BR').format(now),
+    );
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          // Em telas largas (>=420px), cabe os 5 stats. Em telas estreitas,
-          // dropa "Total" (que é equivalente a `filtered.length` e o user
-          // já vê implícito na lista do dia).
-          final compact = constraints.maxWidth < 420;
-          final items = <_CalendarStatTile>[
-            _CalendarStatTile(
-              accent: AppColors.primary.primary,
-              label: 'Hoje',
-              value: todayCount,
-              onTap: () => setState(() {
-                _selectedDay = today;
-                _focusedDay = today;
-              }),
-            ),
-            _CalendarStatTile(
-              accent: AppColors.status.info,
-              label: '7 dias',
-              value: weekCount,
-            ),
-            _CalendarStatTile(
-              accent: AppColors.status.warning,
-              label: 'Pendentes',
-              value: pendingCount,
-            ),
-            _CalendarStatTile(
-              accent: AppColors.status.success,
-              label: 'Concluídos',
-              value: completedCount,
-            ),
-            if (!compact)
-              _CalendarStatTile(
-                accent: AppColors.status.purple,
-                label: 'Total',
-                value: filtered.length,
-              ),
-          ];
-
-          final divColor = ThemeHelpers.borderLightColor(
-            context,
-          ).withValues(alpha: 0.55);
-
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Linha 1 — hoje por extenso + atalho "Hoje" quando fora dele.
+          Row(
             children: [
-              for (var i = 0; i < items.length; i++) ...[
-                if (i > 0) Container(width: 1, height: 38, color: divColor),
-                Expanded(child: items[i].render(context, theme)),
-              ],
+              Expanded(
+                child: Text(
+                  todayLine,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.3,
+                    fontSize: 16.5,
+                    color: ThemeHelpers.textColor(context),
+                  ),
+                ),
+              ),
+              if (!isTodaySelected)
+                InkWell(
+                  borderRadius: BorderRadius.circular(999),
+                  onTap: () => setState(() {
+                    _selectedDay = today;
+                    _focusedDay = today;
+                  }),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: _toneToday.withValues(alpha: 0.55),
+                      ),
+                    ),
+                    child: Text(
+                      'Hoje',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: _toneToday,
+                        letterSpacing: 0.3,
+                        height: 1,
+                      ),
+                    ),
+                  ),
+                ),
             ],
-          );
-        },
+          ),
+          const SizedBox(height: 10),
+
+          // Linha 2 — pílulas de contagem (acendem quando > 0).
+          Wrap(
+            spacing: 14,
+            runSpacing: 6,
+            children: [
+              _contextCount(theme, _toneToday, todayCount, 'hoje'),
+              _contextCount(theme, _toneWeek, weekCount, 'em 7 dias'),
+              _contextCount(theme, _toneRange, rangeCount, 'no período'),
+            ],
+          ),
+
+          // Linha 3 — próximo compromisso (link pro detalhe).
+          if (next != null) ...[
+            const SizedBox(height: 10),
+            InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => _openDetails(next),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.play_arrow_rounded, size: 15, color: secondary),
+                  const SizedBox(width: 5),
+                  Flexible(
+                    child: Text(
+                      'Próximo: ${next.title} · '
+                      '${DateFormat('HH:mm').format(next.startDate)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: secondary,
+                        fontSize: 12.5,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 3),
+                  Icon(Icons.chevron_right_rounded,
+                      size: 15, color: secondary),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+
+          // Linha 4 — atalhos do modelo novo: Convites (badge) + Meus horários.
+          Row(
+            children: [
+              if (pending > 0) ...[
+                Expanded(
+                  child: _contextAction(
+                    theme,
+                    icon: Icons.mark_email_unread_rounded,
+                    label:
+                        '$pending convite${pending > 1 ? 's' : ''} pendente${pending > 1 ? 's' : ''}',
+                    tone: _toneInvites,
+                    filled: true,
+                    onTap: _openInvites,
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
+              Expanded(
+                child: _contextAction(
+                  theme,
+                  icon: Icons.schedule_rounded,
+                  label: 'Meus horários',
+                  tone: _toneSchedule,
+                  filled: false,
+                  onTap: _openScheduleSettings,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(height: 1, color: hairline),
+        ],
       ),
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // PENDING INVITES PILL
-  // ---------------------------------------------------------------------------
-  Widget _buildPendingInvitesPill(AppointmentController ctrl, ThemeData theme) {
-    final pending = ctrl.pendingInvites.length;
-    if (pending == 0) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: AppColors.status.warning.withOpacity(0.10),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.status.warning.withOpacity(0.32)),
+  Widget _contextCount(ThemeData theme, Color tone, int value, String label) {
+    final on = value > 0;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: on ? tone : muted.withValues(alpha: 0.35),
+          ),
         ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: AppColors.status.warning.withOpacity(0.18),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                Icons.mark_email_unread_rounded,
-                color: AppColors.status.warning,
-                size: 18,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: RichText(
-                text: TextSpan(
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
+        const SizedBox(width: 6),
+        Text(
+          '$value $label',
+          style: theme.textTheme.labelSmall?.copyWith(
+            fontWeight: FontWeight.w800,
+            fontSize: 11.5,
+            color: on ? ThemeHelpers.textColor(context) : muted,
+            fontFeatures: const [FontFeature.tabularFigures()],
+            height: 1,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _contextAction(
+    ThemeData theme, {
+    required IconData icon,
+    required String label,
+    required Color tone,
+    required bool filled,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: filled ? tone : Colors.transparent,
+      borderRadius: BorderRadius.circular(11),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(11),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(11),
+            border: filled
+                ? null
+                : Border.all(color: tone.withValues(alpha: 0.45)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 15, color: filled ? Colors.white : tone),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12,
+                    color: filled ? Colors.white : tone,
+                    height: 1,
                   ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Aviso âmbar de dia no passado — compara a data escolhida com a mais
+  /// cedo possível e oferece agendar hoje (paridade com o modal do web).
+  void _showPastDayNotice(DateTime chosenDay) {
+    final theme = Theme.of(context);
+    const amber = Color(0xFFE6B84C);
+    final now = DateTime.now();
+    final fmt = DateFormat("EEE, d 'de' MMM", 'pt_BR');
+
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final muted = ThemeHelpers.textSecondaryColor(sheetContext);
+        return Container(
+          decoration: BoxDecoration(
+            color: ThemeHelpers.cardBackgroundColor(sheetContext),
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(26)),
+          ),
+          padding: const EdgeInsets.fromLTRB(22, 14, 22, 20),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 42,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 14),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      color: muted.withValues(alpha: 0.32),
+                    ),
+                  ),
+                ),
+                Row(
                   children: [
-                    TextSpan(
-                      text: '$pending ',
-                      style: TextStyle(
-                        color: AppColors.status.warning,
-                        fontWeight: FontWeight.w900,
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        color: amber.withValues(alpha: 0.14),
+                        border:
+                            Border.all(color: amber.withValues(alpha: 0.4)),
+                      ),
+                      child: const Icon(Icons.history_toggle_off_rounded,
+                          size: 20, color: amber),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Esse dia já passou',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.3,
+                          color: ThemeHelpers.textColor(sheetContext),
+                        ),
                       ),
                     ),
-                    TextSpan(
-                      text:
-                          'convite${pending > 1 ? 's' : ''} aguardando sua resposta',
-                      style: TextStyle(color: ThemeHelpers.textColor(context)),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Agendamentos só podem ser criados de hoje em diante.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: muted,
+                    height: 1.45,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _pastNoticeCell(
+                        theme,
+                        sheetContext,
+                        label: 'ESCOLHIDA',
+                        value: _capitalizeFirst(fmt.format(chosenDay)),
+                        tone: amber,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _pastNoticeCell(
+                        theme,
+                        sheetContext,
+                        label: 'MAIS CEDO POSSÍVEL',
+                        value: _capitalizeFirst(fmt.format(now)),
+                        tone: const Color(0xFF10B981),
+                      ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () => Navigator.of(sheetContext).pop(),
+                        style: TextButton.styleFrom(foregroundColor: muted),
+                        child: const Text('Fechar'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () {
+                          Navigator.of(sheetContext).pop();
+                          _openCreate(date: now);
+                        },
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF059669),
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text('Agendar hoje',
+                              maxLines: 1, softWrap: false),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _pastNoticeCell(
+    ThemeData theme,
+    BuildContext cellContext, {
+    required String label,
+    required String value,
+    required Color tone,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: tone),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  letterSpacing: 1.2,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 9.5,
+                  color: ThemeHelpers.textSecondaryColor(cellContext),
+                  height: 1,
                 ),
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            fontWeight: FontWeight.w800,
+            fontSize: 14,
+            letterSpacing: -0.2,
+            color: ThemeHelpers.textColor(cellContext),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _openInvites() {
+    Navigator.of(context).pushNamed('/calendar/convites').then((_) {
+      if (!mounted) return;
+      final ctrl = context.read<AppointmentController>();
+      ctrl.loadAppointments(reset: true);
+      ctrl.loadPendingInvites();
+    });
+  }
+
+  void _openScheduleSettings() {
+    Navigator.of(context).pushNamed('/calendar/horarios');
+  }
+
+  // ---------------------------------------------------------------------------
+  // ESCOPO DE PESSOAS (minha agenda / seleção / toda a empresa)
+  // ---------------------------------------------------------------------------
+
+  /// Membros da empresa (cache da sessão) — `GET /users/company-members/simple`.
+  List<({String id, String name})>? _members;
+  bool _loadingMembers = false;
+
+  Future<void> _ensureMembersLoaded(StateSetter refresh) async {
+    if (_members != null || _loadingMembers) return;
+    _loadingMembers = true;
+    refresh(() {});
+    try {
+      final res = await ApiService.instance
+          .get<dynamic>('/users/company-members/simple');
+      final raw = res.data;
+      final list = raw is List
+          ? raw
+          : (raw is Map && raw['data'] is List ? raw['data'] as List : const []);
+      _members = list
+          .whereType<Map>()
+          .map((e) => (
+                id: e['id']?.toString() ?? '',
+                name: e['name']?.toString() ?? '',
+              ))
+          .where((m) => m.id.isNotEmpty && m.name.isNotEmpty)
+          .toList()
+        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    } catch (_) {
+      _members = [];
+    }
+    _loadingMembers = false;
+    if (mounted) refresh(() {});
+  }
+
+  void _openScopeSheet() {
+    final ctrl = context.read<AppointmentController>();
+    final role = ModuleAccessService.instance.userRole?.toLowerCase() ?? '';
+    // Gate por PAPEL, não permissão — paridade com o web.
+    final canViewAllCompany =
+        role == 'master' || role == 'admin' || role == 'manager';
+
+    var selectedIds = List<String>.of(ctrl.scopeUserIds);
+    var allCompany = ctrl.scopeAllCompany;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final mq = MediaQuery.of(sheetContext);
+        return StatefulBuilder(
+          builder: (sheetContext, refresh) {
+            _ensureMembersLoaded(refresh);
+            final theme = Theme.of(sheetContext);
+            final muted = ThemeHelpers.textSecondaryColor(sheetContext);
+            final hairline = ThemeHelpers.borderColor(sheetContext)
+                .withValues(alpha: 0.35);
+            final isMine = !allCompany && selectedIds.isEmpty;
+
+            return Container(
+              constraints: BoxConstraints(maxHeight: mq.size.height * 0.85),
+              decoration: BoxDecoration(
+                color: ThemeHelpers.cardBackgroundColor(sheetContext),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(26)),
+              ),
+              child: SafeArea(
+                top: false,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 42,
+                        height: 4,
+                        margin: const EdgeInsets.only(top: 10, bottom: 6),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(999),
+                          color: muted.withValues(alpha: 0.32),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(22, 8, 22, 12),
+                      child: Text(
+                        'De quem é a agenda?',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.3,
+                          color: ThemeHelpers.textColor(sheetContext),
+                        ),
+                      ),
+                    ),
+                    Container(height: 1, color: hairline),
+                    Flexible(
+                      child: ListView(
+                        shrinkWrap: true,
+                        padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+                        children: [
+                          _scopeOption(
+                            theme,
+                            sheetContext,
+                            icon: Icons.person_rounded,
+                            label: 'Meus agendamentos',
+                            selected: isMine,
+                            onTap: () => refresh(() {
+                              allCompany = false;
+                              selectedIds = [];
+                            }),
+                          ),
+                          if (canViewAllCompany)
+                            _scopeOption(
+                              theme,
+                              sheetContext,
+                              icon: Icons.apartment_rounded,
+                              label: 'Toda a empresa',
+                              selected: allCompany,
+                              onTap: () => refresh(() {
+                                allCompany = true;
+                                selectedIds = [];
+                              }),
+                            ),
+                          Padding(
+                            padding:
+                                const EdgeInsets.fromLTRB(12, 14, 12, 6),
+                            child: Text(
+                              'PESSOAS ESPECÍFICAS',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                letterSpacing: 1.4,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 9.5,
+                                color: muted,
+                              ),
+                            ),
+                          ),
+                          if (_loadingMembers)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 20),
+                              child: Center(
+                                child: SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2.4),
+                                ),
+                              ),
+                            )
+                          else if ((_members ?? const []).isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
+                              child: Text(
+                                'Nenhum membro encontrado.',
+                                style: theme.textTheme.bodySmall
+                                    ?.copyWith(color: muted),
+                              ),
+                            )
+                          else
+                            for (final m in _members!)
+                              _scopeOption(
+                                theme,
+                                sheetContext,
+                                icon: Icons.person_outline_rounded,
+                                label: m.name,
+                                selected: selectedIds.contains(m.id),
+                                checkbox: true,
+                                onTap: () => refresh(() {
+                                  allCompany = false;
+                                  if (selectedIds.contains(m.id)) {
+                                    selectedIds =
+                                        selectedIds.where((x) => x != m.id).toList();
+                                  } else {
+                                    selectedIds = [...selectedIds, m.id];
+                                  }
+                                }),
+                              ),
+                        ],
+                      ),
+                    ),
+                    Container(height: 1, color: hairline),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextButton(
+                              onPressed: () =>
+                                  Navigator.of(sheetContext).pop(),
+                              style: TextButton.styleFrom(
+                                  foregroundColor: muted),
+                              child: const Text('Cancelar'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: FilledButton(
+                              onPressed: () async {
+                                Navigator.of(sheetContext).pop();
+                                await ctrl.setScope(
+                                  userIds: selectedIds,
+                                  allCompany: allCompany,
+                                );
+                                await ctrl.loadAppointments(reset: true);
+                              },
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF059669),
+                                foregroundColor: Colors.white,
+                              ),
+                              child: const Text('Aplicar'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _scopeOption(
+    ThemeData theme,
+    BuildContext optionContext, {
+    required IconData icon,
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+    bool checkbox = false,
+  }) {
+    const accent = Color(0xFF4A90E2);
+    final muted = ThemeHelpers.textSecondaryColor(optionContext);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          child: Row(
+            children: [
+              Icon(icon, size: 18, color: selected ? accent : muted),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight:
+                        selected ? FontWeight.w800 : FontWeight.w600,
+                    color: selected
+                        ? ThemeHelpers.textColor(optionContext)
+                        : muted,
+                  ),
+                ),
+              ),
+              Icon(
+                checkbox
+                    ? (selected
+                        ? Icons.check_box_rounded
+                        : Icons.check_box_outline_blank_rounded)
+                    : (selected
+                        ? Icons.radio_button_checked_rounded
+                        : Icons.radio_button_off_rounded),
+                size: 20,
+                color: selected ? accent : muted.withValues(alpha: 0.6),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -851,6 +1432,12 @@ class _CalendarPageState extends State<CalendarPage>
                 },
                 onPageChanged: (focused) {
                   _focusedDay = focused;
+                  // Janela de fetch derivada: navegou pra fora dela → ela
+                  // cresce (nunca encolhe) e recarrega o range novo.
+                  final ctrl = context.read<AppointmentController>();
+                  if (ctrl.ensureWindowCovers(focused)) {
+                    ctrl.loadAppointments(reset: true);
+                  }
                 },
                 onFormatChanged: (format) {
                   setState(() {
@@ -1393,496 +1980,6 @@ class _CalendarPageState extends State<CalendarPage>
       a.year == b.year && a.month == b.month && a.day == b.day;
 }
 
-// ===========================================================================
-// AGENDA HEADER — fluido, sem caixa, identidade própria.
-//
-// Esta tela NÃO usa o padrão "hero card" do Dashboard / CRM / Imóveis
-// (eyebrow + título + subtítulo dentro de um container retângular). Aqui
-// o conteúdo é solto, com hierarquia tipográfica editorial:
-//
-//   AGENDA · QUARTA-FEIRA                              ● 14:32
-//
-//   15 de outubro                                          ← manchete
-//   3 compromissos hoje · 2 amanhã                        ← contexto
-//
-//   ─────────────────────────────────────────────         ← divisor gradient
-//
-//   PRÓXIMO · em 1h12
-//
-//   15:45 │ Visita ao apartamento Rua Gomes              ← tap → details
-//         │ ● Visita    📍 Vila Olímpia                   →
-// ===========================================================================
-
-class _PremiumHero extends StatelessWidget {
-  final Appointment? next;
-  final int todayCount;
-  final int tomorrowCount;
-  final VoidCallback onTapNext;
-  final VoidCallback onTapEmpty;
-
-  const _PremiumHero({
-    required this.next,
-    required this.todayCount,
-    required this.tomorrowCount,
-    required this.onTapNext,
-    required this.onTapEmpty,
-  });
-
-  String _buildContextLine() {
-    final parts = <String>[];
-    if (todayCount > 0) {
-      parts.add(
-        '$todayCount ${todayCount == 1 ? "compromisso" : "compromissos"} hoje',
-      );
-    }
-    if (tomorrowCount > 0) {
-      parts.add('$tomorrowCount amanhã');
-    }
-    if (parts.isEmpty) {
-      return 'Dia livre — bom momento para focar nos seus leads';
-    }
-    return parts.join(' · ');
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final primary = AppColors.primary.primary;
-    final now = DateTime.now();
-    final weekday = DateFormat('EEEE', 'pt_BR').format(now);
-    final monthDay = DateFormat("d 'de' MMMM", 'pt_BR').format(now);
-    final timeNow = DateFormat('HH:mm').format(now);
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // ── Eyebrow + relógio (fluido, sem container) ───────────────
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(
-                child: Text(
-                  'AGENDA · ${weekday.toUpperCase()}',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: primary,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.6,
-                    fontSize: 10,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: 8),
-              _AgendaLiveClock(time: timeNow, color: primary),
-            ],
-          ),
-          const SizedBox(height: 10),
-          // ── Manchete: data por extenso ───────────────────────────────
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              monthDay,
-              style: theme.textTheme.displaySmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                letterSpacing: -1.4,
-                color: ThemeHelpers.textColor(context),
-                height: 1,
-                fontSize: 38,
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          // ── Contexto do dia ───────────────────────────────────────────
-          Text(
-            _buildContextLine(),
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
-              fontWeight: FontWeight.w600,
-              height: 1.35,
-              fontSize: 14,
-            ),
-          ),
-          const SizedBox(height: 22),
-          // ── Divisor gradient (linha fina horizontal, fade) ───────────
-          Container(
-            height: 1,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  primary.withOpacity(isDark ? 0.55 : 0.4),
-                  ThemeHelpers.borderColor(context).withOpacity(0.4),
-                  Colors.transparent,
-                ],
-                stops: const [0.0, 0.42, 1.0],
-              ),
-            ),
-          ),
-          const SizedBox(height: 22),
-          // ── Próximo compromisso ou estado vazio ──────────────────────
-          if (next != null)
-            _AgendaNextFluid(next: next!, isDark: isDark, onTap: onTapNext)
-          else
-            _AgendaEmptyFluid(
-              todayCount: todayCount,
-              tomorrowCount: tomorrowCount,
-              onTap: onTapEmpty,
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Relógio vivo no topo do hero — bullet pulsante + horário monospace.
-class _AgendaLiveClock extends StatelessWidget {
-  final String time;
-  final Color color;
-  const _AgendaLiveClock({required this.time, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 7,
-          height: 7,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: color,
-            boxShadow: [
-              BoxShadow(
-                color: color.withOpacity(0.55),
-                blurRadius: 6,
-                spreadRadius: 1,
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 7),
-        Text(
-          time,
-          style: theme.textTheme.labelLarge?.copyWith(
-            color: ThemeHelpers.textColor(context),
-            fontWeight: FontWeight.w900,
-            letterSpacing: -0.4,
-            fontFeatures: const [FontFeature.tabularFigures()],
-            fontSize: 13,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Próximo compromisso fluido — sem caixa. Layout horizontal:
-/// [hora gigante] [linha vertical fina] [info] [chevron].
-class _AgendaNextFluid extends StatelessWidget {
-  final Appointment next;
-  final bool isDark;
-  final VoidCallback onTap;
-  const _AgendaNextFluid({
-    required this.next,
-    required this.isDark,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final color = AppointmentVisuals.colorFromHex(next.color);
-    final now = DateTime.now();
-    final isHappening =
-        now.isAfter(next.startDate) && now.isBefore(next.endDate);
-    final relative = AppointmentVisuals.relativeTimeLabel(
-      next.startDate,
-      next.endDate,
-    );
-    final timeStr = AppointmentVisuals.formattedTime(next.startDate);
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Eyebrow: PRÓXIMO · em 1h12 (ou AO VIVO)
-              Row(
-                children: [
-                  Icon(
-                    isHappening ? Icons.bolt_rounded : Icons.schedule_rounded,
-                    size: 13,
-                    color: color,
-                  ),
-                  const SizedBox(width: 5),
-                  Flexible(
-                    child: Text(
-                      isHappening
-                          ? 'AO VIVO · ${relative.toLowerCase()}'
-                          : 'PRÓXIMO · ${relative.toLowerCase()}',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: color,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.2,
-                        fontSize: 10.5,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              // Linha principal: hora + linha vertical fina + info + chevron
-              IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      timeStr,
-                      style: theme.textTheme.displaySmall?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        color: color,
-                        letterSpacing: -1.5,
-                        height: 1,
-                        fontSize: 44,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Container(
-                      width: 2,
-                      margin: const EdgeInsets.symmetric(vertical: 4),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            color.withOpacity(isDark ? 0.55 : 0.42),
-                            color.withOpacity(0),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            next.title,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -0.3,
-                              height: 1.2,
-                              color: ThemeHelpers.textColor(context),
-                              fontSize: 16,
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 6),
-                          Wrap(
-                            spacing: 12,
-                            runSpacing: 6,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    AppointmentVisuals.iconFor(next.type),
-                                    size: 13,
-                                    color: color,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    next.type.label,
-                                    style: theme.textTheme.labelMedium
-                                        ?.copyWith(
-                                          fontWeight: FontWeight.w800,
-                                          color: color,
-                                          fontSize: 11,
-                                          letterSpacing: 0.1,
-                                        ),
-                                  ),
-                                ],
-                              ),
-                              if (next.location != null &&
-                                  next.location!.trim().isNotEmpty)
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.place_outlined,
-                                      size: 13,
-                                      color: ThemeHelpers.textSecondaryColor(
-                                        context,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    ConstrainedBox(
-                                      constraints: const BoxConstraints(
-                                        maxWidth: 200,
-                                      ),
-                                      child: Text(
-                                        next.location!,
-                                        style: theme.textTheme.bodySmall
-                                            ?.copyWith(
-                                              color:
-                                                  ThemeHelpers.textSecondaryColor(
-                                                    context,
-                                                  ),
-                                              fontWeight: FontWeight.w600,
-                                              fontSize: 12,
-                                            ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Icon(
-                        Icons.arrow_forward_rounded,
-                        color: color.withOpacity(isDark ? 0.85 : 0.7),
-                        size: 18,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Estado vazio fluido — sem caixa, mantém a linguagem editorial da tela.
-class _AgendaEmptyFluid extends StatelessWidget {
-  final int todayCount;
-  final int tomorrowCount;
-  final VoidCallback onTap;
-  const _AgendaEmptyFluid({
-    required this.todayCount,
-    required this.tomorrowCount,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final hasToday = todayCount > 0;
-    final color = AppColors.status.success;
-
-    final eyebrow = hasToday
-        ? 'DIA CONCLUÍDO'
-        : (tomorrowCount > 0 ? 'AMANHÃ NA SUA AGENDA' : 'AGENDA LIVRE');
-    final headline = hasToday
-        ? 'Sem mais compromissos hoje'
-        : (tomorrowCount > 0
-              ? 'Hoje livre — $tomorrowCount amanhã'
-              : 'Sem compromissos à vista');
-    final subtitle = hasToday
-        ? 'Aproveite para revisar leads ou planejar amanhã.'
-        : 'Toque abaixo para criar um novo compromisso.';
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    hasToday
-                        ? Icons.celebration_rounded
-                        : Icons.add_circle_outline_rounded,
-                    size: 13,
-                    color: color,
-                  ),
-                  const SizedBox(width: 5),
-                  Text(
-                    eyebrow,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: color,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 1.2,
-                      fontSize: 10.5,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                headline,
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.4,
-                  height: 1.15,
-                  color: ThemeHelpers.textColor(context),
-                  fontSize: 22,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                subtitle,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                  fontWeight: FontWeight.w600,
-                  height: 1.35,
-                ),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Text(
-                    'Criar compromisso',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: color,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.1,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Icon(Icons.arrow_forward_rounded, size: 16, color: color),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 /// Linha de timeline para um agendamento dentro do dia selecionado.
 class _TimelineRow extends StatelessWidget {
@@ -1959,76 +2056,3 @@ class _TimelineRow extends StatelessWidget {
 
 /// Tile da linha de stats do calendário — um item da "manchete editorial"
 /// que substitui o row de cards encapsulados.
-class _CalendarStatTile {
-  const _CalendarStatTile({
-    required this.accent,
-    required this.label,
-    required this.value,
-    this.onTap,
-  });
-
-  final Color accent;
-  final String label;
-  final int value;
-  final VoidCallback? onTap;
-
-  Widget render(BuildContext context, ThemeData theme) {
-    final tileBody = Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          // Número grande — protagonista visual
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              '$value',
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: accent,
-                letterSpacing: -0.6,
-                height: 1,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            ),
-          ),
-          const SizedBox(height: 4),
-          // Label uppercase fino
-          Text(
-            label.toUpperCase(),
-            style: theme.textTheme.labelSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: ThemeHelpers.textSecondaryColor(context),
-              letterSpacing: 1.4,
-              fontSize: 9.5,
-              height: 1,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 6),
-          // Linha accent sob o label
-          Container(
-            height: 2,
-            width: 18,
-            decoration: BoxDecoration(
-              color: accent,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    if (onTap == null) return tileBody;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: tileBody,
-      ),
-    );
-  }
-}

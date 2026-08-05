@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_colors.dart';
@@ -11,12 +12,45 @@ import '../../../shared/services/secure_storage_service.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/kanban_analytics_service.dart';
 import '../../../shared/utils/jwt_utils.dart';
+import '../../../shared/utils/masks.dart';
 import '../models/kanban_models.dart';
 import '../services/kanban_service.dart';
 import '../controllers/kanban_controller.dart';
 import 'subtask_manager.dart';
 import 'mark_task_result_sheet.dart';
 import 'transfer_task_sheet.dart';
+
+// ─── Paleta da aba Detalhes — cor por seção (coerência ≠ uniformidade) ───────
+// O vermelho da marca fica reservado pra identidade (hero/tabs) e estados
+// críticos (atrasada, perdido, destrutivo). Cada seção fala na sua família.
+const Color _kBriefingTone = Color(0xFF6366F1); // indigo — texto editorial
+const Color _kDossierTone = Color(0xFF0891B2); // cyan — ficha técnica/dados
+const Color _kContactTone = Color(0xFF059669); // emerald — contato/lead
+const Color _kPeopleTone = Color(0xFF8B5CF6); // violet — pessoas/equipe
+const Color _kTagsTone = Color(0xFFD97706); // amber — categorias
+const Color _kAuditTone = Color(0xFF64748B); // slate — auditoria/tempo
+const Color _kChatTone = Color(0xFF3B82F6); // blue — comunicação
+
+/// Cor estável derivada do nome — cada pessoa tem a sua (mesma mecânica do
+/// `_tagColor`). Sem nome → slate. Substitui o avatar vermelho uniforme.
+Color _personColor(String? name) {
+  if (name == null || name.trim().isEmpty) return const Color(0xFF64748B);
+  const palette = [
+    Color(0xFF0EA5E9),
+    Color(0xFF14B8A6),
+    Color(0xFF6366F1),
+    Color(0xFFF97316),
+    Color(0xFF22C55E),
+    Color(0xFFEC4899),
+    Color(0xFFA855F7),
+    Color(0xFF0891B2),
+  ];
+  var h = 0;
+  for (final c in name.trim().toLowerCase().codeUnits) {
+    h = (h * 31 + c) & 0x7fffffff;
+  }
+  return palette[h % palette.length];
+}
 
 /// Modal completo de detalhes do card.
 ///
@@ -418,10 +452,37 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
         final canXfer =
             perms?.canTransfer ?? perms?.canEditTasks ?? false;
 
+        // Teclado: o bottom sheet tem altura fixa, então sem este ajuste o
+        // composer de observações ficava ESCONDIDO atrás do teclado. O sheet
+        // encolhe e sobe junto com o viewInsets.
+        //
+        // O piso da altura é em px ABSOLUTOS (não fração da tela): precisa
+        // caber handle + header + tabbar + composer (~360px). Piso de 40%
+        // da tela ficava menor que isso em tela baixa com teclado aberto e
+        // o Column da aba Conversas estourava alguns px. O piso ainda é
+        // capado pelo espaço físico disponível (tela − teclado) e pelo
+        // próprio teto — cobre landscape sem inverter o clamp.
+        final keyboard = mq.viewInsets.bottom;
+        final maxSheet = mq.size.height * 0.94;
+        final available = mq.size.height - keyboard;
+        var minSheet = available >= 360.0 ? 360.0 : available;
+        if (minSheet < 0) minSheet = 0;
+        if (minSheet > maxSheet) minSheet = maxSheet;
+        final sheetHeight = (maxSheet - keyboard).clamp(minSheet, maxSheet);
+
         return Material(
           color: Colors.transparent,
-          child: Container(
-            height: mq.size.height * 0.94,
+          child: AnimatedPadding(
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOut,
+            padding: EdgeInsets.only(bottom: keyboard),
+            // AnimatedContainer (não Container): o height encolhe em
+            // SINCRONIA com o padding — mudança seca de altura estourava
+            // o Column interno por alguns frames na abertura do teclado.
+            child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOut,
+            height: sheetHeight,
             decoration: BoxDecoration(
               color: ThemeHelpers.cardBackgroundColor(context),
               borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
@@ -433,29 +494,56 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
             child: Column(
               children: [
                 _buildDragHandle(context, isDark),
-                _StateRibbon(state: state),
-                _TaskHeroHeader(
-                  task: task,
-                  state: state,
-                  canMarkResult: canMark,
-                  canTransfer: canXfer,
-                  onMarkWon: () =>
-                      _openMarkResultSheet(context, task, quickEntry: 'won'),
-                  onMarkLost: () =>
-                      _openMarkResultSheet(context, task, quickEntry: 'lost'),
-                  onTransfer: () => _openTransferSheet(context, task),
-                  onOpenResult: () =>
-                      _openMarkResultSheet(context, task),
-                  onClose: () => Navigator.of(context).pop(),
-                  onCopyId: () {
-                    Clipboard.setData(ClipboardData(text: task.id));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('ID da tarefa copiado'),
-                        duration: Duration(seconds: 2),
-                      ),
-                    );
-                  },
+                // MODO DIGITAÇÃO: com o teclado aberto, o cabeçalho pesado
+                // (faixa de estado + hero) se recolhe com fade+size e devolve
+                // ~200px pro conteúdo — composer inteiro à vista, sem rolagem
+                // interna. Fechou o teclado, ele volta suave.
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOutCubic,
+                  alignment: Alignment.topCenter,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 160),
+                    switchInCurve: Curves.easeOut,
+                    switchOutCurve: Curves.easeIn,
+                    transitionBuilder: (child, anim) =>
+                        FadeTransition(opacity: anim, child: child),
+                    child: keyboard > 0
+                        ? const SizedBox(
+                            key: ValueKey('typing'),
+                            width: double.infinity,
+                          )
+                        : Column(
+                            key: const ValueKey('header'),
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _TaskHeroHeader(
+                                task: task,
+                                state: state,
+                                canMarkResult: canMark,
+                                canTransfer: canXfer,
+                                onMarkLost: () => _openMarkResultSheet(
+                                    context, task,
+                                    quickEntry: 'lost'),
+                                onTransfer: () =>
+                                    _openTransferSheet(context, task),
+                                onOpenResult: () =>
+                                    _openMarkResultSheet(context, task),
+                                onClose: () => Navigator.of(context).pop(),
+                                onCopyId: () {
+                                  Clipboard.setData(
+                                      ClipboardData(text: task.id));
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('ID da tarefa copiado'),
+                                      duration: Duration(seconds: 2),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                  ),
                 ),
                 _MinimalTabBar(
                   controller: _tabController,
@@ -514,6 +602,7 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
                   ),
                 ),
               ],
+            ),
             ),
           ),
         );
@@ -584,8 +673,8 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
           ),
           const SizedBox(height: 26),
 
-          // 2. BENTO GRID — info chave em 2×2 com cores próprias
-          _BentoInfoGrid(task: task, state: state),
+          // 2. DOSSIÊ — ficha técnica flush (valor, resultado, prazo, cadência…)
+          _TaskDossier(task: task, state: state),
           const SizedBox(height: 26),
 
           // 2.5 LEAD / CONTATO — número do lead estilizado (paridade com o web)
@@ -593,6 +682,7 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
             _SectionHeader(
               overline: 'Lead',
               title: 'Contato',
+              accent: _kContactTone,
             ),
             const SizedBox(height: 10),
             _LeadContactCard(client: task.client!),
@@ -603,6 +693,7 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
           _SectionHeader(
             overline: 'Equipe',
             title: 'Pessoas envolvidas',
+            accent: _kPeopleTone,
           ),
           const SizedBox(height: 10),
           _PeopleStrip(task: task),
@@ -614,6 +705,7 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
               overline: 'Categorias',
               title: 'Tags',
               trailing: '${tags.length}',
+              accent: _kTagsTone,
             ),
             const SizedBox(height: 10),
             Wrap(
@@ -628,6 +720,7 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
           _SectionHeader(
             overline: 'Auditoria',
             title: 'Linha do tempo',
+            accent: _kAuditTone,
           ),
           const SizedBox(height: 14),
           _HorizontalTimeline(task: task, state: state),
@@ -641,42 +734,16 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
   // ---------------------------------------------------------------------------
 
   Widget _buildCommentsTab(BuildContext context, ThemeData theme) {
-    final accent = _kanbanAccent(context);
-    return Column(
-      children: [
-        Expanded(
-          child: _loadingComments
-              ? const _LoadingView()
-              : _commentsError != null
-                  ? _ErrorView(
-                      message: _commentsError!,
-                      onRetry: _loadComments,
-                    )
-                  : _comments.isEmpty
-                      ? const _EmptyState(
-                          icon: Icons.forum_outlined,
-                          title: 'Sem conversas por aqui',
-                          subtitle:
-                              'Seja o primeiro a comentar e deixar contexto para o time.',
-                        )
-                      : ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
-                          physics: const BouncingScrollPhysics(),
-                          itemCount: _comments.length,
-                          separatorBuilder: (_, _) =>
-                              const SizedBox(height: 4),
-                          itemBuilder: (context, i) {
-                            final c = _comments[i];
-                            return _CommentBubble(
-                              comment: c,
-                              isMe: c.userId == _currentUserId,
-                              canDelete: _canDeleteComment(c),
-                              onDelete: () => _deleteComment(c.id),
-                            );
-                          },
-                        ),
-        ),
-        _CommentComposer(
+    // Conversa fala em azul (bolhas, composer, anexos) — não na cor da marca.
+    const accent = _kChatTone;
+    // LayoutBuilder: o composer nunca pode exceder a altura da aba — quando
+    // o teclado espreme o sheet, a lista vai a zero (Expanded) e o composer
+    // é capado + rola por dentro, em vez de estourar o Column.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final composerMax =
+            constraints.hasBoundedHeight ? constraints.maxHeight : null;
+        final composer = _CommentComposer(
           controller: _commentController,
           focusNode: _commentFocus,
           onSubmit: _submittingComment ? null : _submitComment,
@@ -687,8 +754,55 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
           onPickFiles: _selectFiles,
           onRemoveFile: _removeFile,
           accent: accent,
-        ),
-      ],
+        );
+        return Column(
+          children: [
+            Expanded(
+              child: _loadingComments
+                  ? const _LoadingView()
+                  : _commentsError != null
+                      ? _ErrorView(
+                          message: _commentsError!,
+                          onRetry: _loadComments,
+                        )
+                      : _comments.isEmpty
+                          ? const _EmptyState(
+                              icon: Icons.forum_outlined,
+                              title: 'Sem conversas por aqui',
+                              subtitle:
+                                  'Seja o primeiro a comentar e deixar contexto para o time.',
+                            )
+                          : ListView.separated(
+                              padding:
+                                  const EdgeInsets.fromLTRB(18, 14, 18, 14),
+                              physics: const BouncingScrollPhysics(),
+                              itemCount: _comments.length,
+                              separatorBuilder: (_, _) =>
+                                  const SizedBox(height: 4),
+                              itemBuilder: (context, i) {
+                                final c = _comments[i];
+                                return _CommentBubble(
+                                  comment: c,
+                                  isMe: c.userId == _currentUserId,
+                                  canDelete: _canDeleteComment(c),
+                                  onDelete: () => _deleteComment(c.id),
+                                );
+                              },
+                            ),
+            ),
+            if (composerMax == null)
+              composer
+            else
+              ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: composerMax),
+                child: SingleChildScrollView(
+                  physics: const ClampingScrollPhysics(),
+                  child: composer,
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 
@@ -776,7 +890,9 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
         final subtitle = e['subtitle']?.toString();
         final at = e['at']?.toString() ?? '';
         final tone = e['tone']?.toString();
-        Color dot = theme.colorScheme.primary;
+        // Sem tone do backend → slate neutro (o primary vermelho pintava a
+        // trilha inteira de vermelho quando o tone não vinha).
+        Color dot = _kAuditTone;
         if (tone != null && tone.startsWith('#') && tone.length >= 7) {
           try {
             dot = Color(int.parse(tone.replaceFirst('#', '0xFF')));
@@ -1137,30 +1253,6 @@ class _TaskState {
 
 /// Tira finíssima no topo do header indicando o estado da tarefa. Substitui
 /// o gradiente colorido do header anterior — visualmente mais leve no claro.
-class _StateRibbon extends StatelessWidget {
-  final _TaskState state;
-
-  const _StateRibbon({required this.state});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 3,
-      width: double.infinity,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            state.accent.withValues(alpha: 0.0),
-            state.accent.withValues(alpha: 0.95),
-            state.accent.withValues(alpha: 0.0),
-          ],
-          stops: const [0.0, 0.5, 1.0],
-        ),
-      ),
-    );
-  }
-}
-
 // =============================================================================
 // HEADER
 // =============================================================================
@@ -1172,7 +1264,6 @@ class _TaskHeroHeader extends StatelessWidget {
   final bool canTransfer;
   final VoidCallback onClose;
   final VoidCallback onCopyId;
-  final VoidCallback onMarkWon;
   final VoidCallback onMarkLost;
   final VoidCallback onTransfer;
   final VoidCallback onOpenResult;
@@ -1184,7 +1275,6 @@ class _TaskHeroHeader extends StatelessWidget {
     required this.canTransfer,
     required this.onClose,
     required this.onCopyId,
-    required this.onMarkWon,
     required this.onMarkLost,
     required this.onTransfer,
     required this.onOpenResult,
@@ -1198,10 +1288,6 @@ class _TaskHeroHeader extends StatelessWidget {
     final priorityColor = task.priority != null
         ? Color(int.parse(task.priority!.color.replaceFirst('#', '0xFF')))
         : null;
-
-    const win = Color(0xFF15803D);
-    const loss = Color(0xFFB91C1C);
-    final xfer = theme.colorScheme.primary;
 
     final closed = task.hasClosedResult;
     final showCrm = canMarkResult || canTransfer;
@@ -1303,67 +1389,83 @@ class _TaskHeroHeader extends StatelessWidget {
           const SizedBox(height: 14),
           Padding(
             padding: const EdgeInsets.only(right: 16),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(
-                  child: Row(
-                    children: [
-                      if (task.assignedTo != null)
-                        _MetaAvatarPill(user: task.assignedTo!)
-                      else
-                        Text(
-                          'Sem responsável',
-                          style: theme.textTheme.labelLarge?.copyWith(
-                            color: secondary,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.1,
+            // LayoutBuilder: as pills ficam no tamanho NATURAL enquanto
+            // couberem; só quando o espaço real acaba (tela estreita +
+            // fonte grande) o grupo encolhe em escala via FittedBox. O
+            // avatar (Expanded) absorve o resto e encolhe primeiro.
+            child: LayoutBuilder(
+              builder: (context, rowBox) {
+                final actionsMax = rowBox.hasBoundedWidth
+                    ? (rowBox.maxWidth - 72).clamp(0.0, rowBox.maxWidth)
+                    : double.infinity;
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: Row(
+                        children: [
+                          if (task.assignedTo != null)
+                            Flexible(
+                              child: _MetaAvatarPill(user: task.assignedTo!),
+                            )
+                          else
+                            Flexible(
+                              child: Text(
+                                'Sem responsável',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.labelLarge?.copyWith(
+                                  color: secondary,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: -0.1,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    // Só as duas ações que o time realmente usa, em pill
+                    // SÓLIDA (cor cheia + texto branco) — venda não passa
+                    // por aqui, passa pela ficha de venda.
+                    if (showCrm)
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: actionsMax),
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerRight,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (canMarkResult && closed)
+                                _HeroCrmIconButton(
+                                  icon: Icons.tune_rounded,
+                                  tooltip: 'Resultado · reabrir ou revisar',
+                                  color: secondary,
+                                  onPressed: onOpenResult,
+                                ),
+                              if (canMarkResult && !closed)
+                                _HeroSolidAction(
+                                  icon: LucideIcons.trendingDown,
+                                  label: 'Perdido',
+                                  color: const Color(0xFFDC2626),
+                                  onPressed: onMarkLost,
+                                ),
+                              if (canTransfer) ...[
+                                if (canMarkResult) const SizedBox(width: 6),
+                                _HeroSolidAction(
+                                  icon: LucideIcons.arrowLeftRight,
+                                  label: 'Transferir',
+                                  color: const Color(0xFF6366F1),
+                                  onPressed: onTransfer,
+                                ),
+                              ],
+                            ],
                           ),
                         ),
-                    ],
-                  ),
-                ),
-                if (showCrm) ...[
-                  Container(
-                    width: 1,
-                    height: 26,
-                    margin: const EdgeInsets.only(right: 6),
-                    color: ThemeHelpers.borderColor(context)
-                        .withValues(alpha: isDark ? 0.4 : 0.35),
-                  ),
-                  if (canMarkResult && closed)
-                    _HeroCrmIconButton(
-                      icon: Icons.tune_rounded,
-                      tooltip: 'Resultado · reabrir ou revisar',
-                      color: secondary,
-                      onPressed: onOpenResult,
-                    ),
-                  if (canMarkResult && !closed) ...[
-                    _HeroCrmIconButton(
-                      icon: Icons.emoji_events_outlined,
-                      tooltip: 'Marcar como vendido',
-                      color: win,
-                      onPressed: onMarkWon,
-                    ),
-                    const SizedBox(width: 4),
-                    _HeroCrmIconButton(
-                      icon: Icons.south_west_rounded,
-                      tooltip: 'Marcar como perdido',
-                      color: loss,
-                      onPressed: onMarkLost,
-                    ),
+                      ),
                   ],
-                  if (canTransfer) ...[
-                    if (canMarkResult) const SizedBox(width: 4),
-                    _HeroCrmIconButton(
-                      icon: Icons.swap_horiz_rounded,
-                      tooltip: 'Transferir para outro funil',
-                      color: xfer,
-                      onPressed: onTransfer,
-                    ),
-                  ],
-                ],
-              ],
+                );
+              },
             ),
           ),
           Padding(
@@ -1432,6 +1534,58 @@ class _HeroCrmIconButton extends StatelessWidget {
   }
 }
 
+/// Pill SÓLIDA de ação CRM no hero (Perdido / Transferir): cor cheia,
+/// texto branco, compacta — sem lavagem de tint nem borda.
+class _HeroSolidAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onPressed;
+
+  const _HeroSolidAction({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: color,
+      borderRadius: BorderRadius.circular(11),
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(11),
+        splashColor: Colors.white.withValues(alpha: 0.18),
+        highlightColor: Colors.white.withValues(alpha: 0.08),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 15, color: Colors.white),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                maxLines: 1,
+                softWrap: false,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 12.5,
+                  letterSpacing: -0.1,
+                  height: 1,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _BreadcrumbChip extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -1461,8 +1615,9 @@ class _BreadcrumbChip extends StatelessWidget {
         children: [
           Icon(icon, size: 12, color: c),
           const SizedBox(width: 5),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 200),
+          // Flexible (não maxWidth fixo): o chip encolhe pro espaço REAL da
+          // linha — constante de 200 ainda estourava em tela estreita.
+          Flexible(
             child: Text(
               label,
               maxLines: 1,
@@ -1515,7 +1670,7 @@ class _MetaAvatarPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final accent = _kanbanAccent(context);
+    final accent = _personColor(user.name);
     final isDark = theme.brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
@@ -1561,7 +1716,7 @@ class _SolidAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = _kanbanAccent(context);
+    final accent = _personColor(user?.name);
     final initials = _initialsFromName(user?.name);
     final hasAvatar = user?.avatar != null && user!.avatar!.isNotEmpty;
     return Container(
@@ -1712,21 +1867,33 @@ class _SectionHeader extends StatelessWidget {
   final String title;
   final String? trailing;
 
+  /// Cor da seção — cada bloco da aba fala na sua família (indigo, emerald,
+  /// violet…). Null cai no accent vermelho da marca (abas antigas).
+  final Color? accent;
+
   const _SectionHeader({
     required this.overline,
     required this.title,
     this.trailing,
+    this.accent,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final accent = _kanbanAccent(context);
+    final tone = accent ?? _kanbanAccent(context);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Container(width: 4, height: 14, color: accent),
+        Container(
+          width: 3.5,
+          height: 24,
+          decoration: BoxDecoration(
+            color: tone,
+            borderRadius: BorderRadius.circular(999),
+          ),
+        ),
         const SizedBox(width: 10),
         Expanded(
           child: Column(
@@ -1738,7 +1905,7 @@ class _SectionHeader extends StatelessWidget {
                 style: theme.textTheme.labelSmall?.copyWith(
                   letterSpacing: 1.4,
                   fontWeight: FontWeight.w800,
-                  color: accent,
+                  color: tone,
                   fontSize: 10,
                   height: 1,
                 ),
@@ -1823,6 +1990,26 @@ class _LeadContactCard extends StatelessWidget {
   static String _titleCase(String s) =>
       s.isEmpty ? s : s[0].toUpperCase() + s.substring(1).toLowerCase();
 
+  /// Máscara de exibição do telefone: remove o DDI 55 quando presente
+  /// (números salvos como 55DD9XXXXXXXX) e aplica (DD) 9XXXX-XXXX.
+  static String _maskPhone(String s) {
+    var digits = s.replaceAll(RegExp(r'\D'), '');
+    if ((digits.length == 12 || digits.length == 13) &&
+        digits.startsWith('55')) {
+      digits = digits.substring(2);
+    }
+    if (digits.length < 10) return s.trim();
+    return Masks.phone(digits);
+  }
+
+  static void _copyToClipboard(BuildContext context, String value,
+      String message) {
+    Clipboard.setData(ClipboardData(text: value));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -1890,21 +2077,38 @@ class _LeadContactCard extends StatelessWidget {
           Container(height: 1, color: border.withValues(alpha: 0.6)),
           const SizedBox(height: 14),
 
-          // Telefone (número do lead) em destaque, acionável
+          // Telefone (número do lead) em destaque: máscara correta + copiar
           if (phone != null && phone.isNotEmpty)
             _LeadContactRow(
               icon: Icons.phone_rounded,
               label: 'Telefone',
-              value: phone,
+              value: _maskPhone(phone),
+              onCopy: () => _copyToClipboard(
+                context,
+                _maskPhone(phone),
+                'Número copiado',
+              ),
               actions: [
+                _LeadContactAction(
+                  icon: Icons.copy_rounded,
+                  tooltip: 'Copiar número',
+                  color: _kAuditTone,
+                  onTap: () => _copyToClipboard(
+                    context,
+                    _maskPhone(phone),
+                    'Número copiado',
+                  ),
+                ),
                 _LeadContactAction(
                   icon: Icons.call_rounded,
                   tooltip: 'Ligar',
+                  color: _kChatTone,
                   onTap: () => _launch('tel:${_telDigits(phone)}'),
                 ),
                 _LeadContactAction(
                   icon: Icons.chat_rounded,
                   tooltip: 'WhatsApp',
+                  color: const Color(0xFF25D366),
                   onTap: () => _launch('https://wa.me/${_waDigits(phone)}'),
                 ),
               ],
@@ -1913,11 +2117,27 @@ class _LeadContactCard extends StatelessWidget {
             _LeadContactRow(
               icon: Icons.chat_rounded,
               label: 'WhatsApp',
-              value: whatsapp,
+              value: _maskPhone(whatsapp),
+              onCopy: () => _copyToClipboard(
+                context,
+                _maskPhone(whatsapp),
+                'Número copiado',
+              ),
               actions: [
+                _LeadContactAction(
+                  icon: Icons.copy_rounded,
+                  tooltip: 'Copiar número',
+                  color: _kAuditTone,
+                  onTap: () => _copyToClipboard(
+                    context,
+                    _maskPhone(whatsapp),
+                    'Número copiado',
+                  ),
+                ),
                 _LeadContactAction(
                   icon: Icons.chat_rounded,
                   tooltip: 'Abrir WhatsApp',
+                  color: const Color(0xFF25D366),
                   onTap: () => _launch('https://wa.me/${_waDigits(whatsapp)}'),
                 ),
               ],
@@ -1931,6 +2151,7 @@ class _LeadContactCard extends StatelessWidget {
                 _LeadContactAction(
                   icon: Icons.send_rounded,
                   tooltip: 'Enviar e-mail',
+                  color: _kBriefingTone,
                   onTap: () => _launch('mailto:$email'),
                 ),
               ],
@@ -1939,7 +2160,16 @@ class _LeadContactCard extends StatelessWidget {
             _LeadContactRow(
               icon: Icons.badge_outlined,
               label: 'CPF',
-              value: cpf,
+              value: cpf.replaceAll(RegExp(r'\D'), '').length == 11
+                  ? Masks.cpf(cpf)
+                  : cpf,
+              onCopy: () => _copyToClipboard(
+                context,
+                cpf.replaceAll(RegExp(r'\D'), '').length == 11
+                    ? Masks.cpf(cpf)
+                    : cpf,
+                'CPF copiado',
+              ),
             ),
           if (city != null && city.isNotEmpty)
             _LeadContactRow(
@@ -1990,11 +2220,15 @@ class _LeadContactRow extends StatelessWidget {
   final String value;
   final List<Widget> actions;
 
+  /// Toque no valor copia (feedback fica a cargo do chamador).
+  final VoidCallback? onCopy;
+
   const _LeadContactRow({
     required this.icon,
     required this.label,
     required this.value,
     this.actions = const [],
+    this.onCopy,
   });
 
   @override
@@ -2002,6 +2236,15 @@ class _LeadContactRow extends StatelessWidget {
     final theme = Theme.of(context);
     final textColor = ThemeHelpers.textColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
+    final valueText = Text(
+      value,
+      style: theme.textTheme.bodyMedium?.copyWith(
+        fontSize: 15,
+        fontWeight: FontWeight.w600,
+        color: textColor,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      ),
+    );
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Row(
@@ -2027,14 +2270,13 @@ class _LeadContactRow extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  value,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: textColor,
-                  ),
-                ),
+                onCopy == null
+                    ? valueText
+                    : InkWell(
+                        onTap: onCopy,
+                        borderRadius: BorderRadius.circular(6),
+                        child: valueText,
+                      ),
               ],
             ),
           ),
@@ -2049,20 +2291,23 @@ class _LeadContactRow extends StatelessWidget {
 }
 
 /// Botão de ação rápida (ligar / WhatsApp / e-mail) no card do lead.
+/// Cada ação fala na sua cor: ligar azul, WhatsApp verde, copiar neutro.
 class _LeadContactAction extends StatelessWidget {
   final IconData icon;
   final String tooltip;
   final VoidCallback onTap;
+  final Color? color;
 
   const _LeadContactAction({
     required this.icon,
     required this.tooltip,
     required this.onTap,
+    this.color,
   });
 
   @override
   Widget build(BuildContext context) {
-    final accent = _kanbanAccent(context);
+    final accent = color ?? _kanbanAccent(context);
     return Tooltip(
       message: tooltip,
       child: Material(
@@ -2104,7 +2349,7 @@ class _EditorialDescription extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final accent = _kanbanAccent(context);
+    const accent = _kBriefingTone;
     final empty = text == null || text!.isEmpty;
     final hasText = !empty;
     final length = hasText ? text!.length : 0;
@@ -2205,26 +2450,26 @@ class _EditorialDescription extends StatelessWidget {
 }
 
 // =============================================================================
-// BENTO INFO GRID (2×2 — substitui a lista vertical _InfoStack)
+// DOSSIÊ — ficha técnica flush do card (substitui o antigo grid 2×2 de caixas)
 // =============================================================================
 
-/// Grid 2×2 de tiles temáticos com info-chave do card.
+/// Segue a mesma gramática editorial do BRIEFING logo acima: eyebrow +
+/// hairline, conteúdo direto na página (sem caixas tingidas).
 ///
-/// Cada tile tem **cor própria** (não uma caixa cinza idêntica), com a
-/// cor refletindo a categoria ou o estado:
-/// - **Prazo**: cinza neutro / âmbar (vence hoje) / vermelho (atrasada)
-/// - **Prioridade**: cor da própria prioridade (vinda do backend)
-/// - **Funil**: roxo (`#8B5CF6`) — categoria de "contexto/organização"
-/// - **Status**: verde (`#10B981`) se concluída, cinza se em aberto
-///
-/// O destaque é o **valor central grande** (não a label). Cada tile
-/// também tem uma "helper line" no rodapé (ex.: "Em 3 dias", "Workspace
-/// pessoal"). É bem mais escaneável que linhas verticais alinhadas.
-class _BentoInfoGrid extends StatelessWidget {
+/// Estrutura:
+/// 1. Eyebrow `DOSSIÊ` com o **resultado** do card à direita (EM ABERTO /
+///    GANHO / PERDIDO / CANCELADO) — substitui o antigo tile de "Status".
+/// 2. **Valor da negociação** como linha-herói (tipografia grande, verde).
+/// 3. Ficha técnica em 2 colunas separadas por hairlines: prazo, prioridade,
+///    funil, idade no funil, última atividade e cadência — e, quando
+///    existem, recuperação de perdido, pré-atendimento e transferência.
+/// 4. Card perdido ganha uma régua vermelha com o motivo da perda (mesma
+///    linguagem da régua accent do briefing).
+class _TaskDossier extends StatelessWidget {
   final KanbanTask task;
   final _TaskState state;
 
-  const _BentoInfoGrid({required this.task, required this.state});
+  const _TaskDossier({required this.task, required this.state});
 
   static String? _deadlineHelper(_TaskState state) {
     final d = state.daysFromToday;
@@ -2237,162 +2482,462 @@ class _BentoInfoGrid extends StatelessWidget {
     return 'Em $d dia${d == 1 ? '' : 's'}';
   }
 
-  @override
-  Widget build(BuildContext context) {
+  static String _money(double v) {
+    return NumberFormat.currency(
+      locale: 'pt_BR',
+      symbol: 'R\$',
+      decimalDigits: v % 1 == 0 ? 0 : 2,
+    ).format(v);
+  }
+
+  /// "há 5 min" / "há 3 h" / "há 2 dias" — voz curta pra última atividade.
+  static String _relative(DateTime d) {
+    final diff = DateTime.now().difference(d);
+    if (diff.inMinutes < 1) return 'agora mesmo';
+    if (diff.inMinutes < 60) return 'há ${diff.inMinutes} min';
+    if (diff.inHours < 24) return 'há ${diff.inHours} h';
+    if (diff.inDays < 30) {
+      return 'há ${diff.inDays} dia${diff.inDays == 1 ? '' : 's'}';
+    }
+    final months = diff.inDays ~/ 30;
+    if (months < 12) return 'há $months ${months == 1 ? 'mês' : 'meses'}';
+    final years = diff.inDays ~/ 365;
+    return 'há $years ano${years == 1 ? '' : 's'}';
+  }
+
+  (String, Color) _resultInfo() {
+    switch (task.result) {
+      case 'won':
+        return ('GANHO', const Color(0xFF10B981));
+      case 'lost':
+        return ('PERDIDO', const Color(0xFFEF4444));
+      case 'cancelled':
+        return ('CANCELADO', const Color(0xFF94A3B8));
+    }
+    if (task.isCompleted) return ('CONCLUÍDA', const Color(0xFF10B981));
+    return ('EM ABERTO', const Color(0xFF0891B2));
+  }
+
+  _SpecEntry _cadenceEntry(Color slate) {
+    if (task.cadenceEnabled == true) {
+      final attempts = task.cadenceAttemptCount ?? 0;
+      final max = task.cadenceMaxAttempts;
+      final awaiting = task.cadenceAwaitingReply == true;
+      return _SpecEntry(
+        icon: LucideIcons.repeat,
+        accent: awaiting ? const Color(0xFFF59E0B) : const Color(0xFF059669),
+        label: 'Cadência',
+        value: max != null && max > 0
+            ? '$attempts de $max envios'
+            : '$attempts envio${attempts == 1 ? '' : 's'}',
+        helper: awaiting
+            ? 'Aguardando resposta do lead'
+            : 'Automação ativa na etapa',
+        valueAccent: awaiting,
+        numeric: true,
+      );
+    }
+    return _SpecEntry(
+      icon: LucideIcons.repeat,
+      accent: slate,
+      label: 'Cadência',
+      value: 'Inativa',
+      helper: 'Sem automação nesta etapa',
+    );
+  }
+
+  List<_SpecEntry> _entries() {
     final priorityColor = task.priority != null
         ? Color(int.parse(task.priority!.color.replaceFirst('#', '0xFF')))
         : null;
+    const slate = Color(0xFF64748B);
+    final due = task.dueDate?.toLocal();
+    final created = task.createdAt.toLocal();
+    final updated = task.updatedAt.toLocal();
+    final ageDays = DateTime.now().difference(created).inDays;
 
-    final tiles = <_BentoTile>[
-      // PRAZO — destaque para data + helper "Em N dias"
-      _BentoTile(
+    final entries = <_SpecEntry>[
+      // PRAZO — data real do card; cor segue a saúde (atrasada/vence hoje).
+      _SpecEntry(
         icon: state.health == _TaskHealth.overdue
-            ? Icons.error_rounded
+            ? LucideIcons.circleAlert
             : state.health == _TaskHealth.dueToday
-                ? Icons.warning_amber_rounded
-                : Icons.event_outlined,
-        accent: state.dueDate == null
-            ? const Color(0xFF64748B) // slate
-            : state.accent,
+                ? LucideIcons.triangleAlert
+                : LucideIcons.calendarClock,
+        accent: due == null ? slate : state.accent,
         label: 'Prazo',
-        value: state.dueDate == null
+        value: due == null
             ? 'Sem prazo'
-            : DateFormat("d 'de' MMM", 'pt_BR')
-                .format(state.dueDate!.toLocal()),
-        helper: state.dueDate == null ? null : _deadlineHelper(state),
-        valueAccent: state.dueDate != null && state.health != _TaskHealth.ok,
+            : DateFormat("d 'de' MMM", 'pt_BR').format(due),
+        helper: state.health == _TaskHealth.completed
+            ? 'Card concluído'
+            : due == null
+                ? 'Defina ao editar o card'
+                : _deadlineHelper(state),
+        valueAccent: due != null &&
+            (state.health == _TaskHealth.overdue ||
+                state.health == _TaskHealth.dueToday),
       ),
 
-      // PRIORIDADE — usa cor real vinda do backend
-      _BentoTile(
-        icon: Icons.flag_rounded,
+      // PRIORIDADE — dot na cor real vinda do backend.
+      _SpecEntry(
+        icon: LucideIcons.flag,
         accent: priorityColor ?? const Color(0xFF94A3B8),
         label: 'Prioridade',
         value: task.priority?.label ?? 'Não definida',
-        valueAccent: task.priority != null,
-        helper: task.priority == null ? 'Defina ao editar' : null,
+        helper: task.priority == null ? 'Defina ao editar o card' : null,
+        dot: priorityColor != null,
       ),
 
-      // FUNIL — sempre roxo (cor de "contexto")
-      if (task.project != null)
-        _BentoTile(
-          icon: Icons.account_tree_outlined,
-          accent: const Color(0xFF8B5CF6),
-          label: 'Funil',
-          value: task.project!.name,
-          helper: task.project!.isPersonal == true
-              ? 'Workspace pessoal'
-              : task.project!.status.label,
-        )
-      else
-        _BentoTile(
-          icon: Icons.account_tree_outlined,
-          accent: const Color(0xFF94A3B8),
-          label: 'Funil',
-          value: 'Sem funil',
-          helper: 'Sem projeto associado',
-        ),
-
-      // STATUS
-      _BentoTile(
-        icon: task.isCompleted
-            ? Icons.check_circle_rounded
-            : Icons.circle_outlined,
-        accent: task.isCompleted
-            ? const Color(0xFF10B981)
-            : const Color(0xFF94A3B8),
-        label: 'Status',
-        value: task.isCompleted ? 'Concluída' : 'Em aberto',
-        valueAccent: task.isCompleted,
-        helper: task.isCompleted ? 'Marcada como done' : 'Aguardando',
+      // FUNIL — violeta = contexto/organização.
+      _SpecEntry(
+        icon: LucideIcons.gitBranch,
+        accent: task.project != null ? const Color(0xFF8B5CF6) : slate,
+        label: 'Funil',
+        value: task.project?.name ?? 'Sem funil',
+        helper: task.project == null
+            ? 'Sem projeto associado'
+            : task.project!.isPersonal == true
+                ? 'Workspace pessoal'
+                : task.project!.status.label,
       ),
+
+      // IDADE — quanto tempo o lead está vivo no funil.
+      _SpecEntry(
+        icon: LucideIcons.hourglass,
+        accent: const Color(0xFF0EA5E9),
+        label: 'No funil há',
+        value: ageDays <= 0 ? 'Hoje' : '$ageDays dia${ageDays == 1 ? '' : 's'}',
+        helper: 'desde ${DateFormat("d 'de' MMM", 'pt_BR').format(created)}',
+        numeric: true,
+      ),
+
+      // ÚLTIMA ATIVIDADE — voz relativa + data completa no helper.
+      _SpecEntry(
+        icon: LucideIcons.history,
+        accent: slate,
+        label: 'Última atividade',
+        value: _relative(updated),
+        helper: DateFormat("d 'de' MMM, HH:mm", 'pt_BR').format(updated),
+        numeric: true,
+      ),
+
+      // CADÊNCIA WhatsApp da etapa atual.
+      _cadenceEntry(slate),
     ];
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // 2 colunas em larguras > 320 (sempre verdade pra mobile portrait
-        // moderno). Em telas muito largas (tablet), dá pra usar 4 colunas.
-        final cols = constraints.maxWidth >= 720 ? 4 : 2;
-        const aspectRatio = 1.55; // largura/altura — tile ligeiramente
-        // mais largo que alto, dá mais espaço pra label longa.
+    // Entradas condicionais — só aparecem quando carregam informação real.
+    if ((task.lossMarkCount ?? 0) > 0 || task.inRecoveryPool == true) {
+      entries.add(_SpecEntry(
+        icon: LucideIcons.rotateCcw,
+        accent: const Color(0xFFEC4899),
+        label: 'Recuperação',
+        value:
+            task.inRecoveryPool == true ? 'Pool de perdidos' : 'Reincidente',
+        helper: (task.lossMarkCount ?? 0) > 0
+            ? 'Marcado perdido ${task.lossMarkCount}×'
+            : 'Lead em recuperação',
+        valueAccent: true,
+      ));
+    }
+    final preService = task.preService?.trim();
+    if (preService != null && preService.isNotEmpty) {
+      entries.add(_SpecEntry(
+        icon: LucideIcons.headset,
+        accent: const Color(0xFF14B8A6),
+        label: 'Pré-atendimento',
+        value: preService,
+        helper: 'Quem qualificou o lead',
+      ));
+    }
+    if (task.transferDate != null) {
+      entries.add(_SpecEntry(
+        icon: LucideIcons.arrowLeftRight,
+        accent: const Color(0xFF6366F1),
+        label: 'Transferência',
+        value: DateFormat("d 'de' MMM 'de' yyyy", 'pt_BR')
+            .format(task.transferDate!.toLocal()),
+        helper: 'Card movido de funil',
+      ));
+    }
+    return entries;
+  }
 
-        return GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: tiles.length,
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: cols,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            childAspectRatio: aspectRatio,
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    const accent = _kDossierTone;
+    final hairline = ThemeHelpers.borderColor(context).withValues(alpha: 0.35);
+    final (resultLabel, resultColor) = _resultInfo();
+    final entries = _entries();
+    final money = task.totalValue;
+    final moneyColor =
+        isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
+
+    // Pares de entradas por linha; sobra ímpar vira linha cheia.
+    final rows = <List<_SpecEntry>>[];
+    for (var i = 0; i < entries.length; i += 2) {
+      rows.add(entries.sublist(
+          i, i + 2 > entries.length ? entries.length : i + 2));
+    }
+
+    final lossReason = task.lossReason?.trim();
+    final resultNotes = task.resultNotes?.trim();
+    final showLoss = task.result == 'lost' &&
+        ((lossReason != null && lossReason.isNotEmpty) ||
+            (resultNotes != null && resultNotes.isNotEmpty));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Eyebrow no mesmo ritmo do BRIEFING + selo de resultado à direita.
+        Row(
+          children: [
+            Text(
+              'DOSSIÊ',
+              style: theme.textTheme.labelSmall?.copyWith(
+                letterSpacing: 2.6,
+                fontWeight: FontWeight.w900,
+                color: accent,
+                fontSize: 10,
+                height: 1,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: Container(height: 1, color: hairline)),
+            const SizedBox(width: 10),
+            Container(
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: resultColor,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              resultLabel,
+              style: theme.textTheme.labelSmall?.copyWith(
+                letterSpacing: 1.6,
+                fontWeight: FontWeight.w900,
+                color: resultColor,
+                fontSize: 10,
+                height: 1,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+
+        // Linha-herói: valor da negociação.
+        Text(
+          'VALOR DA NEGOCIAÇÃO',
+          style: theme.textTheme.labelSmall?.copyWith(
+            letterSpacing: 1.6,
+            fontWeight: FontWeight.w800,
+            color: secondary,
+            fontSize: 10,
+            height: 1,
           ),
-          itemBuilder: (_, i) => tiles[i].render(context),
-        );
-      },
+        ),
+        const SizedBox(height: 7),
+        if (money != null)
+          Text(
+            _money(money),
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.8,
+              height: 1.05,
+              fontSize: 26,
+              color: moneyColor,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          )
+        else ...[
+          Text(
+            'Não informado',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              fontSize: 16,
+              color: secondary,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Edite o card para registrar o potencial',
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: secondary.withValues(alpha: 0.8),
+            ),
+          ),
+        ],
+        const SizedBox(height: 14),
+
+        // Ficha técnica — linhas de 2 colunas com hairlines.
+        for (final row in rows) ...[
+          Container(height: 1, color: hairline),
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: _SpecTile(
+                    entry: row[0],
+                    padRight: row.length == 2,
+                  ),
+                ),
+                if (row.length == 2) ...[
+                  Container(width: 1, color: hairline),
+                  Expanded(
+                    child: _SpecTile(entry: row[1], padLeft: true),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+        Container(height: 1, color: hairline),
+
+        // Motivo da perda — régua vermelha na linguagem do briefing.
+        if (showLoss) ...[
+          const SizedBox(height: 16),
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  width: 3,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEF4444).withValues(alpha: 0.6),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'MOTIVO DA PERDA',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          letterSpacing: 1.6,
+                          fontWeight: FontWeight.w900,
+                          color: const Color(0xFFEF4444),
+                          fontSize: 10,
+                          height: 1,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        KanbanLossReason.tryParse(lossReason)?.label ??
+                            (lossReason != null && lossReason.isNotEmpty
+                                ? lossReason
+                                : 'Não informado'),
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14.5,
+                          letterSpacing: -0.2,
+                          color: ThemeHelpers.textColor(context),
+                        ),
+                      ),
+                      if (resultNotes != null && resultNotes.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          resultNotes,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            fontSize: 12.5,
+                            fontStyle: FontStyle.italic,
+                            fontWeight: FontWeight.w500,
+                            color: secondary,
+                            height: 1.45,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
 
-class _BentoTile {
+/// Uma entrada da ficha técnica do dossiê.
+class _SpecEntry {
   final IconData icon;
   final Color accent;
   final String label;
   final String value;
   final String? helper;
 
-  /// Quando `true`, o valor central usa a cor accent (chama atenção
-  /// pra valores "ativos" — prazo crítico, prioridade definida, etc).
+  /// Valor pintado na cor accent (estados "quentes": atrasada, aguardando).
   final bool valueAccent;
 
-  const _BentoTile({
+  /// Números tabulares (datas relativas, contagens, dias).
+  final bool numeric;
+
+  /// Dot colorido antes do valor (prioridade usa a cor real do backend).
+  final bool dot;
+
+  const _SpecEntry({
     required this.icon,
     required this.accent,
     required this.label,
     required this.value,
     this.helper,
     this.valueAccent = false,
+    this.numeric = false,
+    this.dot = false,
+  });
+}
+
+/// Célula flush da ficha técnica: ícone tingido + label small-caps,
+/// valor forte, helper discreto. Sem caixa — as hairlines do dossiê
+/// fazem a divisão.
+class _SpecTile extends StatelessWidget {
+  final _SpecEntry entry;
+  final bool padLeft;
+  final bool padRight;
+
+  const _SpecTile({
+    required this.entry,
+    this.padLeft = false,
+    this.padRight = false,
   });
 
-  Widget render(BuildContext context) {
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        // Fundo sutilmente tingido na cor do accent — não cinza idêntico.
-        color: accent.withValues(alpha: isDark ? 0.10 : 0.06),
-        border: Border.all(
-          color: accent.withValues(alpha: isDark ? 0.32 : 0.22),
-        ),
+    return Padding(
+      padding: EdgeInsets.only(
+        top: 12,
+        bottom: 12,
+        left: padLeft ? 14 : 0,
+        right: padRight ? 14 : 0,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // Topo: ícone + eyebrow label
           Row(
             children: [
-              Container(
-                width: 26,
-                height: 26,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  color: accent.withValues(alpha: isDark ? 0.22 : 0.16),
-                ),
-                child: Icon(icon, size: 14, color: accent),
-              ),
-              const SizedBox(width: 8),
+              Icon(entry.icon, size: 13, color: entry.accent),
+              const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  label.toUpperCase(),
+                  entry.label.toUpperCase(),
                   style: theme.textTheme.labelSmall?.copyWith(
-                    letterSpacing: 1.2,
+                    letterSpacing: 1.4,
                     fontWeight: FontWeight.w800,
                     color: secondary,
-                    fontSize: 10,
+                    fontSize: 9.5,
                     height: 1,
                   ),
                   maxLines: 1,
@@ -2401,39 +2946,52 @@ class _BentoTile {
               ),
             ],
           ),
-
-          // Valor central em destaque
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Text(
-              value,
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w900,
-                letterSpacing: -0.3,
-                height: 1.1,
-                fontSize: 15.5,
-                color: valueAccent
-                    ? accent
-                    : ThemeHelpers.textColor(context),
+          const SizedBox(height: 7),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              if (entry.dot) ...[
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: entry.accent,
+                  ),
+                ),
+                const SizedBox(width: 6),
+              ],
+              Flexible(
+                child: Text(
+                  entry.value,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                    letterSpacing: -0.2,
+                    height: 1.2,
+                    color: entry.valueAccent
+                        ? entry.accent
+                        : ThemeHelpers.textColor(context),
+                    fontFeatures: entry.numeric
+                        ? const [FontFeature.tabularFigures()]
+                        : null,
+                  ),
+                ),
               ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
+            ],
           ),
-
-          // Helper line discreta no rodapé
-          if (helper != null && helper!.isNotEmpty)
+          if (entry.helper != null && entry.helper!.isNotEmpty) ...[
+            const SizedBox(height: 3),
             Text(
-              helper!,
+              entry.helper!,
               style: theme.textTheme.bodySmall?.copyWith(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
                 color: secondary,
-                height: 1.1,
+                height: 1.35,
               ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
             ),
+          ],
         ],
       ),
     );
@@ -2683,16 +3241,16 @@ class _HorizontalTimeline extends StatelessWidget {
 
     final entries = <_TimelineEntry>[
       _TimelineEntry(
-        icon: Icons.add_circle_outline_rounded,
-        accent: const Color(0xFF22C55E),
+        icon: LucideIcons.circlePlus,
+        accent: const Color(0xFF10B981),
         label: 'Criada',
         value: fmt.format(task.createdAt.toLocal()),
         time: timeFmt.format(task.createdAt.toLocal()),
         helper: _relativeTime(task.createdAt),
       ),
       _TimelineEntry(
-        icon: Icons.update_rounded,
-        accent: const Color(0xFF3B82F6),
+        icon: LucideIcons.refreshCw,
+        accent: const Color(0xFF0EA5E9),
         label: 'Atualizada',
         value: fmt.format(task.updatedAt.toLocal()),
         time: timeFmt.format(task.updatedAt.toLocal()),
@@ -2701,17 +3259,17 @@ class _HorizontalTimeline extends StatelessWidget {
       if (state.dueDate != null)
         _TimelineEntry(
           icon: state.health == _TaskHealth.overdue
-              ? Icons.error_rounded
+              ? LucideIcons.circleAlert
               : state.health == _TaskHealth.dueToday
-                  ? Icons.warning_amber_rounded
-                  : Icons.event_outlined,
+                  ? LucideIcons.triangleAlert
+                  : LucideIcons.calendarClock,
           accent: state.health == _TaskHealth.ok
               ? const Color(0xFF8B5CF6)
               : state.accent,
           label: 'Prazo',
           value: fmt.format(state.dueDate!.toLocal()),
           time: timeFmt.format(state.dueDate!.toLocal()),
-          helper: _BentoInfoGrid._deadlineHelper(state),
+          helper: _TaskDossier._deadlineHelper(state),
           emphasized: state.health != _TaskHealth.ok,
         ),
     ];
@@ -2792,18 +3350,21 @@ class _TimelineEntry {
       crossAxisAlignment: CrossAxisAlignment.center,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Bullet circular accent — fica POR CIMA da linha conectora,
-        // por isso tem fundo do scaffold pra "esconder" a linha que passa
-        // por trás (ilusão de quebra do conector).
+        // Bullet circular accent — fica POR CIMA da linha conectora. O
+        // fundo é o scaffold MESCLADO com um tint da cor do evento
+        // (alphaBlend mantém opacidade total, escondendo a linha atrás).
         Container(
           width: 36,
           height: 36,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: scaffoldBg,
+            color: Color.alphaBlend(
+              accent.withValues(alpha: isDark ? 0.16 : 0.10),
+              scaffoldBg,
+            ),
             border: Border.all(
-              color: accent.withValues(alpha: emphasized ? 0.85 : 0.55),
-              width: emphasized ? 2 : 1.5,
+              color: accent.withValues(alpha: emphasized ? 0.85 : 0.45),
+              width: emphasized ? 2 : 1.2,
             ),
             boxShadow: emphasized
                 ? [
@@ -2817,7 +3378,7 @@ class _TimelineEntry {
           ),
           child: Icon(
             icon,
-            size: 16,
+            size: 15,
             color: accent,
           ),
         ),
@@ -2897,7 +3458,8 @@ class _CommentBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final accent = _kanbanAccent(context);
+    // Comunicação fala em azul — vermelho aqui brigava com todo o resto.
+    const accent = _kChatTone;
     final secondary = ThemeHelpers.textSecondaryColor(context);
 
     final bubbleColor = isMe
@@ -3009,7 +3571,7 @@ class _AttachmentRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final accent = _kanbanAccent(context);
+    const accent = _kChatTone;
     return Container(
       padding: const EdgeInsets.fromLTRB(8, 6, 4, 6),
       decoration: BoxDecoration(
@@ -3752,7 +4314,8 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final accent = _kanbanAccent(context);
+    // Estado vazio é NEUTRO — vermelho aqui lia como erro.
+    const accent = _kAuditTone;
     final secondary = ThemeHelpers.textSecondaryColor(context);
     return Center(
       child: Padding(

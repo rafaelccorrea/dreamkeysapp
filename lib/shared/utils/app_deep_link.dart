@@ -36,15 +36,20 @@ class AppDeepLink {
   }
 
   static String? _fromActionUrl(String url) {
-    if (url.startsWith('/')) return _normalizeMobilePath(url);
+    // Sempre parsear como Uri — actionUrls do backend podem trazer query
+    // string (ex.: lembrete manda `/calendar?appointmentId={id}`), e o
+    // caminho antigo passava a URL crua adiante, quebrando o match.
     final uri = Uri.tryParse(url);
     if (uri == null) return null;
     final path = uri.path;
     if (path.isEmpty) return null;
-    return _normalizeMobilePath(path);
+    return _normalizeMobilePath(path, uri.queryParameters);
   }
 
-  static String? _normalizeMobilePath(String path) {
+  static String? _normalizeMobilePath(
+    String path, [
+    Map<String, String>? query,
+  ]) {
     if (path.startsWith('/kanban/task/')) return path;
     if (path.startsWith('/tasks/')) {
       final id = path.split('/').where((s) => s.isNotEmpty).last;
@@ -54,6 +59,25 @@ class AppDeepLink {
       final segments = path.split('/').where((s) => s.isNotEmpty).toList();
       if (segments.length == 2) {
         return AppRoutes.calendarDetails(segments[1]);
+      }
+    }
+    // URLs de agenda que o backend emite:
+    //   /calendar?appointmentId={id}     → lembrete (cron 15 min)
+    //   /calendar/appointments/{id}      → convite aceito/recusado
+    //   /calendar/details/{id}           → navegação do web
+    //   /calendar/invites/{inviteId}     → convite recebido
+    if (path.startsWith('/calendar')) {
+      final apptFromQuery = query?['appointmentId'];
+      if (apptFromQuery != null && apptFromQuery.isNotEmpty) {
+        return AppRoutes.calendarDetails(apptFromQuery);
+      }
+      final segments = path.split('/').where((s) => s.isNotEmpty).toList();
+      if (segments.length >= 3 &&
+          (segments[1] == 'appointments' || segments[1] == 'details')) {
+        return AppRoutes.calendarDetails(segments[2]);
+      }
+      if (segments.length >= 2 && segments[1] == 'invites') {
+        return AppRoutes.calendarInvites;
       }
     }
     if (path.startsWith('/proposals/')) {
