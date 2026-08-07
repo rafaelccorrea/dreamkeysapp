@@ -229,7 +229,12 @@ class AppRoutes {
 
   // Check-in (presença na imobiliária por geolocalização)
   /// Tela principal — fazer check-in / check-out + estado atual.
+  /// Aceita `arguments: {'checkout': true}` para abrir já com a confirmação
+  /// de saída (deep link "Sair" da Ilha Dinâmica).
   static const String checkIn = '/check-in';
+  /// Deep link da Ilha Dinâmica (`dreamkeys://check-in/checkout`): abre a
+  /// tela de check-in com o fluxo de checkout armado.
+  static const String checkInCheckout = '/check-in/checkout';
   /// Histórico de check-ins (lista paginada com filtros).
   static const String checkInList = '/check-in/list';
 
@@ -658,7 +663,15 @@ class AppRoutes {
         }
       }
     } else if (routeName == AppRoutes.checkIn) {
-      return _buildRoute(const CheckInPage(), settings);
+      final args = settings.arguments as Map<String, dynamic>?;
+      return _buildRoute(
+        CheckInPage(startCheckout: args?['checkout'] == true),
+        settings,
+      );
+    } else if (routeName == AppRoutes.checkInCheckout) {
+      // Alvo direto do deep link — mesmo destino da rota acima com o
+      // checkout armado.
+      return _buildRoute(const CheckInPage(startCheckout: true), settings);
     } else if (routeName == AppRoutes.checkInList) {
       return _buildRoute(const CheckInListPage(), settings);
     } else if (routeName == AppRoutes.visits) {

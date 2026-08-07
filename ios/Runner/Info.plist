@@ -78,6 +78,12 @@
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
 	<true/>
+	<!-- Deep link default do engine DESLIGADO: ele empurrava o path cru
+	     ("/checkout") pro Navigator e caía em "Página não encontrada". Os
+	     links dreamkeys:// são tratados pelo canal deep_link do AppDelegate
+	     + DeepLinkService no Dart. -->
+	<key>FlutterDeepLinkingEnabled</key>
+	<false/>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

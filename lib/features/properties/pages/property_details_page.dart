@@ -3273,12 +3273,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         title: 'Localização',
         icon: Icons.map_outlined,
         tone: const Color(0xFF3B82F6),
-        // Atalho discreto no header — o mapa embaixo é vitrine; navegação de
-        // verdade acontece no Google Maps externo. Sem coordenadas, o botão
-        // vive dentro do placeholder (por endereço) pra não duplicar.
-        headerTrailing: _propertyCoords(property) != null
-            ? _buildOpenMapsButton(context, theme, property)
-            : null,
+        // Header limpo — as ações (Copiar endereço / Abrir no Maps) vivem
+        // no par pareado logo abaixo do mapa, dentro da seção.
         child: _buildMapSection(context, theme, property),
       ),
       // Captação — saiu do hero de identidade e virou seção própria,
@@ -5786,6 +5782,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           'ENDEREÇO',
           addressLine,
           mapsBlue,
+          // Tap-para-copiar na linha principal — mesmo padrão do telefone
+          // do lead no CRM.
+          onTap: () => _copyPropertyAddress(property),
         ),
       if (property.neighborhood.trim().isNotEmpty)
         _buildLocationInfoRow(
@@ -5942,18 +5941,15 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                 color: ThemeHelpers.textColor(context),
               ),
             ),
-            const SizedBox(height: 2),
-            TextButton.icon(
-              onPressed: () => _openInExternalMaps(property),
-              // Azul de navegação — nunca o vermelho default do tema.
-              style: TextButton.styleFrom(
-                foregroundColor: mapsBlue,
-                visualDensity: VisualDensity.compact,
-              ),
-              icon: const Icon(Icons.open_in_new_rounded, size: 14),
-              label: const Text(
-                'Abrir no Maps pelo endereço',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+            const SizedBox(height: 3),
+            // A ação vive no par de botões logo abaixo — aqui só a dica de
+            // que o Maps abre pelo endereço cadastrado (sem duplicar botão).
+            Text(
+              'O Maps abre pelo endereço cadastrado',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: muted.withValues(alpha: 0.9),
               ),
             ),
           ],
@@ -5961,7 +5957,37 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       );
     }
 
+    final canCopyAddress = _fullAddressText(property).isNotEmpty;
     final children = <Widget>[mapBlock];
+    // Par de ações pareadas sob o mapa — a âncora de ações da seção: mesma
+    // largura, mesma altura, mesma voz visual (pill outline azul). O header
+    // fica limpo (só barrinha + título).
+    if (canCopyAddress || coords != null) {
+      children.add(const SizedBox(height: 10));
+      children.add(
+        Row(
+          children: [
+            if (canCopyAddress) ...[
+              Expanded(
+                child: _buildLocationActionButton(
+                  Icons.copy_rounded,
+                  'Copiar endereço',
+                  () => _copyPropertyAddress(property),
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
+            Expanded(
+              child: _buildLocationActionButton(
+                Icons.map_rounded,
+                'Abrir no Maps',
+                () => _openInExternalMaps(property),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     if (infoRows.isNotEmpty) {
       children.add(const SizedBox(height: 14));
       for (var i = 0; i < infoRows.length; i++) {
@@ -6012,29 +6038,78 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     await BrokerContactActions.openMaps(context, query);
   }
 
-  /// "Abrir no Maps" discreto à direita do header da seção Localização —
-  /// AZUL de navegação (nunca o vermelho default do tema).
-  Widget _buildOpenMapsButton(
-    BuildContext context,
-    ThemeData theme,
-    Property property,
-  ) {
-    return TextButton.icon(
-      onPressed: () => _openInExternalMaps(property),
-      style: TextButton.styleFrom(
-        foregroundColor: const Color(0xFF3B82F6),
-        minimumSize: Size.zero,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        visualDensity: VisualDensity.compact,
+  /// Endereço completo legível — os mesmos campos que a seção Localização
+  /// exibe, unidos por ', ' pulando vazios. Ex.: "Rua das Acácias, 123,
+  /// Palmital, Marília, 17500-000".
+  String _fullAddressText(Property property) {
+    final street = [property.street, property.number]
+        .where((s) => s.trim().isNotEmpty)
+        .join(', ');
+    final base =
+        property.address.trim().isNotEmpty ? property.address.trim() : street;
+    return [
+      base,
+      property.complement?.trim() ?? '',
+      property.neighborhood,
+      property.city,
+      property.state,
+      property.zipCode,
+    ].map((s) => s.trim()).where((s) => s.isNotEmpty).join(', ');
+  }
+
+  /// Copia o endereço completo — clipboard + haptic + snack curto.
+  Future<void> _copyPropertyAddress(Property property) async {
+    final text = _fullAddressText(property);
+    if (text.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    HapticFeedback.selectionClick();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Endereço copiado'),
+        duration: Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
       ),
-      icon: const Icon(Icons.open_in_new_rounded, size: 13),
-      label: const Text(
-        'Abrir no Maps',
-        style: TextStyle(
-          fontSize: 11.5,
-          fontWeight: FontWeight.w800,
-          letterSpacing: -0.1,
+    );
+  }
+
+  /// Botão do par de ações da Localização — pill outline AZUL (o tema
+  /// global pinta botões de vermelho por default), voz visual única pros
+  /// dois lados do par. Label em FittedBox: nunca clipa, nem em 320dp.
+  Widget _buildLocationActionButton(
+    IconData icon,
+    String label,
+    VoidCallback onPressed,
+  ) {
+    const mapsBlue = Color(0xFF3B82F6);
+    return SizedBox(
+      height: 40,
+      child: OutlinedButton.icon(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: mapsBlue,
+          side: BorderSide(color: mapsBlue.withValues(alpha: 0.45)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          visualDensity: VisualDensity.compact,
+        ),
+        icon: Icon(icon, size: 16),
+        label: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            label,
+            maxLines: 1,
+            softWrap: false,
+            style: const TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.1,
+            ),
+          ),
         ),
       ),
     );
@@ -6047,11 +6122,12 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     IconData icon,
     String label,
     String value,
-    Color tone,
-  ) {
+    Color tone, {
+    VoidCallback? onTap,
+  }) {
     final isDark = theme.brightness == Brightness.dark;
     final muted = ThemeHelpers.textSecondaryColor(context);
-    return Row(
+    final row = Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Container(
@@ -6093,7 +6169,28 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             ],
           ),
         ),
+        // Affordance de cópia — o usuário precisa VER que a linha é
+        // copiável (padrão do _LeadContactRow do CRM).
+        if (onTap != null) ...[
+          const SizedBox(width: 8),
+          Icon(
+            Icons.copy_rounded,
+            size: 14,
+            color: muted.withValues(alpha: 0.8),
+          ),
+        ],
       ],
+    );
+    if (onTap == null) return row;
+    // Tap-para-copiar (padrão do telefone do lead no CRM) — splash suave
+    // sem tirar a linha do layout flush.
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: row,
+      ),
     );
   }
 

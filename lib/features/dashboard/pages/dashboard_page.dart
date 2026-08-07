@@ -16,6 +16,7 @@ import '../../notifications/widgets/notification_center.dart';
 import '../widgets/dashboard_filters_drawer.dart';
 import '../widgets/broker_dashboard_hub.dart';
 import '../../../core/notifications/subtask_reminder_service.dart';
+import '../../../core/navigation/deep_link_service.dart';
 
 // Formatters globais
 final _currencyFormatter = NumberFormat.currency(
@@ -54,6 +55,11 @@ class _DashboardPageState extends State<DashboardPage> {
     super.initState();
     _loadDashboardData();
     unawaited(SubtaskReminderService.instance.syncFromServer());
+    // Home montada = usuário autenticado. Libera deep links (warm) e consome
+    // o pendente do cold start (ex.: "Sair" da Ilha Dinâmica com app fechado).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      DeepLinkService.instance.notifyHomeReady();
+    });
   }
 
   Future<void> _loadDashboardData() async {

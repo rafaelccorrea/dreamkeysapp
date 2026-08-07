@@ -17,6 +17,18 @@ import FirebaseCore
 ///      `Info.plist` por defeito) repassa o APNs token para o `Messaging`.
 @main
 @objc class AppDelegate: FlutterAppDelegate {
+  /// Canal por onde os deep links `dreamkeys://` chegam ao Flutter.
+  /// O roteamento default do engine (`FlutterDeepLinkingEnabled`) foi
+  /// DESLIGADO no Info.plist: ele empurrava o path cru pro Navigator e caía
+  /// em "Página não encontrada". Aqui o link vai inteiro pro Dart, que decide
+  /// a rota (DeepLinkService).
+  private var deepLinkChannel: FlutterMethodChannel?
+
+  /// Último link ainda não consumido pelo Dart. Cobre o cold start: o handler
+  /// do Flutter ainda não existe quando o iOS entrega a URL, então o Dart
+  /// busca via `getInitialLink` depois que sobe.
+  private var pendingDeepLink: String?
+
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -27,10 +39,52 @@ import FirebaseCore
       UNUserNotificationCenter.current().delegate = self
     }
 
+    // Cold start via URL (app fechado): a URL vem nas launchOptions.
+    if let url = launchOptions?[.url] as? URL, url.scheme == "dreamkeys" {
+      pendingDeepLink = url.absoluteString
+    }
+
     GeneratedPluginRegistrant.register(with: self)
     let ok = super.application(application, didFinishLaunchingWithOptions: launchOptions)
     registerLiveActivityCacheChannel()
+    registerDeepLinkChannel()
     return ok
+  }
+
+  /// Warm start (app vivo em background/foreground): iOS entrega a URL aqui.
+  /// Também é chamado logo após o launch num cold start via URL — o
+  /// `pendingDeepLink` + dedupe no Dart cobrem a dupla entrega.
+  override func application(
+    _ app: UIApplication,
+    open url: URL,
+    options: [UIApplication.OpenURLOptionsKey: Any] = [:]
+  ) -> Bool {
+    if url.scheme == "dreamkeys" {
+      pendingDeepLink = url.absoluteString
+      deepLinkChannel?.invokeMethod("onLink", arguments: url.absoluteString)
+      return true
+    }
+    return super.application(app, open: url, options: options)
+  }
+
+  private func registerDeepLinkChannel() {
+    guard let controller = window?.rootViewController as? FlutterViewController else {
+      return
+    }
+    let channel = FlutterMethodChannel(
+      name: "com.dreamkeys.corretor/deep_link",
+      binaryMessenger: controller.binaryMessenger
+    )
+    channel.setMethodCallHandler { [weak self] call, result in
+      switch call.method {
+      case "getInitialLink":
+        result(self?.pendingDeepLink)
+        self?.pendingDeepLink = nil
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+    deepLinkChannel = channel
   }
 
   private func registerLiveActivityCacheChannel() {

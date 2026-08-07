@@ -34,10 +34,13 @@ private enum IslandKey {
 
 private let kCheckoutDeepLink = URL(string: "dreamkeys://check-in/checkout")!
 
-// Paleta sóbria — cores do sistema iOS, UMA por fase, aplicada só em
-// acentos (dot, anel, timer, keyline). Nada de gradiente/glow: superfície
-// é o material escuro da própria ilha/lock screen.
+// Gramática das ilhas de referência (iFood/Uber/placar): IDENTIDADE DE MARCA
+// sempre visível + dados em BRANCO + cor da fase só como acento pequeno
+// (dot, anel, barra de progresso, eyebrow). Timer nunca é colorido — a única
+// exceção é o vermelho de alerta quando expira.
 private enum Brand {
+  /// Vermelho institucional Intellisys (≈ #D32F2F) — só no roundel da marca.
+  static let red = Color(red: 0.827, green: 0.184, blue: 0.184)
   static let ok = Color(red: 0.188, green: 0.820, blue: 0.345)     // #30D158
   static let warn = Color(red: 1.0, green: 0.839, blue: 0.039)     // #FFD60A
   static let urgent = Color(red: 1.0, green: 0.624, blue: 0.039)   // #FF9F0A
@@ -71,15 +74,6 @@ private enum Phase: String {
     case .expiring: return "Expira"
     case .critical: return "Urgente"
     case .expired: return "Expirou"
-    }
-  }
-
-  var compactSymbol: String {
-    switch self {
-    case .active: return "checkmark"
-    case .expiring: return "clock.fill"
-    case .critical: return "bolt.fill"
-    case .expired: return "xmark"
     }
   }
 }
@@ -245,16 +239,6 @@ private struct Snap {
     return trimmed.isEmpty ? "Imobiliária" : trimmed
   }
 
-  /// Legenda compacta: empresa quando check-in ok; alerta nas demais fases.
-  var compactContextLabel: String {
-    switch phase {
-    case .active:
-      return companyDisplayName
-    case .expiring, .critical, .expired:
-      return phase.shortLabel
-    }
-  }
-
   /// Fração do tempo de check-in já consumida (0…1).
   var elapsedFraction: Double {
     guard let checked = checkedIn else { return 0 }
@@ -263,18 +247,52 @@ private struct Snap {
     let elapsed = Date().timeIntervalSince(checked)
     return min(1, max(0, elapsed / total))
   }
+
+  /// Cor de acento da fase (vermelho de alerta quando expirado).
+  var accent: Color {
+    isExpired ? Brand.danger : phase.accent
+  }
 }
 
 // MARK: - UI
 
-/// Anel de progresso do tempo — a cor da fase esvazia conforme a janela do
-/// check-in é consumida; ícone da fase no centro (opcional). Substitui o
-/// antigo orb com gradiente+glow: mesmo dado, metade do peso visual.
-private struct PhaseRing: View {
+/// Monograma Intellisys — roundel vermelho da marca com "i" tipográfico
+/// branco. É a identidade fixa da ilha (como o logo do iFood/Uber): nunca
+/// muda de cor com a fase.
+private struct BrandMark: View {
+  var size: CGFloat = 17
+
+  var body: some View {
+    ZStack {
+      RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
+        .fill(Brand.red)
+      Text("i")
+        .font(.system(size: size * 0.68, weight: .black, design: .rounded))
+        .italic()
+        .foregroundColor(.white)
+        .offset(x: -size * 0.02, y: -size * 0.03)
+    }
+    .frame(width: size, height: size)
+  }
+}
+
+/// Dot 6px — a menor unidade de cor da fase (acompanha o timer branco).
+private struct PhaseDot: View {
   let snap: Snap
-  var diameter: CGFloat = 28
-  var lineWidth: CGFloat = 2.5
-  var showIcon: Bool = true
+  var size: CGFloat = 6
+
+  var body: some View {
+    Circle()
+      .fill(snap.accent)
+      .frame(width: size, height: size)
+  }
+}
+
+/// Minimal: BrandMark com anel fino de progresso da fase ao redor.
+private struct BrandRing: View {
+  let snap: Snap
+  var size: CGFloat = 14
+  var lineWidth: CGFloat = 2
 
   var body: some View {
     TimelineView(.periodic(from: .now, by: 30)) { _ in
@@ -287,21 +305,45 @@ private struct PhaseRing: View {
             to: snap.isExpired ? 1 : max(0.03, 1 - snap.elapsedFraction)
           )
           .stroke(
-            snap.phase.accent,
+            snap.accent,
             style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
           )
           .rotationEffect(.degrees(-90))
-        if showIcon {
-          Image(systemName: snap.phase.compactSymbol)
-            .font(.system(size: diameter * 0.34, weight: .bold))
-            .foregroundColor(snap.phase.accent)
-        }
+        BrandMark(size: size)
       }
-      .frame(width: diameter, height: diameter)
+      .frame(width: size + 6, height: size + 6)
     }
   }
 }
 
+/// Barra de progresso fina (estilo player do Spotify): track discreto,
+/// preenchimento na cor da fase, largura total, 3px.
+private struct PhaseProgressBar: View {
+  let snap: Snap
+  var height: CGFloat = 3
+
+  var body: some View {
+    TimelineView(.periodic(from: .now, by: 30)) { _ in
+      GeometryReader { geo in
+        ZStack(alignment: .leading) {
+          Capsule()
+            .fill(Color.white.opacity(0.12))
+          Capsule()
+            .fill(snap.accent)
+            .frame(
+              width: max(
+                height,
+                geo.size.width * (snap.isExpired ? 1 : snap.elapsedFraction)
+              )
+            )
+        }
+      }
+      .frame(height: height)
+    }
+  }
+}
+
+/// Dígitos do cronômetro — sempre BRANCOS (vermelho só quando expira).
 private struct LiveCountdownText: View {
   let snap: Snap
   var fontSize: CGFloat = 15
@@ -325,57 +367,41 @@ private struct LiveCountdownText: View {
       }
     }
     .font(.system(size: fontSize, weight: weight, design: .rounded))
+    .foregroundColor(snap.isExpired ? Brand.danger : .white)
     .lineLimit(1)
     .fixedSize(horizontal: true, vertical: false)
   }
 }
 
-/// Cronômetro compacto — só dígitos na cor da fase (ilha recolhida).
-private struct CompactIslandTimer: View {
+/// Trailing compacto: dot da fase + dígitos brancos (o verde vira só o dot).
+private struct CompactTimer: View {
   let snap: Snap
   var fontSize: CGFloat = 12
 
-  private var color: Color {
-    snap.isExpired ? Brand.danger : snap.phase.accent
-  }
-
   var body: some View {
-    Group {
-      if snap.isExpired {
-        Text("0:00")
-          .monospacedDigit()
-      } else if snap.secondsLeft >= 3600 {
-        // >1h: "1h05" ocupa menos que "1:05:00"
-        Text(snap.compactTimerText)
-          .monospacedDigit()
-      } else {
-        Text(timerInterval: Date()...snap.expires, countsDown: true)
-          .monospacedDigit()
+    HStack(spacing: 5) {
+      PhaseDot(snap: snap)
+      Group {
+        if snap.isExpired {
+          Text("0:00")
+            .monospacedDigit()
+        } else if snap.secondsLeft >= 3600 {
+          // >1h: "1h05" ocupa menos que "1:05:00"
+          TimelineView(.periodic(from: .now, by: 30)) { _ in
+            Text(snap.compactTimerText)
+              .monospacedDigit()
+          }
+        } else {
+          Text(timerInterval: Date()...snap.expires, countsDown: true)
+            .monospacedDigit()
+        }
       }
+      .font(.system(size: fontSize, weight: .bold, design: .rounded))
+      .foregroundColor(snap.isExpired ? Brand.danger : .white)
+      .lineLimit(1)
+      .minimumScaleFactor(0.8)
+      .fixedSize(horizontal: true, vertical: false)
     }
-    .font(.system(size: fontSize, weight: .bold, design: .rounded))
-    .foregroundColor(color)
-    .lineLimit(1)
-    .minimumScaleFactor(0.8)
-    .fixedSize(horizontal: true, vertical: false)
-  }
-}
-
-/// Timer protagonista — dígitos grandes na cor da fase, sem cápsula.
-/// (A cápsula gradiente anterior competia com todo o resto da tela.)
-private struct HeroTimer: View {
-  let snap: Snap
-  var fontSize: CGFloat = 24
-  var islandCompact: Bool = false
-
-  var body: some View {
-    LiveCountdownText(
-      snap: snap,
-      fontSize: fontSize,
-      weight: .heavy,
-      islandCompact: islandCompact
-    )
-    .foregroundColor(snap.isExpired ? Brand.danger : snap.phase.accent)
   }
 }
 
@@ -398,6 +424,26 @@ private struct EntryWindowLine: View {
           .foregroundColor(Brand.danger)
       } else {
         (Text("Até ") + Text(snap.expires, style: .time))
+          .foregroundColor(.white.opacity(0.55))
+      }
+    }
+    .font(.system(size: fontSize, weight: .semibold, design: .rounded))
+    .lineLimit(1)
+  }
+}
+
+/// Status curto ao lado da barra: "Ativo até 15:30" / "Expirado — renove".
+private struct StatusLine: View {
+  let snap: Snap
+  var fontSize: CGFloat = 10
+
+  var body: some View {
+    Group {
+      if snap.isExpired {
+        Text("Expirado — renove")
+          .foregroundColor(Brand.danger)
+      } else {
+        (Text("Ativo até ") + Text(snap.expires, style: .time))
           .foregroundColor(.white.opacity(0.55))
       }
     }
@@ -433,29 +479,30 @@ private struct LockCard: View {
   let snap: Snap
 
   var body: some View {
-    HStack(spacing: 14) {
-      PhaseRing(snap: snap, diameter: 40, lineWidth: 3)
+    VStack(spacing: 12) {
+      HStack(spacing: 14) {
+        BrandMark(size: 40)
 
-      VStack(alignment: .leading, spacing: 3) {
-        Text("CHECK-IN · \(snap.phase.shortLabel.uppercased())")
-          .font(.system(size: 9.5, weight: .heavy))
-          .tracking(1.4)
-          .foregroundColor(snap.phase.accent)
-          .lineLimit(1)
-        Text(snap.companyDisplayName)
-          .font(.system(size: 16, weight: .heavy))
-          .foregroundColor(.white)
-          .lineLimit(1)
-          .minimumScaleFactor(0.8)
-        EntryWindowLine(snap: snap)
+        VStack(alignment: .leading, spacing: 3) {
+          Text("CHECK-IN · \(snap.phase.shortLabel.uppercased())")
+            .font(.system(size: 9.5, weight: .heavy))
+            .tracking(1.4)
+            .foregroundColor(snap.accent)
+            .lineLimit(1)
+          Text(snap.companyDisplayName)
+            .font(.system(size: 16, weight: .black))
+            .foregroundColor(.white)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+          EntryWindowLine(snap: snap)
+        }
+
+        Spacer(minLength: 8)
+
+        LiveCountdownText(snap: snap, fontSize: 24)
       }
 
-      Spacer(minLength: 8)
-
-      VStack(alignment: .trailing, spacing: 6) {
-        HeroTimer(snap: snap, fontSize: 24)
-        CheckoutPill(snap: snap)
-      }
+      PhaseProgressBar(snap: snap)
     }
     .padding(16)
   }
@@ -475,46 +522,53 @@ struct CheckInLiveActivity: Widget {
 
       return DynamicIsland {
         DynamicIslandExpandedRegion(.leading) {
-          PhaseRing(snap: snap, diameter: 28, lineWidth: 2.5)
+          BrandMark(size: 30)
             .padding(.leading, 4)
         }
         DynamicIslandExpandedRegion(.trailing) {
-          HeroTimer(snap: snap, fontSize: 16, islandCompact: true)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-            .padding(.trailing, 4)
+          VStack(alignment: .trailing, spacing: 4) {
+            PhaseDot(snap: snap)
+            LiveCountdownText(snap: snap, fontSize: 20, islandCompact: true)
+          }
+          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+          .padding(.trailing, 4)
         }
         DynamicIslandExpandedRegion(.center) {
           VStack(spacing: 2) {
-            Text("CHECK-IN · \(snap.phase.shortLabel.uppercased())")
+            Text("CHECK-IN")
               .font(.system(size: 8.5, weight: .heavy))
-              .tracking(1.2)
-              .foregroundColor(snap.phase.accent)
+              .tracking(1.6)
+              .foregroundColor(snap.accent)
               .lineLimit(1)
             Text(snap.companyDisplayName)
-              .font(.system(size: 13, weight: .heavy))
+              .font(.system(size: 14, weight: .heavy))
               .foregroundColor(.white)
               .lineLimit(1)
               .minimumScaleFactor(0.75)
+            EntryWindowLine(snap: snap, fontSize: 10)
           }
           .frame(maxWidth: .infinity)
         }
         DynamicIslandExpandedRegion(.bottom) {
-          HStack {
-            EntryWindowLine(snap: snap, fontSize: 10)
-            Spacer(minLength: 8)
-            CheckoutPill(snap: snap)
+          VStack(spacing: 7) {
+            PhaseProgressBar(snap: snap)
+            HStack {
+              StatusLine(snap: snap)
+              Spacer(minLength: 8)
+              CheckoutPill(snap: snap)
+            }
           }
           .padding(.horizontal, 6)
-          .padding(.top, 2)
+          .padding(.top, 4)
         }
       } compactLeading: {
-        PhaseRing(snap: snap, diameter: 15, lineWidth: 2, showIcon: false)
+        BrandMark(size: 17)
       } compactTrailing: {
-        CompactIslandTimer(snap: snap)
+        CompactTimer(snap: snap)
       } minimal: {
-        PhaseRing(snap: snap, diameter: 14, lineWidth: 2, showIcon: false)
+        BrandRing(snap: snap, size: 14, lineWidth: 2)
       }
-      .keylineTint(snap.isExpired ? Brand.danger : snap.phase.accent)
+      .keylineTint(snap.accent)
       .widgetURL(URL(string: "dreamkeys://check-in")!)
     }
   }

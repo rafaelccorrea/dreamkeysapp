@@ -19,7 +19,12 @@ import '../../../shared/widgets/skeleton_box.dart';
 /// vermelho/preto pesado por uma paleta calma de **emerald/teal** quando
 /// presente e **slate/violet** quando não está.
 class CheckInPage extends StatefulWidget {
-  const CheckInPage({super.key});
+  /// `true` quando a tela é aberta pelo deep link "Sair" da Ilha Dinâmica
+  /// (`dreamkeys://check-in/checkout`): após carregar o estado, mostra a
+  /// confirmação de check-out em vez de esperar o toque no CTA.
+  final bool startCheckout;
+
+  const CheckInPage({super.key, this.startCheckout = false});
 
   @override
   State<CheckInPage> createState() => _CheckInPageState();
@@ -30,6 +35,9 @@ class _CheckInPageState extends State<CheckInPage> {
   bool _actionLoading = false;
   String _actionStep = 'location';
   String? _error;
+
+  /// Confirmação de saída do deep link já exibida (dispara UMA vez).
+  bool _checkoutPromptShown = false;
 
   CheckIn? _active;
   CheckInSettings? _settings;
@@ -87,6 +95,52 @@ class _CheckInPageState extends State<CheckInPage> {
       _active,
       companyName: _settings?.company?.name,
     );
+
+    _maybePromptDeepLinkCheckout();
+  }
+
+  /// Fluxo do deep link "Sair" da Ilha: com o estado carregado, pede a
+  /// confirmação de check-out (nunca encerra direto sem o usuário ver).
+  Future<void> _maybePromptDeepLinkCheckout() async {
+    if (!widget.startCheckout || _checkoutPromptShown || !mounted) return;
+    _checkoutPromptShown = true;
+
+    if (_active == null) {
+      _snack('Nenhum check-in ativo para encerrar.');
+      return;
+    }
+
+    final expiresText =
+        DateFormat('HH:mm').format(_active!.expiresAt.toLocal());
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: const Text(
+          'Encerrar check-in?',
+          style: TextStyle(fontWeight: FontWeight.w900),
+        ),
+        content: Text(
+          'Sua presença está registrada até $expiresText. '
+          'Deseja fazer o check-out agora?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Agora não'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Fazer check-out'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await _doCheckOut();
+    }
   }
 
   Future<void> _refresh() async => _bootstrap();

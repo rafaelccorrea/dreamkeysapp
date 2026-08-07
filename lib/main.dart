@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import 'core/constants/api_constants.dart';
 import 'core/push/app_push_service.dart';
 import 'core/navigation/app_navigator.dart';
+import 'core/navigation/deep_link_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/routes/app_routes.dart';
 import 'shared/services/theme_service.dart';
@@ -49,6 +50,7 @@ class _MyAppState extends State<MyApp> {
     SchedulerBinding.instance.addPostFrameCallback((_) {
       unawaited(AppPushService.instance.initListenersAndLocalNotifications());
       unawaited(LiveActivityService.instance.bootstrap());
+      unawaited(DeepLinkService.instance.init());
     });
   }
 
