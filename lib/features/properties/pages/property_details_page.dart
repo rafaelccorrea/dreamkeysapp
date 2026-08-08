@@ -33,6 +33,7 @@ import '../../keys/models/key_model.dart' as key_models;
 import '../../../../shared/services/gallery_service.dart';
 import '../../../../shared/services/module_access_service.dart';
 import '../../../../core/constants/app_permissions.dart';
+import '../../../../core/constants/feature_visibility.dart';
 import '../services/property_approval_service.dart';
 import '../widgets/approval_action_sheets.dart';
 import '../utils/property_edit_permissions.dart';
@@ -1493,7 +1494,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             tooltip: 'Compartilhar imóvel',
             onPressed: () => showPropertyShareSheet(context, _property!),
           ),
-        if (_property != null && _property!.hasPendingOffers == true)
+        // Ofertas oculta no app: badge da AppBar só volta com o flag.
+        if (FeatureVisibility.offersEnabled &&
+            _property != null &&
+            _property!.hasPendingOffers == true)
           Stack(
             children: [
               ChromeToolbarIconButton(
@@ -1526,8 +1530,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             // disponível (visualização-pura para imóvel de outro corretor).
             final canEdit = _canEditProperty;
             final canDelete = _canDeleteProperty;
-            final hasOffersShortcut =
-                _property != null && _property!.hasPendingOffers == true;
+            // Ofertas oculta no app: o atalho do sheet ⋯ fica desligado
+            // (o gate original de pendências segue preservado atrás do flag).
+            final hasOffersShortcut = FeatureVisibility.offersEnabled &&
+                _property != null &&
+                _property!.hasPendingOffers == true;
             final canShare = _property != null &&
                 _property!.isAvailableForSite == true &&
                 _siteBaseUrl != null;
@@ -2269,14 +2276,17 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             Expanded(
               child: Align(
                 alignment: Alignment.centerRight,
-                child: MatchesBadge(
-                  propertyId: widget.propertyId,
-                  onClick: () => Navigator.pushNamed(
-                    context,
-                    AppRoutes.matchesByProperty(widget.propertyId),
-                  ),
-                  child: const SizedBox.shrink(),
-                ),
+                // Matches oculto no app: o hero segue sem o badge.
+                child: FeatureVisibility.matchesEnabled
+                    ? MatchesBadge(
+                        propertyId: widget.propertyId,
+                        onClick: () => Navigator.pushNamed(
+                          context,
+                          AppRoutes.matchesByProperty(widget.propertyId),
+                        ),
+                        child: const SizedBox.shrink(),
+                      )
+                    : const SizedBox.shrink(),
               ),
             ),
           ],
@@ -2434,7 +2444,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       ));
     }
     final pending = property.pendingOffersCount ?? 0;
-    if (pending > 0) {
+    // Ofertas oculta no app: sem pill de pendências apontando pra área morta.
+    if (FeatureVisibility.offersEnabled && pending > 0) {
       pills.add(_metaPill(
         icon: Icons.request_quote_outlined,
         label: '$pending oferta${pending > 1 ? 's' : ''} pendente${pending > 1 ? 's' : ''}',
@@ -3223,8 +3234,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     ThemeData theme,
     Property property,
   ) {
-    final hasOffers = property.hasPendingOffers == true ||
-        (property.totalOffersCount != null && property.totalOffersCount! > 0);
+    // Ofertas oculta no app: a seção embutida some junto com os atalhos.
+    final hasOffers = FeatureVisibility.offersEnabled &&
+        (property.hasPendingOffers == true ||
+            (property.totalOffersCount != null &&
+                property.totalOffersCount! > 0));
     final hasClients = (property.clients ?? []).isNotEmpty;
     final hasDocuments = !_isLoadingDocuments && _documents.isNotEmpty;
     final hasChecklists = !_isLoadingChecklists && _checklists.isNotEmpty;
@@ -4446,29 +4460,32 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         color: const Color(0xFFE6B84C),
         onTap: () => _openScheduleVisit(property),
       ),
-      (
-        icon: Icons.join_inner_rounded,
-        title: 'Ver matches',
-        subtitle: 'Clientes com perfil compatível com este imóvel',
-        color: const Color(0xFF8B5CF6),
-        onTap: () => Navigator.pushNamed(
-          context,
-          AppRoutes.matchesByProperty(widget.propertyId),
+      // Matches e Ofertas ocultas no app: as linhas só voltam com os flags.
+      if (FeatureVisibility.matchesEnabled)
+        (
+          icon: Icons.join_inner_rounded,
+          title: 'Ver matches',
+          subtitle: 'Clientes com perfil compatível com este imóvel',
+          color: const Color(0xFF8B5CF6),
+          onTap: () => Navigator.pushNamed(
+            context,
+            AppRoutes.matchesByProperty(widget.propertyId),
+          ),
         ),
-      ),
-      (
-        icon: Icons.request_quote_outlined,
-        title: 'Ver ofertas',
-        subtitle: pendingOffers > 0
-            ? '$pendingOffers pendente${pendingOffers > 1 ? 's' : ''} '
-                'aguardando resposta'
-            : 'Propostas recebidas para este imóvel',
-        color: const Color(0xFF0891B2),
-        onTap: () => Navigator.of(context).pushNamed(
-          '/properties/offers',
-          arguments: {'propertyId': widget.propertyId},
+      if (FeatureVisibility.offersEnabled)
+        (
+          icon: Icons.request_quote_outlined,
+          title: 'Ver ofertas',
+          subtitle: pendingOffers > 0
+              ? '$pendingOffers pendente${pendingOffers > 1 ? 's' : ''} '
+                  'aguardando resposta'
+              : 'Propostas recebidas para este imóvel',
+          color: const Color(0xFF0891B2),
+          onTap: () => Navigator.of(context).pushNamed(
+            '/properties/offers',
+            arguments: {'propertyId': widget.propertyId},
+          ),
         ),
-      ),
       (
         icon: Icons.camera_alt_outlined,
         title: 'Nova vistoria',

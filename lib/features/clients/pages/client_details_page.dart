@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/constants/feature_visibility.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/shell_visual_tokens.dart';
@@ -108,8 +109,8 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
                       break;
                   }
                 },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
                     value: 'edit',
                     child: Row(children: [
                       Icon(Icons.edit_outlined, size: 18),
@@ -117,15 +118,17 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
                       Text('Editar'),
                     ]),
                   ),
-                  PopupMenuItem(
-                    value: 'matches',
-                    child: Row(children: [
-                      Icon(Icons.handshake_outlined, size: 18),
-                      SizedBox(width: 10),
-                      Text('Ver matches'),
-                    ]),
-                  ),
-                  PopupMenuItem(
+                  // Matches oculto no app: item fora do menu.
+                  if (FeatureVisibility.matchesEnabled)
+                    const PopupMenuItem(
+                      value: 'matches',
+                      child: Row(children: [
+                        Icon(Icons.handshake_outlined, size: 18),
+                        SizedBox(width: 10),
+                        Text('Ver matches'),
+                      ]),
+                    ),
+                  const PopupMenuItem(
                     value: 'transfer',
                     child: Row(children: [
                       Icon(Icons.swap_horiz_rounded, size: 18),
@@ -133,8 +136,8 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
                       Text('Transferir'),
                     ]),
                   ),
-                  PopupMenuDivider(),
-                  PopupMenuItem(
+                  const PopupMenuDivider(),
+                  const PopupMenuItem(
                     value: 'delete',
                     child: Row(children: [
                       Icon(Icons.delete_outline, size: 18, color: Colors.red),
@@ -295,23 +298,31 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
             ],
           ),
           const SizedBox(height: 14),
-          MatchesBadge(
-            clientId: _client!.id,
-            onClick: () => Navigator.pushNamed(
-              context,
-              AppRoutes.matchesByClient(_client!.id),
-            ),
-            child: Text(
-              _client!.name,
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w900,
-                letterSpacing: -0.4,
-                color: ThemeHelpers.textColor(context),
-              ),
-            ),
+          // Matches oculto no app: o nome fica sem o badge (o wrapper só
+          // volta com o flag — permissões/módulo seguem no widget).
+          Builder(
+            builder: (context) {
+              final clientName = Text(
+                _client!.name,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.4,
+                  color: ThemeHelpers.textColor(context),
+                ),
+              );
+              if (!FeatureVisibility.matchesEnabled) return clientName;
+              return MatchesBadge(
+                clientId: _client!.id,
+                onClick: () => Navigator.pushNamed(
+                  context,
+                  AppRoutes.matchesByClient(_client!.id),
+                ),
+                child: clientName,
+              );
+            },
           ),
           const SizedBox(height: 8),
           Wrap(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/constants/feature_visibility.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
@@ -1594,14 +1595,16 @@ class _ClientsPageState extends State<ClientsPage> {
                                 ),
                               ),
                               const SizedBox(width: 6),
-                              _MatchesPill(
-                                clientId: client.id,
-                                accent: typeColor,
-                                onTap: () => Navigator.pushNamed(
-                                  context,
-                                  AppRoutes.matchesByClient(client.id),
+                              // Matches oculto no app: pill fora do card.
+                              if (FeatureVisibility.matchesEnabled)
+                                _MatchesPill(
+                                  clientId: client.id,
+                                  accent: typeColor,
+                                  onTap: () => Navigator.pushNamed(
+                                    context,
+                                    AppRoutes.matchesByClient(client.id),
+                                  ),
                                 ),
-                              ),
                               _buildCardOverflowMenu(context, client),
                             ],
                           ),
@@ -2032,8 +2035,8 @@ class _ClientsPageState extends State<ClientsPage> {
             break;
         }
       },
-      itemBuilder: (_) => const [
-        PopupMenuItem(
+      itemBuilder: (_) => [
+        const PopupMenuItem(
           value: 'view',
           child: Row(children: [
             Icon(Icons.open_in_new_rounded, size: 18),
@@ -2041,7 +2044,7 @@ class _ClientsPageState extends State<ClientsPage> {
             Text('Abrir'),
           ]),
         ),
-        PopupMenuItem(
+        const PopupMenuItem(
           value: 'edit',
           child: Row(children: [
             Icon(Icons.edit_outlined, size: 18),
@@ -2049,15 +2052,17 @@ class _ClientsPageState extends State<ClientsPage> {
             Text('Editar'),
           ]),
         ),
-        PopupMenuItem(
-          value: 'matches',
-          child: Row(children: [
-            Icon(Icons.handshake_outlined, size: 18),
-            SizedBox(width: 10),
-            Text('Ver matches'),
-          ]),
-        ),
-        PopupMenuItem(
+        // Matches oculto no app: item fora do menu.
+        if (FeatureVisibility.matchesEnabled)
+          const PopupMenuItem(
+            value: 'matches',
+            child: Row(children: [
+              Icon(Icons.handshake_outlined, size: 18),
+              SizedBox(width: 10),
+              Text('Ver matches'),
+            ]),
+          ),
+        const PopupMenuItem(
           value: 'transfer',
           child: Row(children: [
             Icon(Icons.swap_horiz_rounded, size: 18),
@@ -2065,8 +2070,8 @@ class _ClientsPageState extends State<ClientsPage> {
             Text('Transferir'),
           ]),
         ),
-        PopupMenuDivider(),
-        PopupMenuItem(
+        const PopupMenuDivider(),
+        const PopupMenuItem(
           value: 'delete',
           child: Row(children: [
             Icon(Icons.delete_outline, size: 18, color: Colors.red),
@@ -2754,13 +2759,15 @@ class _ClientsPageState extends State<ClientsPage> {
                 'Atualizar informações cadastrais',
                 () => Navigator.pop(ctx, 'edit'),
               ),
-              _actionRow(
-                ctx,
-                Icons.handshake_outlined,
-                'Ver matches',
-                'Imóveis compatíveis com o perfil',
-                () => Navigator.pop(ctx, 'matches'),
-              ),
+              // Matches oculto no app: linha fora do sheet de ações.
+              if (FeatureVisibility.matchesEnabled)
+                _actionRow(
+                  ctx,
+                  Icons.handshake_outlined,
+                  'Ver matches',
+                  'Imóveis compatíveis com o perfil',
+                  () => Navigator.pop(ctx, 'matches'),
+                ),
               _actionRow(
                 ctx,
                 Icons.swap_horiz_rounded,

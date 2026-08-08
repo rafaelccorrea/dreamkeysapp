@@ -7,6 +7,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart' show SchedulerBinding;
+import 'package:flutter/widgets.dart' show NavigatorState;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -14,6 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../constants/api_constants.dart';
 import '../navigation/app_navigator.dart';
 import '../routes/app_routes.dart';
+import '../../features/notifications/widgets/notification_center.dart';
 import '../../shared/utils/app_deep_link.dart';
 import '../../firebase_options.dart';
 import '../../features/notifications/controllers/notification_controller.dart';
@@ -516,6 +518,27 @@ class AppPushService {
       nav.pushNamed(route);
       return;
     }
-    nav.pushNamed(AppRoutes.notifications);
+    // Fallback DIGNO quando o payload não resolve pra nenhuma tela real:
+    // Home + painel de notificações (o mesmo sheet do sino do dashboard).
+    // A antiga rota /notifications é tela legada — empurrá-la era o bug de
+    // "tela de notificações que nem existe mais".
+    _openHomeWithNotificationsPanel(nav);
+  }
+
+  /// Home limpa (padrão da casa: mesma navegação do drawer/back do
+  /// [AppScaffold]) e, com a transição assentada, abre o painel de
+  /// notificações — o usuário tocou numa notificação, então a resposta
+  /// mínima é mostrá-la no painel, nunca uma rota morta.
+  void _openHomeWithNotificationsPanel(NavigatorState nav) {
+    nav.pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
+    unawaited(() async {
+      // Deixa o fade da Home terminar antes do sheet subir — abrir os dois
+      // ao mesmo tempo briga visualmente (e em cold start dá tempo do
+      // splash assentar a rota).
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      final ctx = appNavigatorKey.currentContext;
+      if (ctx == null || !ctx.mounted) return;
+      await NotificationCenter.openSheet(ctx);
+    }());
   }
 }

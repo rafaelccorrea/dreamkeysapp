@@ -33,12 +33,14 @@ class NotificationCenter extends StatefulWidget {
     this.compactToolbar = false,
   });
 
-  @override
-  State<NotificationCenter> createState() => _NotificationCenterState();
-}
-
-class _NotificationCenterState extends State<NotificationCenter> {
-  Future<void> _openSheet() async {
+  /// Abre o painel (modal bottom sheet) de notificações — o MESMO que o
+  /// sino do dashboard abre. Ponto de entrada público para quem precisa
+  /// abrir o painel programaticamente (ex.: fallback de push sem deep link
+  /// resolvível: Home + painel, em vez da tela legada `/notifications`).
+  ///
+  /// O [context] precisa enxergar o `NotificationController` (Provider) e
+  /// um `Navigator` — o contexto do `appNavigatorKey` atende aos dois.
+  static Future<void> openSheet(BuildContext context) async {
     final controller =
         Provider.of<NotificationController>(context, listen: false);
 
@@ -59,6 +61,13 @@ class _NotificationCenterState extends State<NotificationCenter> {
       builder: (_) => const _NotificationSheet(),
     );
   }
+
+  @override
+  State<NotificationCenter> createState() => _NotificationCenterState();
+}
+
+class _NotificationCenterState extends State<NotificationCenter> {
+  Future<void> _openSheet() => NotificationCenter.openSheet(context);
 
   @override
   Widget build(BuildContext context) {

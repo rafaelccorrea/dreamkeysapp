@@ -11,6 +11,7 @@ import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
 import '../../../../shared/widgets/shimmer_image.dart';
 import '../../../../shared/state/screen_state_cache.dart';
+import '../../../../core/constants/feature_visibility.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/shell_visual_tokens.dart';
 import '../../../../core/theme/theme_helpers.dart';
@@ -2644,7 +2645,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
         : 'Nenhum imóvel cadastrado';
     final subtitle = obstructed
         ? 'Amplie os critérios ou volte ao panorama completo.'
-        : 'Inclua um endereço para passar a gerir ofertas e status daqui.';
+        : 'Inclua um endereço para passar a gerir imóveis e status daqui.';
 
     Widget content() {
       return DecoratedBox(
@@ -2938,7 +2939,10 @@ class _PropertiesPageState extends State<PropertiesPage> {
       userRole: access.userRole,
       hasPermission: access.hasPermission,
     );
-    final canMatches = access.hasPermission('match:view') &&
+    // Matches oculto no app: o item some do sheet, mas os gates de
+    // permissão/módulo originais seguem preservados atrás do flag.
+    final canMatches = FeatureVisibility.matchesEnabled &&
+        access.hasPermission('match:view') &&
         access.isModuleAvailableForCompany('match_system');
 
     final parentContext = context;
