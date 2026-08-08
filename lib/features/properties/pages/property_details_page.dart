@@ -344,6 +344,86 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       (_publicationPending(p) &&
           (_canApprovePublication || _canRejectPublication));
 
+  // ─── Conversa de aprovação (chat aprovador ↔ responsável) ──────────────
+  // Paridade com `PropertyApprovalCommunicationPanel` do web: o gate é
+  // 100% server-side (`canParticipateInApprovalThread` — gestão, aprovadores,
+  // responsável/adicionais, captadores). Quem está fora leva 403 no GET e a
+  // seção inteira some — mesma condição do web, onde o painel vira `null`.
+  // Quem vê, envia: leitura e escrita usam o MESMO gate no backend.
+  List<PropertyHistoryEntry> _threadMessages = const [];
+  bool _threadLoading = true;
+  bool _threadLoadFailed = false;
+  bool _threadForbidden = false;
+  bool _threadSending = false;
+  bool _threadShowAll = false;
+
+  /// Fila selecionada para envio — paridade com o segmented "Enviar na fila"
+  /// do web (default `availability`, igual lá).
+  ApprovalType _threadQueue = ApprovalType.availability;
+  final TextEditingController _threadComposer = TextEditingController();
+  final ScrollController _threadScroll = ScrollController();
+
+  Future<void> _loadApprovalThread() async {
+    if (widget.propertyId.trim().isEmpty) return;
+    setState(() {
+      _threadLoading = true;
+      _threadLoadFailed = false;
+    });
+    // Sem `context` → traz as DUAS filas misturadas em ordem cronológica
+    // (mesma chamada da ficha web). O GET também marca a conversa como vista.
+    final res = await PropertyApprovalService.instance
+        .getApprovalThread(widget.propertyId);
+    if (!mounted) return;
+    if (res.success) {
+      setState(() {
+        _threadMessages = res.data ?? const [];
+        _threadLoading = false;
+      });
+      _threadScrollToBottom();
+    } else if (res.statusCode == 403) {
+      setState(() {
+        _threadForbidden = true;
+        _threadLoading = false;
+      });
+    } else {
+      setState(() {
+        _threadLoadFailed = true;
+        _threadLoading = false;
+      });
+    }
+  }
+
+  void _threadScrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_threadScroll.hasClients) return;
+      _threadScroll.jumpTo(_threadScroll.position.maxScrollExtent);
+    });
+  }
+
+  Future<void> _sendApprovalThreadMessage() async {
+    final text = _threadComposer.text.trim();
+    if (text.isEmpty || _threadSending) return;
+    setState(() => _threadSending = true);
+    final res =
+        await PropertyApprovalService.instance.postApprovalThreadMessage(
+      widget.propertyId,
+      message: text,
+      queue: _threadQueue,
+    );
+    if (!mounted) return;
+    setState(() => _threadSending = false);
+    if (res.success && res.data != null) {
+      setState(() {
+        _threadMessages = [..._threadMessages, res.data!];
+        _threadComposer.clear();
+      });
+      _threadScrollToBottom();
+    } else {
+      // Erro → SnackBar com a mensagem real da API (403 do envio incluso).
+      _approvalSnack(res.message ?? 'Erro ao enviar mensagem.');
+    }
+  }
+
   void _approvalSnack(String msg, {bool ok = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -454,6 +534,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     _isLoading = true;
     _loadProperty();
     _loadSiteBaseUrl();
+    _loadApprovalThread();
     _detailsScrollController.addListener(_handleDetailsScroll);
   }
 
@@ -1012,6 +1093,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     _imagePageController.dispose();
     _updateComposer.dispose();
     _notesController.dispose();
+    _threadComposer.dispose();
+    _threadScroll.dispose();
     _detailsScrollController
       ..removeListener(_handleDetailsScroll)
       ..dispose();
@@ -3250,6 +3333,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       // layout flush (não jogada).
       if (_showApprovalSection(property))
         _buildApprovalSection(context, theme, property),
+      // Conversa de aprovação — logo junto da seção de aprovação. Visível
+      // para quem participa da thread (403 no GET esconde tudo, como no web).
+      if (!_threadForbidden)
+        _buildApprovalThreadSection(context, theme, property),
       if (property.description.trim().isNotEmpty)
         _buildFlushSection(
           theme: theme,
@@ -3437,6 +3524,429 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: rows,
+      ),
+    );
+  }
+
+  /// Azul comunicação — mesma voz do chat do CRM (`_kChatTone` do
+  /// task_details_modal). Vermelho aqui é só marca/erro/destrutivo.
+  static const Color _kThreadTone = Color(0xFF3B82F6);
+
+  /// Quantas mensagens aparecem antes do "Ver anteriores" — a seção não
+  /// infla a página: as últimas N + scroll interno com teto de altura.
+  static const int _kThreadPreviewCount = 10;
+
+  /// Seção flush "Comunicação de aprovações" — paridade com a seção
+  /// "Comunicação sobre aprovações" da ficha web (PropertyDetailsPage +
+  /// PropertyApprovalCommunicationPanel variant full/flush).
+  ///
+  /// Contrato real (imobx):
+  ///   GET  /properties/:id/approval-thread            → mensagens (asc)
+  ///   POST /properties/:id/approval-thread            → { message, approvalContext }
+  /// Filas: `availability` (Disponibilidade) e `publication` (Publicação no
+  /// site) — obrigatório escolher antes de enviar; default = disponibilidade,
+  /// igual ao web.
+  Widget _buildApprovalThreadSection(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+  ) {
+    final isDark = theme.brightness == Brightness.dark;
+    const accent = _kThreadTone;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+
+    final Widget content;
+    if (_threadLoading) {
+      // Skeleton fiel ao layout final: avatar redondo + bolha.
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final h in const [56.0, 42.0])
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 5),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SkeletonBox(width: 30, height: 30, borderRadius: 15),
+                  const SizedBox(width: 10),
+                  Expanded(child: SkeletonBox(height: h, borderRadius: 14)),
+                ],
+              ),
+            ),
+        ],
+      );
+    } else if (_threadLoadFailed) {
+      content = Row(
+        children: [
+          Icon(Icons.cloud_off_rounded, size: 16, color: secondary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Não foi possível carregar a conversa.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: secondary,
+                fontWeight: FontWeight.w600,
+                height: 1.35,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: _loadApprovalThread,
+            // Tema global pinta TextButton de vermelho — accent forçado.
+            style: TextButton.styleFrom(
+              foregroundColor: accent,
+              minimumSize: Size.zero,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text(
+              'Tentar de novo',
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800),
+            ),
+          ),
+        ],
+      );
+    } else if (_threadMessages.isEmpty) {
+      // Empty state neutro — espelho do "Nenhuma mensagem ainda" do web.
+      content = Padding(
+        padding: const EdgeInsets.symmetric(vertical: 18),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: accent.withValues(alpha: isDark ? 0.16 : 0.1),
+              ),
+              alignment: Alignment.center,
+              child: Icon(
+                Icons.chat_bubble_outline_rounded,
+                size: 20,
+                color: accent,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Nenhuma mensagem ainda',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.2,
+                color: ThemeHelpers.textColor(context),
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              'Escolha a fila abaixo e envie a primeira mensagem.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: secondary,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      final total = _threadMessages.length;
+      final visible = (_threadShowAll || total <= _kThreadPreviewCount)
+          ? _threadMessages
+          : _threadMessages.sublist(total - _kThreadPreviewCount);
+      final hiddenCount = total - visible.length;
+      final myId = ModuleAccessService.instance.userId;
+
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (hiddenCount > 0)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => setState(() => _threadShowAll = true),
+                style: TextButton.styleFrom(
+                  foregroundColor: accent,
+                  minimumSize: Size.zero,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 5),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                icon: const Icon(Icons.history_rounded, size: 15),
+                label: Text(
+                  'Ver anteriores ($hiddenCount)',
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.1,
+                  ),
+                ),
+              ),
+            ),
+          // Lista com teto de altura + scroll interno — não infla a página.
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 360),
+            child: SingleChildScrollView(
+              controller: _threadScroll,
+              physics: const ClampingScrollPhysics(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final m in visible)
+                    _ApprovalThreadBubble(
+                      entry: m,
+                      isMe: myId != null &&
+                          myId.isNotEmpty &&
+                          m.user?.id == myId,
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return _buildFlushSection(
+      theme: theme,
+      title: 'Comunicação de aprovações',
+      icon: Icons.forum_outlined,
+      tone: accent,
+      headerTrailing: _threadMessages.isEmpty
+          ? null
+          : Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                color: accent.withValues(alpha: isDark ? 0.2 : 0.1),
+              ),
+              child: Text(
+                '${_threadMessages.length}',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: accent,
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Chat interno entre quem aprova e quem responde pelo imóvel.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: secondary,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 12),
+          content,
+          const SizedBox(height: 14),
+          // Seletor de fila — paridade com o "Enviar na fila" do web.
+          Text(
+            'ENVIAR NA FILA',
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.1,
+              fontSize: 10,
+              color: secondary.withValues(alpha: 0.9),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _threadQueueChip(
+                  context,
+                  label: 'Disponibilidade',
+                  icon: Icons.fact_check_outlined,
+                  selected: _threadQueue == ApprovalType.availability,
+                  onTap: () => setState(
+                      () => _threadQueue = ApprovalType.availability),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _threadQueueChip(
+                  context,
+                  label: 'Publicação no site',
+                  icon: Icons.public_rounded,
+                  selected: _threadQueue == ApprovalType.publication,
+                  onTap: () => setState(
+                      () => _threadQueue = ApprovalType.publication),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _threadComposerBar(context, theme),
+        ],
+      ),
+    );
+  }
+
+  /// Chip de fila — estado claro: selecionado = tinted azul + check + w800.
+  Widget _threadQueueChip(
+    BuildContext context, {
+    required String label,
+    required IconData icon,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    const accent = _kThreadTone;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOut,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            color: selected
+                ? accent.withValues(alpha: isDark ? 0.18 : 0.09)
+                : Colors.transparent,
+            border: Border.all(
+              color: selected
+                  ? accent.withValues(alpha: 0.55)
+                  : ThemeHelpers.borderColor(context)
+                      .withValues(alpha: 0.45),
+              width: selected ? 1.4 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                selected ? Icons.check_circle_rounded : icon,
+                size: 15,
+                color: selected ? accent : secondary,
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                    letterSpacing: -0.1,
+                    color: selected
+                        ? accent
+                        : ThemeHelpers.textColor(context),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Composer — TextField filled + botão enviar azul com loading (gramática
+  /// do composer de comentários do CRM).
+  Widget _threadComposerBar(BuildContext context, ThemeData theme) {
+    final isDark = theme.brightness == Brightness.dark;
+    const accent = _kThreadTone;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 2, 6, 2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: ThemeHelpers.cardBackgroundColor(context)
+            .withValues(alpha: isDark ? 0.5 : 0.7),
+        border: Border.all(
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _threadComposer,
+              minLines: 1,
+              maxLines: 4,
+              maxLength: 4000,
+              textCapitalization: TextCapitalization.sentences,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+                height: 1.35,
+              ),
+              decoration: InputDecoration(
+                hintText: 'Mensagem…',
+                hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                  color: secondary,
+                  fontWeight: FontWeight.w500,
+                ),
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                errorBorder: InputBorder.none,
+                disabledBorder: InputBorder.none,
+                counterText: '',
+                isDense: true,
+                contentPadding:
+                    const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 5, top: 5),
+            child: ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _threadComposer,
+              builder: (context, value, _) {
+                final canSend =
+                    value.text.trim().isNotEmpty && !_threadSending;
+                return Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: canSend ? _sendApprovalThreadMessage : null,
+                    borderRadius: BorderRadius.circular(12),
+                    child: Ink(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        color: canSend
+                            ? accent
+                            : ThemeHelpers.borderColor(context)
+                                .withValues(alpha: 0.3),
+                      ),
+                      child: SizedBox(
+                        width: 38,
+                        height: 38,
+                        child: Center(
+                          child: _threadSending
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : Icon(
+                                  Icons.send_rounded,
+                                  size: 18,
+                                  color:
+                                      canSend ? Colors.white : secondary,
+                                ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -8338,6 +8848,210 @@ class _ExpandToggle extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Cor estável por pessoa — mesma mecânica e paleta do `_personColor` do
+/// chat do CRM (task_details_modal.dart). Sem nome → slate.
+Color _approvalPersonColor(String? name) {
+  if (name == null || name.trim().isEmpty) return const Color(0xFF64748B);
+  const palette = [
+    Color(0xFF0EA5E9),
+    Color(0xFF14B8A6),
+    Color(0xFF6366F1),
+    Color(0xFFF97316),
+    Color(0xFF22C55E),
+    Color(0xFFEC4899),
+    Color(0xFFA855F7),
+    Color(0xFF0891B2),
+  ];
+  var h = 0;
+  for (final c in name.trim().toLowerCase().codeUnits) {
+    h = (h * 31 + c) & 0x7fffffff;
+  }
+  return palette[h % palette.length];
+}
+
+/// Hora relativa curta (mesma régua do chat do CRM): agora / N min / N h /
+/// N d, e a partir de 7 dias a data "d MMM" em pt-BR.
+String _approvalThreadRelativeTime(DateTime date) {
+  final now = DateTime.now();
+  final diff = now.difference(date);
+  if (diff.inSeconds < 60) return 'agora';
+  if (diff.inMinutes < 60) return '${diff.inMinutes} min';
+  if (diff.inHours < 24) return '${diff.inHours} h';
+  if (diff.inDays < 7) return '${diff.inDays} d';
+  return DateFormat('d MMM', 'pt_BR').format(date.toLocal());
+}
+
+/// Bolha da conversa de aprovação — gramática do chat do CRM
+/// (`_CommentBubble` do task_details_modal): avatar-inicial com cor estável
+/// por hash do nome, bolha tinted azul quando é minha, neutra quando é dos
+/// outros; nome w800 + fila em small caps + hora relativa.
+class _ApprovalThreadBubble extends StatelessWidget {
+  final PropertyHistoryEntry entry;
+  final bool isMe;
+
+  const _ApprovalThreadBubble({required this.entry, required this.isMe});
+
+  String _initials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty || parts.first.isEmpty) return '?';
+    if (parts.length == 1) return parts.first.characters.first.toUpperCase();
+    return (parts.first.characters.first + parts.last.characters.first)
+        .toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    // Azul comunicação — mesma voz do chat do CRM.
+    const accent = Color(0xFF3B82F6);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+
+    final rawName = entry.user?.name?.trim() ?? '';
+    final name = rawName.isNotEmpty
+        ? rawName
+        : (entry.user?.email?.trim().isNotEmpty == true
+            ? entry.user!.email!.trim()
+            : 'Usuário');
+    final displayName = isMe ? 'Você' : name;
+
+    // Fila da mensagem (metadata.approvalContext) — tag curta, paridade com
+    // o `contextShort` do web: Disp. / Site.
+    final queue = entry.metadata?['approvalContext']?.toString();
+    final queueLabel = queue == 'publication'
+        ? 'SITE'
+        : (queue == 'availability' ? 'DISP.' : null);
+    final wasEdited = (entry.metadata?['editedAt']?.toString() ?? '')
+        .isNotEmpty;
+
+    final bubbleColor = isMe
+        ? accent.withValues(alpha: isDark ? 0.16 : 0.08)
+        : ThemeHelpers.cardBackgroundColor(context)
+            .withValues(alpha: isDark ? 0.5 : 0.7);
+    final borderColor = isMe
+        ? accent.withValues(alpha: 0.34)
+        : ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
+    final personTone = _approvalPersonColor(name);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: personTone,
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              _initials(name),
+              style: const TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w800,
+                color: Colors.white,
+                letterSpacing: 0.3,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(12, 9, 11, 10),
+              decoration: BoxDecoration(
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(4),
+                  topRight: Radius.circular(14),
+                  bottomLeft: Radius.circular(14),
+                  bottomRight: Radius.circular(14),
+                ),
+                color: bubbleColor,
+                border: Border.all(color: borderColor),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          displayName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.2,
+                            height: 1.15,
+                            color: isMe
+                                ? accent
+                                : ThemeHelpers.textColor(context),
+                          ),
+                        ),
+                      ),
+                      if (queueLabel != null) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 5, vertical: 2),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(6),
+                            color: accent
+                                .withValues(alpha: isDark ? 0.2 : 0.1),
+                          ),
+                          child: Text(
+                            queueLabel,
+                            style: TextStyle(
+                              fontSize: 8.5,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.6,
+                              color: accent,
+                            ),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(width: 8),
+                      Text(
+                        _approvalThreadRelativeTime(entry.createdAt),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: secondary,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 5),
+                  SelectableText(
+                    (entry.description ?? '').trim(),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      height: 1.45,
+                      fontSize: 13.5,
+                      color: ThemeHelpers.textColor(context),
+                    ),
+                  ),
+                  if (wasEdited) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      'editada',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: secondary.withValues(alpha: 0.8),
+                        fontStyle: FontStyle.italic,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

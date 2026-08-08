@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../shared/services/api_service.dart';
 import '../../../shared/services/property_service.dart';
+import '../models/property_activity_models.dart';
 
 /// Filtros textuais aceitos por todas as listagens da fila.
 ///
@@ -558,6 +559,110 @@ class PropertyApprovalService {
       );
     } catch (e) {
       debugPrint('❌ [APPROVAL] remind-approvers: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  // ─── Conversa de aprovação (chat aprovador ↔ responsável) ─────────────
+
+  /// `GET /properties/:id/approval-thread` — mensagens da conversa de
+  /// aprovação (evento `approval_thread_message` do histórico), ordenadas da
+  /// mais antiga para a mais recente. Opcional: filtrar por fila via
+  /// `?context=availability|publication`.
+  ///
+  /// Autorização é server-side (`canParticipateInApprovalThread`): gestão
+  /// (master/admin/manager), aprovadores (matriz ou permissão), responsável,
+  /// responsáveis adicionais e captadores. Quem está fora leva **403** — o
+  /// caller usa `statusCode == 403` para esconder a seção inteira (paridade
+  /// com o `PropertyApprovalCommunicationPanel` do web, que retorna `null`).
+  ///
+  /// Efeito colateral (igual ao web): o backend marca a conversa como vista
+  /// para o usuário atual ao listar.
+  Future<ApiResponse<List<PropertyHistoryEntry>>> getApprovalThread(
+    String propertyId, {
+    ApprovalType? context,
+  }) async {
+    try {
+      final response = await _api.get<dynamic>(
+        '/properties/$propertyId/approval-thread',
+        queryParameters:
+            context != null ? {'context': context.value} : null,
+      );
+      if (response.success) {
+        final raw = response.data;
+        List<dynamic> list;
+        if (raw is List) {
+          list = raw;
+        } else if (raw is Map && raw['data'] is List) {
+          list = raw['data'] as List;
+        } else {
+          list = const [];
+        }
+        final parsed = list
+            .whereType<Map>()
+            .map((e) =>
+                PropertyHistoryEntry.fromJson(Map<String, dynamic>.from(e)))
+            .toList();
+        return ApiResponse.success(
+          data: parsed,
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao carregar a conversa',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [APPROVAL] approval-thread: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// `POST /properties/:id/approval-thread` — envia mensagem na conversa.
+  ///
+  /// Body real do backend (`AddApprovalThreadBodyDto`):
+  /// `{ message, approvalContext: 'availability' | 'publication' }` — a fila
+  /// é obrigatória. Backend valida texto não-vazio e máx. 4000 caracteres, e
+  /// devolve a entrada criada já com o `user` populado.
+  Future<ApiResponse<PropertyHistoryEntry>> postApprovalThreadMessage(
+    String propertyId, {
+    required String message,
+    required ApprovalType queue,
+  }) async {
+    try {
+      final response = await _api.post<Map<String, dynamic>>(
+        '/properties/$propertyId/approval-thread',
+        body: {
+          'message': message,
+          'approvalContext': queue.value,
+        },
+      );
+      if (response.success && response.data != null) {
+        final raw = response.data!;
+        final map = raw['id'] != null
+            ? raw
+            : (raw['data'] is Map<String, dynamic>
+                ? raw['data'] as Map<String, dynamic>
+                : raw);
+        return ApiResponse.success(
+          data: PropertyHistoryEntry.fromJson(map),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao enviar mensagem',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [APPROVAL] approval-thread send: $e');
       return ApiResponse.error(
         message: 'Erro de conexão: ${e.toString()}',
         statusCode: 0,
