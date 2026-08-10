@@ -386,7 +386,17 @@ class AppRoutes {
       Theme(data: AppTheme.lightTheme, child: child);
 
   static Route<dynamic> generateRoute(RouteSettings settings) {
-    final routeName = settings.name;
+    // SANITIZA a rota: tira query string e fragmento antes de casar/extrair
+    // ids. Sem isto, um nome de rota com query (`/kanban/task/{id}?teamId=…`,
+    // formato de actionUrl do web) faz o `split('/')` devolver o id SUJO —
+    // e a chamada de API vira `/kanban/tasks/{id}?teamId=…/fields`, o erro
+    // "Cannot GET …" que o usuário via ao abrir a negociação pela
+    // notificação. Nenhuma rota daqui lê query params, então cortar é
+    // seguro para TODAS as rotas com id no path.
+    final rawName = settings.name;
+    final routeName = rawName == null
+        ? null
+        : rawName.split('?').first.split('#').first;
 
     if (routeName == splash) {
       return _buildRoute(const SplashPage(), settings);
