@@ -2971,7 +2971,6 @@ class _FunnelStageBar extends StatelessWidget {
     final idx = stages.indexWhere((c) => c.id == currentColumnId);
     final atual = idx >= 0 ? stages[idx] : null;
     final tone = _columnTone(atual?.color);
-    final ink = _columnInk(context, tone);
 
     final movendo = movingToColumnId != null;
     final podeVoltar = canMove && idx > 0 && !movendo;
@@ -3026,7 +3025,7 @@ class _FunnelStageBar extends StatelessWidget {
               child: _StageNamePill(
                 label: atual?.title ?? 'Selecionar etapa',
                 tone: tone,
-                ink: ink,
+                ink: _inkOnTone(tone),
                 isDark: isDark,
                 busy: movendo,
                 // Sem permissão de mover o nome continua legível (é
@@ -3105,6 +3104,16 @@ class _StageArrow extends StatelessWidget {
     );
   }
 }
+
+/// Tinta LEGÍVEL sobre um fundo sólido [tone].
+///
+/// Não use `_columnInk` aqui: aquele devolve a própria cor da coluna (ou um
+/// escurecimento leve dela), pensado para texto sobre fundo NEUTRO. Sobre a
+/// cor cheia dava cor-sobre-a-mesma-cor — o nome da etapa sumia e a pill
+/// virava um retângulo liso. Aqui a escolha vem da luminância: coluna clara
+/// (amarelo, lima) pede tinta escura; o resto pede branco.
+Color _inkOnTone(Color tone) =>
+    tone.computeLuminance() > 0.55 ? const Color(0xFF0F172A) : Colors.white;
 
 /// O nome da etapa — peça central. Pill sólida na cor da coluna, com o
 /// ícone de lista sinalizando que dá para trocar por ali.
