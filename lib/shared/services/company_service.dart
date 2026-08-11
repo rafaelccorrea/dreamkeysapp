@@ -29,6 +29,24 @@ class Company {
   }
 }
 
+/// Desfecho de [CompanyService.resolveAndPersistPreferredCompany].
+class CompanySelection {
+  /// Empresa resolvida e já gravada no armazenamento seguro.
+  final String? companyId;
+
+  /// Servidor confirmou que o utilizador não tem nenhuma empresa.
+  final bool userHasNoCompany;
+
+  /// Não deu para concluir (rede/servidor) — tentar de novo depois.
+  final bool failed;
+
+  const CompanySelection({
+    this.companyId,
+    this.userHasNoCompany = false,
+    this.failed = false,
+  });
+}
+
 /// Serviço para gerenciar empresas
 class CompanyService {
   CompanyService._();
@@ -119,33 +137,74 @@ class CompanyService {
     }
   }
 
-  /// Garante que uma empresa esteja selecionada (seleciona automaticamente se necessário)
-  Future<void> ensureCompanySelected() async {
+  /// Carrega `/companies`, escolhe a preferida e **persiste** o ID.
+  ///
+  /// Fonte ÚNICA da seleção de empresa: usada pelo `LoginFlowService`
+  /// (logo após o login) e pelo `SessionBootstrap` (boot, login biométrico,
+  /// deep link, recuperação da Home). Antes essa lógica estava duplicada
+  /// entre o fluxo de login e o `ensureCompanySelected`, e cada caminho de
+  /// entrada no app resolvia — ou esquecia de resolver — a empresa à sua
+  /// maneira. Era daí que nascia a corrida do "Company ID não encontrado".
+  ///
+  /// Distingue os três desfechos, que exigem tratamentos diferentes:
+  ///   - empresa resolvida → [CompanySelection.companyId];
+  ///   - utilizador sem nenhuma empresa (404 ou lista vazia) → diagnóstico
+  ///     REAL, único caso em que a mensagem de erro de empresa é legítima;
+  ///   - falha de rede/servidor → não conclui nada e preserva o ID atual.
+  Future<CompanySelection> resolveAndPersistPreferredCompany() async {
     try {
-      // Verificar se já tem uma empresa selecionada
-      final currentCompanyId = await SecureStorageService.instance.getCompanyId();
-      if (currentCompanyId != null && currentCompanyId.isNotEmpty) {
-        debugPrint('ℹ️ [COMPANY_SERVICE] Empresa já selecionada: $currentCompanyId');
-        return;
-      }
-
-      // Se não tem empresa selecionada, buscar e selecionar
-      debugPrint('🔄 [COMPANY_SERVICE] Nenhuma empresa selecionada, buscando empresas...');
       final companiesResponse = await getCompanies();
 
-      if (companiesResponse.success &&
-          companiesResponse.data != null &&
-          companiesResponse.data!.isNotEmpty) {
-        final preferredCompany = choosePreferredCompany(companiesResponse.data!);
-        if (preferredCompany != null) {
-          await SecureStorageService.instance.saveCompanyId(preferredCompany.id);
-          debugPrint('✅ [COMPANY_SERVICE] Empresa selecionada automaticamente: ${preferredCompany.name}');
+      if (!companiesResponse.success) {
+        if (companiesResponse.statusCode == 404) {
+          debugPrint('ℹ️ [COMPANY_SERVICE] Utilizador não tem empresas (404)');
+          await SecureStorageService.instance.clearCompanyId();
+          return const CompanySelection(userHasNoCompany: true);
         }
+        debugPrint(
+          '⚠️ [COMPANY_SERVICE] Erro ao carregar empresas: ${companiesResponse.message}',
+        );
+        // Erro de transporte: mantém o que já estiver gravado em vez de
+        // apagar uma seleção válida por causa de uma queda de rede.
+        final current = await SecureStorageService.instance.getCompanyId();
+        return CompanySelection(companyId: current, failed: true);
       }
+
+      final companies = companiesResponse.data;
+      if (companies == null || companies.isEmpty) {
+        debugPrint('ℹ️ [COMPANY_SERVICE] Lista de empresas vazia');
+        return const CompanySelection(userHasNoCompany: true);
+      }
+
+      final preferredCompany = choosePreferredCompany(companies);
+      if (preferredCompany == null) {
+        return const CompanySelection(userHasNoCompany: true);
+      }
+
+      await SecureStorageService.instance.saveCompanyId(preferredCompany.id);
+      debugPrint(
+        '✅ [COMPANY_SERVICE] Empresa selecionada: ${preferredCompany.id} (${preferredCompany.name})',
+      );
+      return CompanySelection(companyId: preferredCompany.id);
     } catch (e, stackTrace) {
-      debugPrint('❌ [COMPANY_SERVICE] Erro ao garantir seleção de empresa: $e');
+      debugPrint('❌ [COMPANY_SERVICE] Erro ao resolver empresa: $e');
       debugPrint('📚 [COMPANY_SERVICE] StackTrace: $stackTrace');
+      return const CompanySelection(failed: true);
     }
+  }
+
+  /// Garante que uma empresa esteja selecionada (seleciona automaticamente se necessário)
+  Future<void> ensureCompanySelected() async {
+    final currentCompanyId = await SecureStorageService.instance.getCompanyId();
+    if (currentCompanyId != null && currentCompanyId.isNotEmpty) {
+      debugPrint('ℹ️ [COMPANY_SERVICE] Empresa já selecionada: $currentCompanyId');
+      return;
+    }
+
+    debugPrint(
+      '🔄 [COMPANY_SERVICE] Nenhuma empresa selecionada, buscando empresas...',
+    );
+    await resolveAndPersistPreferredCompany();
   }
 
   /// Busca a empresa atualmente selecionada

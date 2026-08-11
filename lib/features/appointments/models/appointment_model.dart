@@ -422,6 +422,11 @@ class CreateAppointmentData {
   final String? clientId;
   final List<String>? participantIds;
 
+  /// Vincula o compromisso a um card do CRM (`kanbanTaskId` no
+  /// `CreateAppointmentDto`) — é o que faz o agendamento aparecer na aba
+  /// Agenda do card, já que a listagem filtra por esse mesmo campo.
+  final String? kanbanTaskId;
+
   /// Convidados vão no PRÓPRIO POST — o backend cria os convites junto
   /// (sem segundo passo do cliente, paridade com o web).
   final List<String>? inviteUserIds;
@@ -442,6 +447,7 @@ class CreateAppointmentData {
     this.propertyId,
     this.clientId,
     this.participantIds,
+    this.kanbanTaskId,
     this.inviteUserIds,
   });
 
@@ -462,6 +468,7 @@ class CreateAppointmentData {
       if (propertyId != null) 'propertyId': propertyId,
       if (clientId != null) 'clientId': clientId,
       if (participantIds != null) 'participantIds': participantIds,
+      if (kanbanTaskId != null) 'kanbanTaskId': kanbanTaskId,
       if (inviteUserIds != null) 'inviteUserIds': inviteUserIds,
     };
   }

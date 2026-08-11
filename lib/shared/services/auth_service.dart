@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../../core/constants/api_constants.dart';
 import '../../core/push/app_push_service.dart';
+import '../../core/session/session_bootstrap.dart';
 import '../utils/avatar_url_resolver.dart';
 import 'api_service.dart';
 import 'module_access_service.dart';
@@ -455,6 +456,11 @@ class AuthService {
       await SecureStorageService.instance.clearAuthSessionKeepCredentials();
       ModuleAccessService.instance.clear();
       SubscriptionService.instance.clearCache();
+      // Sem isto, o `SessionBootstrap` continuaria a dizer "pronto" depois do
+      // logout — mas o companyId acabou de ser apagado. O próximo login (o do
+      // Face ID, tipicamente) entraria na home sem empresa e sem NINGUÉM para
+      // resolvê-la: era exatamente o "deslogar e voltar a entrar" relatado.
+      SessionBootstrap.instance.reset();
       await LiveActivityService.instance.endCheckIn();
       debugPrint(
         '✅ [AUTH_SERVICE] Logout concluído — sessão limpa, credenciais biométricas preservadas',
@@ -470,6 +476,7 @@ class AuthService {
         _apiService.clearToken();
         await SecureStorageService.instance.clearAuthSessionKeepCredentials();
         ModuleAccessService.instance.clear();
+        SessionBootstrap.instance.reset();
         await LiveActivityService.instance.endCheckIn();
       } catch (clearError) {
         debugPrint('❌ [AUTH_SERVICE] Erro ao limpar dados: $clearError');

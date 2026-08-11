@@ -4,7 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/layout/handheld_layout.dart';
 import '../../../../core/notifications/app_toast.dart';
 import '../../../../core/push/app_push_service.dart';
-import '../../../../shared/services/auth_service.dart';
+import '../../../../core/session/session_bootstrap.dart';
 import '../../../../shared/services/biometric_service.dart';
 import '../../../../shared/services/secure_storage_service.dart';
 import '../../../../shared/services/login_flow_service.dart';
@@ -51,7 +51,6 @@ class _LoginPageState extends State<LoginPage> {
   bool _biometricAvailable = false;
   bool _hasSavedCredentials = false;
   String _biometricType = 'Biometria';
-  bool _biometricLoginAttempted = false; // Flag para evitar múltiplas tentativas
   bool _isBiometricLoginInProgress = false; // Flag para evitar chamadas simultâneas
 
   @override
@@ -71,15 +70,14 @@ class _LoginPageState extends State<LoginPage> {
     if (mounted) setState(() {});
   }
 
-  /// Inicializa verificação de biometria e credenciais salvas
+  /// Descobre se o aparelho tem biometria e se há credenciais salvas.
+  ///
+  /// Serve APENAS para decidir se a tela mostra o botão "Entrar com
+  /// <biometria>" e para pré-preencher o e-mail. NUNCA dispara o prompt do
+  /// sistema: a tela de login abre normal e quem decide usar biometria é o
+  /// usuário, tocando no botão.
   Future<void> _initializeBiometrics() async {
-    // Verificar biometria primeiro e aguardar conclusão
     await _checkBiometricAvailability();
-
-    // Aguardar um pouco para garantir que o estado foi atualizado
-    await Future.delayed(const Duration(milliseconds: 100));
-
-    // Depois verificar credenciais (precisa saber se biometria está disponível)
     await _checkSavedCredentials();
   }
 
@@ -94,7 +92,14 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
-  Future<void> _handleLogin() async {
+  /// Fluxo ÚNICO de entrada no app (senha ou biometria).
+  ///
+  /// [fromBiometrics] só muda o tratamento de falha: credencial salva que o
+  /// servidor recusa é apagada, senão o usuário ficaria preso repetindo uma
+  /// senha antiga (ex.: trocou a senha no painel web).
+  ///
+  /// Devolve `true` quando a sessão foi criada e a navegação aconteceu.
+  Future<bool> _handleLogin({bool fromBiometrics = false}) async {
     debugPrint('🔐 [LOGIN] Iniciando processo de login...');
 
     // Fechar teclado primeiro
@@ -113,7 +118,7 @@ class _LoginPageState extends State<LoginPage> {
         context,
         'Preencha todos os campos corretamente',
       );
-      return;
+      return false;
     }
 
     setState(() {
@@ -143,17 +148,26 @@ class _LoginPageState extends State<LoginPage> {
             },
           );
         }
-        return;
+        return false;
       }
 
       if (result.success && result.route != null) {
         debugPrint('✅ [LOGIN] Login bem-sucedido!');
+
+        // Sessão PRONTA (token + empresa) antes de entrar na Home. O fluxo
+        // de login normalmente já gravou a empresa; aqui é a rede de
+        // segurança para os casos em que não gravou (ex.: `/companies`
+        // instável), para a Home nunca nascer sem `X-Company-ID`.
+        await SessionBootstrap.instance.ensureReady(
+          timeout: const Duration(seconds: 8),
+        );
+
         if (mounted) {
           setState(() {
             _isLoading = false;
           });
         }
-        if (!mounted) return;
+        if (!mounted) return false;
 
         // ────────────────────────────────────────────────────────────────
         // Permissões do sistema PRIMEIRO (notificações + token FCM).
@@ -168,7 +182,7 @@ class _LoginPageState extends State<LoginPage> {
         } catch (e) {
           debugPrint('⚠️ [LOGIN] Falha ao sincronizar permissões push: $e');
         }
-        if (!mounted) return;
+        if (!mounted) return false;
 
         // Oferta de biometria (UI nossa) só DEPOIS que os popups nativos
         // de permissão foram resolvidos.
@@ -190,11 +204,27 @@ class _LoginPageState extends State<LoginPage> {
             context,
           ).pushNamedAndRemoveUntil(result.route!, (route) => false);
         }
+        return true;
       } else {
         debugPrint('❌ [LOGIN] Login falhou: ${result.message}');
+
+        // Credencial salva recusada pelo servidor: apagamos para o usuário
+        // voltar a digitar. Só em recusa explícita — falha de rede NÃO pode
+        // desativar a biometria dele.
+        if (fromBiometrics && _isCredentialRejection(result.message)) {
+          debugPrint('🗑️ [LOGIN] Limpando credenciais salvas inválidas...');
+          await SecureStorageService.instance.clearCredentials();
+          if (mounted) {
+            setState(() {
+              _hasSavedCredentials = false;
+            });
+          }
+        }
+
         if (mounted) {
           AppToast.error(context, result.message);
         }
+        return false;
       }
     } catch (e, stackTrace) {
       debugPrint('💥 [LOGIN] Exceção capturada durante login');
@@ -207,6 +237,7 @@ class _LoginPageState extends State<LoginPage> {
           'Erro ao conectar com o servidor. Tente novamente.',
         );
       }
+      return false;
     } finally {
       debugPrint('🏁 [LOGIN] Finalizando processo de login');
       if (mounted) {
@@ -215,6 +246,16 @@ class _LoginPageState extends State<LoginPage> {
         });
       }
     }
+  }
+
+  /// Distingue "senha errada" de "servidor fora do ar" na mensagem do fluxo
+  /// de login — só a primeira justifica apagar a credencial biométrica.
+  bool _isCredentialRejection(String message) {
+    final m = message.toLowerCase();
+    return m.contains('incorret') ||
+        m.contains('credenc') ||
+        m.contains('inválid') ||
+        m.contains('invalid');
   }
 
   String? _validateEmail(String? value) {
@@ -289,40 +330,10 @@ class _LoginPageState extends State<LoginPage> {
           }
         }
 
-        // Se há credenciais salvas E biometria está disponível, tentar login automático
-        // Mas apenas se ainda não tentou (evita múltiplas tentativas)
-        if (hasCredentials && 
-            _biometricAvailable && 
-            mounted && 
-            !_biometricLoginAttempted && 
-            !_isBiometricLoginInProgress) {
-          debugPrint(
-            '🚀 [BIOMETRIA] Iniciando login automático com biometria...',
-          );
-          debugPrint(
-            '🔍 [BIOMETRIA] Biometria: $_biometricAvailable, Credenciais: $hasCredentials',
-          );
-          // Aguardar um pouco para a UI carregar completamente
-          await Future.delayed(const Duration(milliseconds: 800));
-
-          // Verificar novamente se ainda está montado e as condições ainda são válidas
-          // E se não há outra tentativa em progresso
-          if (mounted && 
-              _biometricAvailable && 
-              _hasSavedCredentials && 
-              !_biometricLoginAttempted && 
-              !_isBiometricLoginInProgress) {
-            _handleBiometricLogin(isManual: false);
-          } else {
-            debugPrint(
-              '⚠️ [BIOMETRIA] Condições mudaram durante o delay - não iniciando login automático',
-            );
-          }
-        } else {
-          debugPrint(
-            'ℹ️ [BIOMETRIA] Login automático não iniciado - Biometria: $_biometricAvailable, Credenciais: $hasCredentials, Já tentado: $_biometricLoginAttempted, Em progresso: $_isBiometricLoginInProgress',
-          );
-        }
+        // Sem disparo automático de biometria aqui: antes a tela pedia Face
+        // ID sozinha ao abrir (e o splash pedia de novo), o que assustava o
+        // usuário e ainda entrava por um caminho que não resolvia a empresa.
+        // Agora o botão de biometria só APARECE — o toque é dele.
       }
     } catch (e) {
       debugPrint('⚠️ [CREDENCIAIS] Erro ao verificar credenciais: $e');
@@ -335,10 +346,21 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  /// Realiza login com biometria
-  Future<void> _handleBiometricLogin({bool isManual = false}) async {
-    debugPrint('🔐 [BIOMETRIA] Iniciando processo de login com biometria...');
-    debugPrint('🔐 [BIOMETRIA] Modo: ${isManual ? "Manual" : "Automático"}');
+  /// Login por biometria — SEMPRE iniciado por toque do usuário no botão
+  /// "Entrar com <biometria>".
+  ///
+  /// A biometria aqui só DESTRAVA as credenciais salvas. A partir daí o
+  /// caminho é exatamente o do login por senha ([_handleLogin] →
+  /// `LoginFlowService`).
+  ///
+  /// Antes este método chamava `AuthService.login` cru e ia direto para a
+  /// Home. Como é o `LoginFlowService` quem carrega `/companies` e grava o
+  /// `companyId`, entrar por aqui produzia uma sessão SEM empresa — e a
+  /// Home morria em "Company ID não encontrado". Era o motivo de o erro
+  /// aparecer sobretudo depois de deslogar e voltar com Face ID (o logout
+  /// limpa o `companyId`, e este caminho nunca o regravava).
+  Future<void> _handleBiometricLogin() async {
+    debugPrint('🔐 [BIOMETRIA] Iniciando login com biometria (toque do usuário)...');
 
     // Proteção contra chamadas simultâneas
     if (_isBiometricLoginInProgress) {
@@ -353,68 +375,41 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    // Se já tentou automaticamente e não é manual, não tentar novamente
-    if (!isManual && _biometricLoginAttempted) {
-      debugPrint('⚠️ [BIOMETRIA] Login automático já foi tentado, aguardando ação manual do usuário');
-      return;
-    }
-
-    // Marcar como em progresso
     _isBiometricLoginInProgress = true;
-    
-    if (!isManual) {
-      _biometricLoginAttempted = true; // Marcar como tentado apenas se for automático
-    }
 
     // NÃO setar _isLoading antes de chamar authenticate, pois isso pode causar o "piscar"
     // O LoadingOverlay será ativado apenas após a autenticação bem-sucedida
 
     try {
-      // Autenticar com biometria
       debugPrint('👆 [BIOMETRIA] Solicitando autenticação biométrica...');
-      debugPrint('👆 [BIOMETRIA] Reason: Use $_biometricType para fazer login');
       final biometricService = BiometricService.instance;
-      
+
       // Verificar novamente antes de chamar authenticate
       final hasBiometrics = await biometricService.hasBiometrics();
       debugPrint('👆 [BIOMETRIA] Verificação final - hasBiometrics: $hasBiometrics');
-      
+
       if (!hasBiometrics) {
         debugPrint('❌ [BIOMETRIA] Biometria não disponível na verificação final');
-        _isBiometricLoginInProgress = false;
         if (mounted) {
           AppToast.error(context, 'Biometria não disponível no momento');
         }
         return;
       }
-      
+
       final authenticated = await biometricService.authenticate(
         reason: 'Use $_biometricType para fazer login',
       );
-      
+
       debugPrint('👆 [BIOMETRIA] Resultado da autenticação: $authenticated');
 
       if (!authenticated) {
-        debugPrint('❌ [BIOMETRIA] Autenticação biométrica cancelada ou falhou');
-        _isBiometricLoginInProgress = false; // Liberar flag
-        // Não precisa setar _isLoading pois não foi setado antes
-        // Se foi cancelado manualmente, permitir nova tentativa
-        if (isManual) {
-          debugPrint('ℹ️ [BIOMETRIA] Cancelamento manual - usuário pode tentar novamente');
-        } else {
-          debugPrint('ℹ️ [BIOMETRIA] Cancelamento automático - aguardando ação do usuário');
-        }
+        // Cancelou ou falhou: fica na tela de login, pode tentar de novo
+        // (pelo botão) ou digitar e-mail e senha.
+        debugPrint('❌ [BIOMETRIA] Autenticação cancelada/falhou — permanecendo no login');
         return;
       }
 
       debugPrint('✅ [BIOMETRIA] Autenticação biométrica bem-sucedida');
-      
-      // Agora sim, ativar o loading para o processo de login
-      if (mounted) {
-        setState(() {
-          _isLoading = true;
-        });
-      }
 
       // Buscar credenciais salvas
       debugPrint('💾 [BIOMETRIA] Buscando credenciais salvas...');
@@ -423,65 +418,27 @@ class _LoginPageState extends State<LoginPage> {
 
       if (email == null || password == null) {
         debugPrint('❌ [BIOMETRIA] Credenciais não encontradas');
-        _isBiometricLoginInProgress = false; // Liberar flag
         if (mounted) {
           setState(() {
-            _isLoading = false;
+            _hasSavedCredentials = false;
           });
+          AppToast.warning(
+            context,
+            'Credenciais salvas não encontradas. Entre com e-mail e senha.',
+          );
         }
         return;
       }
 
       debugPrint('📧 [BIOMETRIA] Email recuperado: $email');
 
-      // Preencher campos
+      // Preencher campos e seguir pelo MESMO fluxo do login por senha —
+      // é ele que resolve empresa, permissões, push e 2FA.
       _emailController.text = email;
       _passwordController.text = password;
 
-      // Realizar login
-      debugPrint('⏳ [BIOMETRIA] Enviando requisição de login para a API...');
-      final authService = AuthService.instance;
-      final loginRequest = LoginRequest(email: email, password: password);
-
-      debugPrint('📤 [BIOMETRIA] Request: ${loginRequest.toJson()}');
-
-      final response = await authService.login(loginRequest);
-
-      debugPrint(
-        '📥 [BIOMETRIA] Response recebida - Status: ${response.statusCode}, Success: ${response.success}',
-      );
-
-      if (response.success && response.data != null) {
-        debugPrint('✅ [BIOMETRIA] Login bem-sucedido!');
-        debugPrint(
-          '👤 [BIOMETRIA] Usuário: ${response.data?.user.name} (${response.data?.user.email})',
-        );
-        if (mounted) {
-          // Navegar para o dashboard
-          Navigator.of(
-            context,
-          ).pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
-        }
-      } else {
-        debugPrint('❌ [BIOMETRIA] Login falhou');
-        debugPrint('📊 [BIOMETRIA] Status Code: ${response.statusCode}');
-        debugPrint('📋 [BIOMETRIA] Mensagem: ${response.message}');
-        debugPrint('🔍 [BIOMETRIA] Error: ${response.error}');
-
-        // Se o login falhar, limpar credenciais salvas
-        debugPrint('🗑️ [BIOMETRIA] Limpando credenciais inválidas...');
-        await SecureStorageService.instance.clearCredentials();
-        if (mounted) {
-          setState(() {
-            _hasSavedCredentials = false;
-          });
-          AppToast.error(
-            context,
-            response.message ??
-                'Credenciais inválidas. Faça login novamente.',
-          );
-        }
-      }
+      if (!mounted) return;
+      await _handleLogin(fromBiometrics: true);
     } catch (e, stackTrace) {
       debugPrint(
         '💥 [BIOMETRIA] Exceção capturada durante login com biometria',
@@ -495,11 +452,6 @@ class _LoginPageState extends State<LoginPage> {
     } finally {
       debugPrint('🏁 [BIOMETRIA] Finalizando processo de login com biometria');
       _isBiometricLoginInProgress = false; // Sempre liberar flag no finally
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
     }
   }
 
@@ -1314,8 +1266,7 @@ class _LoginPageState extends State<LoginPage> {
       width: double.infinity,
       height: 52,
       child: OutlinedButton(
-        onPressed:
-            _isLoading ? null : () => _handleBiometricLogin(isManual: true),
+        onPressed: _isLoading ? null : _handleBiometricLogin,
         style: OutlinedButton.styleFrom(
           elevation: 0,
           foregroundColor: fg,

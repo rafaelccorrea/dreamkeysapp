@@ -25,6 +25,10 @@ enum _Urgency { fresh, warming, hot }
 /// lateral): thumbnail grande com o código logo abaixo, info à direita e, para
 /// quem tem permissão nas filas de disponibilidade/publicação, os botões de
 /// **Aprovar/Recusar** no próprio item. Tocar no corpo abre os detalhes.
+///
+/// O botão de **3 pontinhos** ([onMore]) abre o menu de "mais ações" da fila
+/// (histórico, cobrar, notificar, autorização do proprietário…), espelhando o
+/// `PendingApprovalPortalActionsMenu` do web.
 class ApprovalPropertyCard extends StatefulWidget {
   final Property property;
   final ApprovalQueueKind kind;
@@ -39,6 +43,21 @@ class ApprovalPropertyCard extends StatefulWidget {
   final Future<bool> Function()? onApprove;
   final Future<bool> Function()? onReject;
 
+  /// Reenvio após recusa (responsável corrige e devolve para a fila). Quando
+  /// `null` o botão não aparece.
+  final Future<bool> Function()? onResend;
+
+  /// Voto na fila quando o multi-aprovadores está ligado — substitui o
+  /// aprovar/recusar direto, igual ao web.
+  final Future<bool> Function()? onVote;
+
+  /// Abre o menu de mais ações (3 pontinhos).
+  final VoidCallback? onMore;
+
+  /// Rótulo curto do estado da autorização do proprietário, exibido abaixo do
+  /// título nas filas de proprietário (paridade com `renderBelowTitle`).
+  final String? ownerAuthNote;
+
   const ApprovalPropertyCard({
     super.key,
     required this.property,
@@ -48,6 +67,10 @@ class ApprovalPropertyCard extends StatefulWidget {
     this.canReject = false,
     this.onApprove,
     this.onReject,
+    this.onResend,
+    this.onVote,
+    this.onMore,
+    this.ownerAuthNote,
   });
 
   @override
@@ -57,15 +80,20 @@ class ApprovalPropertyCard extends StatefulWidget {
 class _ApprovalPropertyCardState extends State<ApprovalPropertyCard> {
   bool _approving = false;
   bool _rejecting = false;
+  bool _resending = false;
+  bool _voting = false;
 
   Property get property => widget.property;
   ApprovalQueueKind get kind => widget.kind;
 
-  bool get _busy => _approving || _rejecting;
+  bool get _busy => _approving || _rejecting || _resending || _voting;
 
   bool get _showApprove => widget.canApprove && widget.onApprove != null;
   bool get _showReject => widget.canReject && widget.onReject != null;
-  bool get _showActions => _showApprove || _showReject;
+  bool get _showResend => widget.onResend != null;
+  bool get _showVote => widget.onVote != null;
+  bool get _showActions =>
+      _showApprove || _showReject || _showResend || _showVote;
 
   bool get _isAvailabilityFlow =>
       kind == ApprovalQueueKind.pendingAvailability ||
@@ -206,6 +234,26 @@ class _ApprovalPropertyCardState extends State<ApprovalPropertyCard> {
     }
   }
 
+  Future<void> _runResend() async {
+    if (widget.onResend == null || _busy) return;
+    setState(() => _resending = true);
+    try {
+      await widget.onResend!();
+    } finally {
+      if (mounted) setState(() => _resending = false);
+    }
+  }
+
+  Future<void> _runVote() async {
+    if (widget.onVote == null || _busy) return;
+    setState(() => _voting = true);
+    try {
+      await widget.onVote!();
+    } finally {
+      if (mounted) setState(() => _voting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -335,18 +383,45 @@ class _ApprovalPropertyCardState extends State<ApprovalPropertyCard> {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ],
+                        if ((widget.ownerAuthNote ?? '').isNotEmpty) ...[
+                          const SizedBox(height: 5),
+                          Text(
+                            widget.ownerAuthNote!,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: neutral,
+                              fontWeight: FontWeight.w600,
+                              height: 1.3,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
                       ],
                     ),
                   ),
-                  const SizedBox(width: 4),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Icon(
-                      LucideIcons.chevronRight,
-                      size: 18,
-                      color: neutral.withValues(alpha: 0.7),
+                  const SizedBox(width: 2),
+                  // 3 pontinhos = "mais ações" da fila (mesmo papel do menu
+                  // portal do web). Sem ele, sobra a seta de "abrir ficha".
+                  if (widget.onMore != null)
+                    IconButton(
+                      onPressed: widget.onMore,
+                      visualDensity: VisualDensity.compact,
+                      tooltip: 'Mais ações',
+                      icon: Icon(
+                        LucideIcons.moreVertical,
+                        size: 18,
+                        color: neutral,
+                      ),
+                    )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2, left: 2),
+                      child: Icon(
+                        LucideIcons.chevronRight,
+                        size: 18,
+                        color: neutral.withValues(alpha: 0.7),
+                      ),
                     ),
-                  ),
                 ],
               ),
               if (_showActions) ...[
@@ -387,7 +462,7 @@ class _ApprovalPropertyCardState extends State<ApprovalPropertyCard> {
       icon: _rejecting
           ? spinner(danger)
           : const Icon(LucideIcons.xCircle, size: 16),
-      label: const Text('Recusar'),
+      label: const FittedBox(fit: BoxFit.scaleDown, child: Text('Recusar')),
     );
 
     final approveBtn = FilledButton.icon(
@@ -404,14 +479,61 @@ class _ApprovalPropertyCardState extends State<ApprovalPropertyCard> {
       icon: _approving
           ? spinner(Colors.white)
           : const Icon(LucideIcons.checkCircle2, size: 16),
-      label: const Text('Aprovar'),
+      label: const FittedBox(fit: BoxFit.scaleDown, child: Text('Aprovar')),
     );
+
+    // Reenviar depois de recusa: ação neutra (não é aprovação nem destruição),
+    // por isso sai em contorno na cor de texto secundária.
+    final resendBtn = OutlinedButton.icon(
+      onPressed: _busy ? null : _runResend,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: ThemeHelpers.textColor(context),
+        side: BorderSide(color: ThemeHelpers.borderColor(context)),
+        padding: const EdgeInsets.symmetric(vertical: 11),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+      ),
+      icon: _resending
+          ? spinner(ThemeHelpers.textColor(context))
+          : const Icon(LucideIcons.refreshCw, size: 16),
+      label: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(_resending ? 'Reenviando…' : 'Reenviar'),
+      ),
+    );
+
+    final voteBtn = FilledButton.icon(
+      onPressed: _busy ? null : _runVote,
+      style: FilledButton.styleFrom(
+        backgroundColor: ok,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(vertical: 11),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+      ),
+      icon: _voting
+          ? spinner(Colors.white)
+          : const Icon(LucideIcons.vote, size: 16),
+      label: const FittedBox(fit: BoxFit.scaleDown, child: Text('Votar')),
+    );
+
+    final buttons = <Widget>[
+      if (_showResend) resendBtn,
+      if (_showReject) rejectBtn,
+      if (_showVote) voteBtn,
+      if (_showApprove) approveBtn,
+    ];
 
     return Row(
       children: [
-        if (_showReject) Expanded(child: rejectBtn),
-        if (_showReject && _showApprove) const SizedBox(width: 10),
-        if (_showApprove) Expanded(child: approveBtn),
+        for (var i = 0; i < buttons.length; i++) ...[
+          if (i > 0) const SizedBox(width: 10),
+          Expanded(child: buttons[i]),
+        ],
       ],
     );
   }

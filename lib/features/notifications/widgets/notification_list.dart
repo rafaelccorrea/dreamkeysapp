@@ -1,8 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../controllers/notification_controller.dart';
+import '../models/notification_model.dart';
 import '../utils/notification_navigation.dart';
 import 'notification_item.dart';
+import '../../../core/notifications/app_toast.dart';
+import '../../../core/session/session_bootstrap.dart';
 import '../../../core/theme/app_colors.dart';
 
 /// Lista de notificações com scroll infinito
@@ -50,6 +55,63 @@ class _NotificationListState extends State<NotificationList> {
         controller.loadMore();
       }
     }
+  }
+
+  /// Toque num item do painel.
+  ///
+  /// ORDEM IMPORTA (era aqui o "clico na notificação e dá erro"):
+  ///  1. resolve o destino ANTES de qualquer await — se não houver tela no
+  ///     app, permanecemos no painel em vez de empurrar rota desconhecida
+  ///     (que cai no "Página não encontrada" do `generateRoute`);
+  ///  2. marcar como lida é EFEITO COLATERAL: dispara sem bloquear. Antes,
+  ///     duas chamadas HTTP em série (markAsRead + refreshUnreadCount)
+  ///     seguravam o toque, e uma falha delas deixava o usuário sem
+  ///     navegação nenhuma;
+  ///  3. captura o `NavigatorState` ANTES de fechar o sheet — depois do
+  ///     `pop()` este `context` está desmontado e usá-lo estoura;
+  ///  4. fecha o painel e só então navega, no Navigator RAIZ. Navegar com o
+  ///     bottom sheet ainda aberto empilhava a tela por cima da rota modal
+  ///     (scrim vivo, back voltando pro sheet).
+  Future<void> _handleNotificationTap(
+    BuildContext context,
+    NotificationController controller,
+    NotificationModel notification,
+  ) async {
+    final destination =
+        NotificationNavigation.getNotificationNavigationUrl(notification);
+
+    if (!notification.read) {
+      unawaited(controller.markAsRead(notification.id));
+    }
+
+    if (destination == null || destination.isEmpty) {
+      // Notificação sem tela correspondente no app (financeiro, assinatura,
+      // permissões…). Fica no painel com aviso discreto.
+      AppToast.show(
+        context,
+        message: 'Esta notificação não abre nenhuma tela do app.',
+      );
+      return;
+    }
+
+    final sheetNavigator = Navigator.of(context);
+    final rootNavigator = Navigator.of(context, rootNavigator: true);
+
+    // `embedded` = lista dentro do bottom sheet do sino. Na tela cheia
+    // (`NotificationsPage`) não há sheet para fechar.
+    if (widget.embedded) {
+      sheetNavigator.pop();
+    }
+
+    // Toque vindo de push abre o painel logo no boot: a sessão (token +
+    // empresa) pode não estar resolvida e a tela de destino pediria rota
+    // protegida sem `X-Company-ID`. Idempotente — instantâneo quando pronta.
+    await SessionBootstrap.instance.ensureReady(
+      timeout: const Duration(seconds: 12),
+    );
+
+    if (!rootNavigator.mounted) return;
+    rootNavigator.pushNamed(destination);
   }
 
   @override
@@ -160,19 +222,10 @@ class _NotificationListState extends State<NotificationList> {
                   final notification = controller.notifications[index];
                 return NotificationItem(
                   notification: notification,
-                  onTap: () async {
-                    // Marcar como lida se não estiver lida
-                    if (!notification.read) {
-                      await controller.markAsRead(notification.id);
-                    }
-
-                    // Navegar se tiver URL
-                    final url = NotificationNavigation.getNotificationNavigationUrl(
-                      notification,
+                  onTap: () {
+                    unawaited(
+                      _handleNotificationTap(context, controller, notification),
                     );
-                    if (url != null && context.mounted) {
-                      Navigator.of(context).pushNamed(url);
-                    }
                   },
                   onDelete: () async {
                     await controller.deleteNotification(notification.id);

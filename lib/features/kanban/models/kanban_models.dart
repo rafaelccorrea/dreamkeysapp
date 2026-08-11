@@ -1719,6 +1719,37 @@ class UpdateTaskDto {
   final String? projectId;
   final List<String>? tags;
 
+  /// Contatos adicionais da negociação (`KanbanTaskContactDto[]` no backend).
+  /// Lista **substitui** a atual — mandar `[]` apaga todos.
+  final List<KanbanTaskContactInput>? contacts;
+
+  /// Vínculos do card. O backend valida `@IsUUID()` **sem** `ValidateIf` em
+  /// `clientId`/`propertyId`: mandar `null` explícito dá 400, então aqui só
+  /// se envia quando há id (desvincular cliente/imóvel não é suportado pela API).
+  final String? clientId;
+  final String? propertyId;
+
+  /// Empreendimento aceita `null` no backend (desvincula) — use
+  /// [clearEmpreendimentoId] para enviar o null explícito.
+  final String? empreendimentoId;
+
+  /// Cor do card em hex (`#RRGGBB`, máx. 7 chars). Aceita `null` para voltar
+  /// ao padrão — use [clearCardColor].
+  final String? cardColor;
+
+  /// Envia `empreendimentoId: null` (desvincula o empreendimento).
+  final bool clearEmpreendimentoId;
+
+  /// Envia `cardColor: null` (remove a cor personalizada).
+  final bool clearCardColor;
+
+  /// Por que existe: o `toJson` historicamente sempre manda `tags` (o
+  /// `edit_task_modal` conta com isso para LIMPAR as tags mandando `tags: null`).
+  /// Num patch parcial — salvar só a cor do card, por exemplo — esse
+  /// comportamento apagaria as tags do card. Quem faz patch parcial deve passar
+  /// `includeTags: false`.
+  final bool includeTags;
+
   UpdateTaskDto({
     this.title,
     this.description,
@@ -1729,6 +1760,14 @@ class UpdateTaskDto {
     this.dueDate,
     this.projectId,
     this.tags,
+    this.contacts,
+    this.clientId,
+    this.propertyId,
+    this.empreendimentoId,
+    this.cardColor,
+    this.clearEmpreendimentoId = false,
+    this.clearCardColor = false,
+    this.includeTags = true,
   });
 
   Map<String, dynamic> toJson() {
@@ -1753,8 +1792,268 @@ class UpdateTaskDto {
     }
     if (projectId != null) map['projectId'] = projectId;
     // Tags: enviar array vazio se null, ou a lista se tiver valores
-    map['tags'] = tags ?? [];
+    if (includeTags) {
+      map['tags'] = tags ?? [];
+    } else if (tags != null) {
+      map['tags'] = tags;
+    }
+    if (contacts != null) {
+      map['contacts'] = contacts!.map((c) => c.toJson()).toList();
+    }
+    if (clientId != null && clientId!.isNotEmpty) {
+      map['clientId'] = clientId;
+    }
+    if (propertyId != null && propertyId!.isNotEmpty) {
+      map['propertyId'] = propertyId;
+    }
+    if (clearEmpreendimentoId) {
+      map['empreendimentoId'] = null;
+    } else if (empreendimentoId != null && empreendimentoId!.isNotEmpty) {
+      map['empreendimentoId'] = empreendimentoId;
+    }
+    if (clearCardColor) {
+      map['cardColor'] = null;
+    } else if (cardColor != null && cardColor!.isNotEmpty) {
+      map['cardColor'] = cardColor;
+    }
     return map;
+  }
+}
+
+/// Patch parcial dos campos estendidos do card (`PUT /kanban/tasks/:id/fields`).
+///
+/// Todos os campos são opcionais e o [toJson] **omite os nulos** — o backend
+/// aplica só o que chega, então mandar um campo ausente NÃO o apaga.
+/// Espelha o `UpdateTaskFieldsDto` do Nest (limites de tamanho anotados).
+class UpdateTaskFieldsDto {
+  /// Qualificação do lead (máx. 100).
+  final String? qualification;
+
+  /// Valor total da negociação (número, não string formatada).
+  final double? totalValue;
+
+  /// Previsão de fechamento (ISO 8601).
+  final DateTime? closingForecast;
+
+  /// Data da transferência (ISO 8601).
+  final DateTime? transferDate;
+
+  final String? source;
+  final String? mediaSource;
+  final String? campaign;
+
+  /// Id da campanha no Meta (texto livre, máx. 200).
+  final String? metaCampaignId;
+
+  /// Campanha cadastrada no sistema (UUID). Aceita `null` no backend para
+  /// desvincular — use [clearSystemCampaignId].
+  final String? systemCampaignId;
+
+  /// Pré-atendimento (máx. 8000).
+  final String? preService;
+
+  final String? vgc;
+  final String? sector;
+
+  /// Observações internas (máx. 2000).
+  final String? internalNotes;
+
+  /// Financiamento do cliente aprovado.
+  final bool? clientFinancingApproved;
+
+  /// Campos customizados (objeto livre no backend).
+  final Map<String, dynamic>? customFields;
+
+  /// Envia `systemCampaignId: null` (desvincula a campanha do sistema).
+  final bool clearSystemCampaignId;
+
+  const UpdateTaskFieldsDto({
+    this.qualification,
+    this.totalValue,
+    this.closingForecast,
+    this.transferDate,
+    this.source,
+    this.mediaSource,
+    this.campaign,
+    this.metaCampaignId,
+    this.systemCampaignId,
+    this.preService,
+    this.vgc,
+    this.sector,
+    this.internalNotes,
+    this.clientFinancingApproved,
+    this.customFields,
+    this.clearSystemCampaignId = false,
+  });
+
+  /// `true` quando não há nada para enviar — evita um PUT inútil.
+  bool get isEmpty => toJson().isEmpty;
+
+  Map<String, dynamic> toJson() {
+    final map = <String, dynamic>{};
+    if (qualification != null) map['qualification'] = qualification;
+    if (totalValue != null) map['totalValue'] = totalValue;
+    if (closingForecast != null) {
+      map['closingForecast'] = closingForecast!.toIso8601String();
+    }
+    if (transferDate != null) {
+      map['transferDate'] = transferDate!.toIso8601String();
+    }
+    if (source != null) map['source'] = source;
+    if (mediaSource != null) map['mediaSource'] = mediaSource;
+    if (campaign != null) map['campaign'] = campaign;
+    if (metaCampaignId != null) map['metaCampaignId'] = metaCampaignId;
+    if (clearSystemCampaignId) {
+      map['systemCampaignId'] = null;
+    } else if (systemCampaignId != null && systemCampaignId!.isNotEmpty) {
+      map['systemCampaignId'] = systemCampaignId;
+    }
+    if (preService != null) map['preService'] = preService;
+    if (vgc != null) map['vgc'] = vgc;
+    if (sector != null) map['sector'] = sector;
+    if (internalNotes != null) map['internalNotes'] = internalNotes;
+    if (clientFinancingApproved != null) {
+      map['clientFinancingApproved'] = clientFinancingApproved;
+    }
+    if (customFields != null) map['customFields'] = customFields;
+    return map;
+  }
+}
+
+/// Permissões efetivas do card (`GET /kanban/tasks/:id/capabilities`).
+///
+/// ATENÇÃO: essa rota **ainda não existe no backend** (o web também chama e
+/// engole o 404, degradando para as permissões do board). Por isso o service
+/// devolve `null` em qualquer erro e a UI deve usar `KanbanPermissions` do
+/// board como fonte de verdade enquanto isso.
+class KanbanTaskCapabilities {
+  final bool canView;
+  final bool canEdit;
+  final bool canMove;
+  final bool canDelete;
+  final bool canTransfer;
+  final bool canMarkResult;
+  final bool canCreate;
+
+  /// Códigos de negativa devolvidos pelo backend (motivo do bloqueio).
+  final List<String> denyCodes;
+
+  const KanbanTaskCapabilities({
+    this.canView = false,
+    this.canEdit = false,
+    this.canMove = false,
+    this.canDelete = false,
+    this.canTransfer = false,
+    this.canMarkResult = false,
+    this.canCreate = false,
+    this.denyCodes = const [],
+  });
+
+  static bool _flag(dynamic value) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is String) return value.toLowerCase() == 'true';
+    return false;
+  }
+
+  factory KanbanTaskCapabilities.fromJson(Map<String, dynamic> json) {
+    final rawDeny = json['denyCodes'];
+    return KanbanTaskCapabilities(
+      canView: _flag(json['canView']),
+      canEdit: _flag(json['canEdit']),
+      canMove: _flag(json['canMove']),
+      canDelete: _flag(json['canDelete']),
+      canTransfer: _flag(json['canTransfer']),
+      canMarkResult: _flag(json['canMarkResult']),
+      canCreate: _flag(json['canCreate']),
+      denyCodes: rawDeny is List
+          ? rawDeny.map((e) => e.toString()).toList()
+          : const [],
+    );
+  }
+}
+
+/// Uma transferência do card entre funis (`GET /kanban/tasks/:id/transfer-history`).
+///
+/// Origem/destino são **funis (projetos)**, não colunas — o payload do backend
+/// não traz coluna. `notes` é o motivo/observação da transferência.
+class KanbanTransferHistoryEntry {
+  final String id;
+  final String? fromProjectId;
+  final String? fromProjectName;
+  final String? toProjectId;
+  final String? toProjectName;
+
+  /// Quem executou a transferência.
+  final String? transferredByName;
+
+  /// Responsável definido para o card no funil de destino (opcional).
+  final String? assignedToName;
+
+  /// Card original e a cópia criada no destino (a transferência duplica o card).
+  final String? originalTaskId;
+  final String? originalTaskTitle;
+  final String? duplicatedTaskId;
+  final String? duplicatedTaskTitle;
+
+  /// Motivo/observação.
+  final String? notes;
+
+  /// `transferredAt` do backend (é o `createdAt` da transferência).
+  final DateTime? transferredAt;
+
+  const KanbanTransferHistoryEntry({
+    required this.id,
+    this.fromProjectId,
+    this.fromProjectName,
+    this.toProjectId,
+    this.toProjectName,
+    this.transferredByName,
+    this.assignedToName,
+    this.originalTaskId,
+    this.originalTaskTitle,
+    this.duplicatedTaskId,
+    this.duplicatedTaskTitle,
+    this.notes,
+    this.transferredAt,
+  });
+
+  static Map<String, dynamic>? _obj(dynamic value) =>
+      value is Map ? Map<String, dynamic>.from(value) : null;
+
+  static String? _text(dynamic value) {
+    final text = value?.toString().trim();
+    return (text == null || text.isEmpty) ? null : text;
+  }
+
+  factory KanbanTransferHistoryEntry.fromJson(Map<String, dynamic> json) {
+    final from = _obj(json['fromProject']);
+    final to = _obj(json['toProject']);
+    final by = _obj(json['transferredBy']);
+    final assigned = _obj(json['assignedTo']);
+    final original = _obj(json['originalTask']);
+    final duplicated = _obj(json['duplicatedTask']);
+
+    return KanbanTransferHistoryEntry(
+      id: json['id']?.toString() ?? '',
+      fromProjectId: _text(from?['id']),
+      // `projectName` do originalTask serve de reserva quando `fromProject`
+      // não vem preenchido.
+      fromProjectName:
+          _text(from?['name']) ?? _text(original?['projectName']),
+      toProjectId: _text(to?['id']),
+      toProjectName: _text(to?['name']) ?? _text(duplicated?['projectName']),
+      transferredByName: _text(by?['name']),
+      assignedToName: _text(assigned?['name']),
+      originalTaskId: _text(original?['id']),
+      originalTaskTitle: _text(original?['title']),
+      duplicatedTaskId: _text(duplicated?['id']),
+      duplicatedTaskTitle: _text(duplicated?['title']),
+      notes: _text(json['notes']),
+      transferredAt: DateTime.tryParse(
+        json['transferredAt']?.toString() ?? json['createdAt']?.toString() ?? '',
+      ),
+    );
   }
 }
 
@@ -1784,15 +2083,30 @@ class MoveTaskDto {
   }
 }
 
-/// Comentário de tarefa
-/// Anexo de comentário
+/// Anexo — MESMA forma para comentário e para anexo direto do card.
+///
+/// O backend (`TaskCommentAttachmentDto`) devolve
+/// `{ url, name, previewUrl, contentType, key, size }` — **não existe `id`,
+/// `filename`, `mimeType` nem `uploadedAt`**. O parse antigo exigia
+/// `uploadedAt` num `DateTime.parse`, então QUALQUER comentário com anexo
+/// explodia o `fromJson` e a aba Conversas inteira caía em "Erro ao
+/// processar resposta". Aqui tudo é tolerante: os nomes de campo do web e
+/// os nomes legados são aceitos e nada é obrigatório.
 class Attachment {
   final String id;
   final String filename;
   final String url;
   final int size;
   final String mimeType;
-  final DateTime uploadedAt;
+
+  /// Chave do S3 — é ela (URL-encoded) que o
+  /// `DELETE /kanban/tasks/:id/attachments/:attachmentKey` exige.
+  final String? key;
+
+  /// Miniatura quando o backend manda uma (imagens usam a própria `url`).
+  final String? previewUrl;
+
+  final DateTime? uploadedAt;
 
   Attachment({
     required this.id,
@@ -1800,28 +2114,53 @@ class Attachment {
     required this.url,
     required this.size,
     required this.mimeType,
-    required this.uploadedAt,
+    this.key,
+    this.previewUrl,
+    this.uploadedAt,
   });
 
+  static String? _text(dynamic v) {
+    final s = v?.toString().trim();
+    return (s == null || s.isEmpty) ? null : s;
+  }
+
   factory Attachment.fromJson(Map<String, dynamic> json) {
+    final key = _text(json['key']);
+    final url = _text(json['url']) ?? '';
+    final rawSize = json['size'];
     return Attachment(
-      id: json['id']?.toString() ?? '',
-      filename: json['filename']?.toString() ?? '',
-      url: json['url']?.toString() ?? '',
-      size: json['size'] as int? ?? 0,
-      mimeType: json['mimeType']?.toString() ?? '',
-      uploadedAt: DateTime.parse(json['uploadedAt'].toString()),
+      // Sem `id` no payload: a chave do S3 é o identificador estável.
+      id: _text(json['id']) ?? key ?? url,
+      filename: _text(json['name']) ??
+          _text(json['filename']) ??
+          _text(json['originalName']) ??
+          'Arquivo',
+      url: url,
+      size: rawSize is num ? rawSize.toInt() : int.tryParse('$rawSize') ?? 0,
+      mimeType:
+          _text(json['contentType']) ?? _text(json['mimeType']) ?? '',
+      key: key,
+      previewUrl: _text(json['previewUrl']),
+      uploadedAt: json['uploadedAt'] != null
+          ? DateTime.tryParse(json['uploadedAt'].toString())
+          : null,
     );
   }
 
+  /// `true` quando dá para desenhar a miniatura no lugar do ícone.
+  bool get isImage => mimeType.toLowerCase().startsWith('image/');
+
+  String get bestPreviewUrl => previewUrl ?? url;
+
   Map<String, dynamic> toJson() {
     return {
-      'id': id,
-      'filename': filename,
       'url': url,
+      'name': filename,
       'size': size,
-      'mimeType': mimeType,
-      'uploadedAt': uploadedAt.toIso8601String(),
+      if (mimeType.isNotEmpty) 'contentType': mimeType,
+      if (key != null) 'key': key,
+      if (previewUrl != null) 'previewUrl': previewUrl,
+      if (uploadedAt != null) 'uploadedAt': uploadedAt!.toIso8601String(),
     };
   }
 }
@@ -1875,6 +2214,11 @@ class KanbanTaskComment {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  /// Resposta a outro comentário (`parentCommentId` da entidade
+  /// `kanban_task_comments`). O backend devolve a lista **plana** — quem
+  /// monta a relação pai→filho é o cliente, exatamente como no web.
+  final String? parentCommentId;
+
   // Relacionamentos populados
   final KanbanUser? user;
 
@@ -1886,24 +2230,30 @@ class KanbanTaskComment {
     required this.attachments,
     required this.createdAt,
     required this.updatedAt,
+    this.parentCommentId,
     this.user,
   });
 
   factory KanbanTaskComment.fromJson(Map<String, dynamic> json) {
+    final parent = json['parentCommentId']?.toString().trim();
+    final created = DateTime.tryParse(json['createdAt']?.toString() ?? '');
+    final updated = DateTime.tryParse(json['updatedAt']?.toString() ?? '');
     return KanbanTaskComment(
       id: json['id']?.toString() ?? '',
       taskId: json['taskId']?.toString() ?? '',
       userId: json['userId']?.toString() ?? '',
       message: json['message']?.toString() ?? '',
-      attachments: json['attachments'] != null
+      attachments: json['attachments'] is List
           ? (json['attachments'] as List)
-              .map((e) => Attachment.fromJson(e as Map<String, dynamic>))
+              .whereType<Map>()
+              .map((e) => Attachment.fromJson(Map<String, dynamic>.from(e)))
               .toList()
-          : [],
-      createdAt: DateTime.parse(json['createdAt'].toString()),
-      updatedAt: DateTime.parse(json['updatedAt'].toString()),
-      user: json['user'] != null
-          ? KanbanUser.fromJson(json['user'] as Map<String, dynamic>)
+          : <Attachment>[],
+      createdAt: created ?? DateTime.now(),
+      updatedAt: updated ?? created ?? DateTime.now(),
+      parentCommentId: (parent == null || parent.isEmpty) ? null : parent,
+      user: json['user'] is Map
+          ? KanbanUser.fromJson(Map<String, dynamic>.from(json['user'] as Map))
           : null,
     );
   }
@@ -1917,6 +2267,7 @@ class KanbanTaskComment {
       'attachments': attachments.map((a) => a.toJson()).toList(),
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
+      if (parentCommentId != null) 'parentCommentId': parentCommentId,
     };
   }
 }

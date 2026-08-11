@@ -446,7 +446,7 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
     final cardId = st.taskId;
     if (cardId.isEmpty) return;
     // Deep-link direto pra negociação: a página dedicada carrega a
-    // `KanbanTask` por id e abre o `TaskDetailsModal` automaticamente.
+    // `KanbanTask` por id e abre a `TaskDetailsPage` automaticamente.
     Navigator.of(context).pushNamed(AppRoutes.kanbanTaskDetails(cardId));
   }
 

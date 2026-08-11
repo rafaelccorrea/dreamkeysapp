@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../../../core/constants/api_constants.dart';
 import '../../../shared/services/api_service.dart';
+import '../../../shared/services/profile_service.dart';
 import '../models/client_model.dart';
 
 // Re-export UserInfo para uso no serviço
@@ -176,6 +177,93 @@ class ClientService {
     } catch (e, stackTrace) {
       debugPrint('❌ [CLIENT_SERVICE] Erro ao criar cliente: $e');
       debugPrint('📚 [CLIENT_SERVICE] StackTrace: $stackTrace');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Cadastro rápido de cliente — `POST /clients` com o payload mínimo
+  /// (`{ name, phone, type, capturedById }`), usado no vínculo direto pelo card
+  /// do CRM.
+  ///
+  /// Não usa o [CreateClientDto] de propósito: aquele DTO exige endereço,
+  /// e-mail e CPF, enquanto no backend só `name`, `phone`, `type` e
+  /// **`capturedById`** são obrigatórios (os demais são `@IsOptional`, e mandar
+  /// e-mail vazio dispararia o `@IsEmail`).
+  ///
+  /// [capturedById] é obrigatório no backend; quando não vier, resolvemos o
+  /// usuário logado via perfil — mesmo fallback do web
+  /// (`capturedById || currentUser.id`).
+  ///
+  /// Devolve o **id** do cliente criado.
+  Future<ApiResponse<String>> createQuickClient({
+    required String name,
+    required String phone,
+    ClientType type = ClientType.general,
+    String? capturedById,
+  }) async {
+    try {
+      final trimmedName = name.trim();
+      // O backend valida `name` entre 3 e 255 caracteres.
+      if (trimmedName.length < 3) {
+        return ApiResponse.error(
+          message: 'Informe o nome completo do cliente (mínimo 3 letras)',
+          statusCode: 400,
+        );
+      }
+
+      // O backend normaliza para dígitos e exige de 10 a 13.
+      final digits = phone.replaceAll(RegExp(r'\D'), '');
+      if (digits.length < 10 || digits.length > 13) {
+        return ApiResponse.error(
+          message: 'Telefone inválido — informe DDD e número',
+          statusCode: 400,
+        );
+      }
+
+      var ownerId = capturedById?.trim();
+      if (ownerId == null || ownerId.isEmpty) {
+        final profile = await ProfileService.instance.getProfile();
+        ownerId = profile.data?.id;
+      }
+      if (ownerId == null || ownerId.isEmpty) {
+        return ApiResponse.error(
+          message: 'Não foi possível identificar o usuário responsável',
+          statusCode: 400,
+        );
+      }
+
+      final response = await _apiService.post<Map<String, dynamic>>(
+        ApiConstants.clients,
+        body: {
+          'name': trimmedName,
+          'phone': digits,
+          'type': type.value,
+          'capturedById': ownerId,
+        },
+      );
+
+      if (response.success) {
+        final id = response.data?['id']?.toString();
+        if (id != null && id.isNotEmpty) {
+          return ApiResponse.success(data: id, statusCode: response.statusCode);
+        }
+        debugPrint('❌ [CLIENT_SERVICE] createQuickClient sem id na resposta');
+        return ApiResponse.error(
+          message: 'Cliente criado, mas o id não veio na resposta',
+          statusCode: response.statusCode,
+        );
+      }
+
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao cadastrar cliente',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [CLIENT_SERVICE] createQuickClient: $e');
       return ApiResponse.error(
         message: 'Erro de conexão: ${e.toString()}',
         statusCode: 0,

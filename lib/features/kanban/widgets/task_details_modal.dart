@@ -7,18 +7,25 @@ import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/constants/api_constants.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/widgets/app_scaffold.dart';
+import '../../../shared/widgets/minimal_body_chrome.dart';
+import '../../../shared/services/api_service.dart';
 import '../../../shared/services/secure_storage_service.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/kanban_analytics_service.dart';
 import '../../../shared/utils/jwt_utils.dart';
 import '../../../shared/utils/masks.dart';
+import '../../appointments/models/appointment_model.dart';
+import '../../appointments/services/appointment_service.dart';
 import '../models/kanban_models.dart';
 import '../services/kanban_service.dart';
 import '../controllers/kanban_controller.dart';
 import 'subtask_manager.dart';
 import 'mark_task_result_sheet.dart';
+import 'task_edit_sheets.dart';
 import 'transfer_task_sheet.dart';
 
 // ─── Paleta da aba Detalhes — cor por seção (coerência ≠ uniformidade) ───────
@@ -31,6 +38,35 @@ const Color _kPeopleTone = Color(0xFF8B5CF6); // violet — pessoas/equipe
 const Color _kTagsTone = Color(0xFFD97706); // amber — categorias
 const Color _kAuditTone = Color(0xFF64748B); // slate — auditoria/tempo
 const Color _kChatTone = Color(0xFF3B82F6); // blue — comunicação
+const Color _kInternalTone = Color(0xFFE6B84C); // âmbar queimado — nota interna
+const Color _kLinksTone = Color(0xFF0EA5E9); // sky — vínculos (cliente/imóvel)
+
+/// Cyan — mesma família do RAIO-X: dado e documento são a mesma natureza
+/// (o que está registrado sobre a negociação).
+const Color _kFilesTone = Color(0xFF0891B2);
+
+/// Magenta — agenda. Era a única família livre e legível ao lado do violeta
+/// de PESSOAS: compromisso é hora marcada, não gente.
+const Color _kAgendaTone = Color(0xFFDB2777);
+
+/// Indigo profundo — rotas/transferências. É o MESMO tom do sheet de
+/// transferência (`_routeInk`), então o histórico e a ação falam igual.
+const Color _kRouteTone = Color(0xFF4F46E5);
+
+/// Destaque da menção dentro do texto do comentário. Fica na família da
+/// conversa (azul), nunca no vermelho da marca.
+const Color _kMentionTone = Color(0xFF2563EB);
+
+/// Teal — pessoas ENVOLVIDAS (quem acompanha o card sem ser o dono). Não
+/// repete o violeta de EQUIPE de propósito: responsável/criador é autoria,
+/// envolvido é a rede em volta — duas coisas diferentes na mesma aba.
+const Color _kInvolvedTone = Color(0xFF14B8A6);
+
+/// Verde de confirmar/salvar da casa (o mesmo dos sheets de edição).
+const Color _kConfirmGreen = kTaskEditGreen;
+
+/// Vermelho de ação destrutiva (excluir) — nunca usado para cancelar.
+const Color _kDangerRed = Color(0xFFDC2626);
 
 /// Cor estável derivada do nome — cada pessoa tem a sua (mesma mecânica do
 /// `_tagColor`). Sem nome → slate. Substitui o avatar vermelho uniforme.
@@ -53,24 +89,34 @@ Color _personColor(String? name) {
   return palette[h % palette.length];
 }
 
-/// Modal completo de detalhes do card.
+/// **TELA** completa de detalhes do card (negociação do funil).
 ///
-/// Reestilizado num conceito **editorial**: hierarquia tipográfica forte, sem
-/// sombras pesadas nem gradientes coloridos no fundo dos blocos. Estados (em
-/// dia, vence hoje, atrasada, concluída) são sinalizados por uma "stripe"
-/// finíssima no topo do header e pelas pílulas de meta-status. A intenção é
-/// que o modal pareça mais um documento estruturado do que uma sopa de cards
-/// coloridos — mais legível no modo claro e ainda elegante no escuro.
-class TaskDetailsModal extends StatefulWidget {
+/// > **Nome do arquivo é histórico.** Isto nasceu como bottom sheet
+/// > (`TaskDetailsModal`) e virou tela quando o conteúdo passou do que um
+/// > sheet aguenta — "informações demais para um modal". O arquivo continua
+/// > `task_details_modal.dart` de propósito: mover ~4.7k linhas muito
+/// > refinadas seria risco sem ganho. A classe é [TaskDetailsPage] e a
+/// > navegação é por rota (`adaptivePageRoute`), nunca `showModalBottomSheet`.
+///
+/// Conceito **editorial**: hierarquia tipográfica forte, sem sombras pesadas
+/// nem gradientes coloridos no fundo dos blocos. Estados (em dia, vence hoje,
+/// atrasada, concluída) são sinalizados pelas pílulas de meta-status do hero.
+/// A intenção é que a tela pareça um documento estruturado, não uma sopa de
+/// cards coloridos — mais legível no modo claro e ainda elegante no escuro.
+///
+/// Anatomia: `AppScaffold` (back + título do lead + copiar ID na barra) e o
+/// corpo em `Column` → hero · abas coloridas · `TabBarView`. Sem grabber, sem
+/// altura calculada e sem "modo digitação": o `Scaffold` já reage ao teclado.
+class TaskDetailsPage extends StatefulWidget {
   final KanbanTask task;
 
-  const TaskDetailsModal({super.key, required this.task});
+  const TaskDetailsPage({super.key, required this.task});
 
   @override
-  State<TaskDetailsModal> createState() => _TaskDetailsModalState();
+  State<TaskDetailsPage> createState() => _TaskDetailsPageState();
 }
 
-class _TaskDetailsModalState extends State<TaskDetailsModal>
+class _TaskDetailsPageState extends State<TaskDetailsPage>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final KanbanService _kanbanService = KanbanService.instance;
@@ -85,6 +131,28 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
   bool _submittingComment = false;
   int _commentLength = 0;
 
+  // ─── MENÇÕES E RESPOSTA ───────────────────────────────────────────────────
+  // O `@` abre o autocomplete DENTRO do composer (painel acima do campo, nunca
+  // um overlay que o teclado empurra para fora). A lista de membros é a MESMA
+  // fonte do web (`/users/company-members/simple`) e serve também aos
+  // envolvidos e aos convidados da agenda — uma requisição para as três.
+  List<KanbanUser> _members = const [];
+  bool _loadingMembers = false;
+  bool _didLoadMembers = false;
+
+  /// Trecho `@…` sendo digitado agora: início do `@` no texto e o termo.
+  int? _mentionAnchor;
+  String _mentionQuery = '';
+
+  /// Quem já foi escolhido no autocomplete desta mensagem (vira
+  /// `mentionedUserIds` no POST — o backend também aceita `@[uuid]` no texto,
+  /// mas o campo explícito é o caminho limpo).
+  final List<KanbanUser> _pendingMentions = [];
+
+  /// Comentário sendo respondido (`parentCommentId`). A lista do backend é
+  /// plana; quem monta a thread é a tela.
+  KanbanTaskComment? _replyTo;
+
   // Histórico
   List<HistoryEntry> _history = [];
   bool _loadingHistory = false;
@@ -96,48 +164,304 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
   /// `GET /kanban/tasks/:id/fields`. A listagem das colunas não traz telefone.
   KanbanTask? _detailedTask;
 
+  /// Payload CRU do mesmo `GET /kanban/tasks/:id/fields`. O modelo
+  /// `KanbanTask` não carrega `internalNotes` nem o imóvel vinculado, e a
+  /// tela precisa dos dois para editar — então o mapa original fica guardado
+  /// junto do card já parseado (uma requisição só serve aos dois).
+  Map<String, dynamic>? _rawFields;
+
+  /// Movimentação de etapa em curso — trava toques repetidos no trilho.
+  bool _movingStage = false;
+
+  // ─── EDIÇÃO INLINE ────────────────────────────────────────────────────────
+  // Título e briefing viram campo na própria tela (sem sheet): quem está
+  // lendo a ficha corrige o que está errado onde o erro aparece.
+  final TextEditingController _titleCtrl = TextEditingController();
+  bool _editingTitle = false;
+  bool _savingTitle = false;
+
+  final TextEditingController _descCtrl = TextEditingController();
+  bool _editingDescription = false;
+  bool _savingDescription = false;
+
+  final TextEditingController _notesCtrl = TextEditingController();
+  bool _editingNotes = false;
+  bool _savingNotes = false;
+
+  /// Campo do RAIO-X / vínculos gravando agora — o spinner nasce na própria
+  /// célula tocada (nunca um overlay na tela inteira).
+  String? _savingField;
+
+  /// Última ligação registrada NESTA sessão — base da confirmação
+  /// anti-duplicata (< 2 min pergunta antes de registrar outra).
+  DateTime? _lastCallAt;
+  bool _registeringCall = false;
+
+  /// Imóvel escolhido nesta sessão. A API do card não devolve o imóvel
+  /// vinculado de forma garantida, então o rótulo recém-escolhido fica aqui
+  /// para a linha de vínculo não voltar a dizer "Não vinculado".
+  String? _linkedPropertyLabel;
+
+  bool _deleting = false;
+
+  /// Coluna destino enquanto o movimento está em voo — o trilho pinta o
+  /// alvo com spinner, então o feedback nasce onde o dedo tocou.
+  String? _movingToColumnId;
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 7, vsync: this);
+    _tabController = TabController(length: 8, vsync: this);
     _tabController.addListener(_onTabChanged);
-    _commentController.addListener(() {
-      if (mounted) setState(() => _commentLength = _commentController.text.length);
-    });
+    _commentController.addListener(_onCommentTextChanged);
     _commentFocus.addListener(() => setState(() {}));
     _loadCurrentUserId();
     _loadComments();
     _loadTaskFields();
+    _ensureMembers();
+  }
+
+  /// Reavalia o texto do composer a cada tecla: contador + detecção do `@`.
+  ///
+  /// A âncora é o `@` mais recente ANTES do cursor que ainda não virou frase
+  /// (sem quebra de linha e com no máximo duas palavras depois dele — nomes
+  /// compostos precisam de fôlego). Fora disso o painel fecha.
+  void _onCommentTextChanged() {
+    if (!mounted) return;
+    final text = _commentController.text;
+    final sel = _commentController.selection;
+    final cursor = (sel.isValid ? sel.baseOffset : text.length)
+        .clamp(0, text.length)
+        .toInt();
+
+    int? anchor;
+    var query = '';
+    final at = text.lastIndexOf('@', cursor > 0 ? cursor - 1 : 0);
+    if (at >= 0 && (at == 0 || _isMentionBoundary(text[at - 1]))) {
+      final term = text.substring(at + 1, cursor);
+      // Termo com espaço no fim = menção já fechada (ou um `@` solto): o
+      // painel some em vez de ficar aberto atrás do resto da frase.
+      if (!term.contains('\n') &&
+          !term.endsWith(' ') &&
+          term.length <= 32 &&
+          term.split(' ').length <= 3) {
+        anchor = at;
+        query = term;
+      }
+    }
+
+    setState(() {
+      _commentLength = text.length;
+      _mentionAnchor = anchor;
+      _mentionQuery = query;
+    });
+    if (anchor != null) _ensureMembers();
+  }
+
+  static bool _isMentionBoundary(String char) =>
+      char == ' ' || char == '\n' || char == '(' || char == '\t';
+
+  /// Sugestões do `@` — no máximo 6, sem repetir quem já foi mencionado.
+  List<KanbanUser> get _mentionSuggestions {
+    if (_mentionAnchor == null) return const [];
+    final q = _mentionQuery.trim().toLowerCase();
+    final chosen = _pendingMentions.map((u) => u.id).toSet();
+    final list = _members.where((u) {
+      if (chosen.contains(u.id)) return false;
+      if (q.isEmpty) return true;
+      return u.name.toLowerCase().contains(q) ||
+          u.email.toLowerCase().contains(q);
+    }).toList();
+    return list.length > 6 ? list.sublist(0, 6) : list;
+  }
+
+  /// Troca o `@termo` pelo `@Nome ` e guarda o id para o POST.
+  void _applyMention(KanbanUser user) {
+    final anchor = _mentionAnchor;
+    if (anchor == null) return;
+    final text = _commentController.text;
+    final sel = _commentController.selection;
+    final cursor = (sel.isValid ? sel.baseOffset : text.length)
+        .clamp(0, text.length)
+        .toInt();
+    final safeEnd = cursor < anchor ? anchor : cursor;
+    final inserted = '@${user.name} ';
+    final novo = text.replaceRange(anchor, safeEnd, inserted);
+    _commentController.value = TextEditingValue(
+      text: novo,
+      selection: TextSelection.collapsed(offset: anchor + inserted.length),
+    );
+    setState(() {
+      if (!_pendingMentions.any((u) => u.id == user.id)) {
+        _pendingMentions.add(user);
+      }
+      _mentionAnchor = null;
+      _mentionQuery = '';
+    });
+  }
+
+  /// Membros da empresa (fonte das menções, dos envolvidos e dos convidados).
+  Future<void> _ensureMembers() async {
+    if (_didLoadMembers || _loadingMembers) return;
+    setState(() => _loadingMembers = true);
+    final r = await _kanbanService.getCompanyMembersSimple();
+    if (!mounted) return;
+    setState(() {
+      _loadingMembers = false;
+      _didLoadMembers = true;
+      if (r.success && r.data != null) _members = r.data!;
+    });
   }
 
   /// Recarrega o card completo para obter o cliente/lead com telefone,
   /// WhatsApp etc. (a listagem do board omite esses campos).
+  ///
+  /// Vai no CRU (`ApiService`) em vez do `getTaskById` porque o mesmo
+  /// payload carrega campos que o modelo não parseia — `internalNotes` e o
+  /// imóvel vinculado — e a tela agora os edita. O `KanbanTask` continua
+  /// saindo do mesmo mapa via `fromJson`, então é uma requisição só.
   Future<void> _loadTaskFields() async {
     try {
-      final r = await _kanbanService.getTaskById(widget.task.id);
+      final r = await ApiService.instance.get<Map<String, dynamic>>(
+        ApiConstants.kanbanTaskFields(widget.task.id),
+      );
       if (!mounted) return;
       if (r.success && r.data != null) {
-        setState(() => _detailedTask = r.data);
+        final map = r.data!;
+        KanbanTask? parsed;
+        try {
+          parsed = KanbanTask.fromJson(map);
+        } catch (e) {
+          debugPrint('⚠️ [TASK_DETAILS] Erro ao parsear campos do card: $e');
+        }
+        setState(() {
+          _rawFields = map;
+          if (parsed != null) _detailedTask = parsed;
+          if (!_editingNotes) _notesCtrl.text = _internalNotes ?? '';
+        });
       }
     } catch (e) {
       debugPrint('⚠️ [TASK_DETAILS] Erro ao carregar campos do card: $e');
     }
   }
 
+  /// Pessoas envolvidas vindas do payload cru — o `KanbanTask` não carrega
+  /// `involvedUsers`, mas o `GET /kanban/tasks/:id/fields` (que é o
+  /// `getTaskById` do backend) traz o array populado.
+  List<KanbanUser> get _involvedUsers {
+    final raw = _rawFields?['involvedUsers'];
+    if (raw is! List) return const [];
+    final out = <KanbanUser>[];
+    for (final item in raw) {
+      if (item is! Map) continue;
+      try {
+        final u = KanbanUser.fromJson(Map<String, dynamic>.from(item));
+        if (u.id.isNotEmpty) out.add(u);
+      } catch (e) {
+        debugPrint('⚠️ [TASK_DETAILS] parse envolvido: $e');
+      }
+    }
+    return out;
+  }
+
+  /// Abre o multi-seletor e grava a lista inteira
+  /// (`PUT /kanban/tasks/:id/involved-users` substitui o conjunto).
+  Future<void> _manageInvolvedUsers() async {
+    await _ensureMembers();
+    if (!mounted) return;
+    final escolhidos = await TaskPeopleMultiSelectSheet.show(
+      context,
+      eyebrow: 'Envolvidos',
+      title: 'Quem mais acompanha este card?',
+      tone: _kInvolvedTone,
+      confirmLabel: 'Salvar envolvidos',
+      initialSelected: _involvedUsers,
+      preloaded: _members.isEmpty ? null : _members,
+      emptyHint: 'Ninguém acompanhando além do responsável.',
+    );
+    if (escolhidos == null || !mounted) return;
+    await _saveInvolvedUsers(escolhidos.map((u) => u.id).toList());
+  }
+
+  Future<void> _removeInvolvedUser(KanbanUser user) async {
+    final restante = _involvedUsers
+        .where((u) => u.id != user.id)
+        .map((u) => u.id)
+        .toList();
+    await _saveInvolvedUsers(restante);
+  }
+
+  Future<void> _saveInvolvedUsers(List<String> userIds) async {
+    setState(() => _savingField = 'involvedUsers');
+    final r = await _kanbanService.setInvolvedUsers(widget.task.id, userIds);
+    if (!mounted) return;
+    if (r.success) {
+      // A lista mora no payload cru — recarregar é o que a repinta.
+      await _loadTaskFields();
+      if (!mounted) return;
+      setState(() => _savingField = null);
+      _snack('Pessoas envolvidas atualizadas', ok: true);
+    } else {
+      setState(() => _savingField = null);
+      _snack(r.message ?? 'Erro ao salvar envolvidos', erro: true);
+    }
+  }
+
+  /// Observação interna vinda do payload cru (o modelo não tem o campo).
+  String? get _internalNotes {
+    final v = _rawFields?['internalNotes'];
+    final s = v?.toString().trim();
+    return (s == null || s.isEmpty) ? null : s;
+  }
+
+  /// Imóvel vinculado: rótulo escolhido nesta sessão manda; senão o que o
+  /// payload cru trouxer (`property.title` / `property.code`).
+  String? get _propertyLabel {
+    if (_linkedPropertyLabel != null) return _linkedPropertyLabel;
+    final raw = _rawFields?['property'];
+    if (raw is Map) {
+      final title = raw['title']?.toString().trim();
+      if (title != null && title.isNotEmpty) return title;
+      final name = raw['name']?.toString().trim();
+      if (name != null && name.isNotEmpty) return name;
+      final code = raw['code']?.toString().trim();
+      if (code != null && code.isNotEmpty) return 'Imóvel $code';
+    }
+    final id = _rawFields?['propertyId']?.toString().trim();
+    if (id != null && id.isNotEmpty) return 'Imóvel vinculado';
+    return null;
+  }
+
+  String? get _propertyId {
+    final raw = _rawFields?['property'];
+    if (raw is Map) {
+      final id = raw['id']?.toString().trim();
+      if (id != null && id.isNotEmpty) return id;
+    }
+    final id = _rawFields?['propertyId']?.toString().trim();
+    return (id == null || id.isEmpty) ? null : id;
+  }
+
   void _onTabChanged() {
     if (!mounted) return;
     setState(() {});
     final i = _tabController.index;
-    if (i == 1 && !_didLoadJourney) {
-      _loadJourney();
+    if (i == 1) {
+      if (!_didLoadJourney) _loadJourney();
+      // Transferências moram na MESMA aba da jornada: mudar de funil é o
+      // movimento mais largo que o card faz.
+      if (!_didLoadTransfers) _loadTransferHistory();
     }
     if (i == 4 && !_didLoadFiles) {
       _loadTaskFiles();
     }
-    if (i == 5 && _canViewTaskAnalytics && !_didLoadMetrics) {
+    if (i == 5 && !_didLoadAppointments) {
+      _loadAppointments();
+    }
+    if (i == 6 && _canViewTaskAnalytics && !_didLoadMetrics) {
       _loadTaskMetrics();
     }
-    if (i == 6 && _history.isEmpty && !_loadingHistory) {
+    if (i == 7 && _history.isEmpty && !_loadingHistory) {
       _loadHistory();
     }
   }
@@ -146,8 +470,12 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
   void dispose() {
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
+    _commentController.removeListener(_onCommentTextChanged);
     _commentController.dispose();
     _commentFocus.dispose();
+    _titleCtrl.dispose();
+    _descCtrl.dispose();
+    _notesCtrl.dispose();
     super.dispose();
   }
 
@@ -290,10 +618,18 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
     }
     setState(() => _submittingComment = true);
     try {
+      // Só vão os ids cujo `@Nome` sobreviveu ao texto final (a pessoa pode
+      // ter apagado a menção depois de escolher).
+      final mentionIds = _pendingMentions
+          .where((u) => message.contains('@${u.name}'))
+          .map((u) => u.id)
+          .toList();
       final response = await _kanbanService.createComment(
         widget.task.id,
         message,
         _selectedFiles.isNotEmpty ? _selectedFiles : null,
+        mentionedUserIds: mentionIds.isEmpty ? null : mentionIds,
+        parentCommentId: _replyTo?.id,
       );
       if (!mounted) return;
       if (response.success && response.data != null) {
@@ -301,8 +637,17 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
           _comments.add(response.data!);
           _commentController.clear();
           _selectedFiles.clear();
+          _pendingMentions.clear();
+          _replyTo = null;
+          _mentionAnchor = null;
+          _mentionQuery = '';
           _submittingComment = false;
         });
+        // Enviou → teclado sai da frente: o hero volta e a mensagem recém
+        // criada aparece na lista (antes o teclado seguia aberto e a pessoa
+        // não via o que tinha acabado de escrever entrar).
+        _commentFocus.unfocus();
+        FocusScope.of(context).unfocus();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Comentário criado com sucesso!'),
@@ -339,11 +684,16 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
+            // O tema global pinta TextButton de vermelho: cancelar não é
+            // destrutivo, então a cor é forçada para o texto secundário.
+            style: TextButton.styleFrom(
+              foregroundColor: ThemeHelpers.textSecondaryColor(context),
+            ),
             child: const Text('Cancelar'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            style: TextButton.styleFrom(foregroundColor: _kDangerRed),
             child: const Text('Excluir'),
           ),
         ],
@@ -355,7 +705,12 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
           await _kanbanService.deleteComment(widget.task.id, commentId);
       if (!mounted) return;
       if (response.success) {
-        setState(() => _comments.removeWhere((c) => c.id == commentId));
+        setState(() {
+          _comments.removeWhere((c) => c.id == commentId);
+          // Respondendo a um comentário que acabou de sumir → o banner some
+          // junto (senão o POST iria com um `parentCommentId` inválido).
+          if (_replyTo?.id == commentId) _replyTo = null;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Comentário excluído'),
@@ -403,6 +758,9 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
       base = base.copyWith(
         clientId: _detailedTask!.clientId,
         client: _detailedTask!.client,
+        // Contatos avulsos também: lead sem cliente vinculado só tem telefone
+        // aqui, e é ele que alimenta a seção Contato.
+        contacts: _detailedTask!.contacts,
       );
     }
     return base;
@@ -423,14 +781,696 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
     );
   }
 
-  void _openTransferSheet(BuildContext context, KanbanTask task) {
-    showModalBottomSheet<void>(
+  // ---------------------------------------------------------------------------
+  // ESCRITA — a ficha é VIVA
+  // ---------------------------------------------------------------------------
+  //
+  // Regra de sincronia (uma só, para não haver dois caminhos):
+  // • tudo que cabe no `UpdateTaskDto` vai pelo `KanbanController.updateTask`,
+  //   que troca a task dentro do board e chama `notifyListeners()` — o board
+  //   atrás e esta tela (que vive num `ListenableBuilder` + `_mergedTask`)
+  //   repintam juntos, sem callback nem resultado de pop;
+  // • o que só existe em `updateTaskFields` (valor, observação interna) não
+  //   passa pelo controller: depois de gravar, o valor recarrega o board
+  //   inteiro (mesmo remédio que `deleteTask`/`markTaskResult` já usam) e a
+  //   observação, que o board nem mostra, recarrega só o card.
+  // Em TODOS os casos o payload cru é relido no fim (`_loadTaskFields`).
+
+  KanbanTask get _taskNow => _mergedTask(KanbanController.instance);
+
+  KanbanPermissions? get _perms => KanbanController.instance.permissions;
+
+  bool get _canEdit => _perms?.canEditTasks ?? false;
+
+  bool get _canDelete => _perms?.canDeleteTasks ?? false;
+
+  /// Tags são de gestão: no CRM web só gestor/líder/admin mexem nelas
+  /// (`canManageCardTags`). Sem esse flag no app, o papel do usuário faz o
+  /// mesmo recorte — corretor comum VÊ as tags e não edita.
+  bool get _canManageTags {
+    if (!_canEdit) return false;
+    final role =
+        ModuleAccessService.instance.userRole?.toLowerCase().trim() ?? '';
+    return role == 'master' || role == 'admin' || role == 'manager';
+  }
+
+  /// Funil de referência para os seletores (membros, clientes, imóveis).
+  String? get _pickerProjectId {
+    final t = _taskNow;
+    final fromTask = t.projectId?.trim();
+    if (fromTask != null && fromTask.isNotEmpty) return fromTask;
+    final fromProject = t.project?.id.trim();
+    if (fromProject != null && fromProject.isNotEmpty) return fromProject;
+    final fromController = KanbanController.instance.projectId?.trim();
+    if (fromController != null && fromController.isNotEmpty) {
+      return fromController;
+    }
+    return null;
+  }
+
+  void _snack(String message, {bool erro = false, bool ok = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: erro
+              ? _kDangerRed
+              : ok
+                  ? _kConfirmGreen
+                  : null,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+  }
+
+  /// Escrita pelo `UpdateTaskDto`.
+  ///
+  /// **`includeTags: false` é obrigatório em patch parcial**: o `toJson`
+  /// sempre manda `tags` (o modal de edição depende disso para limpar), e
+  /// sem o flag salvar a prioridade apagaria as tags do card.
+  Future<bool> _patchTask(
+    UpdateTaskDto dto, {
+    KanbanTask Function(KanbanTask atual)? overlay,
+    bool dropDetailed = false,
+  }) async {
+    final controller = KanbanController.instance;
+    final ok = await controller.updateTask(widget.task.id, dto);
+    if (!mounted) return false;
+    if (!ok) {
+      _snack(controller.error ?? 'Não foi possível salvar a alteração.',
+          erro: true);
+      return false;
+    }
+    // O overlay de `_detailedTask` é mais VELHO que a resposta que o
+    // controller acabou de aplicar no board — ajusta antes do refetch para
+    // a tela não piscar o dado antigo.
+    if (dropDetailed) {
+      setState(() => _detailedTask = null);
+    } else if (overlay != null && _detailedTask != null) {
+      setState(() => _detailedTask = overlay(_detailedTask!));
+    }
+    await _loadTaskFields();
+    return true;
+  }
+
+  /// Escrita pelo `updateTaskFields` (valor, observação interna).
+  Future<bool> _patchFields(
+    UpdateTaskFieldsDto dto, {
+    bool reloadBoard = false,
+  }) async {
+    final r = await _kanbanService.updateTaskFields(widget.task.id, dto);
+    if (!mounted) return false;
+    if (!r.success) {
+      _snack(r.message ?? 'Não foi possível salvar a alteração.', erro: true);
+      return false;
+    }
+    if (reloadBoard) {
+      final c = KanbanController.instance;
+      await c.loadBoard(teamId: c.teamId, projectId: c.projectId);
+    }
+    if (!mounted) return true;
+    await _loadTaskFields();
+    return true;
+  }
+
+  // ─── 1. REGISTRAR LIGAÇÃO ────────────────────────────────────────────────
+
+  /// Ação mais repetida do corretor: um toque, sem formulário.
+  ///
+  /// Registrou há menos de 2 minutos nesta sessão? Pergunta antes — dedo
+  /// duplo em botão grande é o erro mais provável aqui, e a ligação
+  /// duplicada suja o histórico e as métricas de atividade.
+  Future<void> _registerCall() async {
+    if (_registeringCall) return;
+    final last = _lastCallAt;
+    if (last != null && DateTime.now().difference(last).inMinutes < 2) {
+      final again = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Registrar outra ligação?'),
+          content: const Text(
+            'Você acabou de registrar uma ligação para este lead. Quer '
+            'registrar mais uma?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              style: TextButton.styleFrom(
+                foregroundColor: ThemeHelpers.textSecondaryColor(ctx),
+              ),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: TextButton.styleFrom(foregroundColor: _kConfirmGreen),
+              child: const Text('Registrar'),
+            ),
+          ],
+        ),
+      );
+      if (again != true || !mounted) return;
+    }
+
+    setState(() => _registeringCall = true);
+    final r = await _kanbanService.registerTaskCall(widget.task.id);
+    if (!mounted) return;
+    setState(() => _registeringCall = false);
+    if (!r.success) {
+      _snack(r.message ?? 'Não foi possível registrar a ligação.', erro: true);
+      return;
+    }
+    HapticFeedback.mediumImpact();
+    setState(() => _lastCallAt = DateTime.now());
+    _snack('Ligação registrada no histórico', ok: true);
+    if (_history.isNotEmpty) await _loadHistory();
+  }
+
+  // ─── 3. TÍTULO E BRIEFING (edição inline) ────────────────────────────────
+
+  void _startTitleEdit() {
+    _titleCtrl.text = _taskNow.title;
+    setState(() => _editingTitle = true);
+  }
+
+  Future<void> _saveTitle() async {
+    final novo = _titleCtrl.text.trim();
+    if (novo.isEmpty) {
+      _snack('O título não pode ficar vazio.', erro: true);
+      return;
+    }
+    if (novo == _taskNow.title.trim()) {
+      setState(() => _editingTitle = false);
+      return;
+    }
+    setState(() => _savingTitle = true);
+    final ok = await _patchTask(
+      UpdateTaskDto(title: novo, includeTags: false),
+      overlay: (t) => t.copyWith(title: novo),
+    );
+    if (!mounted) return;
+    setState(() {
+      _savingTitle = false;
+      if (ok) _editingTitle = false;
+    });
+    if (ok) {
+      HapticFeedback.selectionClick();
+      _snack('Título atualizado', ok: true);
+    }
+  }
+
+  void _startDescriptionEdit() {
+    _descCtrl.text = _taskNow.description ?? '';
+    setState(() => _editingDescription = true);
+  }
+
+  Future<void> _saveDescription() async {
+    final novo = _descCtrl.text.trim();
+    if (novo == (_taskNow.description ?? '').trim()) {
+      setState(() => _editingDescription = false);
+      return;
+    }
+    setState(() => _savingDescription = true);
+    final ok = await _patchTask(
+      UpdateTaskDto(description: novo, includeTags: false),
+      overlay: (t) => t.copyWith(description: novo),
+    );
+    if (!mounted) return;
+    setState(() {
+      _savingDescription = false;
+      if (ok) _editingDescription = false;
+    });
+    if (ok) {
+      HapticFeedback.selectionClick();
+      _snack('Briefing atualizado', ok: true);
+    }
+  }
+
+  // ─── 4. CAMPOS DO RAIO-X ─────────────────────────────────────────────────
+
+  Future<void> _editPriority() async {
+    final task = _taskNow;
+    final escolha =
+        await TaskPrioritySheet.show(context, current: task.priority);
+    if (escolha == null || !mounted || escolha == task.priority) return;
+    setState(() => _savingField = 'priority');
+    final ok = await _patchTask(
+      UpdateTaskDto(priority: escolha.name, includeTags: false),
+      overlay: (t) => t.copyWith(priority: escolha),
+    );
+    if (!mounted) return;
+    setState(() => _savingField = null);
+    if (ok) {
+      HapticFeedback.selectionClick();
+      _snack('Prioridade: ${escolha.label}', ok: true);
+    }
+  }
+
+  Future<void> _editDeadline() async {
+    final task = _taskNow;
+    final escolha =
+        await TaskDeadlineSheet.show(context, current: task.dueDate);
+    if (escolha == null || !mounted) return;
+    setState(() => _savingField = 'dueDate');
+    bool ok;
+    if (escolha.clear) {
+      ok = await _clearDueDate();
+    } else {
+      ok = await _patchTask(
+        UpdateTaskDto(dueDate: escolha.date, includeTags: false),
+        overlay: (t) => t.copyWith(dueDate: escolha.date),
+      );
+    }
+    if (!mounted) return;
+    setState(() => _savingField = null);
+    if (ok) {
+      HapticFeedback.selectionClick();
+      _snack(
+        escolha.clear
+            ? 'Prazo removido'
+            : 'Prazo: ${DateFormat("d 'de' MMMM", 'pt_BR').format(escolha.date!)}',
+        ok: true,
+      );
+    }
+  }
+
+  /// Remover o prazo não cabe no `UpdateTaskDto` (o `toJson` só manda
+  /// `dueDate` quando tem valor, então null nunca chegaria ao backend). O
+  /// PUT vai cru no MESMO endpoint do serviço — nada de rota inventada — e
+  /// o board recarrega logo em seguida, já que o controller não participou.
+  Future<bool> _clearDueDate() async {
+    try {
+      final r = await ApiService.instance.put<Map<String, dynamic>>(
+        ApiConstants.kanbanTaskById(widget.task.id),
+        body: const {'dueDate': null},
+      );
+      if (!mounted) return false;
+      if (!r.success) {
+        _snack(r.message ?? 'Não foi possível remover o prazo.', erro: true);
+        return false;
+      }
+      final c = KanbanController.instance;
+      await c.loadBoard(teamId: c.teamId, projectId: c.projectId);
+      if (!mounted) return true;
+      await _loadTaskFields();
+      return true;
+    } catch (e) {
+      if (mounted) _snack('Erro ao remover o prazo: $e', erro: true);
+      return false;
+    }
+  }
+
+  Future<void> _editValue() async {
+    final novo = await TaskValueSheet.show(context, current: _taskNow.totalValue);
+    if (novo == null || !mounted) return;
+    setState(() => _savingField = 'totalValue');
+    final ok = await _patchFields(
+      UpdateTaskFieldsDto(totalValue: novo),
+      reloadBoard: true,
+    );
+    if (!mounted) return;
+    setState(() => _savingField = null);
+    if (ok) {
+      HapticFeedback.selectionClick();
+      _snack('Valor da negociação atualizado', ok: true);
+    }
+  }
+
+  Future<void> _editAssignee() async {
+    final projectId = _pickerProjectId;
+    if (projectId == null) {
+      _snack('Funil do card não identificado.', erro: true);
+      return;
+    }
+    final task = _taskNow;
+    final escolhido = await TaskAssigneeSheet.show(
+      context,
+      projectId: projectId,
+      currentUserId: task.assignedToId,
+    );
+    if (escolhido == null || !mounted || escolhido.id == task.assignedToId) {
+      return;
+    }
+    setState(() => _savingField = 'assignedTo');
+    final ok = await _patchTask(
+      UpdateTaskDto(assignedToId: escolhido.id, includeTags: false),
+      overlay: (t) =>
+          t.copyWith(assignedToId: escolhido.id, assignedTo: escolhido),
+    );
+    if (!mounted) return;
+    setState(() => _savingField = null);
+    if (ok) {
+      HapticFeedback.selectionClick();
+      _snack('Responsável: ${escolhido.name}', ok: true);
+    }
+  }
+
+  // ─── 5. OBSERVAÇÃO INTERNA ───────────────────────────────────────────────
+
+  void _startNotesEdit() {
+    _notesCtrl.text = _internalNotes ?? '';
+    setState(() => _editingNotes = true);
+  }
+
+  Future<void> _saveNotes() async {
+    final novo = _notesCtrl.text.trim();
+    if (novo == (_internalNotes ?? '')) {
+      setState(() => _editingNotes = false);
+      return;
+    }
+    setState(() => _savingNotes = true);
+    final ok = await _patchFields(UpdateTaskFieldsDto(internalNotes: novo));
+    if (!mounted) return;
+    setState(() {
+      _savingNotes = false;
+      if (ok) _editingNotes = false;
+    });
+    if (ok) {
+      HapticFeedback.selectionClick();
+      _snack('Observação interna salva', ok: true);
+    }
+  }
+
+  // ─── 6. VÍNCULOS (cliente / imóvel) ──────────────────────────────────────
+
+  /// Sem opção de DESVINCULAR: o backend valida UUID e recusa null nesses
+  /// campos, então a UI só oferece o que a API aceita — trocar.
+  Future<void> _editClientLink() async {
+    final projectId = _pickerProjectId;
+    if (projectId == null) {
+      _snack('Funil do card não identificado.', erro: true);
+      return;
+    }
+    final task = _taskNow;
+    // Contato avulso alimenta o "Cadastrar como cliente" já preenchido.
+    KanbanTaskContactInput? avulso;
+    for (final c in task.contacts ?? const <KanbanTaskContactInput>[]) {
+      if ((c.phone?.trim().isNotEmpty ?? false)) {
+        avulso = c;
+        break;
+      }
+    }
+    final sugestaoTelefone =
+        avulso?.phone?.trim() ?? task.contactPhone?.trim() ?? task.contactWhatsapp?.trim();
+
+    final escolha = await TaskLinkPickerSheet.show(
+      context,
+      kind: TaskLinkKind.client,
+      projectId: projectId,
+      currentId: task.clientId,
+      suggestedName: avulso?.name?.trim(),
+      suggestedPhone: task.client == null ? sugestaoTelefone : null,
+    );
+    if (escolha == null || !mounted || escolha.id == task.clientId) return;
+
+    setState(() => _savingField = 'client');
+    final ok = await _patchTask(
+      UpdateTaskDto(clientId: escolha.id, includeTags: false),
+      // O cliente antigo está no overlay — cai fora e volta do refetch.
+      dropDetailed: true,
+    );
+    if (!mounted) return;
+    setState(() => _savingField = null);
+    if (ok) {
+      HapticFeedback.selectionClick();
+      _snack('Cliente vinculado: ${escolha.label}', ok: true);
+    }
+  }
+
+  Future<void> _editPropertyLink() async {
+    final projectId = _pickerProjectId;
+    if (projectId == null) {
+      _snack('Funil do card não identificado.', erro: true);
+      return;
+    }
+    final escolha = await TaskLinkPickerSheet.show(
+      context,
+      kind: TaskLinkKind.property,
+      projectId: projectId,
+      currentId: _propertyId,
+    );
+    if (escolha == null || !mounted || escolha.id == _propertyId) return;
+
+    setState(() => _savingField = 'property');
+    final ok = await _patchTask(
+      UpdateTaskDto(propertyId: escolha.id, includeTags: false),
+    );
+    if (!mounted) return;
+    setState(() {
+      _savingField = null;
+      if (ok) _linkedPropertyLabel = escolha.label;
+    });
+    if (ok) {
+      HapticFeedback.selectionClick();
+      _snack('Imóvel vinculado: ${escolha.label}', ok: true);
+    }
+  }
+
+  // ─── 7. CONTATOS DO LEAD ─────────────────────────────────────────────────
+
+  Future<void> _manageContacts() async {
+    final task = _taskNow;
+    final atuais = task.contacts ?? const <KanbanTaskContactInput>[];
+    final nova = await TaskContactsSheet.show(context, contacts: atuais);
+    if (nova == null || !mounted) return;
+    setState(() => _savingField = 'contacts');
+    final ok = await _patchTask(
+      UpdateTaskDto(contacts: nova, includeTags: false),
+      overlay: (t) => t.copyWith(contacts: nova),
+    );
+    if (!mounted) return;
+    setState(() => _savingField = null);
+    if (ok) {
+      HapticFeedback.selectionClick();
+      _snack(
+        nova.isEmpty
+            ? 'Contatos removidos'
+            : 'Contatos salvos (${nova.length})',
+        ok: true,
+      );
+    }
+  }
+
+  // ─── 8. EXCLUIR CARD ─────────────────────────────────────────────────────
+
+  Future<void> _openCardActions() async {
+    final acao = await TaskCardActionsSheet.show(context, canDelete: _canDelete);
+    if (acao == null || !mounted) return;
+    if (acao == TaskCardAction.delete) await _confirmDelete();
+  }
+
+  Future<void> _confirmDelete() async {
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Excluir card'),
+        content: Text(
+          'Excluir "${_taskNow.title}" do funil? Comentários, tarefas e '
+          'histórico vão junto. Esta ação não pode ser desfeita.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            style: TextButton.styleFrom(
+              foregroundColor: ThemeHelpers.textSecondaryColor(ctx),
+            ),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: _kDangerRed),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+    if (confirmado != true || !mounted || _deleting) return;
+
+    setState(() => _deleting = true);
+    final controller = KanbanController.instance;
+    // O messenger e o navigator são capturados ANTES: depois do pop este
+    // context morre e o SnackBar não teria onde nascer.
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    // `deleteTask` do controller já recarrega o board no sucesso.
+    final ok = await controller.deleteTask(widget.task.id);
+    if (!mounted) return;
+    setState(() => _deleting = false);
+    if (!ok) {
+      _snack(controller.error ?? 'Não foi possível excluir o card.',
+          erro: true);
+      return;
+    }
+    HapticFeedback.mediumImpact();
+    if (navigator.canPop()) navigator.pop();
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('Card excluído'),
+          backgroundColor: _kConfirmGreen,
+        ),
+      );
+  }
+
+  // ─── 9. TAGS ─────────────────────────────────────────────────────────────
+
+  Future<void> _manageTags() async {
+    final task = _taskNow;
+    final atuais = List<String>.from(task.displayTags ?? const <String>[]);
+    final novas = await TaskTagsSheet.show(
+      context,
+      teamId: KanbanController.instance.teamId,
+      selected: atuais,
+    );
+    if (novas == null || !mounted) return;
+    setState(() => _savingField = 'tags');
+    // Aqui a lista COMPLETA é a intenção — `includeTags` fica no padrão
+    // (true) justamente para conseguir esvaziar as tags do card.
+    final ok = await _patchTask(
+      UpdateTaskDto(tags: novas),
+      overlay: (t) => t.copyWith(tags: novas),
+    );
+    if (!mounted) return;
+    setState(() => _savingField = null);
+    if (ok) {
+      HapticFeedback.selectionClick();
+      _snack(novas.isEmpty ? 'Tags removidas' : 'Tags atualizadas', ok: true);
+    }
+  }
+
+  /// Coluna (etapa) do board por id — a lista vem do controller singleton,
+  /// o mesmo board que a tela de trás está exibindo.
+  KanbanColumn? _columnById(String? id) {
+    if (id == null || id.isEmpty) return null;
+    for (final c in KanbanController.instance.columns) {
+      if (c.id == id) return c;
+    }
+    return null;
+  }
+
+  /// MOVER O LEAD DE ETAPA sem arrastar no board (paridade com o CRM web).
+  ///
+  /// A ação passa pelo `KanbanController.moveTask`, que já faz o movimento
+  /// otimista + `MoveTaskDto` com `fromColumnId` obrigatório + rollback no
+  /// erro. Como o controller notifica os listeners, o board ATRÁS e este
+  /// modal (que vive dentro de um `ListenableBuilder` + `_mergedTask`)
+  /// re-renderizam sozinhos — sem inventar callback nem resultado de pop.
+  Future<void> _openMoveStageSheet(BuildContext context, KanbanTask task) async {
+    if (_movingStage) return;
+    final controller = KanbanController.instance;
+    final columns = controller.columns
+        .where((c) => !KanbanSyntheticColumns.isSyntheticId(c.id))
+        .toList();
+    if (columns.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Etapas do funil ainda não carregadas.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final target = await showModalBottomSheet<KanbanColumn>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54,
+      builder: (ctx) => _MoveStageSheet(
+        columns: columns,
+        currentColumnId: task.columnId,
+        counts: {
+          for (final c in columns) c.id: controller.columnDisplayTotal(c),
+        },
+      ),
+    );
+    if (!mounted || target == null) return;
+    await _moveToStage(context, task, target);
+  }
+
+  /// Executa a mudança de etapa. Serve aos DOIS caminhos: o toque no trilho
+  /// do hero (principal) e o sheet de lista (quando o funil é longo).
+  ///
+  /// Como o toque no trilho é de um dedo só, o sucesso oferece **Desfazer**
+  /// por alguns segundos — mover errado é o engano mais provável aqui, e
+  /// desfazer é mais gentil que um diálogo de confirmação antes de cada
+  /// movimento.
+  Future<void> _moveToStage(
+    BuildContext context,
+    KanbanTask task,
+    KanbanColumn target, {
+    bool permitirDesfazer = true,
+  }) async {
+    if (_movingStage || target.id == task.columnId) return;
+    final controller = KanbanController.instance;
+    final origem = _columnById(task.columnId);
+
+    setState(() => _movingStage = true);
+    setState(() => _movingToColumnId = target.id);
+    final ok = await controller.moveTask(
+      taskId: task.id,
+      fromColumnId: task.columnId,
+      targetColumnId: target.id,
+      targetPosition: 0,
+    );
+    if (!mounted) return;
+    setState(() {
+      _movingStage = false;
+      _movingToColumnId = null;
+    });
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(controller.error ?? 'Erro ao mover o lead'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    HapticFeedback.mediumImpact();
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('Lead movido para ${target.title}'),
+          backgroundColor: const Color(0xFF059669),
+          duration: const Duration(seconds: 4),
+          action: (permitirDesfazer && origem != null)
+              ? SnackBarAction(
+                  label: 'Desfazer',
+                  textColor: Colors.white,
+                  onPressed: () {
+                    final atual = _mergedTask(KanbanController.instance);
+                    _moveToStage(
+                      context,
+                      atual,
+                      origem,
+                      permitirDesfazer: false,
+                    );
+                  },
+                )
+              : null,
+        ),
+      );
+  }
+
+  Future<void> _openTransferSheet(BuildContext context, KanbanTask task) async {
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.black54,
       builder: (ctx) => TransferTaskSheet(task: task),
     );
+    if (!mounted) return;
+    // O sheet não devolve resultado: fechou, a rota é relida (se não houve
+    // transferência, a lista volta igual — custo de uma requisição).
+    if (_didLoadTransfers) await _loadTransferHistory();
+    if (!mounted) return;
+    if (_didLoadJourney) await _loadJourney();
   }
 
   // ---------------------------------------------------------------------------
@@ -439,12 +1479,10 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
 
   @override
   Widget build(BuildContext context) {
-    final mq = MediaQuery.of(context);
     return ListenableBuilder(
       listenable: KanbanController.instance,
       builder: (context, _) {
         final theme = Theme.of(context);
-        final isDark = theme.brightness == Brightness.dark;
         final task = _mergedTask(KanbanController.instance);
         final state = _TaskState.from(task);
         final perms = KanbanController.instance.permissions;
@@ -453,190 +1491,190 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
         final canXfer =
             perms?.canTransfer ?? perms?.canEditTasks ?? false;
 
-        // Teclado: o bottom sheet tem altura fixa, então sem este ajuste o
-        // composer de observações ficava ESCONDIDO atrás do teclado. O sheet
-        // encolhe e sobe junto com o viewInsets.
-        //
-        // O piso da altura é em px ABSOLUTOS (não fração da tela): precisa
-        // caber handle + header + tabbar + composer (~360px). Piso de 40%
-        // da tela ficava menor que isso em tela baixa com teclado aberto e
-        // o Column da aba Conversas estourava alguns px. O piso ainda é
-        // capado pelo espaço físico disponível (tela − teclado) e pelo
-        // próprio teto — cobre landscape sem inverter o clamp.
-        final keyboard = mq.viewInsets.bottom;
-        final maxSheet = mq.size.height * 0.94;
-        final available = mq.size.height - keyboard;
-        var minSheet = available >= 360.0 ? 360.0 : available;
-        if (minSheet < 0) minSheet = 0;
-        if (minSheet > maxSheet) minSheet = maxSheet;
-        final sheetHeight = (maxSheet - keyboard).clamp(minSheet, maxSheet);
+        // Título da barra = o próprio lead (o chrome já corta com ellipsis).
+        final leadTitle = task.title.trim();
 
-        return Material(
-          color: Colors.transparent,
-          child: AnimatedPadding(
-            duration: const Duration(milliseconds: 160),
-            curve: Curves.easeOut,
-            padding: EdgeInsets.only(bottom: keyboard),
-            // AnimatedContainer (não Container): o height encolhe em
-            // SINCRONIA com o padding — mudança seca de altura estourava
-            // o Column interno por alguns frames na abertura do teclado.
-            child: AnimatedContainer(
-            duration: const Duration(milliseconds: 160),
-            curve: Curves.easeOut,
-            height: sheetHeight,
-            decoration: BoxDecoration(
-              color: ThemeHelpers.cardBackgroundColor(context),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
-              border: Border.all(
-                color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
-              ),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              children: [
-                _buildDragHandle(context, isDark),
-                // MODO DIGITAÇÃO: com o teclado aberto, o cabeçalho pesado
-                // (faixa de estado + hero) se recolhe com fade+size e devolve
-                // ~200px pro conteúdo — composer inteiro à vista, sem rolagem
-                // interna. Fechou o teclado, ele volta suave.
-                AnimatedSize(
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeOutCubic,
-                  alignment: Alignment.topCenter,
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 160),
-                    switchInCurve: Curves.easeOut,
-                    switchOutCurve: Curves.easeIn,
-                    transitionBuilder: (child, anim) =>
-                        FadeTransition(opacity: anim, child: child),
-                    child: keyboard > 0
-                        ? const SizedBox(
-                            key: ValueKey('typing'),
-                            width: double.infinity,
-                          )
-                        : Column(
-                            key: const ValueKey('header'),
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              _TaskHeroHeader(
-                                task: task,
-                                state: state,
-                                canMarkResult: canMark,
-                                canTransfer: canXfer,
-                                onMarkLost: () => _openMarkResultSheet(
-                                    context, task,
-                                    quickEntry: 'lost'),
-                                onTransfer: () =>
-                                    _openTransferSheet(context, task),
-                                onOpenResult: () =>
-                                    _openMarkResultSheet(context, task),
-                                onClose: () => Navigator.of(context).pop(),
-                                onCopyId: () {
-                                  Clipboard.setData(
-                                      ClipboardData(text: task.id));
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('ID da tarefa copiado'),
-                                      duration: Duration(seconds: 2),
-                                    ),
-                                  );
-                                },
-                              ),
-                            ],
-                          ),
+        // TELA (não sheet): sem altura calculada, sem padding de viewInsets e
+        // sem "modo digitação" — o Scaffold do AppScaffold já encolhe o corpo
+        // com o teclado (resizeToAvoidBottomInset) e o hero fica sempre à
+        // vista. Voltar é o back da barra.
+        return AppScaffold(
+          title: leadTitle.isEmpty ? 'Negociação' : leadTitle,
+          showBottomNavigation: false,
+          showDrawer: false,
+          actions: [
+            ChromeToolbarIconButton(
+              icon: Icons.copy_rounded,
+              tooltip: 'Copiar ID',
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: task.id));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('ID da tarefa copiado'),
+                    duration: Duration(seconds: 2),
                   ),
-                ),
-                // Cada aba com identidade própria (ativa colore ícone +
-                // label + indicador; inativas slate).
-                _MinimalTabBar(
+                );
+              },
+            ),
+            // Destrutivo mora no chrome, longe do conteúdo — nunca ao lado
+            // de uma ação que se usa todo dia.
+            if (_canDelete)
+              ChromeToolbarIconButton(
+                icon: Icons.more_horiz_rounded,
+                tooltip: 'Mais ações',
+                onPressed: _openCardActions,
+              ),
+          ],
+          body: Column(
+            children: [
+              // Teclado aberto = o hero sai de cena com fade (AnimatedSize +
+              // opacidade, saída suave, nunca corte seco).
+              //
+              // Não é herança do modal: a AppBar já identifica o lead, e a
+              // conta de espaço em aparelho baixo (360×640, teclado ~250px)
+              // não fecha com hero + abas + composer — faltavam ~20px com
+              // título de 2 linhas. Quem está digitando quer ver o que
+              // escreve, não o cabeçalho. Sem clamp de altura e sem padding
+              // de viewInsets: quem encolhe o corpo é o próprio Scaffold.
+              AnimatedSize(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.topCenter,
+                // Editando o título o hero FICA: é lá que o campo vive, e
+                // some-lo com o teclado tiraria da tela justamente o que a
+                // pessoa está digitando.
+                child: MediaQuery.of(context).viewInsets.bottom > 0 &&
+                        !_editingTitle
+                    ? const SizedBox(width: double.infinity)
+                    : _TaskHeroHeader(
+                        task: task,
+                        state: state,
+                        canMarkResult: canMark,
+                        canTransfer: canXfer,
+                        onMarkLost: () => _openMarkResultSheet(
+                          context,
+                          task,
+                          quickEntry: 'lost',
+                        ),
+                        // GANHO direto do hero: fechar a venda é o momento
+                        // mais importante do funil e não pode custar mais
+                        // toques que perder o lead.
+                        onMarkWon: () => _openMarkResultSheet(
+                          context,
+                          task,
+                          quickEntry: 'won',
+                        ),
+                        onTransfer: () => _openTransferSheet(context, task),
+                        onOpenResult: () =>
+                            _openMarkResultSheet(context, task),
+                        canEditTitle: _canEdit,
+                        editingTitle: _editingTitle,
+                        savingTitle: _savingTitle,
+                        titleController: _titleCtrl,
+                        onStartTitleEdit: _startTitleEdit,
+                        onCancelTitleEdit: () {
+                          FocusScope.of(context).unfocus();
+                          setState(() => _editingTitle = false);
+                        },
+                        onSaveTitle: _saveTitle,
+                        // Trilho do funil: etapas reais do board (sem as
+                        // colunas sintéticas de filtro).
+                        stages: KanbanController.instance.columns
+                            .where(
+                              (c) => !KanbanSyntheticColumns.isSyntheticId(
+                                c.id,
+                              ),
+                            )
+                            .toList(),
+                        canMoveStage:
+                            perms?.canMoveTasks ?? perms?.canEditTasks ?? false,
+                        movingToColumnId: _movingToColumnId,
+                        onPickStage: (col) =>
+                            _moveToStage(context, task, col),
+                        onOpenStageList: () =>
+                            _openMoveStageSheet(context, task),
+                      ),
+              ),
+              // Cada aba com identidade própria (ativa colore ícone +
+              // label + indicador; inativas slate).
+              _MinimalTabBar(
+                controller: _tabController,
+                tabs: [
+                  const _TabItem(
+                    icon: Icons.article_outlined,
+                    label: 'Detalhes',
+                    color: Color(0xFF6366F1), // indigo
+                  ),
+                  const _TabItem(
+                    icon: Icons.signpost_outlined,
+                    label: 'Jornada',
+                    color: Color(0xFFD97706), // âmbar
+                  ),
+                  const _TabItem(
+                    icon: Icons.checklist_rounded,
+                    label: 'Tarefas',
+                    color: Color(0xFF14B8A6), // teal
+                  ),
+                  _TabItem(
+                    icon: Icons.forum_outlined,
+                    label: 'Conversas',
+                    color: const Color(0xFF3B82F6), // azul
+                    badge: _comments.length,
+                  ),
+                  _TabItem(
+                    icon: Icons.attach_file_rounded,
+                    label: 'Arquivos',
+                    color: const Color(0xFF0891B2), // cyan
+                    badge: _taskFiles.isNotEmpty ? _taskFiles.length : null,
+                  ),
+                  _TabItem(
+                    icon: Icons.event_outlined,
+                    label: 'Agenda',
+                    color: _kAgendaTone, // magenta
+                    badge:
+                        _appointments.isEmpty ? null : _appointments.length,
+                  ),
+                  const _TabItem(
+                    icon: Icons.insights_rounded,
+                    label: 'Métricas',
+                    color: Color(0xFF10B981), // emerald
+                  ),
+                  _TabItem(
+                    icon: Icons.history_rounded,
+                    label: 'Histórico',
+                    color: const Color(0xFF64748B), // slate
+                    badge: (_history.isNotEmpty || _loadingHistory)
+                        ? _history.length
+                        : null,
+                  ),
+                ],
+              ),
+              Expanded(
+                child: TabBarView(
                   controller: _tabController,
-                  tabs: [
-                    const _TabItem(
-                      icon: Icons.article_outlined,
-                      label: 'Detalhes',
-                      color: Color(0xFF6366F1), // indigo
+                  physics: const ClampingScrollPhysics(),
+                  children: [
+                    _buildDetailsTab(context, theme, state, task),
+                    _buildJourneyTab(context, theme),
+                    SingleChildScrollView(
+                      physics: const ClampingScrollPhysics(),
+                      child: SubTaskManager(
+                        taskId: task.id,
+                        parentCardTitle: task.title,
+                      ),
                     ),
-                    const _TabItem(
-                      icon: Icons.signpost_outlined,
-                      label: 'Jornada',
-                      color: Color(0xFFD97706), // âmbar
-                    ),
-                    const _TabItem(
-                      icon: Icons.checklist_rounded,
-                      label: 'Tarefas',
-                      color: Color(0xFF14B8A6), // teal
-                    ),
-                    _TabItem(
-                      icon: Icons.forum_outlined,
-                      label: 'Conversas',
-                      color: const Color(0xFF3B82F6), // azul
-                      badge: _comments.length,
-                    ),
-                    _TabItem(
-                      icon: Icons.attach_file_rounded,
-                      label: 'Arquivos',
-                      color: const Color(0xFF0891B2), // cyan
-                      badge: _taskFiles.isNotEmpty ? _taskFiles.length : null,
-                    ),
-                    const _TabItem(
-                      icon: Icons.insights_rounded,
-                      label: 'Métricas',
-                      color: Color(0xFF10B981), // emerald
-                    ),
-                    _TabItem(
-                      icon: Icons.history_rounded,
-                      label: 'Histórico',
-                      color: const Color(0xFF64748B), // slate
-                      badge: (_history.isNotEmpty || _loadingHistory)
-                          ? _history.length
-                          : null,
-                    ),
+                    _buildCommentsTab(context, theme),
+                    _buildFilesTab(context, theme),
+                    _buildAgendaTab(context, theme),
+                    _buildMetricsTab(context, theme),
+                    _buildHistoryTab(context, theme),
                   ],
                 ),
-                Expanded(
-                  child: TabBarView(
-                    controller: _tabController,
-                    physics: const ClampingScrollPhysics(),
-                    children: [
-                      _buildDetailsTab(context, theme, state, task),
-                      _buildJourneyTab(context, theme),
-                      SingleChildScrollView(
-                        physics: const ClampingScrollPhysics(),
-                        child: SubTaskManager(
-                          taskId: task.id,
-                          parentCardTitle: task.title,
-                        ),
-                      ),
-                      _buildCommentsTab(context, theme),
-                      _buildFilesTab(context, theme),
-                      _buildMetricsTab(context, theme),
-                      _buildHistoryTab(context, theme),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            ),
+              ),
+            ],
           ),
         );
       },
-    );
-  }
-
-  Widget _buildDragHandle(BuildContext context, bool isDark) {
-    return Container(
-      padding: const EdgeInsets.only(top: 8, bottom: 6),
-      child: Center(
-        child: Container(
-          width: 40,
-          height: 4,
-          decoration: BoxDecoration(
-            color: ThemeHelpers.textSecondaryColor(context)
-                .withValues(alpha: isDark ? 0.32 : 0.22),
-            borderRadius: BorderRadius.circular(999),
-          ),
-        ),
-      ),
     );
   }
 
@@ -671,8 +1709,46 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
   ) {
     final hasDescription =
         task.description != null && task.description!.trim().isNotEmpty;
-    final tags = task.displayTags;
-    final hasTags = tags != null && tags.isNotEmpty;
+    final tags = task.displayTags ?? const <String>[];
+    final hasTags = tags.isNotEmpty;
+
+    // LEAD SEM CLIENTE VINCULADO — o card do board mostra o telefone mesmo
+    // assim (vem de `task.contacts` via `contactPhone`), mas o detalhe só
+    // montava a seção quando havia `client`: o número sumia justamente nos
+    // leads de campanha/WhatsApp, que são a maioria. Aqui os contatos avulsos
+    // alimentam a MESMA seção.
+    final looseContacts = task.client == null
+        ? (task.contacts ?? const <KanbanTaskContactInput>[])
+            .where((c) => c.hasAny)
+            .toList()
+        : const <KanbanTaskContactInput>[];
+    KanbanTaskContactInput? primaryContact;
+    for (final c in looseContacts) {
+      final p = c.phone?.trim();
+      if (p != null && p.isNotEmpty) {
+        primaryContact = c;
+        break;
+      }
+    }
+    primaryContact ??= looseContacts.isEmpty ? null : looseContacts.first;
+    final extraContacts = looseContacts
+        .where((c) =>
+            !identical(c, primaryContact) &&
+            (c.phone?.trim().isNotEmpty ?? false))
+        .toList();
+    final rawLoosePhone = task.client == null
+        ? (task.contactPhone ?? task.contactWhatsapp)?.trim()
+        : null;
+    final loosePhone =
+        (rawLoosePhone != null && rawLoosePhone.isNotEmpty) ? rawLoosePhone : null;
+    final primaryPhone = primaryContact?.phone?.trim();
+    final leadPhone = (primaryPhone != null && primaryPhone.isNotEmpty)
+        ? primaryPhone
+        : loosePhone;
+    final hasLooseContact = task.client == null &&
+        (leadPhone != null ||
+            (primaryContact?.name?.trim().isNotEmpty ?? false) ||
+            (primaryContact?.email?.trim().isNotEmpty ?? false));
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 32),
@@ -680,51 +1756,179 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 1. DESCRIÇÃO em destaque editorial
+          // 1. DESCRIÇÃO em destaque editorial (e editável no lugar)
           _EditorialDescription(
             text: hasDescription ? task.description!.trim() : null,
+            canEdit: _canEdit,
+            editing: _editingDescription,
+            saving: _savingDescription,
+            controller: _descCtrl,
+            onStartEdit: _startDescriptionEdit,
+            onCancel: () {
+              FocusScope.of(context).unfocus();
+              setState(() => _editingDescription = false);
+            },
+            onSave: _saveDescription,
           ),
           const SizedBox(height: 26),
 
           // 2. RAIO-X — ficha técnica flush (valor, resultado, prazo, cadência…)
-          _TaskDossier(task: task, state: state),
+          //
+          // A etapa NÃO mora mais aqui: virou o trilho do funil no hero, onde
+          // ela é desenho (percurso do lead) e não "mais uma linha de opção"
+          // no meio da ficha. O sheet de lista continua vivo como atalho para
+          // funis longos — chamado pelo toque no nome da etapa no trilho.
+          _TaskDossier(
+            task: task,
+            state: state,
+            canEdit: _canEdit,
+            savingField: _savingField,
+            onEditValue: _editValue,
+            onEditDeadline: _editDeadline,
+            onEditPriority: _editPriority,
+          ),
           const SizedBox(height: 26),
 
-          // 2.5 LEAD / CONTATO — número do lead estilizado (paridade com o web)
-          if (task.client != null) ...[
-            _SectionHeader(
-              overline: 'Lead',
-              title: 'Contato',
-              accent: _kContactTone,
-            ),
-            const SizedBox(height: 10),
-            _LeadContactCard(client: task.client!),
-            const SizedBox(height: 26),
-          ],
+          // 2.2 VÍNCULOS — cliente e imóvel da negociação. Trocar sim,
+          // desvincular não: o backend valida UUID e recusa null, então a UI
+          // não oferece o que a API não aceita.
+          _SectionHeader(
+            overline: 'Vínculos',
+            title: 'Cliente e imóvel',
+            accent: _kLinksTone,
+          ),
+          const SizedBox(height: 10),
+          _LinkRow(
+            icon: Icons.badge_outlined,
+            label: 'Cliente',
+            value: task.client?.name.trim(),
+            canEdit: _canEdit,
+            saving: _savingField == 'client',
+            onTap: _editClientLink,
+          ),
+          _LinkRow(
+            icon: Icons.home_work_outlined,
+            label: 'Imóvel',
+            value: _propertyLabel,
+            canEdit: _canEdit,
+            saving: _savingField == 'property',
+            onTap: _editPropertyLink,
+            isLast: true,
+          ),
+          const SizedBox(height: 26),
 
-          // 3. EQUIPE
+          // 2.5 LEAD / CONTATO — número do lead estilizado (paridade com o
+          // web) + as duas ações que o corretor mais repete no dia.
+          // Sem contagem no cabeçalho: quem conta os contatos é o botão
+          // "Contatos (n)" logo abaixo — dois números para a mesma coisa
+          // seria ruído.
+          const _SectionHeader(
+            overline: 'Lead',
+            title: 'Contato',
+            accent: _kContactTone,
+          ),
+          const SizedBox(height: 10),
+          if (task.client != null)
+            _LeadContactCard(client: task.client!)
+          else if (hasLooseContact)
+            _LeadContactCard(
+              contactName: primaryContact?.name,
+              contactPhone: leadPhone,
+              contactEmail: primaryContact?.email,
+              contactJobTitle: primaryContact?.jobTitle,
+              extraContacts: extraContacts,
+            )
+          else
+            const _MutedHint(
+              icon: Icons.person_off_outlined,
+              text: 'Nenhum contato cadastrado neste lead ainda.',
+            ),
+          const SizedBox(height: 12),
+          _ContactActionBar(
+            registering: _registeringCall,
+            onRegisterCall: _registerCall,
+            canEdit: _canEdit,
+            savingContacts: _savingField == 'contacts',
+            contactsCount: (task.contacts ?? const []).length,
+            onManageContacts: _manageContacts,
+          ),
+          const SizedBox(height: 26),
+
+          // 2.8 INTERNO — o que o time anota e o cliente nunca vê.
+          _InternalNotesSection(
+            notes: _internalNotes,
+            canEdit: _canEdit,
+            editing: _editingNotes,
+            saving: _savingNotes,
+            controller: _notesCtrl,
+            onStartEdit: _startNotesEdit,
+            onCancel: () {
+              FocusScope.of(context).unfocus();
+              setState(() => _editingNotes = false);
+            },
+            onSave: _saveNotes,
+          ),
+          const SizedBox(height: 26),
+
+          // 3. EQUIPE — autoria do card (quem criou, quem responde).
           _SectionHeader(
             overline: 'Equipe',
-            title: 'Pessoas envolvidas',
+            title: 'Responsável e autoria',
             accent: _kPeopleTone,
           ),
           const SizedBox(height: 10),
-          _PeopleStrip(task: task),
+          _PeopleStrip(
+            task: task,
+            canEditAssignee: _canEdit,
+            savingAssignee: _savingField == 'assignedTo',
+            onEditAssignee: _editAssignee,
+          ),
 
-          // 4. TAGS (se houver)
-          if (hasTags) ...[
+          // 3b. ENVOLVIDOS — a rede em volta do card. Fala em teal para não
+          // se confundir com a autoria (violeta) logo acima.
+          if (_involvedUsers.isNotEmpty || _canEdit) ...[
+            const SizedBox(height: 26),
+            _SectionHeader(
+              overline: 'Envolvidos',
+              title: 'Quem mais acompanha',
+              trailing: _involvedUsers.isEmpty
+                  ? null
+                  : '${_involvedUsers.length}',
+              accent: _kInvolvedTone,
+            ),
+            const SizedBox(height: 10),
+            _InvolvedPeopleStrip(
+              people: _involvedUsers,
+              canEdit: _canEdit,
+              saving: _savingField == 'involvedUsers',
+              onManage: _manageInvolvedUsers,
+              onRemove: _removeInvolvedUser,
+            ),
+          ],
+
+          // 4. TAGS — visíveis para todo mundo, editáveis só para gestão.
+          if (hasTags || _canManageTags) ...[
             const SizedBox(height: 26),
             _SectionHeader(
               overline: 'Categorias',
               title: 'Tags',
-              trailing: '${tags.length}',
+              trailing: hasTags ? '${tags.length}' : null,
               accent: _kTagsTone,
             ),
             const SizedBox(height: 10),
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: [for (final t in tags) _PillTag(label: t)],
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                for (final t in tags) _PillTag(label: t),
+                if (_canManageTags)
+                  _ManageTagsChip(
+                    hasTags: hasTags,
+                    saving: _savingField == 'tags',
+                    onTap: _manageTags,
+                  ),
+              ],
             ),
           ],
           const SizedBox(height: 26),
@@ -749,14 +1953,55 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
   Widget _buildCommentsTab(BuildContext context, ThemeData theme) {
     // Conversa fala em azul (bolhas, composer, anexos) — não na cor da marca.
     const accent = _kChatTone;
-    // LayoutBuilder: o composer nunca pode exceder a altura da aba — quando
-    // o teclado espreme o sheet, a lista vai a zero (Expanded) e o composer
-    // é capado + rola por dentro, em vez de estourar o Column.
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final composerMax =
-            constraints.hasBoundedHeight ? constraints.maxHeight : null;
-        final composer = _CommentComposer(
+    // Anatomia de conversa: lista em Expanded, composer fixo no rodapé. Como
+    // isto virou TELA, o Scaffold encolhe o corpo com o teclado — não existe
+    // mais o failsafe de capar/rolar o composer que o sheet exigia.
+    return Column(
+      children: [
+        Expanded(
+          child: _loadingComments
+              ? const _LoadingView()
+              : _commentsError != null
+                  ? _ErrorView(
+                      message: _commentsError!,
+                      onRetry: _loadComments,
+                    )
+                  : _comments.isEmpty
+                      ? const _EmptyState(
+                          icon: Icons.forum_outlined,
+                          title: 'Sem conversas por aqui',
+                          subtitle:
+                              'Seja o primeiro a comentar e deixar contexto para o time.',
+                        )
+                      : Builder(
+                          builder: (context) {
+                            final thread = _threadedComments();
+                            return ListView.separated(
+                              padding:
+                                  const EdgeInsets.fromLTRB(18, 14, 18, 14),
+                              physics: const BouncingScrollPhysics(),
+                              itemCount: thread.length,
+                              separatorBuilder: (_, _) =>
+                                  const SizedBox(height: 4),
+                              itemBuilder: (context, i) {
+                                final node = thread[i];
+                                final c = node.comment;
+                                return _CommentBubble(
+                                  comment: c,
+                                  isMe: c.userId == _currentUserId,
+                                  canDelete: _canDeleteComment(c),
+                                  onDelete: () => _deleteComment(c.id),
+                                  isReply: node.isReply,
+                                  replyToName: node.parentAuthor,
+                                  mentionNames: _memberNames,
+                                  onReply: () => _startReply(c),
+                                );
+                              },
+                            );
+                          },
+                        ),
+        ),
+        _CommentComposer(
           controller: _commentController,
           focusNode: _commentFocus,
           onSubmit: _submittingComment ? null : _submitComment,
@@ -767,56 +2012,60 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
           onPickFiles: _selectFiles,
           onRemoveFile: _removeFile,
           accent: accent,
-        );
-        return Column(
-          children: [
-            Expanded(
-              child: _loadingComments
-                  ? const _LoadingView()
-                  : _commentsError != null
-                      ? _ErrorView(
-                          message: _commentsError!,
-                          onRetry: _loadComments,
-                        )
-                      : _comments.isEmpty
-                          ? const _EmptyState(
-                              icon: Icons.forum_outlined,
-                              title: 'Sem conversas por aqui',
-                              subtitle:
-                                  'Seja o primeiro a comentar e deixar contexto para o time.',
-                            )
-                          : ListView.separated(
-                              padding:
-                                  const EdgeInsets.fromLTRB(18, 14, 18, 14),
-                              physics: const BouncingScrollPhysics(),
-                              itemCount: _comments.length,
-                              separatorBuilder: (_, _) =>
-                                  const SizedBox(height: 4),
-                              itemBuilder: (context, i) {
-                                final c = _comments[i];
-                                return _CommentBubble(
-                                  comment: c,
-                                  isMe: c.userId == _currentUserId,
-                                  canDelete: _canDeleteComment(c),
-                                  onDelete: () => _deleteComment(c.id),
-                                );
-                              },
-                            ),
-            ),
-            if (composerMax == null)
-              composer
-            else
-              ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: composerMax),
-                child: SingleChildScrollView(
-                  physics: const ClampingScrollPhysics(),
-                  child: composer,
-                ),
-              ),
-          ],
-        );
-      },
+          mentionSuggestions: _mentionSuggestions,
+          loadingMentions: _loadingMembers && _mentionAnchor != null,
+          onPickMention: _applyMention,
+          replyTo: _replyTo,
+          onCancelReply: () => setState(() => _replyTo = null),
+        ),
+      ],
     );
+  }
+
+  /// Nomes dos membros — o realce da menção casa `@Nome Sobrenome` inteiro
+  /// (nome composto sem isso viraria "@Ana" + " Paula" solto).
+  List<String> get _memberNames =>
+      _members.map((u) => u.name).where((n) => n.trim().isNotEmpty).toList();
+
+  void _startReply(KanbanTaskComment comment) {
+    setState(() => _replyTo = comment);
+    _commentFocus.requestFocus();
+  }
+
+  /// Achata a lista plana do backend em raízes + respostas (um nível, como o
+  /// web). Resposta órfã — pai excluído — volta a ser raiz para não sumir.
+  List<_CommentNode> _threadedComments() {
+    final byId = {for (final c in _comments) c.id: c};
+    final children = <String, List<KanbanTaskComment>>{};
+    final roots = <KanbanTaskComment>[];
+    for (final c in _comments) {
+      final parent = c.parentCommentId;
+      if (parent != null && parent.isNotEmpty && byId.containsKey(parent)) {
+        children.putIfAbsent(parent, () => []).add(c);
+      } else {
+        roots.add(c);
+      }
+    }
+    int byDate(KanbanTaskComment a, KanbanTaskComment b) =>
+        a.createdAt.compareTo(b.createdAt);
+    roots.sort(byDate);
+    final out = <_CommentNode>[];
+    for (final root in roots) {
+      out.add(_CommentNode(comment: root));
+      final kids = children[root.id];
+      if (kids == null) continue;
+      kids.sort(byDate);
+      for (final kid in kids) {
+        out.add(
+          _CommentNode(
+            comment: kid,
+            isReply: true,
+            parentAuthor: root.user?.name,
+          ),
+        );
+      }
+    }
+    return out;
   }
 
   // ---------------------------------------------------------------------------
@@ -885,7 +2134,12 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
     if (_journeyError != null) {
       return _ErrorView(message: _journeyError!, onRetry: _loadJourney);
     }
-    if (_journey.isEmpty) {
+
+    final temTransfer = _transfers.isNotEmpty;
+    final podeTransferir =
+        _perms?.canTransfer ?? _perms?.canEditTasks ?? false;
+    final vazio = _journey.isEmpty && !temTransfer && !podeTransferir;
+    if (vazio) {
       return const _EmptyState(
         icon: Icons.signpost_outlined,
         title: 'Sem eventos de jornada',
@@ -893,11 +2147,89 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
             'Eventos de atribuição, colunas, transferências e resultado aparecem aqui.',
       );
     }
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-      physics: const BouncingScrollPhysics(),
-      itemCount: _journey.length,
-      itemBuilder: (context, i) {
+
+    return RefreshIndicator(
+      color: _kRouteTone,
+      onRefresh: () async {
+        await Future.wait([_loadJourney(), _loadTransferHistory()]);
+      },
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        children: [
+          // ROTAS — mudar de funil é o movimento mais largo que o card faz,
+          // então abre a aba antes do miúdo da jornada.
+          if (temTransfer || podeTransferir || _loadingTransfers) ...[
+            _SectionHeader(
+              overline: 'Rotas',
+              title: 'Transferências de funil',
+              trailing: temTransfer ? '${_transfers.length}' : null,
+              accent: _kRouteTone,
+            ),
+            const SizedBox(height: 12),
+            if (podeTransferir) ...[
+              _TransferActionBar(
+                onTap: () => _openTransferSheet(context, _taskNow),
+              ),
+              const SizedBox(height: 14),
+            ],
+            if (_loadingTransfers)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 10),
+                child: Center(
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.2,
+                      color: _kRouteTone,
+                    ),
+                  ),
+                ),
+              )
+            else if (_transfersError != null)
+              _MutedHint(
+                icon: Icons.cloud_off_rounded,
+                text: _transfersError!,
+              )
+            else if (!temTransfer)
+              const _MutedHint(
+                icon: Icons.alt_route_rounded,
+                text: 'Este card nunca mudou de funil.',
+              )
+            else
+              for (var i = 0; i < _transfers.length; i++)
+                _TransferRow(
+                  entry: _transfers[i],
+                  isLast: i == _transfers.length - 1,
+                ),
+            const SizedBox(height: 26),
+          ],
+          _SectionHeader(
+            overline: 'Jornada',
+            title: 'Linha de eventos',
+            trailing: _journey.isEmpty ? null : '${_journey.length}',
+            accent: const Color(0xFFD97706),
+          ),
+          const SizedBox(height: 14),
+          if (_journey.isEmpty)
+            const _MutedHint(
+              icon: Icons.signpost_outlined,
+              text: 'Nenhum evento registrado nesta negociação ainda.',
+            )
+          else
+            for (var i = 0; i < _journey.length; i++)
+              _journeyRow(context, theme, i),
+        ],
+      ),
+    );
+  }
+
+  /// Um evento da jornada (dot + fio + texto). Extraído do `itemBuilder` para
+  /// a aba poder empilhar seções acima dele sem duplicar o desenho.
+  Widget _journeyRow(BuildContext context, ThemeData theme, int i) {
         final e = _journey[i];
         final title = e['title']?.toString() ?? '';
         final subtitle = e['subtitle']?.toString();
@@ -985,25 +2317,28 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
             ],
           ),
         );
-      },
-    );
   }
 
   // ---------------------------------------------------------------------------
   // TAB: ARQUIVOS (GET /kanban/tasks/:id/attachments)
   // ---------------------------------------------------------------------------
 
-  List<Map<String, dynamic>> _taskFiles = [];
+  /// Anexos do card já parseados (a `key` do S3 é o que o DELETE exige).
+  List<Attachment> _taskFiles = [];
   bool _loadingFiles = false;
   String? _filesError;
   bool _didLoadFiles = false;
+  bool _uploadingFiles = false;
+
+  /// Chave do anexo sendo removido — o spinner nasce na própria linha.
+  String? _deletingAttachmentKey;
 
   Future<void> _loadTaskFiles() async {
     setState(() {
       _loadingFiles = true;
       _filesError = null;
     });
-    final r = await _kanbanService.getTaskAttachments(widget.task.id);
+    final r = await _kanbanService.getTaskAttachmentList(widget.task.id);
     if (!mounted) return;
     if (r.success && r.data != null) {
       setState(() {
@@ -1020,52 +2355,413 @@ class _TaskDetailsModalState extends State<TaskDetailsModal>
     }
   }
 
+  /// Escolhe e sobe anexos direto no card (multipart `files`).
+  ///
+  /// As duas travas do backend são conferidas ANTES de gastar rede: no máximo
+  /// [KanbanService.maxTaskAttachments] arquivos no card e 200 MB por arquivo
+  /// — e a mensagem diz qual arquivo estourou, não um 413 genérico.
+  Future<void> _uploadTaskFiles() async {
+    if (_uploadingFiles) return;
+    List<File> escolhidos;
+    try {
+      final result = await FilePicker.pickFiles(
+        allowMultiple: true,
+        type: FileType.any,
+      );
+      if (result == null || result.files.isEmpty) return;
+      escolhidos = result.files
+          .where((f) => f.path != null)
+          .map((f) => File(f.path!))
+          .toList();
+    } catch (e) {
+      _snack('Erro ao selecionar arquivos: $e', erro: true);
+      return;
+    }
+    if (escolhidos.isEmpty) return;
+
+    final restante = KanbanService.maxTaskAttachments - _taskFiles.length;
+    if (restante <= 0) {
+      _snack(
+        'O card já tem o máximo de ${KanbanService.maxTaskAttachments} anexos. '
+        'Remova um antes de enviar outro.',
+        erro: true,
+      );
+      return;
+    }
+    if (escolhidos.length > restante) {
+      _snack(
+        'Cabem só mais $restante ${restante == 1 ? 'arquivo' : 'arquivos'} '
+        'neste card (limite de ${KanbanService.maxTaskAttachments}).',
+        erro: true,
+      );
+      return;
+    }
+    for (final f in escolhidos) {
+      final bytes = await f.length();
+      if (bytes > KanbanService.maxTaskAttachmentBytes) {
+        final nome = f.path.split(RegExp(r'[\\/]')).last;
+        if (!mounted) return;
+        _snack('"$nome" passa do limite de 200 MB por arquivo.', erro: true);
+        return;
+      }
+    }
+
+    setState(() => _uploadingFiles = true);
+    final r = await _kanbanService.uploadTaskAttachments(
+      widget.task.id,
+      escolhidos,
+    );
+    if (!mounted) return;
+    setState(() => _uploadingFiles = false);
+    if (r.success) {
+      _snack(
+        escolhidos.length == 1
+            ? 'Arquivo anexado ao card'
+            : '${escolhidos.length} arquivos anexados ao card',
+        ok: true,
+      );
+      await _loadTaskFiles();
+    } else {
+      _snack(r.message ?? 'Erro ao enviar anexos', erro: true);
+    }
+  }
+
+  Future<void> _deleteTaskFile(Attachment file) async {
+    final chave = file.key;
+    if (chave == null || chave.isEmpty) {
+      _snack('Este anexo não tem chave de armazenamento — não dá para remover.',
+          erro: true);
+      return;
+    }
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remover anexo'),
+        content: Text('"${file.filename}" sai do card para todo o time.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            // Cancelar não é destrutivo: o tema global pinta TextButton de
+            // vermelho, então a cor é forçada de volta ao texto secundário.
+            style: TextButton.styleFrom(
+              foregroundColor: ThemeHelpers.textSecondaryColor(ctx),
+            ),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: _kDangerRed),
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+    if (confirmado != true) return;
+    setState(() => _deletingAttachmentKey = chave);
+    final r = await _kanbanService.deleteTaskAttachment(widget.task.id, chave);
+    if (!mounted) return;
+    setState(() => _deletingAttachmentKey = null);
+    if (r.success) {
+      _snack('Anexo removido', ok: true);
+      await _loadTaskFiles();
+    } else {
+      _snack(r.message ?? 'Erro ao remover anexo', erro: true);
+    }
+  }
+
+  Future<void> _openAttachment(Attachment file) async {
+    if (file.url.isEmpty) {
+      _snack('Este anexo não tem link para abrir.', erro: true);
+      return;
+    }
+    try {
+      final uri = Uri.parse(file.url);
+      final abriu = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!abriu && mounted) {
+        _snack('Não foi possível abrir o arquivo.', erro: true);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      _snack('Link do arquivo inválido.', erro: true);
+    }
+  }
+
   Widget _buildFilesTab(BuildContext context, ThemeData theme) {
+    const accent = _kFilesTone;
     if (_loadingFiles) return const _LoadingView();
     if (_filesError != null) {
       return _ErrorView(message: _filesError!, onRetry: _loadTaskFiles);
     }
-    if (_taskFiles.isEmpty) {
-      return const _EmptyState(
-        icon: Icons.folder_open_rounded,
-        title: 'Sem anexos no card',
-        subtitle:
-            'Arquivos enviados diretamente na tarefa (fora dos comentários) aparecem aqui.',
+
+    final total = _taskFiles.length;
+    final cheio = total >= KanbanService.maxTaskAttachments;
+
+    return RefreshIndicator(
+      color: accent,
+      onRefresh: _loadTaskFiles,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        children: [
+          _SectionHeader(
+            overline: 'Documentos',
+            title: 'Anexos do card',
+            trailing: '$total/${KanbanService.maxTaskAttachments}',
+            accent: accent,
+          ),
+          const SizedBox(height: 12),
+          if (_canEdit)
+            _AttachmentUploadBar(
+              accent: accent,
+              uploading: _uploadingFiles,
+              full: cheio,
+              onPick: _uploadTaskFiles,
+            ),
+          if (_canEdit) const SizedBox(height: 16),
+          if (total == 0)
+            _MutedHint(
+              icon: Icons.folder_open_rounded,
+              text: _canEdit
+                  ? 'Sem anexos no card. Contratos, plantas e propostas '
+                      'enviados aqui ficam fora da conversa e todo o time vê.'
+                  : 'Sem anexos no card. Arquivos enviados diretamente na '
+                      'tarefa (fora dos comentários) aparecem aqui.',
+            )
+          else
+            for (var i = 0; i < total; i++) ...[
+              if (i > 0)
+                Divider(
+                  height: 1,
+                  thickness: 1,
+                  color:
+                      ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
+                ),
+              _TaskAttachmentTile(
+                file: _taskFiles[i],
+                accent: accent,
+                canDelete: _canEdit,
+                deleting: _deletingAttachmentKey != null &&
+                    _deletingAttachmentKey == _taskFiles[i].key,
+                onOpen: () => _openAttachment(_taskFiles[i]),
+                onCopy: () {
+                  Clipboard.setData(ClipboardData(text: _taskFiles[i].url));
+                  _snack('Link copiado');
+                },
+                onDelete: () => _deleteTaskFile(_taskFiles[i]),
+              ),
+            ],
+        ],
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // TAB: AGENDA (GET /appointments?kanbanTaskId= · POST /appointments)
+  // ---------------------------------------------------------------------------
+  //
+  // Sem serviço paralelo: quem fala com a API é o `AppointmentService` da
+  // feature de agenda — o card só empurra o `kanbanTaskId` no filtro e no
+  // corpo da criação, que é exatamente o que o web faz.
+
+  List<Appointment> _appointments = const [];
+  bool _loadingAppointments = false;
+  String? _appointmentsError;
+  bool _didLoadAppointments = false;
+  bool _creatingAppointment = false;
+
+  Future<void> _loadAppointments() async {
+    setState(() {
+      _loadingAppointments = true;
+      _appointmentsError = null;
+    });
+    final r = await AppointmentService.instance.listAppointments(
+      kanbanTaskId: widget.task.id,
+      limit: 50,
+      // Compromisso do card é do CARD, não "meu": admin/gestor vê o que o
+      // time todo marcou nesta negociação. O backend IGNORA a flag para
+      // colaborador (sem 403) e ele segue vendo só os próprios — é a mesma
+      // regra de escopo da tela de Agenda, não uma exceção do card.
+      viewAllCompany: true,
+    );
+    if (!mounted) return;
+    if (r.success && r.data != null) {
+      final lista = [...r.data!.appointments]
+        ..sort((a, b) => a.startDate.compareTo(b.startDate));
+      setState(() {
+        _appointments = lista;
+        _loadingAppointments = false;
+        _didLoadAppointments = true;
+      });
+    } else {
+      setState(() {
+        _appointmentsError = r.message ?? 'Erro ao carregar compromissos';
+        _loadingAppointments = false;
+        _didLoadAppointments = true;
+      });
+    }
+  }
+
+  Future<void> _createAppointmentFromCard() async {
+    if (_creatingAppointment) return;
+    await _ensureMembers();
+    if (!mounted) return;
+    final draft = await TaskAppointmentSheet.show(
+      context,
+      suggestedTitle: _taskNow.title,
+      members: _members.isEmpty ? null : _members,
+      currentUserId: _currentUserId,
+    );
+    if (draft == null || !mounted) return;
+
+    setState(() => _creatingAppointment = true);
+    final task = _taskNow;
+    final r = await AppointmentService.instance.createAppointment(
+      CreateAppointmentData(
+        title: draft.title,
+        // Visita é o compromisso natural de um card de funil imobiliário —
+        // e é o default do próprio enum.
+        type: AppointmentType.visit,
+        startDate: draft.start,
+        endDate: draft.end,
+        kanbanTaskId: task.id,
+        clientId: task.clientId,
+        inviteUserIds:
+            draft.inviteUserIds.isEmpty ? null : draft.inviteUserIds,
+      ),
+    );
+    if (!mounted) return;
+    setState(() => _creatingAppointment = false);
+    if (r.success) {
+      _snack('Compromisso agendado', ok: true);
+      await _loadAppointments();
+    } else {
+      _snack(r.message ?? 'Erro ao agendar compromisso', erro: true);
+    }
+  }
+
+  Widget _buildAgendaTab(BuildContext context, ThemeData theme) {
+    const accent = _kAgendaTone;
+    if (_loadingAppointments) return const _LoadingView();
+    if (_appointmentsError != null) {
+      return _ErrorView(
+        message: _appointmentsError!,
+        onRetry: _loadAppointments,
       );
     }
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-      physics: const BouncingScrollPhysics(),
-      itemCount: _taskFiles.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
-      itemBuilder: (context, i) {
-        final f = _taskFiles[i];
-        final name =
-            f['name']?.toString() ?? f['filename']?.toString() ?? 'Arquivo';
-        final url = f['url']?.toString() ?? '';
-        return ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          tileColor: ThemeHelpers.cardBackgroundColor(context),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-            side: BorderSide(
-              color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
-            ),
+
+    final agora = DateTime.now();
+    final futuros =
+        _appointments.where((a) => !a.startDate.isBefore(agora)).toList();
+    final passados =
+        _appointments.where((a) => a.startDate.isBefore(agora)).toList()
+          ..sort((a, b) => b.startDate.compareTo(a.startDate));
+
+    return RefreshIndicator(
+      color: accent,
+      onRefresh: _loadAppointments,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        children: [
+          _SectionHeader(
+            overline: 'Agenda',
+            title: 'Compromissos deste card',
+            trailing: _appointments.isEmpty ? null : '${_appointments.length}',
+            accent: accent,
           ),
-          leading: const Icon(Icons.attach_file_rounded),
-          title: Text(name, maxLines: 2, overflow: TextOverflow.ellipsis),
-          subtitle: url.isNotEmpty ? Text(url, maxLines: 1, overflow: TextOverflow.ellipsis) : null,
-          onTap: url.isEmpty
-              ? null
-              : () {
-                  Clipboard.setData(ClipboardData(text: url));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Link copiado')),
-                  );
-                },
-        );
-      },
+          const SizedBox(height: 12),
+          if (_canEdit)
+            _AgendaCreateBar(
+              accent: accent,
+              busy: _creatingAppointment,
+              onTap: _createAppointmentFromCard,
+            ),
+          if (_canEdit) const SizedBox(height: 16),
+          if (_appointments.isEmpty)
+            const _MutedHint(
+              icon: Icons.event_available_outlined,
+              text: 'Nada marcado ainda. Visitas e reuniões criadas aqui '
+                  'entram na agenda do time já ligadas a esta negociação.',
+            )
+          else ...[
+            if (futuros.isNotEmpty) ...[
+              _AgendaGroupLabel(label: 'A seguir', accent: accent),
+              for (var i = 0; i < futuros.length; i++) ...[
+                if (i > 0) _agendaDivider(context),
+                _AppointmentTile(
+                  appointment: futuros[i],
+                  accent: accent,
+                  past: false,
+                ),
+              ],
+            ],
+            if (passados.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              _AgendaGroupLabel(label: 'Já aconteceu', accent: _kAuditTone),
+              for (var i = 0; i < passados.length; i++) ...[
+                if (i > 0) _agendaDivider(context),
+                _AppointmentTile(
+                  appointment: passados[i],
+                  accent: _kAuditTone,
+                  past: true,
+                ),
+              ],
+            ],
+          ],
+        ],
+      ),
     );
+  }
+
+  Widget _agendaDivider(BuildContext context) => Divider(
+        height: 1,
+        thickness: 1,
+        color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
+      );
+
+  // ---------------------------------------------------------------------------
+  // TRANSFERÊNCIAS (GET /kanban/tasks/:id/transfer-history)
+  // ---------------------------------------------------------------------------
+
+  List<KanbanTransferHistoryEntry> _transfers = const [];
+  bool _loadingTransfers = false;
+  String? _transfersError;
+  bool _didLoadTransfers = false;
+
+  Future<void> _loadTransferHistory() async {
+    setState(() {
+      _loadingTransfers = true;
+      _transfersError = null;
+    });
+    final r = await _kanbanService.getTaskTransferHistory(widget.task.id);
+    if (!mounted) return;
+    if (r.success && r.data != null) {
+      final lista = [...r.data!]..sort((a, b) {
+          final da = a.transferredAt;
+          final db = b.transferredAt;
+          if (da == null || db == null) return 0;
+          return db.compareTo(da);
+        });
+      setState(() {
+        _transfers = lista;
+        _loadingTransfers = false;
+        _didLoadTransfers = true;
+      });
+    } else {
+      setState(() {
+        // 403 = sem `kanban:view_history`. A seção some em silêncio em vez de
+        // gritar um erro que a pessoa não pode resolver.
+        _transfersError =
+            r.statusCode == 403 ? null : (r.message ?? 'Erro ao carregar');
+        _transfers = const [];
+        _loadingTransfers = false;
+        _didLoadTransfers = true;
+      });
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -1267,6 +2963,234 @@ class _TaskState {
 /// Tira finíssima no topo do header indicando o estado da tarefa. Substitui
 /// o gradiente colorido do header anterior — visualmente mais leve no claro.
 // =============================================================================
+// TRILHO DO FUNIL — percurso do lead (e a troca de etapa como consequência)
+// =============================================================================
+
+/// Fita horizontal com as etapas do funil na ORDEM real do board.
+///
+/// Lê como um progresso: o que ficou para trás vem preenchido na cor da
+/// própria coluna (o caminho andado), a etapa ATUAL é uma pill sólida com
+/// nome, e o que falta aparece como nó vazado. Rola sozinho para deixar a
+/// etapa atual à vista.
+///
+/// Tocar num nó MOVE o card para lá — a ação nasce do desenho, sem virar
+/// "mais uma linha de opção" na ficha. Sem permissão de mover, o trilho
+/// continua visível (informação), apenas não responde ao toque.
+class _FunnelStageRail extends StatefulWidget {
+  final List<KanbanColumn> stages;
+  final String currentColumnId;
+  final bool canMove;
+  final String? movingToColumnId;
+  final void Function(KanbanColumn column) onPick;
+
+  /// Toque na etapa ATUAL — abre a lista completa (funil longo).
+  final VoidCallback onOpenList;
+
+  const _FunnelStageRail({
+    required this.stages,
+    required this.currentColumnId,
+    required this.canMove,
+    required this.movingToColumnId,
+    required this.onPick,
+    required this.onOpenList,
+  });
+
+  @override
+  State<_FunnelStageRail> createState() => _FunnelStageRailState();
+}
+
+class _FunnelStageRailState extends State<_FunnelStageRail> {
+  final ScrollController _scroll = ScrollController();
+
+  /// Largura aproximada de um nó não-atual — usada só para centralizar a
+  /// etapa atual na primeira pintura (não define o layout).
+  static const double _dotSlot = 34;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _centerCurrent());
+  }
+
+  @override
+  void didUpdateWidget(covariant _FunnelStageRail old) {
+    super.didUpdateWidget(old);
+    if (old.currentColumnId != widget.currentColumnId) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _centerCurrent());
+    }
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _centerCurrent() {
+    if (!_scroll.hasClients) return;
+    final idx =
+        widget.stages.indexWhere((c) => c.id == widget.currentColumnId);
+    if (idx < 0) return;
+    final alvo = (idx * _dotSlot) - 40;
+    _scroll.animateTo(
+      alvo.clamp(0.0, _scroll.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final trilho = ThemeHelpers.borderColor(context).withValues(alpha: 0.5);
+    final atualIdx =
+        widget.stages.indexWhere((c) => c.id == widget.currentColumnId);
+
+    return SizedBox(
+      height: 34,
+      child: ListView.builder(
+        controller: _scroll,
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        padding: EdgeInsets.zero,
+        itemCount: widget.stages.length,
+        itemBuilder: (context, i) {
+          final col = widget.stages[i];
+          final tone = _columnTone(col.color);
+          final ink = _columnInk(context, tone);
+          final isAtual = i == atualIdx;
+          final andado = atualIdx >= 0 && i < atualIdx;
+          final indo = widget.movingToColumnId == col.id;
+
+          // Conector: pintado até a etapa atual, apagado depois.
+          final conector = i == 0
+              ? const SizedBox.shrink()
+              : Container(
+                  width: 14,
+                  height: 2,
+                  color: andado || isAtual
+                      ? tone.withValues(alpha: 0.45)
+                      : trilho,
+                );
+
+          final Widget no;
+          if (isAtual || indo) {
+            no = AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+              decoration: BoxDecoration(
+                color: tone,
+                borderRadius: BorderRadius.circular(999),
+                boxShadow: [
+                  BoxShadow(
+                    color: tone.withValues(alpha: 0.35),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (indo)
+                    const SizedBox(
+                      width: 11,
+                      height: 11,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor:
+                            AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  else
+                    const Icon(Icons.circle, size: 7, color: Colors.white),
+                  const SizedBox(width: 7),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 130),
+                    child: Text(
+                      col.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 11.5,
+                        height: 1,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          } else {
+            // Etapa andada = preenchida na cor dela; futura = vazada.
+            no = Tooltip(
+              message: col.title,
+              waitDuration: const Duration(milliseconds: 300),
+              child: Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: andado ? tone.withValues(alpha: 0.9) : Colors.transparent,
+                  border: Border.all(
+                    color: andado ? tone : trilho,
+                    width: andado ? 0 : 1.6,
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: andado
+                    ? const Icon(Icons.check_rounded,
+                        size: 12, color: Colors.white)
+                    : Text(
+                        '${i + 1}',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w800,
+                          color: secondary,
+                          height: 1,
+                        ),
+                      ),
+              ),
+            );
+          }
+
+          final emVoo = widget.movingToColumnId != null;
+          // Nó comum move direto; a pill da etapa ATUAL abre a lista completa
+          // (atalho para funil longo, onde rolar o trilho cansa).
+          final VoidCallback? aoTocar = emVoo
+              ? null
+              : isAtual
+                  ? widget.onOpenList
+                  : (widget.canMove ? () => widget.onPick(col) : null);
+
+          return Row(
+            children: [
+              conector,
+              if (i > 0) const SizedBox(width: 2),
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: aoTocar,
+                  borderRadius: BorderRadius.circular(999),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 3),
+                    child: no,
+                  ),
+                ),
+              ),
+              if (i > 0) const SizedBox(width: 2),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+// =============================================================================
 // HEADER
 // =============================================================================
 
@@ -1275,22 +3199,53 @@ class _TaskHeroHeader extends StatelessWidget {
   final _TaskState state;
   final bool canMarkResult;
   final bool canTransfer;
-  final VoidCallback onClose;
-  final VoidCallback onCopyId;
   final VoidCallback onMarkLost;
+  final VoidCallback onMarkWon;
   final VoidCallback onTransfer;
   final VoidCallback onOpenResult;
+
+  /// Colunas REAIS do funil (sintéticas já filtradas) para o trilho.
+  final List<KanbanColumn> stages;
+  final bool canMoveStage;
+
+  /// Coluna destino em movimento — pinta o alvo em estado "indo".
+  final String? movingToColumnId;
+  final void Function(KanbanColumn column) onPickStage;
+
+  /// Toque na etapa atual abre a lista completa (atalho de funil longo).
+  final VoidCallback onOpenStageList;
+
+  /// Edição do título NO PRÓPRIO hero (sem sheet): o nome do lead se
+  /// corrige onde ele é lido.
+  final bool canEditTitle;
+  final bool editingTitle;
+  final bool savingTitle;
+  final TextEditingController titleController;
+  final VoidCallback onStartTitleEdit;
+  final VoidCallback onCancelTitleEdit;
+  final VoidCallback onSaveTitle;
 
   const _TaskHeroHeader({
     required this.task,
     required this.state,
     required this.canMarkResult,
     required this.canTransfer,
-    required this.onClose,
-    required this.onCopyId,
     required this.onMarkLost,
+    required this.onMarkWon,
     required this.onTransfer,
     required this.onOpenResult,
+    required this.stages,
+    required this.canMoveStage,
+    required this.movingToColumnId,
+    required this.onPickStage,
+    required this.onOpenStageList,
+    required this.canEditTitle,
+    required this.editingTitle,
+    required this.savingTitle,
+    required this.titleController,
+    required this.onStartTitleEdit,
+    required this.onCancelTitleEdit,
+    required this.onSaveTitle,
   });
 
   @override
@@ -1306,148 +3261,181 @@ class _TaskHeroHeader extends StatelessWidget {
     final showCrm = canMarkResult || canTransfer;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 14, 8, 16),
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
+          // Trilha de contexto do card. Fechar e copiar ID saíram daqui: a
+          // tela tem back e cluster de ações no chrome da barra.
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Expanded(
-                child: Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    if (task.project != null)
-                      _BreadcrumbChip(
-                        icon: Icons.account_tree_outlined,
-                        label: task.project!.name,
-                      ),
-                    Icon(
-                      Icons.chevron_right_rounded,
-                      size: 14,
-                      color: secondary,
-                    ),
-                    _BreadcrumbChip(
-                      icon: state.stateIcon,
-                      label: state.stateLabel,
-                      color: state.accent,
-                    ),
-                  ],
+              if (task.project != null)
+                _BreadcrumbChip(
+                  icon: Icons.account_tree_outlined,
+                  label: task.project!.name,
                 ),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 14,
+                color: secondary,
               ),
-              IconButton(
-                tooltip: 'Copiar ID',
-                onPressed: onCopyId,
-                icon: const Icon(Icons.copy_rounded, size: 18),
-                visualDensity: VisualDensity.compact,
-                style: IconButton.styleFrom(
-                  foregroundColor: secondary,
-                ),
-              ),
-              IconButton(
-                tooltip: 'Fechar',
-                onPressed: onClose,
-                icon: const Icon(Icons.close_rounded),
-                visualDensity: VisualDensity.compact,
+              _BreadcrumbChip(
+                icon: state.stateIcon,
+                label: state.stateLabel,
+                color: state.accent,
               ),
             ],
           ),
           const SizedBox(height: 10),
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _PriorityMark(
-                  color: priorityColor ?? state.accent,
-                  hasPriority: task.priority != null,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        task.title,
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.4,
-                          height: 1.2,
-                          fontSize: 18,
-                          color: ThemeHelpers.textColor(context),
-                        ),
-                        maxLines: 4,
-                        overflow: TextOverflow.ellipsis,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _PriorityMark(
+                color: priorityColor ?? state.accent,
+                hasPriority: task.priority != null,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: editingTitle
+                    ? _HeroTitleEditor(
+                        controller: titleController,
+                        saving: savingTitle,
+                        onCancel: onCancelTitleEdit,
+                        onSave: onSaveTitle,
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Toque no título edita — a affordance é um lápis
+                          // discreto colado ao fim do texto, não um botão.
+                          InkWell(
+                            onTap: canEditTitle ? onStartTitleEdit : null,
+                            borderRadius: BorderRadius.circular(8),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    task.title,
+                                    style: theme.textTheme.titleLarge?.copyWith(
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: -0.4,
+                                      height: 1.2,
+                                      fontSize: 18,
+                                      color: ThemeHelpers.textColor(context),
+                                    ),
+                                    maxLines: 4,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                if (canEditTitle) ...[
+                                  const SizedBox(width: 7),
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Icon(
+                                      Icons.edit_rounded,
+                                      size: 13,
+                                      color:
+                                          secondary.withValues(alpha: 0.75),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          Text.rich(
+                            TextSpan(children: _headerSubtitleSpans(task)),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: secondary,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 11.5,
+                              height: 1.35,
+                              letterSpacing: 0.1,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 5),
-                      Text.rich(
-                        TextSpan(children: _headerSubtitleSpans(task)),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: secondary,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 11.5,
-                          height: 1.35,
-                          letterSpacing: 0.1,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
           // Linha de ações CRM: só as pills SÓLIDAS (cor cheia + texto
           // branco), ancoradas à DIREITA — o responsável saiu daqui, a
           // seção "Pessoas envolvidas" já cobre. FittedBox segura tela
           // estreita: encolhe o grupo em escala em vez de estourar a Row.
-          if (showCrm) ...[
+          // Digitando o título, o hero fica só com o essencial: com o
+          // teclado aberto o espaço é curto e ninguém vai marcar resultado
+          // no meio de uma correção de nome.
+          if (showCrm && !editingTitle) ...[
             const SizedBox(height: 14),
-            Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: Align(
+            Align(
+              alignment: Alignment.centerRight,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
                 alignment: Alignment.centerRight,
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerRight,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (canMarkResult && closed)
-                        _HeroCrmIconButton(
-                          icon: Icons.tune_rounded,
-                          tooltip: 'Resultado · reabrir ou revisar',
-                          color: secondary,
-                          onPressed: onOpenResult,
-                        ),
-                      if (canMarkResult && !closed)
-                        _HeroSolidAction(
-                          icon: LucideIcons.trendingDown,
-                          label: 'Perdido',
-                          color: const Color(0xFFDC2626),
-                          onPressed: onMarkLost,
-                        ),
-                      if (canTransfer) ...[
-                        if (canMarkResult) const SizedBox(width: 6),
-                        _HeroSolidAction(
-                          icon: LucideIcons.arrowLeftRight,
-                          label: 'Transferir',
-                          color: const Color(0xFF6366F1),
-                          onPressed: onTransfer,
-                        ),
-                      ],
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (canMarkResult && closed)
+                      _HeroCrmIconButton(
+                        icon: Icons.tune_rounded,
+                        tooltip: 'Resultado · reabrir ou revisar',
+                        color: secondary,
+                        onPressed: onOpenResult,
+                      ),
+                    if (canMarkResult && !closed) ...[
+                      _HeroSolidAction(
+                        icon: LucideIcons.trophy,
+                        label: 'Ganho',
+                        color: _kConfirmGreen,
+                        onPressed: onMarkWon,
+                      ),
+                      const SizedBox(width: 6),
+                      _HeroSolidAction(
+                        icon: LucideIcons.trendingDown,
+                        label: 'Perdido',
+                        color: const Color(0xFFDC2626),
+                        onPressed: onMarkLost,
+                      ),
                     ],
-                  ),
+                    if (canTransfer) ...[
+                      if (canMarkResult) const SizedBox(width: 6),
+                      _HeroSolidAction(
+                        icon: LucideIcons.arrowLeftRight,
+                        label: 'Transferir',
+                        color: const Color(0xFF6366F1),
+                        onPressed: onTransfer,
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ),
           ],
+          // TRILHO DO FUNIL — o percurso do lead como elemento gráfico do
+          // hero, não como "opção" perdida no meio da ficha. Mostra de onde
+          // ele veio, onde está e o que falta; tocar numa etapa MOVE o card.
+          // Assim a função mais pedida vira desenho: informação e ação na
+          // mesma peça.
+          if (stages.isNotEmpty && !editingTitle) ...[
+            const SizedBox(height: 16),
+            _FunnelStageRail(
+              stages: stages,
+              currentColumnId: task.columnId,
+              canMove: canMoveStage,
+              movingToColumnId: movingToColumnId,
+              onPick: onPickStage,
+              onOpenList: onOpenStageList,
+            ),
+          ],
           Padding(
-            padding: const EdgeInsets.only(top: 16, right: 16),
+            padding: const EdgeInsets.only(top: 16),
             child: Container(
               height: 1,
               color: ThemeHelpers.borderColor(context)
@@ -1483,6 +3471,167 @@ class _TaskHeroHeader extends StatelessWidget {
       );
     }
     return spans;
+  }
+}
+
+/// Barra de ações da edição inline: Cancelar (NUNCA vermelho — a cor vai
+/// forçada porque o tema global pinta TextButton de vermelho) + Salvar
+/// verde com estado de carregando no próprio botão.
+class _InlineEditBar extends StatelessWidget {
+  const _InlineEditBar({
+    required this.onCancel,
+    required this.onSave,
+    required this.saving,
+    this.saveLabel = 'Salvar',
+    this.helper,
+  });
+
+  final VoidCallback onCancel;
+  final VoidCallback onSave;
+  final bool saving;
+  final String saveLabel;
+  final String? helper;
+
+  @override
+  Widget build(BuildContext context) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Row(
+      children: [
+        if (helper != null)
+          Expanded(
+            child: Text(
+              helper!,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
+                height: 1.3,
+                color: secondary,
+              ),
+            ),
+          )
+        else
+          const Spacer(),
+        TextButton(
+          onPressed: saving ? null : onCancel,
+          style: TextButton.styleFrom(
+            foregroundColor: secondary,
+            visualDensity: VisualDensity.compact,
+            textStyle: const TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 13,
+            ),
+          ),
+          child: const Text('Cancelar'),
+        ),
+        const SizedBox(width: 6),
+        FilledButton(
+          onPressed: saving ? null : onSave,
+          style: FilledButton.styleFrom(
+            backgroundColor: _kConfirmGreen,
+            foregroundColor: Colors.white,
+            disabledBackgroundColor: _kConfirmGreen.withValues(alpha: 0.4),
+            disabledForegroundColor: Colors.white.withValues(alpha: 0.8),
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(11),
+            ),
+            textStyle: const TextStyle(
+              fontWeight: FontWeight.w900,
+              fontSize: 13,
+            ),
+          ),
+          child: saving
+              ? const SizedBox(
+                  width: 15,
+                  height: 15,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : Text(saveLabel),
+        ),
+      ],
+    );
+  }
+}
+
+/// Campo do título dentro do hero (mesma tipografia forte do título, para
+/// a troca de modo não sacudir o layout).
+class _HeroTitleEditor extends StatelessWidget {
+  const _HeroTitleEditor({
+    required this.controller,
+    required this.saving,
+    required this.onCancel,
+    required this.onSave,
+  });
+
+  final TextEditingController controller;
+  final bool saving;
+  final VoidCallback onCancel;
+  final VoidCallback onSave;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final border = ThemeHelpers.borderColor(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        TextField(
+          controller: controller,
+          autofocus: true,
+          enabled: !saving,
+          maxLines: 3,
+          minLines: 1,
+          maxLength: 200,
+          textCapitalization: TextCapitalization.sentences,
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.4,
+            height: 1.25,
+            fontSize: 18,
+            color: ThemeHelpers.textColor(context),
+          ),
+          decoration: InputDecoration(
+            isDense: true,
+            counterText: '',
+            filled: true,
+            fillColor: border.withValues(alpha: isDark ? 0.16 : 0.1),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: border.withValues(alpha: 0.5)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: border.withValues(alpha: 0.5)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: _kConfirmGreen.withValues(alpha: 0.7),
+                width: 1.5,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        _InlineEditBar(
+          onCancel: onCancel,
+          onSave: onSave,
+          saving: saving,
+          helper: 'Nome do lead no board',
+        ),
+      ],
+    );
   }
 }
 
@@ -1904,10 +4053,32 @@ class _SectionHeader extends StatelessWidget {
 /// dados de contato (telefone, WhatsApp, e-mail, CPF, cidade). Telefone e
 /// WhatsApp são acionáveis (discar / abrir conversa). Espelha o
 /// `ClientInfoCard` do front web.
+///
+/// Serve DOIS casos com o mesmo desenho:
+/// 1. [client] preenchido — lead com cliente vinculado (tipo, status, CPF…);
+/// 2. contato AVULSO ([contactName]/[contactPhone]/[contactEmail]) — lead de
+///    campanha/WhatsApp que vive só em `task.contacts`. Sem cliente não há
+///    tipo/status/CPF/cidade, então essas linhas simplesmente não aparecem.
 class _LeadContactCard extends StatelessWidget {
-  final KanbanTaskClient client;
+  final KanbanTaskClient? client;
 
-  const _LeadContactCard({required this.client});
+  /// Contato avulso (usado apenas quando [client] é nulo).
+  final String? contactName;
+  final String? contactPhone;
+  final String? contactEmail;
+  final String? contactJobTitle;
+
+  /// Demais contatos do card com telefone — viram linhas extras no fim.
+  final List<KanbanTaskContactInput> extraContacts;
+
+  const _LeadContactCard({
+    this.client,
+    this.contactName,
+    this.contactPhone,
+    this.contactEmail,
+    this.contactJobTitle,
+    this.extraContacts = const [],
+  });
 
   static const Map<String, Color> _typeColors = {
     'buyer': Color(0xFF3B82F6),
@@ -1969,30 +4140,84 @@ class _LeadContactCard extends StatelessWidget {
     );
   }
 
+  /// Trio de ações do número: copiar (slate), ligar (azul), WhatsApp (verde).
+  /// Mesma tripla para o cliente vinculado e para o contato avulso.
+  List<Widget> _phoneActions(BuildContext context, String raw) => [
+        _LeadContactAction(
+          icon: Icons.copy_rounded,
+          tooltip: 'Copiar número',
+          color: _kAuditTone,
+          onTap: () =>
+              _copyToClipboard(context, _maskPhone(raw), 'Número copiado'),
+        ),
+        _LeadContactAction(
+          icon: Icons.call_rounded,
+          tooltip: 'Ligar',
+          color: _kChatTone,
+          onTap: () => _launch('tel:${_telDigits(raw)}'),
+        ),
+        _LeadContactAction(
+          icon: Icons.chat_rounded,
+          tooltip: 'WhatsApp',
+          color: const Color(0xFF25D366),
+          onTap: () => _launch('https://wa.me/${_waDigits(raw)}'),
+        ),
+      ];
+
+  /// Linhas dos demais contatos do card (nome como label, número como valor).
+  List<Widget> _extraContactRows(BuildContext context) {
+    final rows = <Widget>[];
+    for (final c in extraContacts) {
+      final raw = c.phone?.trim();
+      if (raw == null || raw.isEmpty) continue;
+      final name = c.name?.trim();
+      rows.add(
+        _LeadContactRow(
+          icon: Icons.person_outline_rounded,
+          label: (name != null && name.isNotEmpty) ? name : 'Outro contato',
+          value: _maskPhone(raw),
+          onCopy: () =>
+              _copyToClipboard(context, _maskPhone(raw), 'Número copiado'),
+          actions: _phoneActions(context, raw),
+        ),
+      );
+    }
+    return rows;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final textColor = ThemeHelpers.textColor(context);
     final border = ThemeHelpers.borderColor(context);
 
-    final typeKey = client.type?.toLowerCase();
+    final c = client;
+    final typeKey = c?.type?.toLowerCase();
     final typeColor = typeKey != null ? _typeColors[typeKey] : null;
-    final typeLabel = (client.type != null && client.type!.trim().isNotEmpty)
-        ? (_typeLabels[typeKey] ?? _titleCase(client.type!))
+    final typeRaw = c?.type?.trim();
+    final typeLabel = (typeRaw != null && typeRaw.isNotEmpty)
+        ? (_typeLabels[typeKey] ?? _titleCase(typeRaw))
         : null;
-    final statusKey = client.status?.toLowerCase();
-    final statusLabel =
-        (client.status != null && client.status!.trim().isNotEmpty)
-            ? (_statusLabels[statusKey] ?? _titleCase(client.status!))
-            : null;
+    final statusKey = c?.status?.toLowerCase();
+    final statusRaw = c?.status?.trim();
+    final statusLabel = (statusRaw != null && statusRaw.isNotEmpty)
+        ? (_statusLabels[statusKey] ?? _titleCase(statusRaw))
+        : null;
 
-    final phone = client.phone?.trim();
-    final whatsapp = client.whatsapp?.trim();
+    // Cliente vinculado manda; sem ele, o contato avulso do card assume.
+    final rawName = c != null ? c.name.trim() : (contactName?.trim() ?? '');
+    final displayName = rawName.isNotEmpty
+        ? rawName
+        : (c != null ? 'Lead sem nome' : 'Contato do lead');
+    final phone =
+        c != null ? c.phone?.trim() : contactPhone?.trim();
+    final whatsapp = c?.whatsapp?.trim();
     final showWhatsapp =
         whatsapp != null && whatsapp.isNotEmpty && whatsapp != phone;
-    final email = client.email?.trim();
-    final cpf = client.cpf?.trim();
-    final city = client.city?.trim();
+    final email = c != null ? c.email?.trim() : contactEmail?.trim();
+    final cpf = c?.cpf?.trim();
+    final city = c?.city?.trim();
+    final role = c == null ? contactJobTitle?.trim() : null;
 
     return Container(
       width: double.infinity,
@@ -2011,7 +4236,7 @@ class _LeadContactCard extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  client.name.isNotEmpty ? client.name : 'Lead sem nome',
+                  displayName,
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w800,
                     color: textColor,
@@ -2022,6 +4247,9 @@ class _LeadContactCard extends StatelessWidget {
               if (typeLabel != null) ...[
                 const SizedBox(width: 8),
                 _LeadBadge(label: typeLabel, color: typeColor),
+              ] else if (role != null && role.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                _LeadBadge(label: role, color: _kContactTone),
               ],
             ],
           ),
@@ -2047,30 +4275,7 @@ class _LeadContactCard extends StatelessWidget {
                 _maskPhone(phone),
                 'Número copiado',
               ),
-              actions: [
-                _LeadContactAction(
-                  icon: Icons.copy_rounded,
-                  tooltip: 'Copiar número',
-                  color: _kAuditTone,
-                  onTap: () => _copyToClipboard(
-                    context,
-                    _maskPhone(phone),
-                    'Número copiado',
-                  ),
-                ),
-                _LeadContactAction(
-                  icon: Icons.call_rounded,
-                  tooltip: 'Ligar',
-                  color: _kChatTone,
-                  onTap: () => _launch('tel:${_telDigits(phone)}'),
-                ),
-                _LeadContactAction(
-                  icon: Icons.chat_rounded,
-                  tooltip: 'WhatsApp',
-                  color: const Color(0xFF25D366),
-                  onTap: () => _launch('https://wa.me/${_waDigits(phone)}'),
-                ),
-              ],
+              actions: _phoneActions(context, phone),
             ),
           if (showWhatsapp)
             _LeadContactRow(
@@ -2136,6 +4341,7 @@ class _LeadContactCard extends StatelessWidget {
               label: 'Cidade',
               value: city,
             ),
+          ..._extraContactRows(context),
         ],
       ),
     );
@@ -2302,16 +4508,114 @@ class _LeadContactAction extends StatelessWidget {
 class _EditorialDescription extends StatelessWidget {
   final String? text;
 
-  const _EditorialDescription({required this.text});
+  /// Edição no lugar: o briefing vira campo onde ele é lido, sem sheet.
+  final bool canEdit;
+  final bool editing;
+  final bool saving;
+  final TextEditingController controller;
+  final VoidCallback onStartEdit;
+  final VoidCallback onCancel;
+  final VoidCallback onSave;
+
+  const _EditorialDescription({
+    required this.text,
+    required this.canEdit,
+    required this.editing,
+    required this.saving,
+    required this.controller,
+    required this.onStartEdit,
+    required this.onCancel,
+    required this.onSave,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
+    final border = ThemeHelpers.borderColor(context);
     const accent = _kBriefingTone;
     final empty = text == null || text!.isEmpty;
     final hasText = !empty;
     final length = hasText ? text!.length : 0;
+
+    if (editing) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                'BRIEFING',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  letterSpacing: 2.6,
+                  fontWeight: FontWeight.w900,
+                  color: accent,
+                  fontSize: 10,
+                  height: 1,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Container(
+                  height: 1,
+                  color: border.withValues(alpha: 0.35),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: controller,
+            autofocus: true,
+            enabled: !saving,
+            minLines: 4,
+            maxLines: 12,
+            maxLength: 4000,
+            textCapitalization: TextCapitalization.sentences,
+            keyboardType: TextInputType.multiline,
+            style: theme.textTheme.bodyLarge?.copyWith(
+              height: 1.5,
+              fontSize: 14.5,
+              fontWeight: FontWeight.w500,
+            ),
+            decoration: InputDecoration(
+              hintText: 'Contexto da negociação, combinados, próximos passos…',
+              hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                color: secondary,
+                fontWeight: FontWeight.w500,
+              ),
+              counterText: '',
+              filled: true,
+              fillColor: border.withValues(alpha: isDark ? 0.16 : 0.1),
+              contentPadding: const EdgeInsets.all(14),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: border.withValues(alpha: 0.5)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: border.withValues(alpha: 0.5)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(
+                  color: accent.withValues(alpha: 0.7),
+                  width: 1.5,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          _InlineEditBar(
+            onCancel: onCancel,
+            onSave: onSave,
+            saving: saving,
+            helper: 'Visível para todo o time',
+          ),
+        ],
+      );
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2349,29 +4653,49 @@ class _EditorialDescription extends StatelessWidget {
                 ),
               ),
             ],
+            // O texto é selecionável, então o lápis vive no eyebrow: toque
+            // no corpo continua servindo para copiar.
+            if (canEdit && hasText) ...[
+              const SizedBox(width: 6),
+              _MicroEditButton(onTap: onStartEdit, tooltip: 'Editar briefing'),
+            ],
           ],
         ),
         const SizedBox(height: 12),
 
         if (empty)
-          Padding(
-            padding: const EdgeInsets.only(left: 14, top: 4),
-            child: Row(
-              children: [
-                Icon(Icons.short_text_rounded, size: 16, color: secondary),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    'Sem descrição. Edite o card para adicionar contexto.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: secondary,
-                      fontWeight: FontWeight.w600,
-                      height: 1.4,
-                      fontStyle: FontStyle.italic,
+          InkWell(
+            onTap: canEdit ? onStartEdit : null,
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.only(left: 14, top: 4, bottom: 4),
+              child: Row(
+                children: [
+                  Icon(Icons.short_text_rounded, size: 16, color: secondary),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      canEdit
+                          ? 'Sem descrição. Toque para escrever o briefing.'
+                          : 'Sem descrição.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: secondary,
+                        fontWeight: FontWeight.w600,
+                        height: 1.4,
+                        fontStyle: FontStyle.italic,
+                      ),
                     ),
                   ),
-                ),
-              ],
+                  if (canEdit) ...[
+                    const SizedBox(width: 8),
+                    Icon(
+                      Icons.edit_rounded,
+                      size: 13,
+                      color: _kBriefingTone.withValues(alpha: 0.8),
+                    ),
+                  ],
+                ],
+              ),
             ),
           )
         else
@@ -2430,7 +4754,23 @@ class _TaskDossier extends StatelessWidget {
   final KanbanTask task;
   final _TaskState state;
 
-  const _TaskDossier({required this.task, required this.state});
+  /// Ficha VIVA: a célula editável ganha só um lápis discreto no canto e
+  /// responde ao toque — nada de virar formulário.
+  final bool canEdit;
+  final String? savingField;
+  final VoidCallback onEditValue;
+  final VoidCallback onEditDeadline;
+  final VoidCallback onEditPriority;
+
+  const _TaskDossier({
+    required this.task,
+    required this.state,
+    required this.canEdit,
+    required this.savingField,
+    required this.onEditValue,
+    required this.onEditDeadline,
+    required this.onEditPriority,
+  });
 
   static String? _deadlineHelper(_TaskState state) {
     final d = state.daysFromToday;
@@ -2534,11 +4874,13 @@ class _TaskDossier extends StatelessWidget {
         helper: state.health == _TaskHealth.completed
             ? 'Card concluído'
             : due == null
-                ? 'Defina ao editar o card'
+                ? (canEdit ? 'Toque para definir' : 'Sem prazo definido')
                 : _deadlineHelper(state),
         // Com prazo definido o valor fala na cor do estado (em dia
         // inclusive) — só "Sem prazo" fica neutro.
         valueAccent: due != null,
+        onTap: canEdit ? onEditDeadline : null,
+        saving: savingField == 'dueDate',
       ),
 
       // PRIORIDADE — dot na cor real vinda do backend.
@@ -2547,9 +4889,13 @@ class _TaskDossier extends StatelessWidget {
         accent: priorityColor ?? const Color(0xFF94A3B8),
         label: 'Prioridade',
         value: task.priority?.label ?? 'Não definida',
-        helper: task.priority == null ? 'Defina ao editar o card' : null,
+        helper: task.priority == null
+            ? (canEdit ? 'Toque para definir' : 'Não definida')
+            : null,
         dot: priorityColor != null,
         valueAccent: task.priority != null,
+        onTap: canEdit ? onEditPriority : null,
+        saving: savingField == 'priority',
       ),
 
       // FUNIL — violeta = contexto/organização.
@@ -2698,50 +5044,87 @@ class _TaskDossier extends StatelessWidget {
         ),
         const SizedBox(height: 16),
 
-        // Linha-herói: valor da negociação.
-        Text(
-          'VALOR DA NEGOCIAÇÃO',
-          style: theme.textTheme.labelSmall?.copyWith(
-            letterSpacing: 1.6,
-            fontWeight: FontWeight.w800,
-            color: secondary,
-            fontSize: 10,
-            height: 1,
+        // Linha-herói: valor da negociação (também editável no toque).
+        InkWell(
+          onTap: canEdit ? onEditValue : null,
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.only(top: 2, bottom: 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      'VALOR DA NEGOCIAÇÃO',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        letterSpacing: 1.6,
+                        fontWeight: FontWeight.w800,
+                        color: secondary,
+                        fontSize: 10,
+                        height: 1,
+                      ),
+                    ),
+                    if (canEdit) ...[
+                      const SizedBox(width: 7),
+                      if (savingField == 'totalValue')
+                        SizedBox(
+                          width: 11,
+                          height: 11,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 1.8,
+                            color: moneyColor,
+                          ),
+                        )
+                      else
+                        Icon(
+                          Icons.edit_rounded,
+                          size: 12,
+                          color: secondary.withValues(alpha: 0.7),
+                        ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 7),
+                if (money != null)
+                  Text(
+                    _money(money),
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.8,
+                      height: 1.05,
+                      fontSize: 26,
+                      color: moneyColor,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  )
+                else ...[
+                  Text(
+                    'Não informado',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                      color: secondary,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    canEdit
+                        ? 'Toque para registrar o potencial'
+                        : 'Potencial não registrado',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: secondary.withValues(alpha: 0.8),
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
-        const SizedBox(height: 7),
-        if (money != null)
-          Text(
-            _money(money),
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w900,
-              letterSpacing: -0.8,
-              height: 1.05,
-              fontSize: 26,
-              color: moneyColor,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
-          )
-        else ...[
-          Text(
-            'Não informado',
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-              fontSize: 16,
-              color: secondary,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            'Edite o card para registrar o potencial',
-            style: theme.textTheme.bodySmall?.copyWith(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: secondary.withValues(alpha: 0.8),
-            ),
-          ),
-        ],
-        const SizedBox(height: 14),
+        const SizedBox(height: 10),
 
         // Ficha técnica — linhas de 2 colunas com hairlines.
         for (final row in rows) ...[
@@ -2855,6 +5238,12 @@ class _SpecEntry {
   /// Dot colorido antes do valor (prioridade usa a cor real do backend).
   final bool dot;
 
+  /// Célula editável — ganha lápis discreto no canto e responde ao toque.
+  final VoidCallback? onTap;
+
+  /// Gravando este campo — o spinner nasce no lugar do lápis.
+  final bool saving;
+
   const _SpecEntry({
     required this.icon,
     required this.accent,
@@ -2864,6 +5253,8 @@ class _SpecEntry {
     this.valueAccent = false,
     this.numeric = false,
     this.dot = false,
+    this.onTap,
+    this.saving = false,
   });
 }
 
@@ -2896,7 +5287,7 @@ class _SpecTile extends StatelessWidget {
             entry.accent,
           );
 
-    return Padding(
+    final conteudo = Padding(
       padding: EdgeInsets.only(
         top: 12,
         bottom: 12,
@@ -2924,6 +5315,25 @@ class _SpecTile extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              // Affordance mínima: só um lápis de 12 no canto da célula.
+              if (entry.saving) ...[
+                const SizedBox(width: 4),
+                SizedBox(
+                  width: 11,
+                  height: 11,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.8,
+                    color: entry.accent,
+                  ),
+                ),
+              ] else if (entry.onTap != null) ...[
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.edit_rounded,
+                  size: 12,
+                  color: secondary.withValues(alpha: 0.65),
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 7),
@@ -2975,6 +5385,301 @@ class _SpecTile extends StatelessWidget {
         ],
       ),
     );
+
+    if (entry.onTap == null) return conteudo;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: entry.saving ? null : entry.onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: conteudo,
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// ETAPA DO FUNIL — linha do RAIO-X + seletor de coluna
+// =============================================================================
+
+/// Cor REAL da coluna (`KanbanColumn.color`, hex do backend — mesma leitura
+/// do board). Sem cor válida cai no violeta de contexto/organização já usado
+/// na entrada FUNIL.
+Color _columnTone(String? hex) {
+  final raw = hex?.trim();
+  if (raw != null && raw.isNotEmpty) {
+    try {
+      return Color(int.parse(raw.replaceFirst('#', '0xFF')));
+    } catch (_) {}
+  }
+  return _kPeopleTone;
+}
+
+/// Tinta legível da cor da coluna: no claro escurece ~18% preservando o matiz
+/// (mesma regra do `_SpecTile`); no escuro a cor pura já contrasta.
+Color _columnInk(BuildContext context, Color tone) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  return isDark
+      ? tone
+      : Color.alphaBlend(Colors.black.withValues(alpha: 0.18), tone);
+}
+
+
+/// Seletor de etapa — bottom sheet na anatomia da casa (grabber, eyebrow na
+/// cor do funil, título, fechar, divisor gradient). Devolve a coluna escolhida
+/// via `Navigator.pop`; quem move é o modal (que tem o contexto vivo pro
+/// SnackBar).
+class _MoveStageSheet extends StatelessWidget {
+  final List<KanbanColumn> columns;
+  final String currentColumnId;
+  final Map<String, int?> counts;
+
+  const _MoveStageSheet({
+    required this.columns,
+    required this.currentColumnId,
+    required this.counts,
+  });
+
+  /// Violeta de contexto/funil — a mesma família da entrada FUNIL no RAIO-X.
+  static const Color _tone = Color(0xFF8B5CF6);
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final mq = MediaQuery.of(context);
+    final border = ThemeHelpers.borderColor(context);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: mq.size.height * 0.78),
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            decoration: BoxDecoration(
+              color: ThemeHelpers.cardBackgroundColor(context),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(26)),
+              border: Border.all(color: border.withValues(alpha: 0.45)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.5 : 0.14),
+                  blurRadius: 44,
+                  offset: const Offset(0, -8),
+                ),
+              ],
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 10, bottom: 4),
+                  child: Center(
+                    child: Container(
+                      width: 42,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: border.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(22, 4, 10, 0),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text(
+                              'MOVER LEAD',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 1.35,
+                                color: _tone,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Para qual etapa?',
+                              style: theme.textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.65,
+                                height: 1.02,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: Icon(Icons.close_rounded, color: muted),
+                        tooltip: 'Fechar',
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  height: 1,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        _tone.withValues(alpha: 0.55),
+                        _tone.withValues(alpha: 0.08),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                ),
+                Flexible(
+                  child: ListView.separated(
+                    padding: EdgeInsets.fromLTRB(
+                        14, 12, 14, 16 + mq.padding.bottom),
+                    physics: const BouncingScrollPhysics(),
+                    shrinkWrap: true,
+                    itemCount: columns.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 6),
+                    itemBuilder: (context, i) {
+                      final c = columns[i];
+                      return _StageOptionRow(
+                        column: c,
+                        isCurrent: c.id == currentColumnId,
+                        count: counts[c.id],
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Linha rica de uma etapa: dot na cor REAL da coluna, nome e contagem. A
+/// etapa atual aparece marcada (check) e sem toque.
+class _StageOptionRow extends StatelessWidget {
+  final KanbanColumn column;
+  final bool isCurrent;
+  final int? count;
+
+  const _StageOptionRow({
+    required this.column,
+    required this.isCurrent,
+    required this.count,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final tone = _columnTone(column.color);
+    final ink = _columnInk(context, tone);
+
+    final helper = isCurrent
+        ? 'Etapa atual do lead'
+        : (count == null
+            ? null
+            : '$count lead${count == 1 ? '' : 's'} nesta etapa');
+
+    final row = Container(
+      padding: const EdgeInsets.fromLTRB(14, 13, 12, 13),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: isCurrent
+            ? tone.withValues(alpha: isDark ? 0.14 : 0.08)
+            : Colors.transparent,
+        border: Border.all(
+          color: isCurrent
+              ? tone.withValues(alpha: 0.4)
+              : ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 11,
+            height: 11,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: tone,
+              boxShadow: [
+                BoxShadow(
+                  color: tone.withValues(alpha: 0.4),
+                  blurRadius: 7,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 13),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  column.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                    letterSpacing: -0.2,
+                    height: 1.2,
+                    color: isCurrent ? ink : ThemeHelpers.textColor(context),
+                  ),
+                ),
+                if (helper != null) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    helper,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: secondary,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Icon(
+            isCurrent
+                ? Icons.check_circle_rounded
+                : Icons.arrow_forward_rounded,
+            size: isCurrent ? 20 : 18,
+            color: isCurrent ? tone : secondary,
+          ),
+        ],
+      ),
+    );
+
+    if (isCurrent) return row;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => Navigator.of(context).pop(column),
+        borderRadius: BorderRadius.circular(14),
+        child: row,
+      ),
+    );
   }
 }
 
@@ -2989,7 +5694,17 @@ class _SpecTile extends StatelessWidget {
 class _PeopleStrip extends StatelessWidget {
   final KanbanTask task;
 
-  const _PeopleStrip({required this.task});
+  /// Só o RESPONSÁVEL é editável — "criado por" é fato histórico.
+  final bool canEditAssignee;
+  final bool savingAssignee;
+  final VoidCallback onEditAssignee;
+
+  const _PeopleStrip({
+    required this.task,
+    required this.canEditAssignee,
+    required this.savingAssignee,
+    required this.onEditAssignee,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -3004,6 +5719,8 @@ class _PeopleStrip extends StatelessWidget {
               role: 'Responsável',
               user: task.assignedTo,
               emptyHint: 'Nenhum responsável',
+              onTap: canEditAssignee ? onEditAssignee : null,
+              saving: savingAssignee,
             ),
           ),
           VerticalDivider(width: 28, thickness: 1, color: hairline),
@@ -3027,10 +5744,16 @@ class _PersonColumn extends StatelessWidget {
   final KanbanUser? user;
   final String emptyHint;
 
+  /// Coluna editável (responsável) — toque troca a pessoa.
+  final VoidCallback? onTap;
+  final bool saving;
+
   const _PersonColumn({
     required this.role,
     required this.user,
     required this.emptyHint,
+    this.onTap,
+    this.saving = false,
   });
 
   @override
@@ -3040,7 +5763,7 @@ class _PersonColumn extends StatelessWidget {
     final assigned = user != null;
     final tone = assigned ? _personColor(user!.name) : const Color(0xFF64748B);
 
-    return Column(
+    final coluna = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -3086,17 +5809,39 @@ class _PersonColumn extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 3),
-        Text(
-          role.toUpperCase(),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.labelSmall?.copyWith(
-            fontSize: 9.5,
-            letterSpacing: 1.4,
-            fontWeight: FontWeight.w800,
-            color: assigned ? tone : secondary,
-            height: 1,
-          ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                role.toUpperCase(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontSize: 9.5,
+                  letterSpacing: 1.4,
+                  fontWeight: FontWeight.w800,
+                  color: assigned ? tone : secondary,
+                  height: 1,
+                ),
+              ),
+            ),
+            if (saving) ...[
+              const SizedBox(width: 5),
+              SizedBox(
+                width: 10,
+                height: 10,
+                child: CircularProgressIndicator(strokeWidth: 1.6, color: tone),
+              ),
+            ] else if (onTap != null) ...[
+              const SizedBox(width: 5),
+              Icon(
+                Icons.edit_rounded,
+                size: 11,
+                color: secondary.withValues(alpha: 0.65),
+              ),
+            ],
+          ],
         ),
         if (assigned && user!.email.isNotEmpty) ...[
           const SizedBox(height: 4),
@@ -3113,6 +5858,19 @@ class _PersonColumn extends StatelessWidget {
           ),
         ],
       ],
+    );
+
+    if (onTap == null) return coluna;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: saving ? null : onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: coluna,
+        ),
+      ),
     );
   }
 }
@@ -3150,6 +5908,618 @@ class _DashedRingPainter extends CustomPainter {
   @override
   bool shouldRepaint(_DashedRingPainter oldDelegate) =>
       oldDelegate.color != color;
+}
+
+// =============================================================================
+// PEÇAS DE EDIÇÃO NA FICHA (flush — nenhuma vira card dentro de card)
+// =============================================================================
+
+/// Lápis de 12 num alvo de toque decente. Usado onde o conteúdo já responde
+/// a outro gesto (texto selecionável, por exemplo).
+class _MicroEditButton extends StatelessWidget {
+  const _MicroEditButton({required this.onTap, required this.tooltip});
+
+  final VoidCallback onTap;
+  final String tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(999),
+          child: Padding(
+            padding: const EdgeInsets.all(5),
+            child: Icon(
+              Icons.edit_rounded,
+              size: 13,
+              color: secondary.withValues(alpha: 0.8),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Linha discreta de "aqui não tem nada" — sem caixa, sem drama.
+class _MutedHint extends StatelessWidget {
+  const _MutedHint({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Padding(
+      padding: const EdgeInsets.only(left: 2, top: 2, bottom: 2),
+      child: Row(
+        children: [
+          Icon(icon, size: 15, color: secondary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: secondary,
+                fontWeight: FontWeight.w600,
+                height: 1.4,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Linha de vínculo (cliente / imóvel): hairline em cima, dado à esquerda,
+/// affordance de edição à direita. Mesma gramática das células do RAIO-X.
+class _LinkRow extends StatelessWidget {
+  const _LinkRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.canEdit,
+    required this.saving,
+    required this.onTap,
+    this.isLast = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final String? value;
+  final bool canEdit;
+  final bool saving;
+  final VoidCallback onTap;
+  final bool isLast;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final hairline = ThemeHelpers.borderColor(context).withValues(alpha: 0.35);
+    final vinculado = value != null && value!.trim().isNotEmpty;
+
+    final linha = Padding(
+      padding: const EdgeInsets.symmetric(vertical: 13),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            size: 16,
+            color: vinculado ? _kLinksTone : secondary,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label.toUpperCase(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    letterSpacing: 1.4,
+                    fontWeight: FontWeight.w800,
+                    color: secondary,
+                    fontSize: 9.5,
+                    height: 1,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  vinculado ? value!.trim() : 'Não vinculado',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: vinculado ? FontWeight.w800 : FontWeight.w600,
+                    fontSize: 14.5,
+                    letterSpacing: -0.2,
+                    height: 1.2,
+                    fontStyle:
+                        vinculado ? FontStyle.normal : FontStyle.italic,
+                    color: vinculado
+                        ? ThemeHelpers.textColor(context)
+                        : secondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          if (saving)
+            const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.8,
+                color: _kLinksTone,
+              ),
+            )
+          else if (canEdit)
+            Icon(
+              vinculado ? Icons.edit_rounded : Icons.add_link_rounded,
+              size: 15,
+              color: secondary.withValues(alpha: 0.7),
+            ),
+        ],
+      ),
+    );
+
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: hairline),
+          bottom: isLast ? BorderSide(color: hairline) : BorderSide.none,
+        ),
+      ),
+      child: canEdit
+          ? Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: saving ? null : onTap,
+                child: linha,
+              ),
+            )
+          : linha,
+    );
+  }
+}
+
+/// As duas ações do bloco de contato: registrar ligação (a mais repetida do
+/// dia, por isso sólida e à esquerda) e gerenciar a lista de contatos.
+class _ContactActionBar extends StatelessWidget {
+  const _ContactActionBar({
+    required this.registering,
+    required this.onRegisterCall,
+    required this.canEdit,
+    required this.savingContacts,
+    required this.contactsCount,
+    required this.onManageContacts,
+  });
+
+  final bool registering;
+  final VoidCallback onRegisterCall;
+  final bool canEdit;
+  final bool savingContacts;
+  final int contactsCount;
+  final VoidCallback onManageContacts;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+
+    final registrar = Material(
+      color: registering
+          ? _kContactTone.withValues(alpha: 0.55)
+          : _kContactTone,
+      borderRadius: BorderRadius.circular(13),
+      child: InkWell(
+        onTap: registering ? null : onRegisterCall,
+        borderRadius: BorderRadius.circular(13),
+        splashColor: Colors.white.withValues(alpha: 0.18),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (registering)
+                  const SizedBox(
+                    width: 15,
+                    height: 15,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                else
+                  const Icon(Icons.phone_in_talk_rounded,
+                      size: 17, color: Colors.white),
+                const SizedBox(width: 8),
+                const Text(
+                  'Registrar ligação',
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13.5,
+                    letterSpacing: -0.1,
+                    height: 1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final gerenciar = Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: savingContacts ? null : onManageContacts,
+        borderRadius: BorderRadius.circular(13),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(13),
+            color: _kContactTone.withValues(alpha: isDark ? 0.12 : 0.07),
+            border: Border.all(
+              color: _kContactTone.withValues(alpha: 0.34),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (savingContacts)
+                    const SizedBox(
+                      width: 15,
+                      height: 15,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: _kContactTone,
+                      ),
+                    )
+                  else
+                    const Icon(Icons.contacts_rounded,
+                        size: 17, color: _kContactTone),
+                  const SizedBox(width: 8),
+                  Text(
+                    contactsCount > 0 ? 'Contatos ($contactsCount)' : 'Contatos',
+                    maxLines: 1,
+                    softWrap: false,
+                    style: const TextStyle(
+                      color: _kContactTone,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 13.5,
+                      letterSpacing: -0.1,
+                      height: 1,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(flex: 3, child: registrar),
+            if (canEdit) ...[
+              const SizedBox(width: 10),
+              Expanded(flex: 2, child: gerenciar),
+            ],
+          ],
+        ),
+        const SizedBox(height: 7),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.history_rounded, size: 12, color: secondary),
+            const SizedBox(width: 5),
+            Expanded(
+              child: Text(
+                'A ligação entra no histórico do card com data e hora.',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: secondary,
+                  fontWeight: FontWeight.w600,
+                  height: 1.3,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// INTERNO — a anotação que fica entre o time. Mesma gramática editorial do
+/// BRIEFING (eyebrow + hairline + régua accent), em âmbar queimado para
+/// separar na leitura o que é do cliente do que é da casa.
+class _InternalNotesSection extends StatelessWidget {
+  const _InternalNotesSection({
+    required this.notes,
+    required this.canEdit,
+    required this.editing,
+    required this.saving,
+    required this.controller,
+    required this.onStartEdit,
+    required this.onCancel,
+    required this.onSave,
+  });
+
+  final String? notes;
+  final bool canEdit;
+  final bool editing;
+  final bool saving;
+  final TextEditingController controller;
+  final VoidCallback onStartEdit;
+  final VoidCallback onCancel;
+  final VoidCallback onSave;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final border = ThemeHelpers.borderColor(context);
+    const accent = _kInternalTone;
+    final vazio = notes == null || notes!.trim().isEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              'INTERNO',
+              style: theme.textTheme.labelSmall?.copyWith(
+                letterSpacing: 2.6,
+                fontWeight: FontWeight.w900,
+                color: accent,
+                fontSize: 10,
+                height: 1,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Container(
+                height: 1,
+                color: border.withValues(alpha: 0.35),
+              ),
+            ),
+            if (canEdit && !editing && !vazio) ...[
+              const SizedBox(width: 6),
+              _MicroEditButton(
+                onTap: onStartEdit,
+                tooltip: 'Editar observação interna',
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (editing) ...[
+          TextField(
+            controller: controller,
+            autofocus: true,
+            enabled: !saving,
+            minLines: 3,
+            maxLines: 10,
+            maxLength: 2000,
+            textCapitalization: TextCapitalization.sentences,
+            keyboardType: TextInputType.multiline,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              height: 1.5,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+            decoration: InputDecoration(
+              hintText:
+                  'Combinados, alertas e o que o time precisa saber antes de falar com o lead…',
+              hintStyle: theme.textTheme.bodySmall?.copyWith(
+                color: secondary,
+                fontWeight: FontWeight.w500,
+              ),
+              counterText: '',
+              filled: true,
+              fillColor: border.withValues(alpha: isDark ? 0.16 : 0.1),
+              contentPadding: const EdgeInsets.all(14),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: border.withValues(alpha: 0.5)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: border.withValues(alpha: 0.5)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(
+                  color: accent.withValues(alpha: 0.8),
+                  width: 1.5,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          _InlineEditBar(
+            onCancel: onCancel,
+            onSave: onSave,
+            saving: saving,
+            helper: 'Só o time vê — o cliente nunca recebe esta nota',
+          ),
+        ] else if (vazio)
+          InkWell(
+            onTap: canEdit ? onStartEdit : null,
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.only(left: 14, top: 2, bottom: 4),
+              child: Row(
+                children: [
+                  Icon(Icons.lock_outline_rounded, size: 15, color: secondary),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      canEdit
+                          ? 'Sem observação interna. Toque para anotar algo que só o time vê.'
+                          : 'Sem observação interna.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: secondary,
+                        fontWeight: FontWeight.w600,
+                        height: 1.4,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                  if (canEdit) ...[
+                    const SizedBox(width: 8),
+                    Icon(
+                      Icons.edit_rounded,
+                      size: 13,
+                      color: accent.withValues(alpha: 0.9),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          )
+        else ...[
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  width: 3,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.65),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: SelectableText(
+                    notes!.trim(),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      height: 1.5,
+                      fontSize: 14,
+                      letterSpacing: -0.1,
+                      color: ThemeHelpers.textColor(context),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.only(left: 17),
+            child: Row(
+              children: [
+                Icon(Icons.visibility_off_rounded, size: 12, color: secondary),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    'Nota interna — não aparece para o cliente.',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: secondary,
+                      fontWeight: FontWeight.w600,
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Chip que abre o seletor de tags (só gestão vê). Vazado para não competir
+/// com as tags reais, que são o conteúdo.
+class _ManageTagsChip extends StatelessWidget {
+  const _ManageTagsChip({
+    required this.hasTags,
+    required this.saving,
+    required this.onTap,
+  });
+
+  final bool hasTags;
+  final bool saving;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: saving ? null : onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: _kTagsTone.withValues(alpha: 0.45),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (saving)
+                const SizedBox(
+                  width: 11,
+                  height: 11,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.8,
+                    color: _kTagsTone,
+                  ),
+                )
+              else
+                const Icon(Icons.add_rounded, size: 13, color: _kTagsTone),
+              const SizedBox(width: 5),
+              Text(
+                hasTags ? 'Gerenciar' : 'Adicionar tag',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: _kTagsTone,
+                  fontSize: 11.5,
+                  letterSpacing: 0.1,
+                  height: 1,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // =============================================================================
@@ -3521,17 +6891,43 @@ class _TimelineEntry {
 // COMMENT BUBBLE / COMPOSER
 // =============================================================================
 
+/// Um comentário já posicionado na thread (raiz ou resposta de 1º nível).
+class _CommentNode {
+  final KanbanTaskComment comment;
+  final bool isReply;
+  final String? parentAuthor;
+
+  const _CommentNode({
+    required this.comment,
+    this.isReply = false,
+    this.parentAuthor,
+  });
+}
+
 class _CommentBubble extends StatelessWidget {
   final KanbanTaskComment comment;
   final bool isMe;
   final bool canDelete;
   final VoidCallback onDelete;
 
+  /// Resposta de 1º nível — recua e ganha o cordão de thread à esquerda.
+  final bool isReply;
+  final String? replyToName;
+
+  /// Nomes conhecidos da empresa: o realce casa o nome INTEIRO depois do `@`.
+  final List<String> mentionNames;
+
+  final VoidCallback? onReply;
+
   const _CommentBubble({
     required this.comment,
     required this.isMe,
     required this.canDelete,
     required this.onDelete,
+    this.isReply = false,
+    this.replyToName,
+    this.mentionNames = const [],
+    this.onReply,
   });
 
   @override
@@ -3551,11 +6947,24 @@ class _CommentBubble extends StatelessWidget {
         : ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: EdgeInsets.only(top: 6, bottom: 6, left: isReply ? 22 : 0),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SolidAvatar(user: comment.user, size: 34),
+          // Cordão da thread: hairline vertical no tom da conversa, nunca um
+          // card dentro de card.
+          if (isReply) ...[
+            Container(
+              width: 2,
+              height: 34,
+              margin: const EdgeInsets.only(right: 8, top: 4),
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+          ],
+          _SolidAvatar(user: comment.user, size: isReply ? 28 : 34),
           const SizedBox(width: 10),
           Expanded(
             child: Container(
@@ -3600,6 +7009,21 @@ class _CommentBubble extends StatelessWidget {
                           letterSpacing: 0.2,
                         ),
                       ),
+                      // Responder só nas raízes: a thread do web tem UM nível,
+                      // e resposta de resposta viraria fio sem fim no celular.
+                      if (onReply != null && !isReply)
+                        InkWell(
+                          onTap: onReply,
+                          borderRadius: BorderRadius.circular(999),
+                          child: Padding(
+                            padding: const EdgeInsets.all(4),
+                            child: Icon(
+                              Icons.reply_rounded,
+                              size: 16,
+                              color: accent,
+                            ),
+                          ),
+                        ),
                       if (canDelete)
                         InkWell(
                           onTap: onDelete,
@@ -3615,12 +7039,42 @@ class _CommentBubble extends StatelessWidget {
                         ),
                     ],
                   ),
+                  if (isReply && (replyToName ?? '').isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.subdirectory_arrow_right_rounded,
+                          size: 13,
+                          color: secondary,
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            'Em resposta a $replyToName',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: secondary,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 6),
-                  SelectableText(
-                    comment.message,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      height: 1.5,
-                      fontSize: 13.5,
+                  SelectableText.rich(
+                    TextSpan(
+                      children: _mentionSpans(
+                        comment.message,
+                        mentionNames,
+                        theme.textTheme.bodyMedium?.copyWith(
+                              height: 1.5,
+                              fontSize: 13.5,
+                            ) ??
+                            const TextStyle(height: 1.5, fontSize: 13.5),
+                      ),
                     ),
                   ),
                   if (comment.attachments.isNotEmpty) ...[
@@ -3716,6 +7170,966 @@ class _AttachmentRow extends StatelessWidget {
   }
 }
 
+// =============================================================================
+// ENVOLVIDOS — pílulas de quem acompanha o card
+// =============================================================================
+
+/// Wrap de pílulas (avatar + nome + remover) mais o chip de gerenciar. Wrap,
+/// não Row: cinco nomes longos em 320dp precisam quebrar linha, não estourar.
+class _InvolvedPeopleStrip extends StatelessWidget {
+  const _InvolvedPeopleStrip({
+    required this.people,
+    required this.canEdit,
+    required this.saving,
+    required this.onManage,
+    required this.onRemove,
+  });
+
+  final List<KanbanUser> people;
+  final bool canEdit;
+  final bool saving;
+  final VoidCallback onManage;
+  final ValueChanged<KanbanUser> onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+
+    if (people.isEmpty && !canEdit) {
+      return const _MutedHint(
+        icon: Icons.groups_outlined,
+        text: 'Ninguém além do responsável acompanha este card.',
+      );
+    }
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        for (final p in people)
+          Container(
+            padding: EdgeInsets.fromLTRB(4, 4, canEdit ? 2 : 11, 4),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              color: _kInvolvedTone.withValues(alpha: isDark ? 0.13 : 0.07),
+              border: Border.all(
+                color: _kInvolvedTone.withValues(alpha: 0.32),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _SolidAvatar(user: p, size: 24),
+                const SizedBox(width: 7),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 150),
+                  child: Text(
+                    p.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12.5,
+                    ),
+                  ),
+                ),
+                if (canEdit)
+                  IconButton(
+                    icon: Icon(
+                      Icons.close_rounded,
+                      size: 14,
+                      color: saving ? secondary : _kInvolvedTone,
+                    ),
+                    onPressed: saving ? null : () => onRemove(p),
+                    tooltip: 'Remover ${p.name}',
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints(minWidth: 26, minHeight: 26),
+                  ),
+              ],
+            ),
+          ),
+        if (canEdit)
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: saving ? null : onManage,
+              borderRadius: BorderRadius.circular(999),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 9,
+                ),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: _kInvolvedTone.withValues(alpha: 0.45),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (saving)
+                      const SizedBox(
+                        width: 13,
+                        height: 13,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: _kInvolvedTone,
+                        ),
+                      )
+                    else
+                      const Icon(
+                        Icons.person_add_alt_1_rounded,
+                        size: 14,
+                        color: _kInvolvedTone,
+                      ),
+                    const SizedBox(width: 7),
+                    Text(
+                      people.isEmpty ? 'Adicionar pessoas' : 'Gerenciar',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12.5,
+                        color: _kInvolvedTone,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+// =============================================================================
+// AGENDA DO CARD — criar compromisso + lista ligada ao card
+// =============================================================================
+
+/// Convite para marcar: mesma gramática da barra de anexos (faixa larga,
+/// hairline, sem sombra) falando em magenta.
+class _AgendaCreateBar extends StatelessWidget {
+  const _AgendaCreateBar({
+    required this.accent,
+    required this.busy,
+    required this.onTap,
+  });
+
+  final Color accent;
+  final bool busy;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: busy ? null : onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: accent.withValues(alpha: isDark ? 0.12 : 0.06),
+            border: Border.all(color: accent.withValues(alpha: 0.38)),
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: busy
+                    ? CircularProgressIndicator(strokeWidth: 2.2, color: accent)
+                    : Icon(Icons.event_outlined, size: 20, color: accent),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      busy ? 'Agendando…' : 'Marcar compromisso',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 14,
+                        letterSpacing: -0.1,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Visita, reunião ou retorno — já vinculado a este card.',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: secondary,
+                        fontWeight: FontWeight.w600,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (!busy) ...[
+                const SizedBox(width: 8),
+                Icon(Icons.add_rounded, size: 18, color: accent),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Rótulo de grupo da agenda — barrinha curta + palavra, sem virar um segundo
+/// `_SectionHeader` (o cabeçalho da seção já foi dado uma vez).
+class _AgendaGroupLabel extends StatelessWidget {
+  const _AgendaGroupLabel({required this.label, required this.accent});
+
+  final String label;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          Container(
+            width: 14,
+            height: 2,
+            decoration: BoxDecoration(
+              color: accent,
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+          const SizedBox(width: 7),
+          Flexible(
+            child: Text(
+              label.toUpperCase(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: accent,
+                fontWeight: FontWeight.w800,
+                fontSize: 10,
+                letterSpacing: 1.4,
+                height: 1,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Linha de compromisso: bloco de data à esquerda (dia grande + mês), título e
+/// horário no meio, status à direita. Passado entra dessaturado.
+class _AppointmentTile extends StatelessWidget {
+  const _AppointmentTile({
+    required this.appointment,
+    required this.accent,
+    required this.past,
+  });
+
+  final Appointment appointment;
+  final Color accent;
+  final bool past;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final inicio = appointment.startDate.toLocal();
+    final fim = appointment.endDate.toLocal();
+    final cancelado = appointment.status == AppointmentStatus.cancelled;
+    final tone = cancelado ? _kDangerRed : accent;
+
+    final convidados = appointment.invites?.length ?? 0;
+    final meta = <String>[
+      '${DateFormat('HH:mm').format(inicio)}–${DateFormat('HH:mm').format(fim)}',
+      appointment.type.label,
+      if (convidados > 0)
+        '$convidados ${convidados == 1 ? 'convidado' : 'convidados'}',
+    ].join(' · ');
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 46,
+            padding: const EdgeInsets.symmetric(vertical: 7),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(11),
+              color: tone.withValues(alpha: isDark ? 0.16 : 0.09),
+              border: Border.all(color: tone.withValues(alpha: 0.3)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  DateFormat('dd').format(inicio),
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: tone,
+                    height: 1,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  DateFormat('MMM', 'pt_BR').format(inicio).toUpperCase(),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: tone,
+                    fontSize: 9.5,
+                    letterSpacing: 0.8,
+                    height: 1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  appointment.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13.5,
+                    height: 1.25,
+                    color: past ? secondary : null,
+                    decoration:
+                        cancelado ? TextDecoration.lineThrough : null,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  meta,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: secondary,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.2,
+                    height: 1.3,
+                  ),
+                ),
+                if ((appointment.location ?? '').trim().isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Row(
+                    children: [
+                      Icon(Icons.place_outlined, size: 12, color: secondary),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          appointment.location!.trim(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: secondary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              color: tone.withValues(alpha: isDark ? 0.16 : 0.09),
+              border: Border.all(color: tone.withValues(alpha: 0.3)),
+            ),
+            child: Text(
+              appointment.status.label,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: tone,
+                fontWeight: FontWeight.w800,
+                fontSize: 10,
+                height: 1.1,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// TRANSFERÊNCIAS — histórico de troca de funil
+// =============================================================================
+
+/// Atalho para transferir a partir da própria seção de rotas — a pill do hero
+/// continua sendo o caminho rápido; esta é a porta de quem já está lendo o
+/// histórico e decide mudar o card de funil ali mesmo.
+class _TransferActionBar extends StatelessWidget {
+  const _TransferActionBar({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    const tone = _kRouteTone;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: tone.withValues(alpha: isDark ? 0.12 : 0.06),
+            border: Border.all(color: tone.withValues(alpha: 0.38)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.alt_route_rounded, size: 20, color: tone),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Transferir para outro funil',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 14,
+                        letterSpacing: -0.1,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Cria a cópia no destino e registra a rota aqui.',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: secondary,
+                        fontWeight: FontWeight.w600,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.arrow_forward_rounded, size: 17, color: tone),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Uma transferência: origem → destino, quem levou e para quem ficou.
+/// Trilha (dot + fio), nunca card — é a mesma gramática da jornada ao lado.
+class _TransferRow extends StatelessWidget {
+  const _TransferRow({required this.entry, required this.isLast});
+
+  final KanbanTransferHistoryEntry entry;
+  final bool isLast;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    const tone = _kRouteTone;
+
+    final quando = entry.transferredAt == null
+        ? null
+        : DateFormat('dd/MM/yy HH:mm').format(entry.transferredAt!.toLocal());
+
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Column(
+            children: [
+              Container(
+                width: 10,
+                height: 10,
+                margin: const EdgeInsets.only(top: 4),
+                decoration: const BoxDecoration(
+                  color: tone,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              if (!isLast)
+                Expanded(
+                  child: Container(
+                    width: 2,
+                    margin: const EdgeInsets.only(top: 4),
+                    color: ThemeHelpers.borderColor(context)
+                        .withValues(alpha: 0.45),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(bottom: isLast ? 0 : 18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (quando != null)
+                    Text(
+                      quando,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: secondary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  const SizedBox(height: 4),
+                  // Origem → destino em Wrap: nome de funil longo quebra para
+                  // a linha de baixo em vez de estourar a largura.
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      _TransferFunnelChip(
+                        label: entry.fromProjectName ?? 'Funil de origem',
+                        tone: secondary,
+                      ),
+                      Icon(Icons.arrow_forward_rounded, size: 13, color: tone),
+                      _TransferFunnelChip(
+                        label: entry.toProjectName ?? 'Funil de destino',
+                        tone: tone,
+                        strong: true,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  if ((entry.transferredByName ?? '').isNotEmpty)
+                    _TransferMetaLine(
+                      icon: Icons.swap_horiz_rounded,
+                      text: 'Transferido por ${entry.transferredByName}',
+                    ),
+                  if ((entry.assignedToName ?? '').isNotEmpty)
+                    _TransferMetaLine(
+                      icon: Icons.person_outline_rounded,
+                      text: 'Ficou com ${entry.assignedToName}',
+                    ),
+                  if ((entry.notes ?? '').trim().isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(10),
+                        color: tone.withValues(alpha: isDark ? 0.1 : 0.05),
+                        border: Border(
+                          left: BorderSide(color: tone, width: 2.5),
+                        ),
+                      ),
+                      child: Text(
+                        entry.notes!.trim(),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          height: 1.4,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TransferFunnelChip extends StatelessWidget {
+  const _TransferFunnelChip({
+    required this.label,
+    required this.tone,
+    this.strong = false,
+  });
+
+  final String label;
+  final Color tone;
+  final bool strong;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 190),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(999),
+          color: tone.withValues(alpha: isDark ? 0.16 : 0.09),
+          border: Border.all(color: tone.withValues(alpha: strong ? 0.4 : 0.28)),
+        ),
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: tone,
+            fontWeight: strong ? FontWeight.w900 : FontWeight.w700,
+            fontSize: 11,
+            height: 1.1,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TransferMetaLine extends StatelessWidget {
+  const _TransferMetaLine({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(icon, size: 13, color: secondary),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              text,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: secondary,
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// ANEXOS DO CARD — barra de envio + linha de arquivo
+// =============================================================================
+
+/// Convite para anexar: uma faixa tracejada larga (alvo de toque generoso),
+/// nunca um card com sombra. Some do caminho quando o limite estoura.
+class _AttachmentUploadBar extends StatelessWidget {
+  const _AttachmentUploadBar({
+    required this.accent,
+    required this.uploading,
+    required this.full,
+    required this.onPick,
+  });
+
+  final Color accent;
+  final bool uploading;
+  final bool full;
+  final VoidCallback onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final bloqueado = full || uploading;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: bloqueado ? null : onPick,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: bloqueado
+                ? Colors.transparent
+                : accent.withValues(alpha: isDark ? 0.12 : 0.06),
+            border: Border.all(
+              color: bloqueado
+                  ? ThemeHelpers.borderColor(context).withValues(alpha: 0.5)
+                  : accent.withValues(alpha: 0.38),
+            ),
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: uploading
+                    ? CircularProgressIndicator(strokeWidth: 2.2, color: accent)
+                    : Icon(
+                        full
+                            ? Icons.block_rounded
+                            : Icons.cloud_upload_outlined,
+                        size: 20,
+                        color: full ? secondary : accent,
+                      ),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      uploading
+                          ? 'Enviando…'
+                          : full
+                              ? 'Limite de ${KanbanService.maxTaskAttachments} anexos atingido'
+                              : 'Anexar arquivos ao card',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 14,
+                        letterSpacing: -0.1,
+                        color: full ? secondary : null,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      full
+                          ? 'Remova um anexo antes de enviar outro.'
+                          : 'Até ${KanbanService.maxTaskAttachments} arquivos, 200 MB cada.',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: secondary,
+                        fontWeight: FontWeight.w600,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (!bloqueado) ...[
+                const SizedBox(width: 8),
+                Icon(Icons.add_rounded, size: 18, color: accent),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Linha de anexo do card: miniatura/ícone + nome + peso/data + ações.
+/// Flush — a separação entre linhas é a hairline da lista, não uma caixa.
+class _TaskAttachmentTile extends StatelessWidget {
+  const _TaskAttachmentTile({
+    required this.file,
+    required this.accent,
+    required this.canDelete,
+    required this.deleting,
+    required this.onOpen,
+    required this.onCopy,
+    required this.onDelete,
+  });
+
+  final Attachment file;
+  final Color accent;
+  final bool canDelete;
+  final bool deleting;
+  final VoidCallback onOpen;
+  final VoidCallback onCopy;
+  final VoidCallback onDelete;
+
+  IconData get _icon {
+    final mime = file.mimeType.toLowerCase();
+    final nome = file.filename.toLowerCase();
+    if (mime.startsWith('image/')) return Icons.image_outlined;
+    if (mime.startsWith('video/')) return Icons.movie_outlined;
+    if (mime.startsWith('audio/')) return Icons.audiotrack_outlined;
+    if (mime.contains('pdf') || nome.endsWith('.pdf')) {
+      return Icons.picture_as_pdf_outlined;
+    }
+    if (nome.endsWith('.xlsx') || nome.endsWith('.xls') || nome.endsWith('.csv')) {
+      return Icons.table_chart_outlined;
+    }
+    if (nome.endsWith('.doc') || nome.endsWith('.docx')) {
+      return Icons.description_outlined;
+    }
+    if (nome.endsWith('.zip') || nome.endsWith('.rar')) {
+      return Icons.folder_zip_outlined;
+    }
+    return Icons.insert_drive_file_outlined;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+
+    final meta = <String>[
+      if (file.size > 0) _formatFileSize(file.size),
+      if (file.uploadedAt != null)
+        DateFormat('dd/MM/yy HH:mm').format(file.uploadedAt!.toLocal()),
+    ].join(' · ');
+
+    return InkWell(
+      onTap: deleting ? null : onOpen,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(11),
+                color: accent.withValues(alpha: isDark ? 0.18 : 0.1),
+              ),
+              clipBehavior: Clip.antiAlias,
+              alignment: Alignment.center,
+              child: file.isImage && file.bestPreviewUrl.isNotEmpty
+                  ? Image.network(
+                      file.bestPreviewUrl,
+                      fit: BoxFit.cover,
+                      width: 40,
+                      height: 40,
+                      errorBuilder: (_, _, _) =>
+                          Icon(_icon, size: 18, color: accent),
+                    )
+                  : Icon(_icon, size: 18, color: accent),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    file.filename,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13.5,
+                      height: 1.25,
+                    ),
+                  ),
+                  if (meta.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      meta,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: secondary,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 6),
+            if (deleting)
+              const SizedBox(
+                width: 34,
+                height: 34,
+                child: Center(
+                  child: SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              )
+            else ...[
+              IconButton(
+                icon: Icon(Icons.open_in_new_rounded, size: 17, color: accent),
+                onPressed: onOpen,
+                tooltip: 'Abrir',
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+              ),
+              IconButton(
+                icon: Icon(Icons.link_rounded, size: 17, color: secondary),
+                onPressed: onCopy,
+                tooltip: 'Copiar link',
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+              ),
+              if (canDelete)
+                IconButton(
+                  icon: const Icon(
+                    Icons.delete_outline_rounded,
+                    size: 17,
+                    color: _kDangerRed,
+                  ),
+                  onPressed: onDelete,
+                  tooltip: 'Remover',
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 34, minHeight: 34),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _CommentComposer extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
@@ -3728,6 +8142,15 @@ class _CommentComposer extends StatelessWidget {
   final ValueChanged<int> onRemoveFile;
   final Color accent;
 
+  /// Sugestões abertas pelo `@` (vazio = painel fechado).
+  final List<KanbanUser> mentionSuggestions;
+  final bool loadingMentions;
+  final ValueChanged<KanbanUser> onPickMention;
+
+  /// Comentário sendo respondido — vira faixa acima do campo.
+  final KanbanTaskComment? replyTo;
+  final VoidCallback onCancelReply;
+
   const _CommentComposer({
     required this.controller,
     required this.focusNode,
@@ -3739,6 +8162,11 @@ class _CommentComposer extends StatelessWidget {
     required this.onPickFiles,
     required this.onRemoveFile,
     required this.accent,
+    this.mentionSuggestions = const [],
+    this.loadingMentions = false,
+    required this.onPickMention,
+    this.replyTo,
+    required this.onCancelReply,
   });
 
   @override
@@ -3763,6 +8191,158 @@ class _CommentComposer extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
+          // MENÇÕES — painel ACIMA do campo (o teclado sobe por baixo, então
+          // uma lista flutuante embaixo ficaria escondida). Teto de 168px com
+          // rolagem própria: em 320dp o composer não cresce sem controle.
+          if (mentionSuggestions.isNotEmpty || loadingMentions) ...[
+            Container(
+              constraints: const BoxConstraints(maxHeight: 168),
+              margin: const EdgeInsets.only(bottom: 8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                color: _kMentionTone.withValues(alpha: isDark ? 0.12 : 0.06),
+                border: Border.all(
+                  color: _kMentionTone.withValues(alpha: 0.32),
+                ),
+              ),
+              child: loadingMentions
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Center(
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: _kMentionTone,
+                          ),
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      physics: const ClampingScrollPhysics(),
+                      itemCount: mentionSuggestions.length,
+                      itemBuilder: (context, i) {
+                        final u = mentionSuggestions[i];
+                        return InkWell(
+                          onTap: () => onPickMention(u),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 7,
+                            ),
+                            child: Row(
+                              children: [
+                                _SolidAvatar(user: u, size: 26),
+                                const SizedBox(width: 9),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        u.name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: theme.textTheme.bodySmall
+                                            ?.copyWith(
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 12.5,
+                                        ),
+                                      ),
+                                      if (u.email.isNotEmpty)
+                                        Text(
+                                          u.email,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.labelSmall
+                                              ?.copyWith(
+                                            color: secondary,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Icon(
+                                  Icons.alternate_email_rounded,
+                                  size: 15,
+                                  color: _kMentionTone,
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+          // RESPOSTA — faixa com o trecho citado e a saída explícita.
+          if (replyTo != null) ...[
+            Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                color: accent.withValues(alpha: isDark ? 0.14 : 0.07),
+                border: Border(
+                  left: BorderSide(color: accent, width: 3),
+                  top: BorderSide(color: accent.withValues(alpha: 0.24)),
+                  right: BorderSide(color: accent.withValues(alpha: 0.24)),
+                  bottom: BorderSide(color: accent.withValues(alpha: 0.24)),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.reply_rounded, size: 15, color: accent),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Respondendo ${replyTo!.user?.name ?? 'comentário'}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: accent,
+                            letterSpacing: 0.2,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          replyTo!.message,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: secondary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.close_rounded, size: 16, color: secondary),
+                    onPressed: onCancelReply,
+                    tooltip: 'Cancelar resposta',
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 30,
+                      minHeight: 30,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           if (files.isNotEmpty) ...[
             SizedBox(
               height: 36,
@@ -3847,12 +8427,16 @@ class _CommentComposer extends StatelessWidget {
                     minLines: 1,
                     maxLines: 5,
                     maxLength: maxLength,
+                    // Observação é frase, não etiqueta: o teclado abre em
+                    // maiúscula e recapitaliza depois de cada ponto.
+                    textCapitalization: TextCapitalization.sentences,
+                    keyboardType: TextInputType.multiline,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w600,
                       height: 1.35,
                     ),
                     decoration: InputDecoration(
-                      hintText: 'Escreva uma mensagem para o time…',
+                      hintText: 'Escreva para o time… use @ para marcar',
                       hintStyle: theme.textTheme.bodyMedium?.copyWith(
                         color: secondary,
                         fontWeight: FontWeight.w500,
@@ -3868,6 +8452,28 @@ class _CommentComposer extends StatelessWidget {
                     ),
                   ),
                 ),
+                // Saída óbvia do "modo digitação": só existe com o teclado
+                // aberto, discreto, à esquerda do enviar. Layout de teclado
+                // fechado fica exatamente como era.
+                if (mq.viewInsets.bottom > 0)
+                  IconButton(
+                    icon: Icon(
+                      Icons.keyboard_hide_rounded,
+                      size: 18,
+                      color: secondary,
+                    ),
+                    onPressed: () {
+                      focusNode.unfocus();
+                      FocusScope.of(context).unfocus();
+                    },
+                    tooltip: 'Fechar teclado',
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(
+                      minWidth: 34,
+                      minHeight: 34,
+                    ),
+                    padding: EdgeInsets.zero,
+                  ),
                 Padding(
                   padding: const EdgeInsets.only(left: 4),
                   child: Material(
@@ -4447,6 +9053,73 @@ Color _kanbanAccent(BuildContext context) {
   final isDark = Theme.of(context).brightness == Brightness.dark;
   return isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
 }
+
+/// Quebra o texto do comentário em trechos normais + menções destacadas.
+///
+/// A menção vale quando o `@` abre palavra (início da linha ou depois de
+/// espaço/parêntese) — assim `contato@empresa.com` continua texto comum. Se o
+/// que vem depois casa com o nome de alguém da empresa, o nome INTEIRO entra
+/// no destaque; senão só a primeira palavra.
+List<TextSpan> _mentionSpans(
+  String message,
+  List<String> names,
+  TextStyle base,
+) {
+  final mentionStyle = base.copyWith(
+    color: _kMentionTone,
+    fontWeight: FontWeight.w800,
+  );
+  final sorted = [...names]..sort((a, b) => b.length.compareTo(a.length));
+  final lower = message.toLowerCase();
+  final spans = <TextSpan>[];
+  final buffer = StringBuffer();
+
+  void flush() {
+    if (buffer.isEmpty) return;
+    spans.add(TextSpan(text: buffer.toString(), style: base));
+    buffer.clear();
+  }
+
+  var i = 0;
+  while (i < message.length) {
+    final char = message[i];
+    final opensWord =
+        i == 0 || _mentionOpeners.contains(message[i - 1]);
+    if (char != '@' || !opensWord) {
+      buffer.write(char);
+      i++;
+      continue;
+    }
+
+    String? hit;
+    for (final name in sorted) {
+      if (name.trim().isEmpty) continue;
+      final n = name.toLowerCase();
+      if (lower.startsWith(n, i + 1)) {
+        hit = message.substring(i + 1, i + 1 + name.length);
+        break;
+      }
+    }
+    hit ??= _firstMentionWord(message.substring(i + 1));
+    if (hit.isEmpty) {
+      buffer.write(char);
+      i++;
+      continue;
+    }
+    flush();
+    spans.add(TextSpan(text: '@$hit', style: mentionStyle));
+    i += hit.length + 1;
+  }
+  flush();
+  return spans.isEmpty ? [TextSpan(text: message, style: base)] : spans;
+}
+
+const Set<String> _mentionOpeners = {' ', '\n', '\t', '(', '[', '-', ','};
+
+final RegExp _mentionWordRe = RegExp(r'^[A-Za-zÀ-ÿ0-9_.]+');
+
+String _firstMentionWord(String rest) =>
+    _mentionWordRe.firstMatch(rest)?.group(0) ?? '';
 
 String _formatFileSize(int bytes) {
   if (bytes < 1024) return '$bytes B';

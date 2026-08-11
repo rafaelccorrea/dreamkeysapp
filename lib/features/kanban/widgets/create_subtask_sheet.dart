@@ -8,6 +8,13 @@ import '../models/kanban_subtask_models.dart';
 import '../services/kanban_subtask_service.dart';
 import 'subtask_visual_helpers.dart';
 
+/// Identidade cromática da aba "Tarefas" do card — teal/cyan. O vermelho
+/// fica reservado pra marca / erro / destrutivo / atraso.
+const Color kSubTaskAccent = Color(0xFF14B8A6);
+
+/// Verde canônico de confirmar/salvar da casa.
+const Color kConfirmGreen = Color(0xFF059669);
+
 /// Resultado do bottom sheet de criação — `null` se cancelado, instância
 /// preenchida quando a subtarefa é criada com sucesso.
 class CreateSubTaskResult {
@@ -15,59 +22,114 @@ class CreateSubTaskResult {
   const CreateSubTaskResult(this.subtask);
 }
 
-/// Bottom sheet de criação de **subtarefa (checklist) dentro de um card**
+/// Bottom sheet de **criação** de subtarefa (checklist) dentro de um card
 /// do Kanban. Paridade funcional com `CreateSubTaskPage.tsx` do web, mas
 /// como **modal** mais natural pra mobile.
-///
-/// Use sempre que precisar criar uma tarefa atrelada a um cartão:
-///   - Dentro do detalhe do card (aba "Tarefas").
-///   - Na tela global "Lista de tarefas" via "Nova tarefa" → seleciona card → abre este sheet.
 Future<CreateSubTaskResult?> showCreateSubTaskSheet({
   required BuildContext context,
   required String taskId,
   String? parentCardTitle,
+}) async {
+  final created = await _showSubTaskFormSheet(
+    context: context,
+    taskId: taskId,
+    parentCardTitle: parentCardTitle,
+    initial: null,
+  );
+  return created == null ? null : CreateSubTaskResult(created);
+}
+
+/// Bottom sheet de **edição** da subtarefa — mesma anatomia do de criação,
+/// com os campos pré-preenchidos e salvamento via `PUT /kanban/subtasks/:id`.
+/// Devolve a subtarefa atualizada, ou `null` se o usuário cancelou.
+Future<KanbanSubTask?> showEditSubTaskSheet({
+  required BuildContext context,
+  required KanbanSubTask subtask,
+  String? parentCardTitle,
 }) {
-  return showModalBottomSheet<CreateSubTaskResult>(
+  return _showSubTaskFormSheet(
+    context: context,
+    taskId: subtask.taskId,
+    parentCardTitle: parentCardTitle,
+    initial: subtask,
+  );
+}
+
+Future<KanbanSubTask?> _showSubTaskFormSheet({
+  required BuildContext context,
+  required String taskId,
+  required String? parentCardTitle,
+  required KanbanSubTask? initial,
+}) {
+  final maxHeight = MediaQuery.sizeOf(context).height * 0.85;
+  return showModalBottomSheet<KanbanSubTask>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
-    showDragHandle: true,
     backgroundColor: ThemeHelpers.cardBackgroundColor(context),
+    constraints: BoxConstraints(maxHeight: maxHeight),
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
     ),
-    builder: (sheetContext) => _CreateSubTaskSheet(
+    builder: (sheetContext) => _SubTaskFormSheet(
       taskId: taskId,
       parentCardTitle: parentCardTitle,
+      initial: initial,
     ),
   );
 }
 
-class _CreateSubTaskSheet extends StatefulWidget {
+class _SubTaskFormSheet extends StatefulWidget {
   final String taskId;
   final String? parentCardTitle;
+  final KanbanSubTask? initial;
 
-  const _CreateSubTaskSheet({
+  const _SubTaskFormSheet({
     required this.taskId,
     required this.parentCardTitle,
+    required this.initial,
   });
 
   @override
-  State<_CreateSubTaskSheet> createState() => _CreateSubTaskSheetState();
+  State<_SubTaskFormSheet> createState() => _SubTaskFormSheetState();
 }
 
-class _CreateSubTaskSheetState extends State<_CreateSubTaskSheet> {
+class _SubTaskFormSheetState extends State<_SubTaskFormSheet> {
   static const int _kTitleMax = 200;
   static const int _kDescMax = 4000;
 
-  final _titleController = TextEditingController();
-  final _descController = TextEditingController();
+  late final TextEditingController _titleController;
+  late final TextEditingController _descController;
 
   SubTaskType? _selectedType;
   DateTime? _dueDate;
   TimeOfDay? _dueTime;
   bool _submitting = false;
   String? _formError;
+
+  bool get _isEdit => widget.initial != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final initial = widget.initial;
+    _titleController = TextEditingController(text: initial?.title ?? '');
+    _descController = TextEditingController(text: initial?.description ?? '');
+    _selectedType = initial?.taskType;
+    _dueDate = initial?.dueDate?.toLocal();
+    _dueTime = _parseTime(initial?.dueTime);
+  }
+
+  static TimeOfDay? _parseTime(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return null;
+    final parts = raw.trim().split(':');
+    if (parts.length < 2) return null;
+    final h = int.tryParse(parts[0]);
+    final m = int.tryParse(parts[1]);
+    if (h == null || m == null) return null;
+    if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+    return TimeOfDay(hour: h, minute: m);
+  }
 
   @override
   void dispose() {
@@ -117,12 +179,40 @@ class _CreateSubTaskSheetState extends State<_CreateSubTaskSheet> {
       _submitting = true;
       _formError = null;
     });
+
+    final title = _titleController.text.trim();
+    final desc = _descController.text.trim();
     final dueTimeStr = _dueTime == null ? null : _fmtTime(_dueTime!);
+
+    if (_isEdit) {
+      final initial = widget.initial!;
+      final dto = UpdateSubTaskDto(
+        title: title,
+        description: desc,
+        dueDate: _dueDate,
+        clearDueDate: _dueDate == null && initial.dueDate != null,
+        dueTime: dueTimeStr,
+        clearDueTime: dueTimeStr == null && (initial.dueTime ?? '').isNotEmpty,
+        taskType: _selectedType,
+        clearTaskType: _selectedType == null && initial.taskType != null,
+      );
+      final res =
+          await KanbanSubtaskService.instance.updateSubTask(initial.id, dto);
+      if (!mounted) return;
+      if (res.success && res.data != null) {
+        Navigator.of(context).pop(res.data!);
+      } else {
+        setState(() {
+          _submitting = false;
+          _formError = res.message ?? 'Não foi possível salvar a tarefa.';
+        });
+      }
+      return;
+    }
+
     final dto = CreateSubTaskDto(
-      title: _titleController.text.trim(),
-      description: _descController.text.trim().isEmpty
-          ? null
-          : _descController.text.trim(),
+      title: title,
+      description: desc.isEmpty ? null : desc,
       dueDate: _dueDate,
       dueTime: dueTimeStr,
       taskType: _selectedType,
@@ -131,7 +221,7 @@ class _CreateSubTaskSheetState extends State<_CreateSubTaskSheet> {
         await KanbanSubtaskService.instance.createSubTask(widget.taskId, dto);
     if (!mounted) return;
     if (res.success && res.data != null) {
-      Navigator.of(context).pop(CreateSubTaskResult(res.data!));
+      Navigator.of(context).pop(res.data!);
     } else {
       setState(() {
         _submitting = false;
@@ -144,199 +234,249 @@ class _CreateSubTaskSheetState extends State<_CreateSubTaskSheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final accent = isDark
-        ? const Color(0xFFFF4D67)
-        : AppColors.primary.primary;
-    final danger = isDark
-        ? AppColors.status.errorDarkMode
-        : AppColors.status.error;
+    final danger =
+        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
     final viewInsets = MediaQuery.viewInsetsOf(context);
 
     return Padding(
       padding: EdgeInsets.only(bottom: viewInsets.bottom),
-      child: SingleChildScrollView(
-        physics: const ClampingScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildHeader(theme, accent),
-            const SizedBox(height: 18),
-            _label('Título', required: true),
-            const SizedBox(height: 6),
-            TextField(
-              controller: _titleController,
-              autofocus: true,
-              maxLength: _kTitleMax,
-              maxLines: 1,
-              onChanged: (_) => setState(() {}),
-              decoration: InputDecoration(
-                hintText: 'Ex.: Retornar ligação, enviar proposta…',
-                counterText: '',
-                isDense: true,
-              ),
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-                color: ThemeHelpers.textColor(context),
-              ),
-            ),
-            const SizedBox(height: 18),
-            _label('Tipo de atividade'),
-            const SizedBox(height: 8),
-            _TypeChips(
-              selected: _selectedType,
-              onChanged: (t) => setState(() => _selectedType = t),
-            ),
-            const SizedBox(height: 18),
-            _label('Prazo'),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: _PickerTile(
-                    icon: LucideIcons.calendar,
-                    label: _dueDate == null ? 'Data' : _fmtDate(_dueDate!),
-                    isSelected: _dueDate != null,
-                    accent: accent,
-                    onTap: _pickDate,
-                    onClear: _dueDate == null
-                        ? null
-                        : () => setState(() => _dueDate = null),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SubTaskSheetGrabber(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 12, 0),
+            child: _buildHeader(theme),
+          ),
+          Flexible(
+            child: SingleChildScrollView(
+              physics: const ClampingScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _label('Título', required: true),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: _titleController,
+                    autofocus: !_isEdit,
+                    maxLength: _kTitleMax,
+                    maxLines: 1,
+                    textCapitalization: TextCapitalization.sentences,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      hintText: 'Ex.: Retornar ligação, enviar proposta…',
+                      counterText: '',
+                      isDense: true,
+                    ),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: ThemeHelpers.textColor(context),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _PickerTile(
-                    icon: LucideIcons.clock,
-                    label: _dueTime == null ? 'Hora' : _fmtTime(_dueTime!),
-                    isSelected: _dueTime != null,
-                    accent: accent,
-                    onTap: _pickTime,
-                    onClear: _dueTime == null
-                        ? null
-                        : () => setState(() => _dueTime = null),
+                  const SizedBox(height: 18),
+                  _label('Tipo de atividade'),
+                  const SizedBox(height: 8),
+                  _TypeChips(
+                    selected: _selectedType,
+                    onChanged: (t) => setState(() => _selectedType = t),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            _label('Descrição'),
-            const SizedBox(height: 6),
-            TextField(
-              controller: _descController,
-              maxLines: 3,
-              maxLength: _kDescMax,
-              onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                hintText: 'Detalhes da tarefa (opcional)…',
-                isDense: true,
-              ),
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w500,
-                color: ThemeHelpers.textColor(context),
-              ),
-            ),
-            if (_formError != null) ...[
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                decoration: BoxDecoration(
-                  color: danger.withValues(alpha: 0.07),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: danger.withValues(alpha: 0.22)),
-                ),
-                child: Row(
-                  children: [
-                    Icon(LucideIcons.alertCircle, size: 16, color: danger),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _formError!,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: danger,
-                          fontWeight: FontWeight.w700,
+                  const SizedBox(height: 18),
+                  _label('Prazo'),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _PickerTile(
+                          icon: LucideIcons.calendar,
+                          label: _dueDate == null ? 'Data' : _fmtDate(_dueDate!),
+                          isSelected: _dueDate != null,
+                          accent: kSubTaskAccent,
+                          onTap: _pickDate,
+                          onClear: _dueDate == null
+                              ? null
+                              : () => setState(() => _dueDate = null),
                         ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _PickerTile(
+                          icon: LucideIcons.clock,
+                          label: _dueTime == null ? 'Hora' : _fmtTime(_dueTime!),
+                          isSelected: _dueTime != null,
+                          accent: kSubTaskAccent,
+                          onTap: _pickTime,
+                          onClear: _dueTime == null
+                              ? null
+                              : () => setState(() => _dueTime = null),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  _label('Descrição'),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: _descController,
+                    maxLines: 3,
+                    maxLength: _kDescMax,
+                    textCapitalization: TextCapitalization.sentences,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      hintText: 'Detalhes da tarefa (opcional)…',
+                      isDense: true,
+                    ),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w500,
+                      color: ThemeHelpers.textColor(context),
+                    ),
+                  ),
+                  if (_formError != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                      decoration: BoxDecoration(
+                        color: danger.withValues(alpha: 0.07),
+                        borderRadius: BorderRadius.circular(12),
+                        border:
+                            Border.all(color: danger.withValues(alpha: 0.22)),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(LucideIcons.alertCircle, size: 16, color: danger),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _formError!,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: danger,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
-                ),
+                  const SizedBox(height: 4),
+                ],
               ),
-            ],
-            const SizedBox(height: 18),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed:
-                        _submitting ? null : () => Navigator.of(context).pop(),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(13),
-                      ),
-                    ),
-                    child: const Text('Cancelar'),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _canSubmit ? _submit : null,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: accent,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(13),
-                      ),
-                    ),
-                    icon: _submitting
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(LucideIcons.plus, size: 18),
-                    label: Text(_submitting ? 'Criando…' : 'Criar tarefa'),
-                  ),
-                ),
-              ],
             ),
-          ],
-        ),
+          ),
+          _buildFooter(theme),
+        ],
       ),
     );
   }
 
-  Widget _buildHeader(ThemeData theme, Color accent) {
-    final isDark = theme.brightness == Brightness.dark;
+  Widget _buildFooter(ThemeData theme) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextButton(
+              onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+              style: TextButton.styleFrom(
+                // O tema global pinta TextButton de vermelho — forçamos o
+                // cinza aqui: "Cancelar" nunca é ação destrutiva.
+                foregroundColor: ThemeHelpers.textSecondaryColor(context),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                textStyle: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              child: const Text('Cancelar'),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            flex: 2,
+            child: ElevatedButton.icon(
+              onPressed: _canSubmit ? _submit : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kConfirmGreen,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor:
+                    kConfirmGreen.withValues(alpha: 0.35),
+                disabledForegroundColor: Colors.white.withValues(alpha: 0.75),
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                textStyle: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              icon: _submitting
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Icon(_isEdit ? LucideIcons.check : LucideIcons.plus,
+                      size: 18),
+              label: Text(
+                _submitting
+                    ? (_isEdit ? 'Salvando…' : 'Criando…')
+                    : (_isEdit ? 'Salvar' : 'Criar tarefa'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeader(ThemeData theme) {
+    final subtitle = _isEdit
+        ? widget.initial!.title
+        : (widget.parentCardTitle == null || widget.parentCardTitle!.isEmpty
+            ? 'Adicionar tarefa ao card'
+            : 'No card "${widget.parentCardTitle}"');
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          width: 40,
-          height: 40,
+          width: 38,
+          height: 38,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            gradient: LinearGradient(
-              colors: [accent, const Color(0xFF7C3AED)],
+            borderRadius: BorderRadius.circular(13),
+            gradient: const LinearGradient(
+              colors: [kSubTaskAccent, Color(0xFF0891B2)],
             ),
             boxShadow: [
               BoxShadow(
-                color: accent.withValues(alpha: isDark ? 0.32 : 0.22),
+                color: kSubTaskAccent.withValues(alpha: 0.28),
                 blurRadius: 12,
                 offset: const Offset(0, 6),
-                spreadRadius: -2,
+                spreadRadius: -3,
               ),
             ],
           ),
-          child: const Icon(LucideIcons.checkSquare,
-              color: Colors.white, size: 20),
+          child: Icon(
+            _isEdit ? LucideIcons.pencil : LucideIcons.checkSquare,
+            color: Colors.white,
+            size: 18,
+          ),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -344,19 +484,16 @@ class _CreateSubTaskSheetState extends State<_CreateSubTaskSheet> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'NOVA TAREFA',
+                _isEdit ? 'EDITAR TAREFA' : 'NOVA TAREFA',
                 style: theme.textTheme.labelSmall?.copyWith(
-                  color: accent,
+                  color: kSubTaskAccent,
                   fontWeight: FontWeight.w900,
                   letterSpacing: 2.0,
                 ),
               ),
               const SizedBox(height: 4),
               Text(
-                widget.parentCardTitle == null ||
-                        widget.parentCardTitle!.isEmpty
-                    ? 'Adicionar tarefa ao card'
-                    : 'No card "${widget.parentCardTitle}"',
+                subtitle,
                 style: theme.textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w900,
                   color: ThemeHelpers.textColor(context),
@@ -369,6 +506,17 @@ class _CreateSubTaskSheetState extends State<_CreateSubTaskSheet> {
             ],
           ),
         ),
+        const SizedBox(width: 8),
+        IconButton(
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+          visualDensity: VisualDensity.compact,
+          tooltip: 'Fechar',
+          icon: Icon(
+            LucideIcons.x,
+            size: 18,
+            color: ThemeHelpers.textSecondaryColor(context),
+          ),
+        ),
       ],
     );
   }
@@ -377,12 +525,16 @@ class _CreateSubTaskSheetState extends State<_CreateSubTaskSheet> {
     final theme = Theme.of(context);
     return Row(
       children: [
-        Text(
-          text.toUpperCase(),
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(context),
-            fontWeight: FontWeight.w900,
-            letterSpacing: 1.4,
+        Flexible(
+          child: Text(
+            text.toUpperCase(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: ThemeHelpers.textSecondaryColor(context),
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.4,
+            ),
           ),
         ),
         if (required) ...[
@@ -396,6 +548,28 @@ class _CreateSubTaskSheetState extends State<_CreateSubTaskSheet> {
           ),
         ],
       ],
+    );
+  }
+}
+
+/// Grabber padrão da casa — 42×4, centralizado, com respiro acima/abaixo.
+class SubTaskSheetGrabber extends StatelessWidget {
+  const SubTaskSheetGrabber({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 10, bottom: 10),
+      child: Center(
+        child: Container(
+          width: 42,
+          height: 4,
+          decoration: BoxDecoration(
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.7),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -485,9 +659,8 @@ class _Chip extends StatelessWidget {
               Text(
                 type.label,
                 style: theme.textTheme.labelMedium?.copyWith(
-                  color: active
-                      ? style.color
-                      : ThemeHelpers.textColor(context),
+                  color:
+                      active ? style.color : ThemeHelpers.textColor(context),
                   fontWeight: FontWeight.w800,
                   letterSpacing: 0.1,
                 ),

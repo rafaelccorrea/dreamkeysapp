@@ -17,6 +17,7 @@ import '../widgets/dashboard_filters_drawer.dart';
 import '../widgets/broker_dashboard_hub.dart';
 import '../../../core/notifications/subtask_reminder_service.dart';
 import '../../../core/navigation/deep_link_service.dart';
+import '../../../core/push/app_push_service.dart';
 
 // Formatters globais
 final _currencyFormatter = NumberFormat.currency(
@@ -55,10 +56,14 @@ class _DashboardPageState extends State<DashboardPage> {
     super.initState();
     _loadDashboardData();
     unawaited(SubtaskReminderService.instance.syncFromServer());
-    // Home montada = usuário autenticado. Libera deep links (warm) e consome
-    // o pendente do cold start (ex.: "Sair" da Ilha Dinâmica com app fechado).
+    // Home montada = usuário autenticado e bootstrap do splash concluído.
+    // Libera deep links (warm) e consome o pendente do cold start (ex.:
+    // "Sair" da Ilha Dinâmica com app fechado). O toque em push usa a MESMA
+    // fila: navegar antes disto arrancava o splash do stack e abortava o
+    // bootstrap (token/empresa), quebrando a tela de destino.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       DeepLinkService.instance.notifyHomeReady();
+      AppPushService.instance.notifyHomeReady();
     });
   }
 

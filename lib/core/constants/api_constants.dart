@@ -333,6 +333,33 @@ class ApiConstants {
   static String kanbanTaskAttachments(String taskId) =>
       '/kanban/tasks/$taskId/attachments';
 
+  /// Remoção de um anexo do card: `DELETE /kanban/tasks/:id/attachments/:key`.
+  /// O `key` é a **chave do S3** (`attachment.key`, ex.: `kanban/tasks/<id>/foto.jpg`)
+  /// e contém `/` — por isso vai sempre url-encoded, igual ao web
+  /// (`encodeURIComponent` em `kanbanApi.deleteTaskAttachment`).
+  static String kanbanTaskAttachmentByKey(String taskId, String attachmentKey) =>
+      '/kanban/tasks/$taskId/attachments/${Uri.encodeComponent(attachmentKey)}';
+
+  /// Campos estendidos do card (`GET` devolve a task inteira; `PUT` aceita
+  /// patch parcial). Apesar do nome, o `GET` responde `KanbanTaskResponseDto`.
+  static String kanbanTaskFields(String taskId) =>
+      '/kanban/tasks/$taskId/fields';
+
+  /// Registro de ligação (`POST` com `{ notes? }` — permissão `kanban:update`
+  /// + `canCommentTasks` no funil).
+  static String kanbanTaskRegisterCall(String taskId) =>
+      '/kanban/tasks/$taskId/register-call';
+
+  /// Permissões efetivas do card. **Ainda não existe no backend** — ver
+  /// `KanbanService.getTaskCapabilities` para a regra de fallback.
+  static String kanbanTaskCapabilities(String taskId) =>
+      '/kanban/tasks/$taskId/capabilities';
+
+  /// Histórico de transferências entre funis (`GET` — permissão
+  /// `kanban:view_history`).
+  static String kanbanTaskTransferHistory(String taskId) =>
+      '/kanban/tasks/$taskId/transfer-history';
+
   // Endpoints de Kanban
   static const String kanbanMyBoards = '/kanban/my-boards';
   static String kanbanBoard(String teamId) => '/kanban/board/$teamId';

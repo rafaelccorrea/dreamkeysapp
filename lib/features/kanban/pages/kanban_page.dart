@@ -1461,6 +1461,15 @@ class _KanbanPageState extends State<KanbanPage> {
                                         return false;
                                       },
                                       child: ListView.builder(
+                                        // Guarda a posição de rolagem POR
+                                        // COLUNA: quem trabalha os leads mais
+                                        // antigos vive no fim da lista e, sem
+                                        // isto, todo rebuild (voltar do card,
+                                        // lançar feedback) jogava de volta ao
+                                        // topo — a pessoa rolava tudo de novo.
+                                        key: PageStorageKey<String>(
+                                          'kanban-col-${column.id}',
+                                        ),
                                         shrinkWrap: false,
                                         physics:
                                             const AlwaysScrollableScrollPhysics(),
@@ -1626,12 +1635,9 @@ class _KanbanPageState extends State<KanbanPage> {
     if (!(controller.permissions?.canMoveTasks ?? false)) {
       return GestureDetector(
         onDoubleTap: () {
-          showModalBottomSheet(
-            context: context,
-            isScrollControlled: true,
-            backgroundColor: Colors.transparent,
-            barrierColor: Colors.black54,
-            builder: (context) => TaskDetailsModal(task: task),
+          Navigator.push(
+            context,
+            adaptivePageRoute<void>(builder: (_) => TaskDetailsPage(task: task)),
           );
         },
         onLongPress: () {
@@ -1670,12 +1676,9 @@ class _KanbanPageState extends State<KanbanPage> {
       childWhenDragging: Opacity(opacity: 0.28, child: _buildTaskCard(task)),
       child: GestureDetector(
         onDoubleTap: () {
-          showModalBottomSheet(
-            context: context,
-            isScrollControlled: true,
-            backgroundColor: Colors.transparent,
-            barrierColor: Colors.black54,
-            builder: (context) => TaskDetailsModal(task: task),
+          Navigator.push(
+            context,
+            adaptivePageRoute<void>(builder: (_) => TaskDetailsPage(task: task)),
           );
         },
         onLongPress: () {
@@ -1964,12 +1967,11 @@ class _KanbanPageState extends State<KanbanPage> {
       onDoubleTap: bulkMode
           ? null
           : () {
-              showModalBottomSheet(
-                context: context,
-                isScrollControlled: true,
-                backgroundColor: Colors.transparent,
-                barrierColor: Colors.black54,
-                builder: (context) => TaskDetailsModal(task: task),
+              Navigator.push(
+                context,
+                adaptivePageRoute<void>(
+                  builder: (_) => TaskDetailsPage(task: task),
+                ),
               );
             },
       child: Container(
@@ -2597,11 +2599,9 @@ class _KanbanPageState extends State<KanbanPage> {
           icon: Icons.info_outline_rounded,
           label: 'Ver detalhes',
           accent: blue,
-          onTap: () => showModalBottomSheet(
-            context: context,
-            isScrollControlled: true,
-            backgroundColor: Colors.transparent,
-            builder: (_) => TaskDetailsModal(task: task),
+          onTap: () => Navigator.push(
+            context,
+            adaptivePageRoute<void>(builder: (_) => TaskDetailsPage(task: task)),
           ),
         ),
         if (perms?.canEditTasks ?? true)

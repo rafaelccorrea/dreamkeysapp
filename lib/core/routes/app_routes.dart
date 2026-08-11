@@ -188,7 +188,7 @@ class AppRoutes {
   /// `/kanban/tarefas` do `imobx-front` — usuário pode ver pendentes, hoje,
   /// atrasadas, concluídas e todas.
   static const String kanbanSubtasks = '/kanban/tarefas';
-  /// Deep-link para a negociação (card do funil) — abre o `TaskDetailsModal`
+  /// Deep-link para a negociação (card do funil) — abre a `TaskDetailsPage`
   /// automaticamente após carregar a `KanbanTask` por id. Paridade com
   /// `/kanban/task/:taskId` do `imobx-front`.
   static String kanbanTaskDetails(String taskId) => '/kanban/task/$taskId';

@@ -12,9 +12,11 @@ import '../widgets/task_details_modal.dart';
 ///
 /// Recebe um `taskId` e:
 ///   1. Busca os dados completos via `KanbanService.getTaskById`.
-///   2. Abre o `TaskDetailsModal` automaticamente em modal bottom sheet.
-///   3. Quando o modal fecha, esta página também fecha — entregando o
-///      usuário de volta na origem (ex.: lista global de tarefas).
+///   2. Carregado, renderiza a própria [TaskDetailsPage] no lugar — nada de
+///      abrir sheet por cima. Como a tela de detalhes já traz o seu chrome
+///      (back + título do lead), o voltar entrega o usuário direto na origem
+///      (ex.: lista global de tarefas), sem pilha intermediária.
+///   3. Enquanto carrega — ou se falhar — mostra os estados desta casca.
 ///
 /// Paridade com a rota `/kanban/task/:taskId` do `imobx-front`.
 class KanbanTaskDetailsPage extends StatefulWidget {
@@ -30,7 +32,6 @@ class _KanbanTaskDetailsPageState extends State<KanbanTaskDetailsPage> {
   bool _loading = true;
   String? _error;
   KanbanTask? _task;
-  bool _modalOpened = false;
 
   @override
   void initState() {
@@ -53,42 +54,21 @@ class _KanbanTaskDetailsPageState extends State<KanbanTaskDetailsPage> {
         _error = res.message ?? 'Não foi possível abrir esta negociação.';
       }
     });
-
-    // Abre o modal logo após o frame da página renderizar.
-    if (_task != null && !_modalOpened) {
-      _modalOpened = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _openTaskModal();
-      });
-    }
-  }
-
-  Future<void> _openTaskModal() async {
-    if (_task == null) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black54,
-      isDismissible: true,
-      enableDrag: true,
-      useSafeArea: false,
-      builder: (sheetContext) => TaskDetailsModal(task: _task!),
-    );
-    // Quando o modal fecha, voltamos pra origem (ex.: lista de tarefas).
-    if (mounted) Navigator.of(context).pop();
   }
 
   @override
   Widget build(BuildContext context) {
+    // Carregado: a tela de detalhes ASSUME a rota (ela já é a tela completa,
+    // com o seu próprio AppScaffold) — nada de casca em volta, senão o back
+    // precisaria de dois toques.
+    final task = _task;
+    if (task != null) return TaskDetailsPage(task: task);
+
     return AppScaffold(
       title: 'Negociação',
       showBottomNavigation: false,
-      body: _loading
-          ? _buildLoading(context)
-          : _error != null
-              ? _buildError(context)
-              : const SizedBox.shrink(),
+      showDrawer: false,
+      body: _loading ? _buildLoading(context) : _buildError(context),
     );
   }
 

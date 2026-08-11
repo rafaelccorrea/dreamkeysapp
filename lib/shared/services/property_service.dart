@@ -161,12 +161,21 @@ class PropertyApprovalSettingsActive {
   final bool preservePublicationOnEdit;
   final bool applyWatermarkToImages;
 
+  /// Sistema de multi-aprovadores ligado: as filas passam a exigir **voto**
+  /// em vez do aprovar/recusar direto (mesma bifurcação do web).
+  final bool approversEnabled;
+
+  /// Esteira de aprovação de edição de campos protegidos ligada.
+  final bool protectedFieldsEnabled;
+
   const PropertyApprovalSettingsActive({
     this.requireApprovalToBeAvailable = false,
     this.requireApprovalToPublishOnSite = false,
     this.requireOwnerAuthorizationToBeAvailable = false,
     this.preservePublicationOnEdit = true,
     this.applyWatermarkToImages = true,
+    this.approversEnabled = false,
+    this.protectedFieldsEnabled = false,
   });
 
   factory PropertyApprovalSettingsActive.fromJson(Map<String, dynamic> json) {
@@ -197,6 +206,12 @@ class PropertyApprovalSettingsActive {
       applyWatermarkToImages: readBool(
         json['applyWatermarkToImages'] ?? json['apply_watermark_to_images'],
         true,
+      ),
+      approversEnabled: readBool(
+        json['approversEnabled'] ?? json['approvers_enabled'],
+      ),
+      protectedFieldsEnabled: readBool(
+        json['protectedFieldsEnabled'] ?? json['protected_fields_enabled'],
       ),
     );
   }
@@ -450,6 +465,12 @@ class Property {
   /// assinada pelo proprietário. Equivalente a `ownerAuthStatus == 'signed'`
   /// para fins de bloqueio de edição.
   final String? ownerAuthSignedAt;
+  /// Data ISO do último envio da autorização para assinatura. Alimenta o
+  /// "Enviado em … — aguardando assinatura" da fila do proprietário.
+  final String? ownerAuthSentAt;
+  /// `true` quando o backend permite reenviar o e-mail do link de assinatura
+  /// (documento vivo no Autentique). Espelha `canResendOwnerAuthEmail` do web.
+  final bool? canResendOwnerAuthEmail;
   // ─── Fila de aprovação: disponibilidade ───────────────────────────────
   /// Data ISO em que a disponibilidade foi recusada (item ainda na fila
   /// aguardando reenvio para nova análise). Quando preenchida com status
@@ -544,6 +565,8 @@ class Property {
     this.captors,
     this.ownerAuthStatus,
     this.ownerAuthSignedAt,
+    this.ownerAuthSentAt,
+    this.canResendOwnerAuthEmail,
     this.availabilityRejectedAt,
     this.availabilityRejectionReason,
     this.availabilityApprovedAt,
@@ -682,6 +705,10 @@ class Property {
           json['owner_auth_status']?.toString(),
       ownerAuthSignedAt: json['ownerAuthSignedAt']?.toString() ??
           json['owner_auth_signed_at']?.toString(),
+      ownerAuthSentAt: json['ownerAuthSentAt']?.toString() ??
+          json['owner_auth_sent_at']?.toString(),
+      canResendOwnerAuthEmail: json['canResendOwnerAuthEmail'] as bool? ??
+          json['can_resend_owner_auth_email'] as bool?,
       availabilityRejectedAt: json['availabilityRejectedAt']?.toString() ??
           json['availability_rejected_at']?.toString(),
       availabilityRejectionReason: json['availabilityRejectionReason']

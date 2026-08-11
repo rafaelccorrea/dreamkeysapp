@@ -1,8 +1,14 @@
-import 'package:flutter/foundation.dart';
+import 'dart:convert';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+
+import '../../../core/constants/api_constants.dart';
 import '../../../shared/services/api_service.dart';
 import '../../../shared/services/property_service.dart';
 import '../models/property_activity_models.dart';
+import '../models/property_change_request.dart';
 
 /// Filtros textuais aceitos por todas as listagens da fila.
 ///
@@ -167,6 +173,73 @@ enum ApprovalType {
 
   final String value;
   const ApprovalType(this.value);
+}
+
+/// Retorno de `POST /properties/:id/owner-authorization/send`.
+/// `signatureUrl` só vem quando o envio foi "apenas link"
+/// (`enviarPorEmail: false`) ou quando o proprietário não tem e-mail.
+class OwnerAuthSendResult {
+  final String? message;
+  final String? signatureUrl;
+
+  const OwnerAuthSendResult({this.message, this.signatureUrl});
+
+  bool get hasLink => (signatureUrl ?? '').isNotEmpty;
+}
+
+/// Estado de um job de exportação das filas de aprovação
+/// (`GET /properties/approval-export-jobs/:jobId`).
+///
+/// A exportação é assíncrona: cria-se o job, consulta-se o status até sair de
+/// `pending`/`processing`, e só então o CSV é baixado. Os quatro estados são
+/// os do `PropertyApprovalExportQueueService` do backend.
+class ApprovalExportJob {
+  final String jobId;
+  final String status;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
+  final DateTime? completedAt;
+  final int totalRows;
+  final String? error;
+  final String? fileName;
+
+  const ApprovalExportJob({
+    required this.jobId,
+    required this.status,
+    this.createdAt,
+    this.updatedAt,
+    this.completedAt,
+    this.totalRows = 0,
+    this.error,
+    this.fileName,
+  });
+
+  bool get isPending => status == 'pending';
+  bool get isProcessing => status == 'processing';
+  bool get isCompleted => status == 'completed';
+  bool get isFailed => status == 'failed';
+
+  /// Ainda vale consultar de novo — quem faz polling para aqui quando vira
+  /// `false` (concluído ou falhou).
+  bool get isRunning => isPending || isProcessing;
+
+  static DateTime? _date(dynamic v) {
+    if (v == null) return null;
+    return DateTime.tryParse(v.toString())?.toLocal();
+  }
+
+  factory ApprovalExportJob.fromJson(Map<String, dynamic> json) {
+    return ApprovalExportJob(
+      jobId: json['jobId']?.toString() ?? '',
+      status: json['status']?.toString() ?? 'pending',
+      createdAt: _date(json['createdAt']),
+      updatedAt: _date(json['updatedAt']),
+      completedAt: _date(json['completedAt']),
+      totalRows: int.tryParse(json['totalRows']?.toString() ?? '') ?? 0,
+      error: json['error']?.toString(),
+      fileName: json['fileName']?.toString(),
+    );
+  }
 }
 
 /// Serviço dedicado às filas de aprovação de imóveis (paridade com
@@ -670,7 +743,699 @@ class PropertyApprovalService {
     }
   }
 
+  // ─── Notificar responsáveis sobre contato do proprietário ─────────────
+
+  /// `POST /properties/:id/notify-responsibles-owner-contact` — avisa os
+  /// responsáveis/captadores que o proprietário precisa ser contatado. Mesmo
+  /// cooldown de 1h do lembrete (429 com `retryAfterSeconds`).
+  Future<ApiResponse<Map<String, dynamic>>> notifyResponsiblesOwnerContact(
+    String propertyId, {
+    required ApprovalType approvalType,
+  }) {
+    return _postMap(
+      endpoint: '/properties/$propertyId/notify-responsibles-owner-contact',
+      body: {'approvalType': approvalType.value},
+      logTag: 'notify-responsibles-owner-contact',
+      fallbackError: 'Erro ao notificar responsáveis',
+    );
+  }
+
+  // ─── Autorização do proprietário ──────────────────────────────────────
+
+  /// `POST /properties/:id/owner-authorization/ignore-signature` — dispensa a
+  /// assinatura digital pendente. `reason` é **obrigatório** no backend
+  /// (`IgnoreOwnerAuthorizationSignatureBodyDto`).
+  Future<ApiResponse<Map<String, dynamic>>> ignoreOwnerAuthorizationSignature(
+    String propertyId, {
+    required String reason,
+  }) {
+    return _postMap(
+      endpoint: '/properties/$propertyId/owner-authorization/ignore-signature',
+      body: {'reason': reason},
+      logTag: 'owner-auth ignore-signature',
+      fallbackError: 'Erro ao dispensar a assinatura',
+    );
+  }
+
+  /// `POST /properties/:id/owner-authorization/invalidate` — apaga a
+  /// assinatura e os votos, devolvendo o imóvel para "aguardando proprietário".
+  Future<ApiResponse<Map<String, dynamic>>> invalidateOwnerAuthorization(
+    String propertyId,
+  ) {
+    return _postMap(
+      endpoint: '/properties/$propertyId/owner-authorization/invalidate',
+      body: const <String, dynamic>{},
+      logTag: 'owner-auth invalidate',
+      fallbackError: 'Erro ao invalidar a assinatura',
+    );
+  }
+
+  /// `POST /properties/:id/owner-authorization/reenviar-email` — reenvia o
+  /// link de assinatura para o e-mail do proprietário (Autentique).
+  Future<ApiResponse<Map<String, dynamic>>> resendOwnerAuthorizationEmail(
+    String propertyId,
+  ) {
+    return _postMap(
+      endpoint: '/properties/$propertyId/owner-authorization/reenviar-email',
+      body: const <String, dynamic>{},
+      logTag: 'owner-auth reenviar-email',
+      fallbackError: 'Erro ao reenviar o e-mail',
+    );
+  }
+
+  /// `POST /properties/:id/owner-authorization/approve-physical` — valida o
+  /// anexo da assinatura física (exige `property:approve_availability`).
+  Future<ApiResponse<Map<String, dynamic>>> approveOwnerAuthorizationPhysical(
+    String propertyId,
+  ) {
+    return _postMap(
+      endpoint: '/properties/$propertyId/owner-authorization/approve-physical',
+      body: const <String, dynamic>{},
+      logTag: 'owner-auth approve-physical',
+      fallbackError: 'Erro ao validar o anexo',
+    );
+  }
+
+  /// `POST /properties/:id/owner-authorization/reject-physical` — recusa o
+  /// anexo. `reason` é opcional no backend.
+  Future<ApiResponse<Map<String, dynamic>>> rejectOwnerAuthorizationPhysical(
+    String propertyId, {
+    String? reason,
+  }) {
+    final r = reason?.trim();
+    return _postMap(
+      endpoint: '/properties/$propertyId/owner-authorization/reject-physical',
+      body: r == null || r.isEmpty ? const <String, dynamic>{} : {'reason': r},
+      logTag: 'owner-auth reject-physical',
+      fallbackError: 'Erro ao recusar o anexo',
+    );
+  }
+
+  /// `GET /properties/:id/owner-authorization/physical-preview` — URL
+  /// temporária para abrir o anexo assinado em papel.
+  Future<ApiResponse<String>> getOwnerAuthorizationPhysicalPreviewUrl(
+    String propertyId,
+  ) async {
+    try {
+      final response = await _api.get<Map<String, dynamic>>(
+        '/properties/$propertyId/owner-authorization/physical-preview',
+      );
+      if (response.success && response.data != null) {
+        final raw = response.data!;
+        final body = raw['data'] is Map<String, dynamic>
+            ? raw['data'] as Map<String, dynamic>
+            : raw;
+        final url = body['url']?.toString() ?? '';
+        if (url.isEmpty) {
+          return ApiResponse.error(
+            message: 'O anexo não está disponível para visualização.',
+            statusCode: response.statusCode,
+          );
+        }
+        return ApiResponse.success(data: url, statusCode: response.statusCode);
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao abrir o anexo',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [APPROVAL] owner-auth physical-preview: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// `GET /properties/:id/owner-authorization/send-history` — quem enviou,
+  /// para qual e-mail e quando; mais a assinatura, se já houver.
+  Future<ApiResponse<OwnerAuthSendHistory>> getOwnerAuthorizationSendHistory(
+    String propertyId,
+  ) async {
+    try {
+      final response = await _api.get<dynamic>(
+        '/properties/$propertyId/owner-authorization/send-history',
+      );
+      if (response.success) {
+        final raw = response.data;
+        final body = raw is Map && raw['data'] != null ? raw['data'] : raw;
+        return ApiResponse.success(
+          data: OwnerAuthSendHistory.fromAny(body),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao carregar o histórico de envios',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [APPROVAL] owner-auth send-history: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// `POST /properties/:id/owner-authorization/send` — gera o PDF do template
+  /// e envia ao Autentique. Devolve `signatureUrl` quando o envio foi só link
+  /// (`enviarPorEmail: false`).
+  Future<ApiResponse<OwnerAuthSendResult>> sendOwnerAuthorization(
+    String propertyId, {
+    required String signerName,
+    String? signerEmail,
+    required bool sendByEmail,
+    required bool hasExclusivity,
+    int? exclusivityDays,
+    required bool exclusivityIndeterminate,
+    required bool acceptsPlaca,
+    required String operationType,
+    String logoSource = 'intellisys',
+  }) async {
+    final body = <String, dynamic>{
+      'signerName': signerName,
+      'enviarPorEmail': sendByEmail,
+      'hasExclusivity': hasExclusivity,
+      'exclusivityDays':
+          hasExclusivity && !exclusivityIndeterminate ? exclusivityDays : null,
+      'exclusivityIndeterminate': exclusivityIndeterminate,
+      'acceptsPlaca': acceptsPlaca,
+      'operationType': operationType,
+      'logoSource': logoSource,
+    };
+    final email = signerEmail?.trim();
+    if (email != null && email.isNotEmpty) body['signerEmail'] = email;
+
+    final res = await _postMap(
+      endpoint: '/properties/$propertyId/owner-authorization/send',
+      body: body,
+      logTag: 'owner-auth send',
+      fallbackError: 'Erro ao enviar para assinatura',
+    );
+    if (!res.success) {
+      return ApiResponse.error(
+        message: res.message ?? 'Erro ao enviar para assinatura',
+        statusCode: res.statusCode,
+        data: res.data,
+      );
+    }
+    final map = res.data ?? const <String, dynamic>{};
+    return ApiResponse.success(
+      data: OwnerAuthSendResult(
+        message: map['message']?.toString(),
+        signatureUrl: map['signatureUrl']?.toString(),
+      ),
+      statusCode: res.statusCode,
+    );
+  }
+
+  /// `POST /properties/:id/owner-authorization/upload-physical` (multipart) —
+  /// anexa o documento assinado em papel para validação do aprovador.
+  Future<ApiResponse<Map<String, dynamic>>> uploadOwnerAuthorizationPhysical(
+    String propertyId,
+    File file,
+  ) {
+    return _postMultipart(
+      endpoint: '/properties/$propertyId/owner-authorization/upload-physical',
+      file: file,
+      logTag: 'owner-auth upload-physical',
+      fallbackError: 'Erro ao enviar o anexo',
+    );
+  }
+
+  /// `POST /properties/:id/owner-authorization/send-document` (multipart) —
+  /// envia um PDF próprio da empresa ao Autentique no lugar do template.
+  Future<ApiResponse<Map<String, dynamic>>> sendOwnerAuthorizationWithDocument(
+    String propertyId,
+    File file, {
+    String? signerEmail,
+    String? signerName,
+    bool sendByEmail = true,
+  }) {
+    final fields = <String, String>{'enviarPorEmail': '$sendByEmail'};
+    final email = signerEmail?.trim();
+    final name = signerName?.trim();
+    if (email != null && email.isNotEmpty) fields['signerEmail'] = email;
+    if (name != null && name.isNotEmpty) fields['signerName'] = name;
+    return _postMultipart(
+      endpoint: '/properties/$propertyId/owner-authorization/send-document',
+      file: file,
+      fields: fields,
+      logTag: 'owner-auth send-document',
+      fallbackError: 'Erro ao enviar o documento',
+    );
+  }
+
+  // ─── Votação (multi-aprovadores) ──────────────────────────────────────
+
+  /// `GET /properties/:id/voting-status?type=` — quórum, votos e pendentes.
+  Future<ApiResponse<ApprovalVotingStatus>> getVotingStatus(
+    String propertyId, {
+    required ApprovalType type,
+  }) async {
+    try {
+      final response = await _api.get<Map<String, dynamic>>(
+        '/properties/$propertyId/voting-status',
+        queryParameters: {'type': type.value},
+      );
+      if (response.success && response.data != null) {
+        final raw = response.data!;
+        final body = raw['approvers'] == null && raw['data'] is Map
+            ? Map<String, dynamic>.from(raw['data'] as Map)
+            : raw;
+        return ApiResponse.success(
+          data: ApprovalVotingStatus.fromJson(body),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao carregar o status de votação',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [APPROVAL] voting-status: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// `POST /properties/:id/vote/:voteType` — registra o voto do aprovador.
+  /// `decision` aceita `approved` | `rejected` (`ApprovalVoteDecision`).
+  Future<ApiResponse<Map<String, dynamic>>> castVote(
+    String propertyId, {
+    required ApprovalType type,
+    required bool approved,
+    String? comment,
+  }) {
+    final body = <String, dynamic>{
+      'decision': approved ? 'approved' : 'rejected',
+    };
+    final c = comment?.trim();
+    if (c != null && c.isNotEmpty) body['comment'] = c;
+    return _postMap(
+      endpoint: '/properties/$propertyId/vote/${type.value}',
+      body: body,
+      logTag: 'cast-vote',
+      fallbackError: 'Erro ao registrar o voto',
+    );
+  }
+
+  // ─── Solicitações de alteração (campos protegidos) ────────────────────
+
+  /// `GET /property-change-requests` — revisores veem todas da empresa; os
+  /// demais só as próprias (escopo aplicado no backend). `canReview` do
+  /// envelope é a fonte da verdade para exibir aprovar/recusar.
+  Future<ApiResponse<PropertyChangeRequestList>> listChangeRequests({
+    PropertyChangeRequestStatus? status,
+    bool mine = false,
+    String? propertyId,
+  }) async {
+    try {
+      final params = <String, String>{};
+      if (status != null) params['status'] = status.value;
+      if (mine) params['mine'] = 'true';
+      if (propertyId != null && propertyId.isNotEmpty) {
+        params['propertyId'] = propertyId;
+      }
+      final response = await _api.get<Map<String, dynamic>>(
+        '/property-change-requests',
+        queryParameters: params,
+      );
+      if (response.success && response.data != null) {
+        final raw = response.data!;
+        final body = raw['items'] == null && raw['data'] is Map
+            ? Map<String, dynamic>.from(raw['data'] as Map)
+            : raw;
+        return ApiResponse.success(
+          data: PropertyChangeRequestList.fromJson(body),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao carregar solicitações',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [APPROVAL] change-requests: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// `GET /property-change-requests/pending-count` — badge da aba.
+  Future<ApiResponse<int>> getChangeRequestsPendingCount() async {
+    try {
+      final response = await _api.get<Map<String, dynamic>>(
+        '/property-change-requests/pending-count',
+      );
+      if (response.success && response.data != null) {
+        final raw = response.data!;
+        final body = raw['count'] == null && raw['data'] is Map
+            ? Map<String, dynamic>.from(raw['data'] as Map)
+            : raw;
+        final v = body['count'];
+        final count = v is int
+            ? v
+            : (v is num ? v.toInt() : int.tryParse('$v') ?? 0);
+        return ApiResponse.success(
+          data: count,
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao contar solicitações',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [APPROVAL] change-requests count: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// `POST /property-change-requests/:id/approve` — aplica o diff ao imóvel.
+  Future<ApiResponse<Map<String, dynamic>>> approveChangeRequest(String id) {
+    return _postMap(
+      endpoint: '/property-change-requests/$id/approve',
+      body: const <String, dynamic>{},
+      logTag: 'change-request approve',
+      fallbackError: 'Erro ao aprovar a solicitação',
+    );
+  }
+
+  /// `POST /property-change-requests/:id/reject` — `reason` obrigatório.
+  Future<ApiResponse<Map<String, dynamic>>> rejectChangeRequest(
+    String id, {
+    required String reason,
+  }) {
+    return _postMap(
+      endpoint: '/property-change-requests/$id/reject',
+      body: {'reason': reason},
+      logTag: 'change-request reject',
+      fallbackError: 'Erro ao recusar a solicitação',
+    );
+  }
+
+  // ─── Exportação das filas (job assíncrono) ─────────────────────────────
+
+  /// `POST /properties/approval-export-jobs` — enfileira a exportação em CSV
+  /// da aba pedida e devolve o `jobId`. O backend processa em segundo plano
+  /// (mesmo fluxo do web: cria → consulta status → baixa).
+  ///
+  /// [tab] aceita `mine`, `owner_authorization`, `availability`,
+  /// `publication`, `rejected` e `all` — qualquer outro valor o backend
+  /// normaliza para `mine`.
+  Future<ApiResponse<String>> createApprovalExportJob({
+    required String tab,
+    ApprovalListFilters filters = ApprovalListFilters.empty,
+    bool includeRejectedAvailability = true,
+    bool includeRejectedPublication = true,
+  }) async {
+    final body = <String, dynamic>{
+      'tab': tab,
+      ...filters.toQueryParams(),
+      if (tab == 'rejected' || tab == 'all') ...{
+        'includeRejectedAvailability': includeRejectedAvailability,
+        'includeRejectedPublication': includeRejectedPublication,
+      },
+    };
+    final res = await _postMap(
+      endpoint: '/properties/approval-export-jobs',
+      body: body,
+      logTag: 'approval-export-job create',
+      fallbackError: 'Erro ao enfileirar a exportação',
+    );
+    if (!res.success) {
+      return ApiResponse.error(
+        message: res.message ?? 'Erro ao enfileirar a exportação',
+        statusCode: res.statusCode,
+        data: res.error,
+      );
+    }
+    final raw = res.data ?? const <String, dynamic>{};
+    final body2 = raw['data'] is Map<String, dynamic>
+        ? raw['data'] as Map<String, dynamic>
+        : raw;
+    final jobId = body2['jobId']?.toString() ?? '';
+    if (jobId.isEmpty) {
+      return ApiResponse.error(
+        message: 'A exportação não retornou um identificador de job.',
+        statusCode: res.statusCode,
+      );
+    }
+    return ApiResponse.success(data: jobId, statusCode: res.statusCode);
+  }
+
+  /// `GET /properties/approval-export-jobs/:jobId` — status do job.
+  Future<ApiResponse<ApprovalExportJob>> getApprovalExportJobStatus(
+    String jobId,
+  ) async {
+    try {
+      final response = await _api.get<Map<String, dynamic>>(
+        '/properties/approval-export-jobs/$jobId',
+      );
+      if (response.success && response.data != null) {
+        final raw = response.data!;
+        final body = raw['data'] is Map<String, dynamic>
+            ? raw['data'] as Map<String, dynamic>
+            : raw;
+        return ApiResponse.success(
+          data: ApprovalExportJob.fromJson(body),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao consultar a exportação',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [APPROVAL] approval-export-job status: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// `GET /properties/approval-export-jobs/:jobId/download` — bytes do CSV.
+  /// O `ApiService` só fala JSON, então baixamos com `http` cru reusando os
+  /// headers da sessão (Authorization + X-Company-ID).
+  Future<ApiResponse<List<int>>> downloadApprovalExportJob(
+    String jobId,
+  ) async {
+    const path = '/properties/approval-export-jobs';
+    try {
+      final uri = Uri.parse(
+        '${ApiConstants.baseApiUrl}$path/$jobId/download',
+      );
+      final headers = await _api.buildOutboundHeaders(endpoint: path);
+      final response = await http
+          .get(uri, headers: headers)
+          .timeout(const Duration(seconds: 90));
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return ApiResponse.success(
+          data: response.bodyBytes.toList(),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: _messageFromBody(
+          response.body,
+          'Não foi possível baixar o arquivo da exportação',
+        ),
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [APPROVAL] approval-export-job download: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// `POST /properties/:id/owner-authorization/preview` — gera o PDF da
+  /// autorização com as opções escolhidas **sem enviar** ao proprietário.
+  /// Resposta é binária (application/pdf), por isso usa `http` cru.
+  Future<ApiResponse<List<int>>> previewOwnerAuthorization(
+    String propertyId, {
+    required bool hasExclusivity,
+    required bool exclusivityIndeterminate,
+    int? exclusivityDays,
+    required bool acceptsPlaca,
+    required String operationType,
+    required String logoSource,
+  }) async {
+    final endpoint = '/properties/$propertyId/owner-authorization/preview';
+    try {
+      final uri = Uri.parse('${ApiConstants.baseApiUrl}$endpoint');
+      final headers = await _api.buildOutboundHeaders(endpoint: endpoint);
+      final response = await http
+          .post(
+            uri,
+            headers: headers,
+            body: jsonEncode({
+              'hasExclusivity': hasExclusivity,
+              'exclusivityIndeterminate': exclusivityIndeterminate,
+              'exclusivityDays':
+                  hasExclusivity && !exclusivityIndeterminate
+                      ? exclusivityDays
+                      : null,
+              'acceptsPlaca': acceptsPlaca,
+              'operationType': operationType,
+              'logoSource': logoSource,
+            }),
+          )
+          .timeout(const Duration(seconds: 90));
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return ApiResponse.success(
+          data: response.bodyBytes.toList(),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: _messageFromBody(
+          response.body,
+          'Não foi possível gerar a pré-visualização',
+        ),
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [APPROVAL] owner-auth preview: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
   // ─── Helpers ───────────────────────────────────────────────────────────
+
+  /// Extrai `message` de um corpo JSON de erro (aceita string ou lista).
+  String _messageFromBody(String body, String fallback) {
+    if (body.isEmpty) return fallback;
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map) {
+        final raw = decoded['message'];
+        if (raw is List && raw.isNotEmpty) return raw.first.toString();
+        if (raw != null) return raw.toString();
+      }
+    } catch (_) {
+      // Corpo não-JSON (ex.: HTML de proxy) — usa o fallback.
+    }
+    return fallback;
+  }
+
+  /// POST que devolve um envelope livre (`{ message: ... }` na maioria das
+  /// rotas de ação). Mantém o `statusCode` para o caller tratar 429/403.
+  Future<ApiResponse<Map<String, dynamic>>> _postMap({
+    required String endpoint,
+    required Map<String, dynamic> body,
+    required String logTag,
+    required String fallbackError,
+  }) async {
+    try {
+      final response = await _api.post<Map<String, dynamic>>(
+        endpoint,
+        body: body,
+      );
+      if (response.success) {
+        return ApiResponse.success(
+          data: response.data ?? const <String, dynamic>{},
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? fallbackError,
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [APPROVAL] $logTag: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Upload multipart (campo `file`) — o `ApiService` só fala JSON, então
+  /// montamos o `MultipartRequest` reaproveitando `buildOutboundHeaders`
+  /// (Authorization + X-Company-ID) sem `Content-Type` (o boundary é do http).
+  Future<ApiResponse<Map<String, dynamic>>> _postMultipart({
+    required String endpoint,
+    required File file,
+    Map<String, String>? fields,
+    required String logTag,
+    required String fallbackError,
+  }) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseApiUrl}$endpoint');
+      final request = http.MultipartRequest('POST', uri);
+      request.headers.addAll(
+        await _api.buildOutboundHeaders(
+          endpoint: endpoint,
+          excludeContentType: true,
+        ),
+      );
+      final length = await file.length();
+      request.files.add(
+        http.MultipartFile(
+          'file',
+          http.ByteStream(file.openRead()),
+          length,
+          filename: file.path.split(RegExp(r'[/\\]')).last,
+        ),
+      );
+      if (fields != null) request.fields.addAll(fields);
+
+      final streamed =
+          await request.send().timeout(const Duration(seconds: 120));
+      final response = await http.Response.fromStream(streamed);
+      Map<String, dynamic> parsed = const {};
+      if (response.body.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(response.body);
+          if (decoded is Map) parsed = Map<String, dynamic>.from(decoded);
+        } catch (_) {
+          // Corpo não-JSON — segue com o mapa vazio.
+        }
+      }
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return ApiResponse.success(
+          data: parsed,
+          statusCode: response.statusCode,
+        );
+      }
+      final raw = parsed['message'];
+      final message = raw is List && raw.isNotEmpty
+          ? raw.first.toString()
+          : (raw?.toString() ?? fallbackError);
+      return ApiResponse.error(
+        message: message,
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [APPROVAL] $logTag: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
 
   Future<ApiResponse<Property>> _postProperty({
     required String endpoint,

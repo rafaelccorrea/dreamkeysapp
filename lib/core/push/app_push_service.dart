@@ -15,6 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../constants/api_constants.dart';
 import '../navigation/app_navigator.dart';
 import '../routes/app_routes.dart';
+import '../session/session_bootstrap.dart';
 import '../../features/notifications/widgets/notification_center.dart';
 import '../../shared/utils/app_deep_link.dart';
 import '../../firebase_options.dart';
@@ -508,10 +509,60 @@ class AppPushService {
     );
   }
 
+  // ── Toque em notificação: fila até a Home + gate de sessão ──────────────
+  //
+  // POR QUÊ: em cold start o toque chega nos PRIMEIROS frames (via
+  // `getInitialMessage`), com o splash ainda a carregar token, empresa,
+  // módulos e permissões. Navegar aí era destrutivo: o fallback fazia
+  // `pushNamedAndRemoveUntil` e ARRANCAVA a rota do splash do stack — o
+  // `if (!mounted) return` do splash abortava o bootstrap no meio e o app
+  // ficava na Home sem token/empresa em memória. Era essa a origem do
+  // "abre o painel de notificações e, ao tocar num item, dá erro": a tela
+  // de destino pedia rota protegida sem `X-Company-ID`.
+  //
+  // Mesmo desenho do [DeepLinkService]: o payload fica PENDENTE e é
+  // consumido quando a Home monta ([notifyHomeReady]). O gate de sessão é
+  // ADICIONAL — a fila garante o bootstrap, o gate garante a empresa.
+  Map<String, dynamic>? _pendingTapPayload;
+  bool _homeReady = false;
+
+  /// Chamado pela Home (DashboardPage) quando o usuário autenticado chega
+  /// lá. Consome o toque pendente do cold start e libera navegação imediata
+  /// para toques futuros (app em background/uso).
+  void notifyHomeReady() {
+    _homeReady = true;
+    final pending = _pendingTapPayload;
+    _pendingTapPayload = null;
+    if (pending != null) {
+      unawaited(_navigateFromTapPayload(pending));
+    }
+  }
+
   void _handleNotificationTapPayload(Map<String, dynamic> data) {
+    if (!_homeReady || appNavigatorKey.currentState == null) {
+      // Ainda no splash/login: guarda e navega quando a Home montar.
+      _pendingTapPayload = data;
+      return;
+    }
+    unawaited(_navigateFromTapPayload(data));
+  }
+
+  Future<void> _navigateFromTapPayload(Map<String, dynamic> data) async {
+    // Rotas protegidas exigem `X-Company-ID`. Idempotente e instantâneo
+    // quando a sessão já está pronta (caso normal do app em uso).
+    await SessionBootstrap.instance.ensureReady(
+      timeout: const Duration(seconds: 12),
+    );
+
     unawaited(NotificationController.instance.refreshUnreadCount());
+
     final nav = appNavigatorKey.currentState;
-    if (nav == null) return;
+    if (nav == null) {
+      // Navigator sumiu durante a espera — devolve à fila em vez de perder
+      // o toque do usuário.
+      _pendingTapPayload = data;
+      return;
+    }
 
     final route = AppDeepLink.fromPushData(data);
     if (route != null && route.isNotEmpty) {

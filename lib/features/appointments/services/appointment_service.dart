@@ -24,6 +24,9 @@ class AppointmentService {
     String? endDate,
     String? propertyId,
     String? clientId,
+    // Agendamentos vinculados a um card do CRM
+    // (`GET /appointments?kanbanTaskId=` — filtro do `FilterAppointmentDto`).
+    String? kanbanTaskId,
     int? page,
     int? limit,
     bool? onlyMyData,
@@ -43,6 +46,9 @@ class AppointmentService {
       }
       if (clientId != null && clientId.isNotEmpty) {
         params['clientId'] = clientId;
+      }
+      if (kanbanTaskId != null && kanbanTaskId.isNotEmpty) {
+        params['kanbanTaskId'] = kanbanTaskId;
       }
       if (page != null) params['page'] = page.toString();
       if (limit != null) params['limit'] = limit.toString();

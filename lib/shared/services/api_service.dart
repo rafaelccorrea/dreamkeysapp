@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../../core/constants/api_constants.dart';
+import '../../core/session/session_bootstrap.dart';
 import '../../core/utils/api_connection_message.dart';
 import 'secure_storage_service.dart';
 import 'auth_service.dart';
@@ -113,31 +114,6 @@ class ApiService {
     return false;
   }
 
-  /// Rotas onde o Company ID pode estar a ser gravado em paralelo (paridade com
-  /// `api.ts` do imobx-front: dashboard, /properties, /kanban).
-  bool _mayReceiveCompanyIdSoon(String? endpoint) {
-    if (endpoint == null) return false;
-    if (endpoint.contains('/dashboard')) return true;
-    if (endpoint.startsWith('/properties')) return true;
-    if (endpoint.startsWith('/kanban')) return true;
-    return false;
-  }
-
-  /// Aguarda Company ID aparecer (ex.: após login enquanto `/companies` grava o ID)
-  Future<String?> _waitForCompanyId({Duration maxWait = const Duration(milliseconds: 500)}) async {
-    final startTime = DateTime.now();
-    
-    while (DateTime.now().difference(startTime) < maxWait) {
-      final companyId = await SecureStorageService.instance.getCompanyId();
-      if (companyId != null && companyId.isNotEmpty) {
-        return companyId;
-      }
-      await Future.delayed(const Duration(milliseconds: 50));
-    }
-    
-    return null;
-  }
-
   /// Helper público para serviços que usam `http.MultipartRequest` ou
   /// `http.get/post/...` direto (fora do `_executeRequest`). Devolve o
   /// mapa de headers seguindo as **mesmas regras** do interceptor do
@@ -172,14 +148,12 @@ class ApiService {
   ///   - Rotas opcionais (`_isOptionalCompanyIdRoute`) → envia
   ///     `X-Company-ID` se houver, sem bloquear quando faltar.
   ///   - Demais rotas (kanban, properties, dashboard, clients, …) →
-  ///     `X-Company-ID` é obrigatório. Em rotas que podem estar correndo
-  ///     com a inicialização (`_mayReceiveCompanyIdSoon`) aguardamos até
-  ///     2s pelo ID antes de bloquear.
+  ///     `X-Company-ID` é obrigatório. Faltando o ID, aguardamos o
+  ///     `SessionBootstrap` resolver a empresa antes de bloquear.
   Future<Map<String, String>> _getDefaultHeaders(String? endpoint) async {
     final isAuthOrPublic = _isExceptionRoute(endpoint);
     final isAuthNoToken = _isAuthRouteWithoutToken(endpoint);
     final isOptionalRoute = _isOptionalCompanyIdRoute(endpoint);
-    final mayReceiveCompanySoon = _mayReceiveCompanyIdSoon(endpoint);
 
     final headers = <String, String>{
       ApiConstants.contentTypeHeader: ApiConstants.contentTypeJson,
@@ -207,15 +181,26 @@ class ApiService {
     }
 
     // Rotas protegidas — Company ID obrigatório.
-    if (companyId == null || companyId.isEmpty) {
-      if (mayReceiveCompanySoon && _token != null) {
-        debugPrint(
-          '⏳ [API_SERVICE] Aguardando Company ID (dashboard/imóveis/kanban)...',
-        );
-        companyId = await _waitForCompanyId(
-          maxWait: const Duration(milliseconds: 2000),
-        );
-      }
+    //
+    // CORRIDA (raiz do bug): o `companyId` só nasce quando alguém carrega
+    // `/companies`. Quem chega numa tela protegida antes disso — login
+    // biométrico, deep link de push, cold start — pedia sem empresa e caía
+    // na tela de erro. O polling cego de antes (500ms/2s) só esperava; não
+    // MANDAVA ninguém resolver, então frequentemente expirava à toa.
+    //
+    // Agora delegamos ao `SessionBootstrap`: ele resolve a empresa se
+    // preciso e é idempotente, então N requisições concorrentes disparam
+    // uma única carga de `/companies` e esperam o mesmo future.
+    //
+    // `/companies` é rota opcional (retorna acima), logo não há recursão.
+    if ((companyId == null || companyId.isEmpty) &&
+        _token != null &&
+        !SessionBootstrap.instance.userHasNoCompany) {
+      debugPrint('⏳ [API_SERVICE] Sem Company ID — aguardando sessão pronta...');
+      await SessionBootstrap.instance.ensureReady(
+        timeout: const Duration(seconds: 8),
+      );
+      companyId = await SecureStorageService.instance.getCompanyId();
     }
 
     if (companyId == null || companyId.isEmpty) {

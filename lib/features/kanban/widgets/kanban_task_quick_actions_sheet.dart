@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/navigation/adaptive_page_route.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/utils/broker_contact_actions.dart';
@@ -112,14 +113,18 @@ Future<void> showKanbanTaskQuickActions(
             leading: const Icon(Icons.info_outline),
             title: const Text('Ver detalhes'),
             onTap: () {
+              // Detalhes agora é TELA: fecha o sheet primeiro e empilha a rota
+              // no frame seguinte (empurrar durante o pop engole a transição).
               Navigator.pop(sheetContext);
-              showModalBottomSheet<void>(
-                context: pageContext,
-                isScrollControlled: true,
-                backgroundColor: Colors.transparent,
-                barrierColor: Colors.black54,
-                builder: (ctx) => TaskDetailsModal(task: enriched),
-              );
+              Future.microtask(() {
+                if (!pageContext.mounted) return;
+                Navigator.push(
+                  pageContext,
+                  adaptivePageRoute<void>(
+                    builder: (_) => TaskDetailsPage(task: enriched),
+                  ),
+                );
+              });
             },
           ),
           if (perms?.canTransfer ?? perms?.canEditTasks ?? false)

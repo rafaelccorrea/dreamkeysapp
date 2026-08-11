@@ -3,8 +3,8 @@ import 'auth_service.dart';
 import 'initialization_service.dart';
 import 'subscription_service.dart';
 import 'company_service.dart';
-import 'secure_storage_service.dart';
 import '../../core/routes/app_routes.dart';
+import '../../core/session/session_bootstrap.dart';
 
 /// Serviço para gerenciar o fluxo completo de login
 class LoginFlowService {
@@ -277,42 +277,30 @@ class LoginFlowService {
       }
 
       // ETAPA 2: Carregar companies
+      //
+      // A seleção vive no `CompanyService.resolveAndPersistPreferredCompany`
+      // — a MESMA rotina que o `SessionBootstrap` usa no boot e no login
+      // biométrico. Antes esta etapa era a única no app que gravava o
+      // `companyId`, então qualquer entrada que não passasse por aqui
+      // (biometria, deep link) deixava a sessão sem empresa.
       debugPrint('🏢 [LOGIN_FLOW] Carregando empresas...');
       final companyService = CompanyService.instance;
-      final companiesResponse = await companyService.getCompanies();
+      final selection = await companyService.resolveAndPersistPreferredCompany();
 
-      String? selectedCompanyId;
+      final selectedCompanyId = selection.companyId;
 
-      if (!companiesResponse.success) {
-        // Se erro 404, usuário não tem empresas
-        if (companiesResponse.statusCode == 404) {
-          debugPrint('ℹ️ [LOGIN_FLOW] Usuário não tem empresas (404)');
-          await SecureStorageService.instance.clearCompanyId();
-          
-          // Se é master/admin, redirecionar para criar empresa
-          if (isMasterOrAdmin) {
-            return LoginFlowResult.redirect(
-              route: AppRoutes.home,
-              message: 'Nenhuma empresa encontrada — crie uma no painel web',
-            );
-          }
-        } else {
-          debugPrint('⚠️ [LOGIN_FLOW] Erro ao carregar empresas: ${companiesResponse.message}');
-          // Tentar continuar com Company ID existente se houver
-          selectedCompanyId = await SecureStorageService.instance.getCompanyId();
-        }
-      } else if (companiesResponse.data != null && companiesResponse.data!.isNotEmpty) {
-        // Selecionar empresa preferida (matrix ou primeira)
-        final preferredCompany = CompanyService.choosePreferredCompany(companiesResponse.data!);
-        if (preferredCompany != null) {
-          selectedCompanyId = preferredCompany.id;
-          await SecureStorageService.instance.saveCompanyId(selectedCompanyId);
-          debugPrint('✅ [LOGIN_FLOW] Company ID selecionado: $selectedCompanyId (${preferredCompany.name})');
-        }
-      } else {
-        // Garantir que uma empresa esteja selecionada (se houver empresas disponíveis)
-        await companyService.ensureCompanySelected();
-        selectedCompanyId = await SecureStorageService.instance.getCompanyId();
+      // Master/admin sem nenhuma empresa: cria no painel web.
+      if (selection.userHasNoCompany && isMasterOrAdmin) {
+        return LoginFlowResult.redirect(
+          route: AppRoutes.home,
+          message: 'Nenhuma empresa encontrada — crie uma no painel web',
+        );
+      }
+
+      // Empresa já resolvida aqui: o `SessionBootstrap` não precisa ir de
+      // novo a `/companies` quando a Home pedir sessão pronta.
+      if (selectedCompanyId != null && selectedCompanyId.isNotEmpty) {
+        SessionBootstrap.instance.markReady();
       }
 
       // Se é master/admin e tem empresas, redirecionar direto para dashboard

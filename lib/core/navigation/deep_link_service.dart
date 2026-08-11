@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../routes/app_routes.dart';
+import '../session/session_bootstrap.dart';
 import 'app_navigator.dart';
 
 /// Deep links `dreamkeys://` (hoje: Ilha Dinâmica do check-in).
@@ -62,7 +65,7 @@ class DeepLinkService {
     final pending = _pending;
     _pending = null;
     if (pending != null) {
-      _navigate(pending);
+      unawaited(_navigate(pending));
     }
   }
 
@@ -80,10 +83,10 @@ class DeepLinkService {
       _pending = link; // cold start: espera a Home montar
       return;
     }
-    _navigate(link);
+    unawaited(_navigate(link));
   }
 
-  void _navigate(String link) {
+  Future<void> _navigate(String link) async {
     final uri = Uri.tryParse(link);
     if (uri == null || uri.scheme != 'dreamkeys') return;
 
@@ -94,6 +97,14 @@ class DeepLinkService {
       ...uri.pathSegments.where((s) => s.isNotEmpty),
     ];
     if (segments.isEmpty) return;
+
+    // O check-in é rota PROTEGIDA (exige `X-Company-ID`). A fila do
+    // `_homeReady` garante que o usuário já está autenticado, mas não que a
+    // empresa foi resolvida — este gate garante. Idempotente: retorna na
+    // hora quando a sessão já está pronta.
+    await SessionBootstrap.instance.ensureReady(
+      timeout: const Duration(seconds: 12),
+    );
 
     final nav = appNavigatorKey.currentState;
     if (nav == null) {

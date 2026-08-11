@@ -1186,12 +1186,19 @@ class KanbanService {
     }
   }
 
-  /// Cria comentário em uma tarefa com suporte a anexos
+  /// Cria comentário em uma tarefa com suporte a anexos.
+  ///
+  /// [mentionedUserIds] são os usuários mencionados: o backend espera o campo
+  /// como **string JSON** de UUIDs dentro do multipart (há um `@Transform` que
+  /// faz o parse), exatamente como o web envia.
+  /// [parentCommentId] transforma o comentário em resposta a outro.
   Future<ApiResponse<KanbanTaskComment>> createComment(
     String taskId,
     String message,
-    List<File>? files,
-  ) async {
+    List<File>? files, {
+    List<String>? mentionedUserIds,
+    String? parentCommentId,
+  }) async {
     try {
       debugPrint('💬 [KANBAN_SERVICE] Criando comentário na tarefa: $taskId');
       debugPrint('💬 [KANBAN_SERVICE] Mensagem: $message');
@@ -1235,6 +1242,15 @@ class KanbanService {
 
       // Adicionar mensagem
       request.fields['message'] = message;
+
+      // Menções e resposta (só entram quando existem — campo vazio no
+      // multipart chegaria como string e quebraria o `@IsUUID` do backend).
+      if (mentionedUserIds != null && mentionedUserIds.isNotEmpty) {
+        request.fields['mentionedUserIds'] = jsonEncode(mentionedUserIds);
+      }
+      if (parentCommentId != null && parentCommentId.trim().isNotEmpty) {
+        request.fields['parentCommentId'] = parentCommentId.trim();
+      }
 
       // Adicionar arquivos
       if (files != null && files.isNotEmpty) {
@@ -1389,7 +1405,7 @@ class KanbanService {
   Future<ApiResponse<KanbanTask>> getTaskById(String taskId) async {
     try {
       final response = await _apiService.get<Map<String, dynamic>>(
-        '/kanban/tasks/$taskId/fields',
+        ApiConstants.kanbanTaskFields(taskId),
       );
       if (response.success && response.data != null) {
         try {
@@ -2046,6 +2062,418 @@ class KanbanService {
       );
     } catch (e) {
       return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// Anexos já parseados (mesma rota do [getTaskAttachments], porém no
+  /// modelo [Attachment] — que é quem carrega a `key` usada no DELETE).
+  Future<ApiResponse<List<Attachment>>> getTaskAttachmentList(
+    String taskId,
+  ) async {
+    final raw = await getTaskAttachments(taskId);
+    if (!raw.success || raw.data == null) {
+      return ApiResponse.error(
+        message: raw.message ?? 'Erro ao listar anexos',
+        statusCode: raw.statusCode,
+      );
+    }
+    final list = <Attachment>[];
+    for (final item in raw.data!) {
+      try {
+        list.add(Attachment.fromJson(item));
+      } catch (e) {
+        debugPrint('❌ [KANBAN_SERVICE] parse anexo: $e');
+      }
+    }
+    return ApiResponse.success(data: list, statusCode: raw.statusCode);
+  }
+
+  /// Membros da empresa — `GET /users/company-members/simple`.
+  ///
+  /// É a MESMA fonte que o web usa no autocomplete de menções do comentário
+  /// (`companyMembersApi.getMembersSimple`) e no seletor de convidados da
+  /// agenda. Não é rota do Kanban, mas vive aqui porque é o card quem
+  /// precisa dela (o app não tem um serviço central de membros).
+  Future<ApiResponse<List<KanbanUser>>> getCompanyMembersSimple() async {
+    try {
+      final response = await _apiService.get<dynamic>(
+        '/users/company-members/simple',
+      );
+      if (response.success && response.data != null) {
+        // O endpoint às vezes devolve array na raiz, às vezes `{ data: [] }`.
+        final raw = response.data;
+        final list = raw is List
+            ? raw
+            : (raw is Map && raw['data'] is List)
+                ? raw['data'] as List
+                : const <dynamic>[];
+        final users = <KanbanUser>[];
+        for (final item in list) {
+          if (item is! Map) continue;
+          try {
+            final u = KanbanUser.fromJson(Map<String, dynamic>.from(item));
+            if (u.id.isNotEmpty && u.name.trim().isNotEmpty) users.add(u);
+          } catch (e) {
+            debugPrint('❌ [KANBAN_SERVICE] parse membro: $e');
+          }
+        }
+        users.sort(
+          (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+        );
+        return ApiResponse.success(
+          data: users,
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao carregar membros da empresa',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [KANBAN_SERVICE] getCompanyMembersSimple: $e');
+      return ApiResponse.error(
+        message: 'Erro ao carregar membros: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Limites do upload de anexos do card — espelham o `FilesInterceptor` do
+  /// backend (`files`, 10 arquivos, `KANBAN_MAX_FILE_SIZE_BYTES`).
+  static const int maxTaskAttachments = 10;
+  static const int maxTaskAttachmentBytes = 200 * 1024 * 1024; // 200 MB
+
+  /// Registra uma ligação no card — `POST /kanban/tasks/:id/register-call`.
+  ///
+  /// Body `{ notes? }` (máx. 500). A resposta é `{ history: {...} }`; o parse é
+  /// tolerante: se o backend mudar o envelope, o registro segue como sucesso
+  /// com `data == null` (a ligação já foi gravada — só o eco veio diferente).
+  Future<ApiResponse<HistoryEntry>> registerTaskCall(
+    String taskId, {
+    String? notes,
+  }) async {
+    try {
+      final trimmed = notes?.trim();
+      if (trimmed != null && trimmed.length > 500) {
+        return ApiResponse.error(
+          message: 'A observação da ligação não pode passar de 500 caracteres',
+          statusCode: 400,
+        );
+      }
+
+      final body = <String, dynamic>{
+        if (trimmed != null && trimmed.isNotEmpty) 'notes': trimmed,
+      };
+
+      final response = await _apiService.post<Map<String, dynamic>>(
+        ApiConstants.kanbanTaskRegisterCall(taskId),
+        body: body,
+      );
+
+      if (response.success) {
+        final raw = response.data?['history'];
+        if (raw is Map) {
+          try {
+            return ApiResponse.success(
+              data: HistoryEntry.fromJson(Map<String, dynamic>.from(raw)),
+              statusCode: response.statusCode,
+            );
+          } catch (e) {
+            debugPrint('❌ [KANBAN_SERVICE] parse register-call $taskId: $e');
+          }
+        }
+        return ApiResponse.success(data: null, statusCode: response.statusCode);
+      }
+
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao registrar ligação',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [KANBAN_SERVICE] registerTaskCall $taskId: $e');
+      return ApiResponse.error(
+        message: 'Erro ao registrar ligação: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Patch parcial dos campos estendidos — `PUT /kanban/tasks/:id/fields`.
+  ///
+  /// Apesar do nome do endpoint, a resposta é a **task completa**
+  /// (`KanbanTaskResponseDto`) — mesmo shape que o `getTaskById` consome.
+  Future<ApiResponse<KanbanTask>> updateTaskFields(
+    String taskId,
+    UpdateTaskFieldsDto dto,
+  ) async {
+    try {
+      final body = dto.toJson();
+      if (body.isEmpty) {
+        return ApiResponse.error(
+          message: 'Nenhum campo para atualizar',
+          statusCode: 400,
+        );
+      }
+
+      final response = await _apiService.put<Map<String, dynamic>>(
+        ApiConstants.kanbanTaskFields(taskId),
+        body: body,
+      );
+
+      if (response.success && response.data != null) {
+        try {
+          return ApiResponse.success(
+            data: KanbanTask.fromJson(response.data!),
+            statusCode: response.statusCode,
+          );
+        } catch (e) {
+          debugPrint('❌ [KANBAN_SERVICE] parse updateTaskFields $taskId: $e');
+          // A gravação foi feita; devolvemos sucesso sem dados para que a tela
+          // apenas recarregue a task em vez de mostrar erro ao usuário.
+          return ApiResponse.success(
+            data: null,
+            statusCode: response.statusCode,
+          );
+        }
+      }
+
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao salvar campos da negociação',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [KANBAN_SERVICE] updateTaskFields $taskId: $e');
+      return ApiResponse.error(
+        message: 'Erro ao salvar campos: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Envia anexos para o card — `POST /kanban/tasks/:id/attachments`
+  /// (multipart, campo `files`, até 10 arquivos de 200 MB cada).
+  ///
+  /// A resposta é a task completa com o array `attachments` acumulado.
+  Future<ApiResponse<KanbanTask>> uploadTaskAttachments(
+    String taskId,
+    List<File> files,
+  ) async {
+    try {
+      if (files.isEmpty) {
+        return ApiResponse.error(
+          message: 'Selecione ao menos um arquivo',
+          statusCode: 400,
+        );
+      }
+      if (files.length > maxTaskAttachments) {
+        return ApiResponse.error(
+          message: 'Máximo de $maxTaskAttachments arquivos por envio',
+          statusCode: 400,
+        );
+      }
+
+      // Validação de tamanho no cliente: o backend corta com um 413 genérico,
+      // então é melhor nomear o arquivo culpado antes de subir os bytes.
+      for (final file in files) {
+        final length = await file.length();
+        if (length > maxTaskAttachmentBytes) {
+          final name = file.path.split('/').last.split('\\').last;
+          return ApiResponse.error(
+            message: 'O arquivo "$name" passa do limite de 200 MB',
+            statusCode: 400,
+          );
+        }
+      }
+
+      final endpoint = ApiConstants.kanbanTaskAttachments(taskId);
+      final uri = Uri.parse('${ApiConstants.baseApiUrl}$endpoint');
+      final request = http.MultipartRequest('POST', uri);
+
+      // Sem Content-Type manual: o `http` monta o boundary do multipart.
+      final headers = await _apiService.buildOutboundHeaders(
+        endpoint: endpoint,
+        excludeContentType: true,
+      );
+      request.headers.addAll(headers);
+
+      for (final file in files) {
+        final fileLength = await file.length();
+        request.files.add(
+          http.MultipartFile(
+            'files',
+            http.ByteStream(file.openRead()),
+            fileLength,
+            filename: file.path.split('/').last.split('\\').last,
+          ),
+        );
+      }
+
+      final streamedResponse = await request.send().timeout(
+        const Duration(minutes: 5),
+      );
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        try {
+          final jsonData = jsonDecode(response.body) as Map<String, dynamic>;
+          return ApiResponse.success(
+            data: KanbanTask.fromJson(jsonData),
+            statusCode: response.statusCode,
+          );
+        } catch (e) {
+          debugPrint('❌ [KANBAN_SERVICE] parse upload anexos $taskId: $e');
+          // Upload concluído — a tela deve recarregar a task.
+          return ApiResponse.success(
+            data: null,
+            statusCode: response.statusCode,
+          );
+        }
+      }
+
+      String errorMessage = 'Erro ao enviar anexos';
+      try {
+        final errorData = jsonDecode(response.body) as Map<String, dynamic>;
+        errorMessage = errorData['message']?.toString() ?? errorMessage;
+      } catch (_) {
+        if (response.body.isNotEmpty) errorMessage = response.body;
+      }
+      debugPrint(
+        '❌ [KANBAN_SERVICE] upload anexos $taskId: ${response.statusCode}',
+      );
+      return ApiResponse.error(
+        message: errorMessage,
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [KANBAN_SERVICE] uploadTaskAttachments $taskId: $e');
+      return ApiResponse.error(
+        message: 'Erro ao enviar anexos: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Remove um anexo do card —
+  /// `DELETE /kanban/tasks/:id/attachments/:key`.
+  ///
+  /// [attachmentKey] é o campo `key` do anexo (chave do S3); a codificação da
+  /// URL fica por conta de `ApiConstants.kanbanTaskAttachmentByKey`.
+  /// Resposta: task completa atualizada.
+  Future<ApiResponse<KanbanTask>> deleteTaskAttachment(
+    String taskId,
+    String attachmentKey,
+  ) async {
+    try {
+      if (attachmentKey.trim().isEmpty) {
+        return ApiResponse.error(
+          message: 'Anexo inválido',
+          statusCode: 400,
+        );
+      }
+
+      final response = await _apiService.delete<Map<String, dynamic>>(
+        ApiConstants.kanbanTaskAttachmentByKey(taskId, attachmentKey),
+      );
+
+      if (response.success) {
+        if (response.data != null) {
+          try {
+            return ApiResponse.success(
+              data: KanbanTask.fromJson(response.data!),
+              statusCode: response.statusCode,
+            );
+          } catch (e) {
+            debugPrint('❌ [KANBAN_SERVICE] parse delete anexo $taskId: $e');
+          }
+        }
+        // Anexo removido; sem task no eco, a tela recarrega.
+        return ApiResponse.success(data: null, statusCode: response.statusCode);
+      }
+
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao remover anexo',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [KANBAN_SERVICE] deleteTaskAttachment $taskId: $e');
+      return ApiResponse.error(
+        message: 'Erro ao remover anexo: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Permissões efetivas do card — `GET /kanban/tasks/:id/capabilities`.
+  ///
+  /// Devolve `null` (nunca lança, nunca sinaliza erro na UI) porque a rota
+  /// **ainda não existe no backend**: hoje ela responde 404 e o próprio web
+  /// degrada para as permissões do board. Quem chama deve tratar `null` como
+  /// "sem informação" e continuar usando `KanbanPermissions` do board — assim,
+  /// quando o endpoint for publicado, a tela passa a refinar sozinha.
+  Future<KanbanTaskCapabilities?> getTaskCapabilities(String taskId) async {
+    try {
+      final response = await _apiService.get<Map<String, dynamic>>(
+        ApiConstants.kanbanTaskCapabilities(taskId),
+      );
+      if (response.success && response.data != null) {
+        return KanbanTaskCapabilities.fromJson(response.data!);
+      }
+      return null;
+    } catch (e) {
+      debugPrint('❌ [KANBAN_SERVICE] getTaskCapabilities $taskId: $e');
+      return null;
+    }
+  }
+
+  /// Histórico de transferências entre funis —
+  /// `GET /kanban/tasks/:id/transfer-history` (array na raiz).
+  ///
+  /// Exige a permissão `kanban:view_history`: sem ela o backend responde 403 e
+  /// a tela deve simplesmente esconder a seção.
+  Future<ApiResponse<List<KanbanTransferHistoryEntry>>> getTaskTransferHistory(
+    String taskId,
+  ) async {
+    try {
+      final response = await _apiService.get<List<dynamic>>(
+        ApiConstants.kanbanTaskTransferHistory(taskId),
+      );
+
+      if (response.success && response.data != null) {
+        final entries = <KanbanTransferHistoryEntry>[];
+        for (final item in response.data!) {
+          if (item is Map) {
+            try {
+              entries.add(
+                KanbanTransferHistoryEntry.fromJson(
+                  Map<String, dynamic>.from(item),
+                ),
+              );
+            } catch (e) {
+              // Item torto não pode derrubar a lista inteira.
+              debugPrint('❌ [KANBAN_SERVICE] parse transferência: $e');
+            }
+          }
+        }
+        return ApiResponse.success(
+          data: entries,
+          statusCode: response.statusCode,
+        );
+      }
+
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao carregar transferências',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [KANBAN_SERVICE] getTaskTransferHistory $taskId: $e');
+      return ApiResponse.error(
+        message: 'Erro ao carregar transferências: ${e.toString()}',
+        statusCode: 0,
+      );
     }
   }
 }

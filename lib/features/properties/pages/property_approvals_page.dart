@@ -1,8 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_permissions.dart';
 import '../../../core/routes/app_routes.dart';
@@ -12,9 +16,15 @@ import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/property_service.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import '../models/property_change_request.dart';
 import '../services/property_approval_service.dart';
 import '../widgets/approval_action_sheets.dart';
+import '../widgets/approval_actions_sheet.dart';
+import '../widgets/approval_filters_sheet.dart';
+import '../widgets/approval_info_sheets.dart';
+import '../widgets/approval_owner_auth_sheet.dart';
 import '../widgets/approval_property_card.dart';
+import '../widgets/change_request_card.dart';
 
 /// Tela de **Fila de Aprovação de Imóveis**.
 ///
@@ -40,7 +50,7 @@ class PropertyApprovalsPage extends StatefulWidget {
   State<PropertyApprovalsPage> createState() => _PropertyApprovalsPageState();
 }
 
-enum _Tab { mine, ownerAuth, availability, publication, rejected }
+enum _Tab { mine, ownerAuth, availability, publication, rejected, editRequests }
 
 class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
   static const double _kSectionGap = 12;
@@ -48,6 +58,10 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
   static const double _kPagePadTop = 10;
   static const double _kPagePadBottom = 88;
   static const int _kRejectedPageSize = 10;
+
+  /// Piso de largura por aba: abaixo disso o rótulo ficaria ilegível, então a
+  /// barra rola em vez de espremer.
+  static const double _kMinTabWidth = 58;
 
   late final ModuleAccessService _moduleAccess = ModuleAccessService.instance;
 
@@ -83,12 +97,33 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
   RejectedListResponse _rejectedPub = RejectedListResponse.empty;
   RejectedCounts _rejectedCounts = RejectedCounts.zero;
 
+  // Aba "Edições" — solicitações de alteração de campos protegidos.
+  bool _loadingEditRequests = false;
+  String? _errorEditRequests;
+  PropertyChangeRequestList _editRequests = PropertyChangeRequestList.empty;
+  PropertyChangeRequestStatus? _editRequestsFilter =
+      PropertyChangeRequestStatus.pending;
+
+  /// Configuração de aprovação da empresa — decide marca d'água na publicação,
+  /// bifurcação para votação (multi-aprovadores), exigência de assinatura do
+  /// proprietário e se a esteira de campos protegidos está ligada.
+  PropertyApprovalSettingsActive _settings =
+      const PropertyApprovalSettingsActive();
+
   _Tab _activeTab = _Tab.mine;
 
   final TextEditingController _searchController = TextEditingController();
   Timer? _searchDebounce;
   String _appliedSearch = '';
   bool _searchFocused = false;
+
+  /// Filtros granulares (responsável, código, título, proprietário). A busca
+  /// global do topo tem prioridade sobre eles — quem impõe essa regra é o
+  /// [ApprovalListFilters.toQueryParams], em paridade com o web.
+  ApprovalListFilters _advanced = ApprovalListFilters.empty;
+
+  /// Exportação em curso (job assíncrono): trava o botão e mostra progresso.
+  bool _exporting = false;
 
   bool _didLoadQueues = false;
 
@@ -127,7 +162,11 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
     final canView = _canViewQueues;
     if (canView) _didLoadQueues = true;
     return Future.wait([
+      _loadSettings(),
       _loadMine(),
+      // A esteira de edições é escopada no backend (revisores veem tudo, os
+      // demais só as próprias), então a aba existe para qualquer usuário.
+      _loadEditRequests(),
       if (canView) ...[
         _loadAvailability(),
         _loadPublication(),
@@ -137,7 +176,54 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
     ]);
   }
 
-  ApprovalListFilters _filters() => ApprovalListFilters(search: _appliedSearch);
+  Future<void> _loadSettings() async {
+    final res =
+        await PropertyService.instance.getPropertyApprovalSettingsActive();
+    if (!mounted) return;
+    if (res.success && res.data != null) {
+      setState(() => _settings = res.data!);
+    }
+  }
+
+  Future<void> _loadEditRequests() async {
+    setState(() {
+      _loadingEditRequests = true;
+      _errorEditRequests = null;
+    });
+    final res = await PropertyApprovalService.instance.listChangeRequests(
+      status: _editRequestsFilter,
+    );
+    if (!mounted) return;
+    setState(() {
+      _loadingEditRequests = false;
+      if (res.success && res.data != null) {
+        _editRequests = res.data!;
+      } else {
+        _errorEditRequests =
+            res.message ?? 'Erro ao carregar solicitações de edição';
+      }
+    });
+  }
+
+  ApprovalListFilters _filters() => ApprovalListFilters(
+        search: _appliedSearch,
+        responsibleName: _advanced.responsibleName,
+        propertyCode: _advanced.propertyCode,
+        propertyTitle: _advanced.propertyTitle,
+        ownerName: _advanced.ownerName,
+        teamId: _advanced.teamId,
+        responsibleUserId: _advanced.responsibleUserId,
+      );
+
+  /// Quantos filtros granulares estão ativos (alimenta o badge do botão).
+  int get _advancedCount => [
+        _advanced.responsibleName,
+        _advanced.propertyCode,
+        _advanced.propertyTitle,
+        _advanced.ownerName,
+        _advanced.teamId,
+        _advanced.responsibleUserId,
+      ].where((v) => (v ?? '').trim().isNotEmpty).length;
 
   void _selectTab(_Tab tab) {
     if (tab == _activeTab) return;
@@ -292,6 +378,41 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
       .hasPermission(AppPermissions.propertyApprovePublication);
   bool get _canRejectPublication =>
       _moduleAccess.hasPermission(AppPermissions.propertyRejectPublication);
+  bool get _canManageSettings => _moduleAccess
+      .hasPermission(AppPermissions.propertyManageApprovalSettings);
+
+  /// Espelha `canInvalidateOwnerSignature` do web: só faz sentido quando a
+  /// empresa exige a autorização, e apenas para quem aprova/configura.
+  bool get _canInvalidateOwnerSignature =>
+      _settings.requireOwnerAuthorizationToBeAvailable &&
+      (_canManageSettings ||
+          _canApproveAvailability ||
+          _canApprovePublication);
+
+  /// Espelha `showIgnoreOwnerSignatureMenuItem(p)` do web: aprovador/gestão
+  /// **ou** responsável/captador do próprio imóvel, e só com assinatura
+  /// digital pendente.
+  bool _canIgnoreOwnerSignature(Property p) {
+    if (!_settings.requireOwnerAuthorizationToBeAvailable) return false;
+    if ((p.ownerAuthStatus ?? '') != 'pending') return false;
+    final uid = _moduleAccess.userId;
+    final isLinked = uid != null &&
+        uid.isNotEmpty &&
+        (p.responsibleUserId == uid ||
+            p.capturedById == uid ||
+            (p.responsibleUserIds?.contains(uid) ?? false) ||
+            (p.capturedByIds?.contains(uid) ?? false));
+    final isApproverOrAdmin = _canApproveAvailability ||
+        _canApprovePublication ||
+        _canManageSettings;
+    return isLinked || isApproverOrAdmin;
+  }
+
+  /// Só o responsável pode "cobrar" os aprovadores (mesma regra do web).
+  bool _isResponsible(Property p) {
+    final uid = _moduleAccess.userId;
+    return uid != null && uid.isNotEmpty && p.responsibleUserId == uid;
+  }
 
   void _actionSnack(String msg, {bool ok = false}) {
     if (!mounted) return;
@@ -309,8 +430,20 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
   Future<bool> _approveCard(Property p, ApprovalQueueKind kind) async {
     final svc = PropertyApprovalService.instance;
     final isPub = kind == ApprovalQueueKind.pendingPublication;
+    bool? watermark;
+    if (isPub && _settings.applyWatermarkToImages) {
+      // Mesma bifurcação do web (`openApprovePublicationModal`): a empresa
+      // com marca d'água ligada confirma antes de publicar.
+      final choice = await showApprovePublicationSheet(
+        context: context,
+        propertyTitle: p.title.isEmpty ? (p.code ?? 'Imóvel') : p.title,
+        watermarkConfigured: true,
+      );
+      if (choice == null) return false;
+      watermark = choice.applyWatermark;
+    }
     final res = isPub
-        ? await svc.approvePublication(p.id, applyWatermark: null)
+        ? await svc.approvePublication(p.id, applyWatermark: watermark)
         : await svc.approveAvailability(p.id, applyWatermark: false);
     if (!mounted) return false;
     if (res.success) {
@@ -350,6 +483,722 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
     return false;
   }
 
+  // ─── Reenvio / votação ────────────────────────────────────────────────
+
+  /// Fila a que o item pertence, para os endpoints que exigem `approvalType`.
+  ApprovalType _queueOf(ApprovalQueueKind kind) {
+    switch (kind) {
+      case ApprovalQueueKind.myPublication:
+      case ApprovalQueueKind.pendingPublication:
+      case ApprovalQueueKind.rejectedPublication:
+        return ApprovalType.publication;
+      case ApprovalQueueKind.myAvailability:
+      case ApprovalQueueKind.myOwnerAuth:
+      case ApprovalQueueKind.pendingAvailability:
+      case ApprovalQueueKind.pendingOwnerAuth:
+      case ApprovalQueueKind.rejectedAvailability:
+        return ApprovalType.availability;
+    }
+  }
+
+  bool _isPublicationQueue(ApprovalQueueKind kind) =>
+      _queueOf(kind) == ApprovalType.publication;
+
+  /// Item recusado aguardando correção — habilita o botão "Reenviar".
+  bool _isRejectedWaitingResend(Property p, ApprovalQueueKind kind) {
+    if (kind == ApprovalQueueKind.rejectedAvailability ||
+        kind == ApprovalQueueKind.rejectedPublication) {
+      return true;
+    }
+    if (_isPublicationQueue(kind)) {
+      return (p.publicationRejectedAt ?? '').isNotEmpty;
+    }
+    return (p.availabilityRejectedAt ?? '').isNotEmpty;
+  }
+
+  /// Reenvia para nova análise. Aprovador usa a rota de revisão; responsável
+  /// usa a rota `responsible/reopen-*` (não exige permissão de aprovação).
+  Future<bool> _resendCard(Property p, ApprovalQueueKind kind) async {
+    final svc = PropertyApprovalService.instance;
+    final isPub = _isPublicationQueue(kind);
+    final canReview = isPub ? _canApprovePublication : _canApproveAvailability;
+    final res = isPub
+        ? (canReview
+            ? await svc.requestSitePublicationReview(p.id)
+            : await svc.requestSitePublicationReviewAsResponsible(p.id))
+        : (canReview
+            ? await svc.requestAvailabilityReview(p.id)
+            : await svc.requestAvailabilityReviewAsResponsible(p.id));
+    if (!mounted) return false;
+    if (res.success) {
+      _actionSnack('Reenviado para nova aprovação.', ok: true);
+      await _refreshAll();
+      return true;
+    }
+    _actionSnack(res.message ?? 'Falha ao reenviar.');
+    return false;
+  }
+
+  /// Voto na fila quando o multi-aprovadores está ligado.
+  Future<bool> _voteCard(Property p, ApprovalQueueKind kind) async {
+    final queue = _queueOf(kind);
+    final result = await showApprovalVoteSheet(
+      context: context,
+      propertyId: p.id,
+      propertyTitle: _propertyLabel(p),
+      queue: queue,
+      tone: _activeTabColor(context),
+    );
+    if (result == null || !mounted) return false;
+    final res = await PropertyApprovalService.instance.castVote(
+      p.id,
+      type: queue,
+      approved: result.approved,
+      comment: result.comment,
+    );
+    if (!mounted) return false;
+    if (res.success) {
+      _actionSnack('Voto registrado.', ok: true);
+      await _refreshAll();
+      return true;
+    }
+    _actionSnack(res.message ?? 'Falha ao registrar o voto.');
+    return false;
+  }
+
+  // ─── Menu de mais ações (3 pontinhos) ─────────────────────────────────
+
+  String _propertyLabel(Property p) =>
+      p.title.isNotEmpty ? p.title : (p.code ?? 'Imóvel sem título');
+
+  /// Rótulo do estado da autorização exibido abaixo do título nas filas de
+  /// proprietário — paridade com o `renderBelowTitle` do web.
+  String? _ownerAuthNote(Property p) {
+    final status = p.ownerAuthStatus ?? '';
+    final sentAt = p.ownerAuthSentAt;
+    switch (status) {
+      case 'not_sent':
+        return 'Não enviado';
+      case 'physical_rejected':
+        return 'Anexo recusado — ajuste e reenvie o documento';
+      case 'pending_physical_validation':
+        return sentAt == null || sentAt.isEmpty
+            ? 'Anexo aguardando validação do aprovador'
+            : 'Anexo enviado em ${_fmtDate(sentAt)} — aguardando validação';
+      case 'pending':
+        return sentAt == null || sentAt.isEmpty
+            ? 'Aguardando assinatura do proprietário'
+            : 'Enviado em ${_fmtDate(sentAt)} — aguardando assinatura';
+      case 'signed':
+        return 'Assinado pelo proprietário';
+      default:
+        return null;
+    }
+  }
+
+  String _fmtDate(String iso) {
+    final d = DateTime.tryParse(iso);
+    if (d == null) return iso;
+    final l = d.toLocal();
+    return '${l.day.toString().padLeft(2, '0')}/'
+        '${l.month.toString().padLeft(2, '0')}/${l.year}';
+  }
+
+  /// Menu de "mais ações" do item — reúne, em uma folha só, o que o web
+  /// espalha nos menus de 3 pontinhos de cada aba.
+  Future<void> _openMoreActions(Property p, ApprovalQueueKind kind) async {
+    final tone = _activeTabColor(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final warn = isDark
+        ? AppColors.status.warningDarkMode
+        : AppColors.status.warning;
+    final purple =
+        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
+    final queue = _queueOf(kind);
+    final ownerStatus = p.ownerAuthStatus ?? '';
+    final isOwnerAuthQueue = kind == ApprovalQueueKind.pendingOwnerAuth ||
+        kind == ApprovalQueueKind.myOwnerAuth;
+    final rejectedWaiting = _isRejectedWaitingResend(p, kind);
+    final canActOnQueue = queue == ApprovalType.publication
+        ? _canApprovePublication
+        : _canApproveAvailability;
+
+    final actions = <ApprovalMenuAction>[];
+
+    // 1) Abrir a ficha — equivalente ao "abrir em nova aba" do desktop, que
+    // no telefone vira navegação normal.
+    actions.add(
+      ApprovalMenuAction(
+        icon: LucideIcons.externalLink,
+        label: 'Abrir ficha do imóvel',
+        hint: 'Ver dados, fotos e histórico completo.',
+        onTap: () => _openDetails(p),
+      ),
+    );
+
+    // 2) Conversa de aprovação (o painel embutido no card do web).
+    actions.add(
+      ApprovalMenuAction(
+        icon: LucideIcons.messagesSquare,
+        label: 'Conversa de aprovação',
+        hint: 'Falar com o aprovador ou com o responsável.',
+        tone: purple,
+        onTap: () => showApprovalThreadSheet(
+          context: context,
+          propertyId: p.id,
+          propertyTitle: _propertyLabel(p),
+          queue: queue,
+          tone: purple,
+        ),
+      ),
+    );
+
+    // 3) Fluxo da autorização do proprietário.
+    if (isOwnerAuthQueue) {
+      actions.add(
+        ApprovalMenuAction(
+          icon: LucideIcons.send,
+          label: ownerStatus == 'pending_physical_validation'
+              ? 'Substituir anexo'
+              : ownerStatus == 'pending'
+                  ? 'Enviar novamente'
+                  : 'Enviar para assinatura',
+          hint: 'Autorização de venda / contrato de agenciamento.',
+          tone: purple,
+          onTap: () => _sendOwnerAuthorization(p, ownerStatus),
+        ),
+      );
+      if (_canApproveAvailability &&
+          ownerStatus == 'pending_physical_validation') {
+        actions.addAll([
+          ApprovalMenuAction(
+            icon: LucideIcons.eye,
+            label: 'Ver anexo',
+            hint: 'Abre o documento assinado em papel.',
+            onTap: () => _openOwnerAuthPhysicalPreview(p),
+          ),
+          ApprovalMenuAction(
+            icon: LucideIcons.badgeCheck,
+            label: 'Validar assinatura física',
+            hint: 'Libera o imóvel para a fila de aprovação.',
+            tone: kApprovalGreen,
+            onTap: () => _approveOwnerAuthPhysical(p),
+          ),
+          ApprovalMenuAction(
+            icon: LucideIcons.ban,
+            label: 'Recusar anexo',
+            hint: 'O documento sai e o imóvel volta a aguardar autorização.',
+            danger: true,
+            onTap: () => _rejectOwnerAuthPhysical(p),
+          ),
+        ]);
+      }
+      if (ownerStatus == 'pending' && (p.canResendOwnerAuthEmail ?? false)) {
+        actions.add(
+          ApprovalMenuAction(
+            icon: LucideIcons.mail,
+            label: 'Reenviar por e-mail',
+            hint: 'Manda o link de assinatura de novo ao proprietário.',
+            tone: purple,
+            onTap: () => _resendOwnerAuthEmail(p),
+          ),
+        );
+      }
+    }
+
+    // 4) Cobrar aprovadores (só o responsável, e não em item recusado).
+    if (!rejectedWaiting && _isResponsible(p) && !isOwnerAuthQueue) {
+      actions.add(
+        ApprovalMenuAction(
+          icon: LucideIcons.bellRing,
+          label: 'Cobrar aprovadores',
+          hint: 'Envia um lembrete — vale uma vez por hora.',
+          tone: warn,
+          onTap: () => _remindApprovers(p, queue),
+        ),
+      );
+    }
+
+    // 5) Notificar responsáveis sobre contato com o proprietário — no web
+    // aparece no item recusado para quem aprova aquela fila.
+    if (rejectedWaiting && canActOnQueue) {
+      actions.add(
+        ApprovalMenuAction(
+          icon: LucideIcons.contactRound,
+          label: 'Notificar sobre contato do proprietário',
+          hint: 'Avisa responsáveis e captadores — uma vez por hora.',
+          tone: warn,
+          onTap: () => _notifyOwnerContact(p, queue),
+        ),
+      );
+    }
+
+    // 6) Recusar direto pelo menu na fila de aprovação (sem multi-aprovadores).
+    if (!_settings.approversEnabled && !rejectedWaiting && !isOwnerAuthQueue) {
+      final canReject = queue == ApprovalType.publication
+          ? _canRejectPublication
+          : _canRejectAvailability;
+      if (canReject &&
+          (kind == ApprovalQueueKind.pendingAvailability ||
+              kind == ApprovalQueueKind.pendingPublication)) {
+        actions.add(
+          ApprovalMenuAction(
+            icon: LucideIcons.xCircle,
+            label: 'Recusar',
+            hint: 'Exige motivo — o responsável é notificado.',
+            danger: true,
+            onTap: () => _rejectCard(p, kind),
+          ),
+        );
+      }
+    }
+
+    // 7) Dispensar / invalidar assinatura do proprietário.
+    if (_canIgnoreOwnerSignature(p)) {
+      actions.add(
+        ApprovalMenuAction(
+          icon: LucideIcons.penOff,
+          label: 'Ignorar assinatura',
+          hint: 'Avança o fluxo sem esperar a assinatura digital.',
+          tone: warn,
+          onTap: () => _ignoreOwnerSignature(p),
+        ),
+      );
+    }
+    if (_canInvalidateOwnerSignature &&
+        (!isOwnerAuthQueue || ownerStatus == 'signed')) {
+      actions.add(
+        ApprovalMenuAction(
+          icon: LucideIcons.unlink,
+          label: 'Invalidar assinatura',
+          hint: 'Apaga a assinatura e reinicia o fluxo do proprietário.',
+          danger: true,
+          onTap: () => _invalidateOwnerSignature(p),
+        ),
+      );
+    }
+
+    // 8) Histórico — o do envio na fila do proprietário, o do imóvel no resto.
+    actions.add(
+      ApprovalMenuAction(
+        icon: LucideIcons.history,
+        label: isOwnerAuthQueue ? 'Ver histórico de envios' : 'Ver histórico',
+        hint: isOwnerAuthQueue
+            ? 'Para quem foi enviado, quando e por quem.'
+            : 'Linha do tempo do imóvel.',
+        onTap: () => isOwnerAuthQueue
+            ? showOwnerAuthSendHistorySheet(
+                context: context,
+                propertyId: p.id,
+                propertyTitle: _propertyLabel(p),
+                tone: purple,
+              )
+            : showPropertyHistorySheet(
+                context: context,
+                propertyId: p.id,
+                propertyTitle: _propertyLabel(p),
+                tone: tone,
+              ),
+      ),
+    );
+
+    if (!mounted) return;
+    await showApprovalActionsSheet(
+      context: context,
+      eyebrow: _queueEyebrow(kind),
+      title: _propertyLabel(p),
+      subtitle: p.code == null || p.code!.isEmpty ? null : 'Cód. ${p.code}',
+      tone: tone,
+      icon: LucideIcons.listChecks,
+      actions: actions,
+    );
+  }
+
+  String _queueEyebrow(ApprovalQueueKind kind) {
+    switch (kind) {
+      case ApprovalQueueKind.myAvailability:
+      case ApprovalQueueKind.pendingAvailability:
+        return 'DISPONIBILIDADE';
+      case ApprovalQueueKind.myPublication:
+      case ApprovalQueueKind.pendingPublication:
+        return 'PUBLICAÇÃO';
+      case ApprovalQueueKind.myOwnerAuth:
+      case ApprovalQueueKind.pendingOwnerAuth:
+        return 'PROPRIETÁRIO';
+      case ApprovalQueueKind.rejectedAvailability:
+        return 'DISPONIBILIDADE RECUSADA';
+      case ApprovalQueueKind.rejectedPublication:
+        return 'PUBLICAÇÃO RECUSADA';
+    }
+  }
+
+  // ─── Ações do menu ────────────────────────────────────────────────────
+
+  /// Trata o cooldown de 1h (429) igual ao web: converte `retryAfterSeconds`
+  /// em minutos na mensagem.
+  void _cooldownSnack(String? message, dynamic errorBody, String verb) {
+    int? retry;
+    if (errorBody is Map) {
+      final raw = errorBody['retryAfterSeconds'];
+      if (raw is num) retry = raw.toInt();
+      if (raw is String) retry = int.tryParse(raw);
+    }
+    if (retry != null) {
+      final mins = (retry / 60).ceil().clamp(1, 999);
+      _actionSnack('Aguarde cerca de $mins min para $verb novamente.');
+      return;
+    }
+    _actionSnack(message ?? 'Aguarde 1 hora entre os envios.');
+  }
+
+  Future<void> _remindApprovers(Property p, ApprovalType queue) async {
+    final res = await PropertyApprovalService.instance
+        .remindApprovalApprovers(p.id, approvalType: queue);
+    if (!mounted) return;
+    if (res.success) {
+      _actionSnack(
+        res.data?['message']?.toString() ?? 'Aprovadores notificados.',
+        ok: true,
+      );
+      return;
+    }
+    if (res.statusCode == 429) {
+      _cooldownSnack(res.message, res.data, 'cobrar');
+      return;
+    }
+    _actionSnack(res.message ?? 'Não foi possível enviar a cobrança.');
+  }
+
+  Future<void> _notifyOwnerContact(Property p, ApprovalType queue) async {
+    final res = await PropertyApprovalService.instance
+        .notifyResponsiblesOwnerContact(p.id, approvalType: queue);
+    if (!mounted) return;
+    if (res.success) {
+      _actionSnack(
+        res.data?['message']?.toString() ?? 'Responsáveis notificados.',
+        ok: true,
+      );
+      return;
+    }
+    if (res.statusCode == 429) {
+      _cooldownSnack(res.message, res.data, 'notificar');
+      return;
+    }
+    _actionSnack(res.message ?? 'Não foi possível enviar a notificação.');
+  }
+
+  Future<void> _ignoreOwnerSignature(Property p) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final result = await showApprovalConfirmSheet(
+      context: context,
+      eyebrow: 'PROPRIETÁRIO',
+      title: 'Ignorar assinatura digital',
+      subtitle: _propertyLabel(p),
+      message:
+          'O imóvel segue no fluxo sem esperar a assinatura no Autentique. '
+          'O motivo fica registrado no histórico.',
+      icon: LucideIcons.penOff,
+      tone: isDark
+          ? AppColors.status.warningDarkMode
+          : AppColors.status.warning,
+      confirmLabel: 'Ignorar assinatura',
+      confirmIcon: LucideIcons.penOff,
+      withReason: true,
+      reasonRequired: true,
+      reasonLabel: 'Motivo',
+      reasonHint: 'Ex.: proprietário em viagem, liberação aprovada pela gestão.',
+    );
+    if (result == null || !mounted) return;
+    final res = await PropertyApprovalService.instance
+        .ignoreOwnerAuthorizationSignature(p.id, reason: result.reason);
+    if (!mounted) return;
+    if (res.success) {
+      _actionSnack('Assinatura dispensada — fluxo liberado.', ok: true);
+      await _refreshAll();
+      return;
+    }
+    _actionSnack(res.message ?? 'Não foi possível dispensar a assinatura.');
+  }
+
+  Future<void> _invalidateOwnerSignature(Property p) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final result = await showApprovalConfirmSheet(
+      context: context,
+      eyebrow: 'PROPRIETÁRIO',
+      title: 'Invalidar assinatura',
+      subtitle: _propertyLabel(p),
+      message:
+          'A assinatura é apagada, os votos em andamento são descartados e o '
+          'imóvel volta a aguardar a autorização do proprietário. Não dá para '
+          'desfazer.',
+      icon: LucideIcons.unlink,
+      tone: isDark ? AppColors.status.errorDarkMode : AppColors.status.error,
+      confirmLabel: 'Invalidar',
+      confirmIcon: LucideIcons.unlink,
+      danger: true,
+    );
+    if (result == null || !mounted) return;
+    final res = await PropertyApprovalService.instance
+        .invalidateOwnerAuthorization(p.id);
+    if (!mounted) return;
+    if (res.success) {
+      _actionSnack('Assinatura invalidada.', ok: true);
+      await _refreshAll();
+      return;
+    }
+    _actionSnack(res.message ?? 'Não foi possível invalidar a assinatura.');
+  }
+
+  Future<void> _resendOwnerAuthEmail(Property p) async {
+    final res = await PropertyApprovalService.instance
+        .resendOwnerAuthorizationEmail(p.id);
+    if (!mounted) return;
+    if (res.success) {
+      _actionSnack('E-mail reenviado ao proprietário.', ok: true);
+      return;
+    }
+    _actionSnack(res.message ?? 'Não foi possível reenviar o e-mail.');
+  }
+
+  Future<void> _approveOwnerAuthPhysical(Property p) async {
+    final result = await showApprovalConfirmSheet(
+      context: context,
+      eyebrow: 'PROPRIETÁRIO',
+      title: 'Validar assinatura física',
+      subtitle: _propertyLabel(p),
+      message:
+          'Confirma que o documento anexo está correto? O imóvel segue para a '
+          'fila de aprovação, com o mesmo efeito da assinatura digital.',
+      icon: LucideIcons.badgeCheck,
+      tone: kApprovalGreen,
+      confirmLabel: 'Validar',
+      confirmIcon: LucideIcons.badgeCheck,
+    );
+    if (result == null || !mounted) return;
+    final res = await PropertyApprovalService.instance
+        .approveOwnerAuthorizationPhysical(p.id);
+    if (!mounted) return;
+    if (res.success) {
+      _actionSnack('Anexo validado — imóvel liberado.', ok: true);
+      await _refreshAll();
+      return;
+    }
+    _actionSnack(res.message ?? 'Não foi possível validar o anexo.');
+  }
+
+  Future<void> _rejectOwnerAuthPhysical(Property p) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final result = await showApprovalConfirmSheet(
+      context: context,
+      eyebrow: 'PROPRIETÁRIO',
+      title: 'Recusar anexo',
+      subtitle: _propertyLabel(p),
+      message:
+          'O anexo é removido e o imóvel continua aguardando a autorização. '
+          'Explique o que precisa ser corrigido.',
+      icon: LucideIcons.ban,
+      tone: isDark ? AppColors.status.errorDarkMode : AppColors.status.error,
+      confirmLabel: 'Recusar anexo',
+      confirmIcon: LucideIcons.ban,
+      danger: true,
+      withReason: true,
+      reasonLabel: 'Motivo (opcional)',
+      reasonHint: 'Ex.: documento ilegível, faltou a assinatura do cônjuge.',
+    );
+    if (result == null || !mounted) return;
+    final res = await PropertyApprovalService.instance
+        .rejectOwnerAuthorizationPhysical(
+      p.id,
+      reason: result.reason.isEmpty ? null : result.reason,
+    );
+    if (!mounted) return;
+    if (res.success) {
+      _actionSnack('Anexo recusado.', ok: true);
+      await _refreshAll();
+      return;
+    }
+    _actionSnack(res.message ?? 'Não foi possível recusar o anexo.');
+  }
+
+  Future<void> _openOwnerAuthPhysicalPreview(Property p) async {
+    final res = await PropertyApprovalService.instance
+        .getOwnerAuthorizationPhysicalPreviewUrl(p.id);
+    if (!mounted) return;
+    if (!res.success || res.data == null) {
+      _actionSnack(res.message ?? 'Não foi possível abrir o anexo.');
+      return;
+    }
+    final uri = Uri.tryParse(res.data!);
+    if (uri == null) {
+      _actionSnack('Link do anexo inválido.');
+      return;
+    }
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && mounted) {
+      _actionSnack('Nenhum aplicativo disponível para abrir o anexo.');
+    }
+  }
+
+  Future<void> _sendOwnerAuthorization(Property p, String ownerStatus) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final purple =
+        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
+    final request = await showOwnerAuthSendSheet(
+      context: context,
+      propertyTitle: _propertyLabel(p),
+      tone: purple,
+      ownerName: p.owner?.name,
+      ownerEmail: p.owner?.email,
+      initialMode: ownerStatus == 'pending_physical_validation'
+          ? OwnerAuthSendMode.physical
+          : OwnerAuthSendMode.digital,
+      isResend: ownerStatus == 'pending',
+    );
+    if (request == null || !mounted) return;
+
+    final svc = PropertyApprovalService.instance;
+    switch (request.mode) {
+      case OwnerAuthSendMode.physical:
+        final res =
+            await svc.uploadOwnerAuthorizationPhysical(p.id, request.file!);
+        if (!mounted) return;
+        if (res.success) {
+          _actionSnack(
+            'Anexo enviado — aguardando validação do aprovador.',
+            ok: true,
+          );
+          await _refreshAll();
+        } else {
+          _actionSnack(res.message ?? 'Não foi possível enviar o anexo.');
+        }
+        return;
+      case OwnerAuthSendMode.ownDocument:
+        final res = await svc.sendOwnerAuthorizationWithDocument(
+          p.id,
+          request.file!,
+          signerEmail: request.signerEmail,
+          signerName: request.signerName,
+          sendByEmail: request.sendByEmail,
+        );
+        if (!mounted) return;
+        if (res.success) {
+          _actionSnack('Documento enviado para assinatura.', ok: true);
+          await _refreshAll();
+          _maybeShowSignatureLink(res.data?['signatureUrl']?.toString());
+        } else {
+          _actionSnack(res.message ?? 'Não foi possível enviar o documento.');
+        }
+        return;
+      case OwnerAuthSendMode.digital:
+        final res = await svc.sendOwnerAuthorization(
+          p.id,
+          signerName: request.signerName,
+          signerEmail: request.signerEmail,
+          sendByEmail: request.sendByEmail,
+          hasExclusivity: request.hasExclusivity,
+          exclusivityDays: request.exclusivityDays,
+          exclusivityIndeterminate: request.exclusivityIndeterminate,
+          acceptsPlaca: request.acceptsPlaca,
+          operationType: request.operationType,
+          logoSource: request.logoSource,
+        );
+        if (!mounted) return;
+        if (res.success) {
+          _actionSnack(
+            res.data?.message ?? 'Autorização enviada para assinatura.',
+            ok: true,
+          );
+          await _refreshAll();
+          _maybeShowSignatureLink(res.data?.signatureUrl);
+        } else {
+          _actionSnack(res.message ?? 'Não foi possível enviar a autorização.');
+        }
+        return;
+    }
+  }
+
+  /// Quando o envio foi "apenas link", mostramos o link para o corretor
+  /// repassar ao proprietário (no web ele vai para a área de transferência).
+  void _maybeShowSignatureLink(String? url) {
+    if (url == null || url.isEmpty || !mounted) return;
+    showApprovalConfirmSheet(
+      context: context,
+      eyebrow: 'LINK DE ASSINATURA',
+      title: 'Repasse este link ao proprietário',
+      message: url,
+      icon: LucideIcons.externalLink,
+      tone: _accentColor(context),
+      confirmLabel: 'Abrir link',
+      confirmIcon: LucideIcons.externalLink,
+    ).then((r) {
+      if (r == null) return;
+      final uri = Uri.tryParse(url);
+      if (uri != null) launchUrl(uri, mode: LaunchMode.externalApplication);
+    });
+  }
+
+  // ─── Ações da aba de edições ──────────────────────────────────────────
+
+  Future<bool> _approveChangeRequest(PropertyChangeRequest req) async {
+    final result = await showApprovalConfirmSheet(
+      context: context,
+      eyebrow: 'EDIÇÃO',
+      title: 'Aprovar alteração',
+      subtitle: req.property?.title,
+      message: req.hasConflict
+          ? 'Atenção: o imóvel mudou depois desta solicitação. Aprovar aplica '
+              'os valores propostos por cima do que está lá hoje.'
+          : 'Os valores propostos são aplicados ao imóvel e o solicitante é '
+              'notificado.',
+      icon: LucideIcons.checkCircle2,
+      tone: kApprovalGreen,
+      confirmLabel: 'Aprovar',
+      confirmIcon: LucideIcons.checkCircle2,
+    );
+    if (result == null || !mounted) return false;
+    final res =
+        await PropertyApprovalService.instance.approveChangeRequest(req.id);
+    if (!mounted) return false;
+    if (res.success) {
+      _actionSnack('Alteração aplicada ao imóvel.', ok: true);
+      await _loadEditRequests();
+      return true;
+    }
+    _actionSnack(res.message ?? 'Não foi possível aprovar a solicitação.');
+    return false;
+  }
+
+  Future<bool> _rejectChangeRequest(PropertyChangeRequest req) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final result = await showApprovalConfirmSheet(
+      context: context,
+      eyebrow: 'EDIÇÃO',
+      title: 'Recusar alteração',
+      subtitle: req.property?.title,
+      message: 'O imóvel fica intacto e o solicitante recebe o motivo.',
+      icon: LucideIcons.xCircle,
+      tone: isDark ? AppColors.status.errorDarkMode : AppColors.status.error,
+      confirmLabel: 'Recusar',
+      confirmIcon: LucideIcons.xCircle,
+      danger: true,
+      withReason: true,
+      reasonRequired: true,
+      reasonLabel: 'Motivo da recusa',
+      reasonHint: 'Explique o que impede a alteração.',
+    );
+    if (result == null || !mounted) return false;
+    final res = await PropertyApprovalService.instance
+        .rejectChangeRequest(req.id, reason: result.reason);
+    if (!mounted) return false;
+    if (res.success) {
+      _actionSnack('Solicitação recusada. Solicitante notificado.', ok: true);
+      await _loadEditRequests();
+      return true;
+    }
+    _actionSnack(res.message ?? 'Não foi possível recusar a solicitação.');
+    return false;
+  }
+
   // ─── Helpers visuais ──────────────────────────────────────────────────
 
   Color _accentColor(BuildContext context) {
@@ -379,6 +1228,8 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
         return isDark
             ? AppColors.status.errorDarkMode
             : AppColors.status.error;
+      case _Tab.editRequests:
+        return isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
       case _Tab.mine:
         return _accentColor(context);
     }
@@ -416,6 +1267,8 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
                         _buildGreeting(context),
                         const SizedBox(height: _kSectionGap),
                         _buildSearchField(context),
+                        const SizedBox(height: 10),
+                        _buildToolbarActions(context),
                         const SizedBox(height: _kSectionGap),
                       ],
                     ),
@@ -782,6 +1635,152 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
     );
   }
 
+  // ─── Barra de ações: filtros + exportação ─────────────────────────────
+
+  /// Chave da aba para o job de exportação. A aba "Edições" não é exportável
+  /// no backend (o job só conhece as filas de aprovação), então devolve
+  /// `null` e o botão some — melhor sumir do que falhar ao tocar.
+  String? get _exportTabKey {
+    switch (_activeTab) {
+      case _Tab.mine:
+        return 'mine';
+      case _Tab.ownerAuth:
+        return 'owner_authorization';
+      case _Tab.availability:
+        return 'availability';
+      case _Tab.publication:
+        return 'publication';
+      case _Tab.rejected:
+        return 'rejected';
+      case _Tab.editRequests:
+        return null;
+    }
+  }
+
+  Widget _buildToolbarActions(BuildContext context) {
+    final count = _advancedCount;
+    final canExport = _exportTabKey != null;
+
+    return Row(
+      children: [
+        Expanded(
+          child: _ToolbarPill(
+            icon: LucideIcons.slidersHorizontal,
+            label: count > 0 ? 'Filtros · $count' : 'Filtros',
+            tone: const Color(0xFF4F46E5),
+            active: count > 0,
+            onTap: _openFiltersSheet,
+          ),
+        ),
+        if (canExport) ...[
+          const SizedBox(width: 10),
+          Expanded(
+            child: _ToolbarPill(
+              icon: LucideIcons.download,
+              label: _exporting ? 'Exportando…' : 'Exportar',
+              tone: const Color(0xFF0891B2),
+              active: false,
+              busy: _exporting,
+              onTap: _exporting ? null : _exportCurrentTab,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _openFiltersSheet() async {
+    final result = await showApprovalFiltersSheet(
+      context: context,
+      current: _advanced,
+      globalSearchActive: _appliedSearch.trim().isNotEmpty,
+    );
+    if (result == null || !mounted) return;
+    setState(() => _advanced = result);
+    await _refreshAll();
+  }
+
+  /// Exporta a aba atual em CSV.
+  ///
+  /// É um job assíncrono no backend (mesmo fluxo do web): cria → consulta o
+  /// status até sair de `pending`/`processing` → baixa os bytes. O arquivo vai
+  /// para o diretório temporário e sobe na folha de compartilhamento, que é o
+  /// equivalente mobile do "download" do navegador.
+  Future<void> _exportCurrentTab() async {
+    final tab = _exportTabKey;
+    if (tab == null) return;
+
+    setState(() => _exporting = true);
+    final svc = PropertyApprovalService.instance;
+    try {
+      final created = await svc.createApprovalExportJob(
+        tab: tab,
+        filters: _filters(),
+      );
+      if (!created.success || (created.data ?? '').isEmpty) {
+        _actionSnack(created.message ?? 'Não foi possível iniciar a exportação');
+        return;
+      }
+      final jobId = created.data!;
+
+      // Polling com teto: ~60s. Sem teto, um job travado deixaria o botão
+      // girando para sempre.
+      ApprovalExportJob? job;
+      for (var i = 0; i < 40; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 1500));
+        if (!mounted) return;
+        final status = await svc.getApprovalExportJobStatus(jobId);
+        if (!status.success || status.data == null) {
+          _actionSnack(status.message ?? 'Erro ao consultar a exportação');
+          return;
+        }
+        job = status.data;
+        if (!job!.isRunning) break;
+      }
+
+      if (job == null || job.isRunning) {
+        _actionSnack('A exportação demorou mais que o esperado. Tente de novo.');
+        return;
+      }
+      if (job.isFailed) {
+        _actionSnack(job.error ?? 'A exportação falhou no servidor');
+        return;
+      }
+
+      final bytes = await svc.downloadApprovalExportJob(jobId);
+      if (!bytes.success || bytes.data == null) {
+        _actionSnack(bytes.message ?? 'Erro ao baixar o arquivo');
+        return;
+      }
+
+      final dir = await getTemporaryDirectory();
+      final name = (job.fileName ?? '').trim().isNotEmpty
+          ? job.fileName!.trim()
+          : 'aprovacoes-$tab.csv';
+      final file = File('${dir.path}/$name');
+      await file.writeAsBytes(bytes.data!, flush: true);
+
+      if (!mounted) return;
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path)],
+          subject: 'Exportação da fila de aprovação',
+        ),
+      );
+      if (!mounted) return;
+      _actionSnack(
+        job.totalRows > 0
+            ? 'Exportação pronta — ${job.totalRows} registro(s).'
+            : 'Exportação pronta.',
+        ok: true,
+      );
+    } catch (e) {
+      _actionSnack('Erro ao exportar: $e');
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
   // ─── Abas flush fixas (sublinhado, sem scroll) ────────────────────────
 
   Widget _buildTabsRail(BuildContext context) {
@@ -799,6 +1798,8 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
     final purple = isDark
         ? AppColors.status.purpleDarkMode
         : AppColors.status.purple;
+    final blue =
+        isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
 
     final tabs = <_TabSpec>[
       _TabSpec(
@@ -840,6 +1841,16 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
           count: _rejectedCounts.total,
           accentColor: danger,
         ),
+      // Aba "Edições" (campos protegidos). O backend escopa a lista, então
+      // ela vale tanto para quem revisa quanto para quem só acompanha as
+      // próprias solicitações.
+      _TabSpec(
+        tab: _Tab.editRequests,
+        icon: LucideIcons.squarePen,
+        label: 'Edições',
+        count: _editRequests.items.where((r) => r.isPending).length,
+        accentColor: blue,
+      ),
     ];
 
     // Barra de abas **flush** com sublinhado — fixa (sem scroll horizontal):
@@ -853,17 +1864,37 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
         ),
       ),
       padding: const EdgeInsets.symmetric(horizontal: _kPagePadH - 8),
-      child: Row(
-        children: [
-          for (final t in tabs)
-            Expanded(
-              child: _FlushTab(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Com 6 filas o layout fixo só cabe em telas normais. Abaixo do piso
+          // legível (`_kMinTabWidth`) a barra passa a rolar em vez de espremer
+          // o rótulo — nada de texto ilegível nem overflow.
+          final available = constraints.maxWidth;
+          final each = available / tabs.length;
+          final items = [
+            for (final t in tabs)
+              _FlushTab(
                 spec: t,
                 selected: _activeTab == t.tab,
                 onTap: () => _selectTab(t.tab),
               ),
+          ];
+          if (each >= _kMinTabWidth) {
+            return Row(
+              children: [for (final w in items) Expanded(child: w)],
+            );
+          }
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const ClampingScrollPhysics(),
+            child: Row(
+              children: [
+                for (final w in items)
+                  SizedBox(width: _kMinTabWidth, child: w),
+              ],
             ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -935,6 +1966,15 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
           eyebrow: 'RECUSADOS',
           title: 'Aguardando ajustes',
           hint: 'Imóveis recusados que precisam de correção.',
+        );
+      case _Tab.editRequests:
+        return (
+          icon: LucideIcons.squarePen,
+          eyebrow: 'CAMPOS PROTEGIDOS',
+          title: 'Solicitações de edição',
+          hint: _editRequests.canReview
+              ? 'Aprovar aplica a alteração ao imóvel; recusar exige motivo.'
+              : 'Suas alterações aguardando revisão de um aprovador.',
         );
     }
   }
@@ -1026,6 +2066,8 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
         return _loadingPublication;
       case _Tab.rejected:
         return _loadingRejectedAvail || _loadingRejectedPub;
+      case _Tab.editRequests:
+        return _loadingEditRequests;
     }
   }
 
@@ -1041,6 +2083,8 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
         return _errorPublication;
       case _Tab.rejected:
         return _errorRejected;
+      case _Tab.editRequests:
+        return _errorEditRequests;
     }
   }
 
@@ -1057,6 +2101,10 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
       case _Tab.rejected:
         return _rejectedAvail.data.isNotEmpty ||
             _rejectedPub.data.isNotEmpty;
+      case _Tab.editRequests:
+        // O cabeçalho da esteira (ligada/desligada) + os filtros valem por si,
+        // então a aba nunca cai no estado vazio "cru".
+        return true;
     }
   }
 
@@ -1066,6 +2114,8 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
     void addList(List<Property> list, ApprovalQueueKind kind) {
       // Ações só nas filas de aprovação (disponibilidade/publicação) e somente
       // para quem tem a permissão correspondente.
+      final isQueue = kind == ApprovalQueueKind.pendingAvailability ||
+          kind == ApprovalQueueKind.pendingPublication;
       final canApprove = kind == ApprovalQueueKind.pendingAvailability
           ? _canApproveAvailability
           : kind == ApprovalQueueKind.pendingPublication
@@ -1076,17 +2126,32 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
           : kind == ApprovalQueueKind.pendingPublication
               ? _canRejectPublication
               : false;
+      // Com multi-aprovadores ligado, a fila vota em vez de aprovar direto —
+      // mesma bifurcação do web (`settings.approversEnabled`).
+      final votingMode = isQueue && _settings.approversEnabled;
       for (var i = 0; i < list.length; i++) {
         final p = list[i];
+        final rejectedWaiting = _isRejectedWaitingResend(p, kind);
+        final showApprove = canApprove && !votingMode && !rejectedWaiting;
+        final showReject = canReject && !votingMode && !rejectedWaiting;
         nodes.add(
           ApprovalPropertyCard(
             property: p,
             kind: kind,
             onOpenDetails: () => _openDetails(p),
-            canApprove: canApprove,
-            canReject: canReject,
-            onApprove: canApprove ? () => _approveCard(p, kind) : null,
-            onReject: canReject ? () => _rejectCard(p, kind) : null,
+            canApprove: showApprove,
+            canReject: showReject,
+            onApprove: showApprove ? () => _approveCard(p, kind) : null,
+            onReject: showReject ? () => _rejectCard(p, kind) : null,
+            onResend: rejectedWaiting ? () => _resendCard(p, kind) : null,
+            onVote: votingMode && !rejectedWaiting && canApprove
+                ? () => _voteCard(p, kind)
+                : null,
+            onMore: () => _openMoreActions(p, kind),
+            ownerAuthNote: kind == ApprovalQueueKind.pendingOwnerAuth ||
+                    kind == ApprovalQueueKind.myOwnerAuth
+                ? _ownerAuthNote(p)
+                : null,
           )
               .animate(key: ValueKey('card-${p.id}-$kind'))
               .fadeIn(
@@ -1146,11 +2211,182 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
           addList(_rejectedPub.data, ApprovalQueueKind.rejectedPublication);
         }
         break;
+      case _Tab.editRequests:
+        return _buildEditRequestsBody();
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: nodes,
+    );
+  }
+
+  // ─── Aba "Edições" (campos protegidos) ────────────────────────────────
+
+  Widget _buildEditRequestsBody() {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final blue =
+        isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final on = _settings.protectedFieldsEnabled;
+    final items = _editRequests.items;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Estado da esteira — linha flush com filete, sem card encapsulando.
+        Container(
+          padding: const EdgeInsets.only(bottom: 14),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                on ? LucideIcons.lock : LucideIcons.lockOpen,
+                size: 16,
+                color: on ? kApprovalGreen : secondary,
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  on
+                      ? 'Esteira ligada: edições em campos protegidos de quem não é aprovador viram solicitação.'
+                      : 'Esteira desligada: qualquer edição é aplicada direto ao imóvel, sem passar por aprovação.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: secondary,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                decoration: BoxDecoration(
+                  color: (on ? kApprovalGreen : secondary)
+                      .withValues(alpha: isDark ? 0.16 : 0.10),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: (on ? kApprovalGreen : secondary)
+                        .withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Text(
+                  on ? 'ATIVADA' : 'DESATIVADA',
+                  style: TextStyle(
+                    color: on ? kApprovalGreen : secondary,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 9.5,
+                    letterSpacing: 0.9,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        // Filtro por status — mesmos quatro do web.
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          physics: const ClampingScrollPhysics(),
+          child: Row(
+            children: [
+              for (final f in <({
+                PropertyChangeRequestStatus? status,
+                String label
+              })>[
+                (status: PropertyChangeRequestStatus.pending, label: 'Pendentes'),
+                (
+                  status: PropertyChangeRequestStatus.approved,
+                  label: 'Aprovadas'
+                ),
+                (
+                  status: PropertyChangeRequestStatus.rejected,
+                  label: 'Recusadas'
+                ),
+                (status: null, label: 'Todas'),
+              ]) ...[
+                _EditRequestFilterChip(
+                  label: f.label,
+                  tone: blue,
+                  selected: _editRequestsFilter == f.status,
+                  onTap: () {
+                    if (_editRequestsFilter == f.status) return;
+                    setState(() => _editRequestsFilter = f.status);
+                    _loadEditRequests();
+                  },
+                ),
+                const SizedBox(width: 8),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        if (_loadingEditRequests)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 34),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (items.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 30, horizontal: 4),
+            child: Column(
+              children: [
+                Container(
+                  width: 60,
+                  height: 60,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: blue.withValues(alpha: 0.10),
+                    border: Border.all(color: blue.withValues(alpha: 0.28)),
+                  ),
+                  child: Icon(LucideIcons.squarePen, color: blue, size: 26),
+                ),
+                const SizedBox(height: 13),
+                Text(
+                  _editRequestsFilter == PropertyChangeRequestStatus.pending
+                      ? 'Nenhuma solicitação pendente'
+                      : 'Nenhuma solicitação encontrada',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: ThemeHelpers.textColor(context),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Edições em campos protegidos aparecem aqui para revisão.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: secondary,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          for (var i = 0; i < items.length; i++)
+            ChangeRequestCard(
+              request: items[i],
+              canReview: _editRequests.canReview,
+              onOpenProperty: items[i].property == null
+                  ? null
+                  : () => Navigator.of(context).pushNamed(
+                        AppRoutes.propertyDetails(items[i].property!.id),
+                      ),
+              onApprove: () => _approveChangeRequest(items[i]),
+              onReject: () => _rejectChangeRequest(items[i]),
+            ).animate(key: ValueKey('cr-${items[i].id}')).fadeIn(
+                  delay: Duration(milliseconds: 40 * i),
+                  duration: 220.ms,
+                ),
+      ],
     );
   }
 
@@ -1288,6 +2524,13 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
           body:
               'Quando algum imóvel for recusado, ele fica listado aqui para revisão.',
         );
+      case _Tab.editRequests:
+        return (
+          icon: LucideIcons.squarePen,
+          title: 'Nenhuma solicitação',
+          body:
+              'Edições em campos protegidos aparecem aqui para aprovação.',
+        );
     }
   }
 }
@@ -1335,6 +2578,143 @@ class _ApprovalRowSkeleton extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Chip de filtro por status da aba "Edições" (pendentes/aprovadas/…).
+/// Pílula da barra de ações (Filtros / Exportar). Tinge em [tone] quando
+/// [active] — assim o usuário vê de relance que há filtro ligado.
+class _ToolbarPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color tone;
+  final bool active;
+  final bool busy;
+  final VoidCallback? onTap;
+
+  const _ToolbarPill({
+    required this.icon,
+    required this.label,
+    required this.tone,
+    required this.active,
+    required this.onTap,
+    this.busy = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final enabled = onTap != null;
+    final fg = active ? tone : (enabled ? secondary : secondary.withValues(alpha: 0.5));
+
+    return Material(
+      color: active
+          ? tone.withValues(alpha: isDark ? 0.16 : 0.09)
+          : Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          height: 40,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: active
+                  ? tone.withValues(alpha: 0.42)
+                  : ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
+              width: active ? 1.3 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (busy)
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(tone),
+                  ),
+                )
+              else
+                Icon(icon, size: 15, color: fg),
+              const SizedBox(width: 8),
+              // FittedBox: "Filtros · 3" e "Exportando…" não podem estourar
+              // a metade da largura em aparelho de 320dp.
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.1,
+                      color: fg,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EditRequestFilterChip extends StatelessWidget {
+  final String label;
+  final Color tone;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _EditRequestFilterChip({
+    required this.label,
+    required this.tone,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            color: selected
+                ? tone.withValues(alpha: isDark ? 0.18 : 0.10)
+                : Colors.transparent,
+            border: Border.all(
+              color: selected
+                  ? tone.withValues(alpha: 0.55)
+                  : ThemeHelpers.borderColor(context),
+              width: selected ? 1.4 : 1,
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+              fontSize: 12.5,
+              color:
+                  selected ? tone : ThemeHelpers.textSecondaryColor(context),
+            ),
+          ),
         ),
       ),
     );
