@@ -180,9 +180,6 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
   bool _editingTitle = false;
   bool _savingTitle = false;
 
-  final TextEditingController _descCtrl = TextEditingController();
-  bool _editingDescription = false;
-  bool _savingDescription = false;
 
   final TextEditingController _notesCtrl = TextEditingController();
   bool _editingNotes = false;
@@ -474,7 +471,6 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
     _commentController.dispose();
     _commentFocus.dispose();
     _titleCtrl.dispose();
-    _descCtrl.dispose();
     _notesCtrl.dispose();
     super.dispose();
   }
@@ -977,33 +973,6 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
     if (ok) {
       HapticFeedback.selectionClick();
       _snack('Título atualizado', ok: true);
-    }
-  }
-
-  void _startDescriptionEdit() {
-    _descCtrl.text = _taskNow.description ?? '';
-    setState(() => _editingDescription = true);
-  }
-
-  Future<void> _saveDescription() async {
-    final novo = _descCtrl.text.trim();
-    if (novo == (_taskNow.description ?? '').trim()) {
-      setState(() => _editingDescription = false);
-      return;
-    }
-    setState(() => _savingDescription = true);
-    final ok = await _patchTask(
-      UpdateTaskDto(description: novo, includeTags: false),
-      overlay: (t) => t.copyWith(description: novo),
-    );
-    if (!mounted) return;
-    setState(() {
-      _savingDescription = false;
-      if (ok) _editingDescription = false;
-    });
-    if (ok) {
-      HapticFeedback.selectionClick();
-      _snack('Briefing atualizado', ok: true);
     }
   }
 
@@ -1525,8 +1494,15 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
                 onPressed: _openCardActions,
               ),
           ],
-          body: Column(
-            children: [
+          // A TELA INTEIRA ROLA. Antes o hero era fixo e só o conteúdo da aba
+          // rolava — daí a sensação de "metade da tela travada", com a área
+          // útil espremida no rodapé. Aqui o hero e o trilho do funil sobem
+          // junto com o dedo e as ABAS ficam presas no topo, que é o padrão
+          // que todo app de ficha usa.
+          body: NestedScrollView(
+            headerSliverBuilder: (context, _) => [
+              SliverToBoxAdapter(
+                child:
               // Teclado aberto = o hero sai de cena com fade (AnimatedSize +
               // opacidade, saída suave, nunca corte seco).
               //
@@ -1595,9 +1571,13 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
                             _openMoveStageSheet(context, task),
                       ),
               ),
+              ),
               // Cada aba com identidade própria (ativa colore ícone +
               // label + indicador; inativas slate).
-              _MinimalTabBar(
+              SliverPersistentHeader(
+                pinned: true,
+                delegate: _PinnedTabBarDelegate(
+                  child: _MinimalTabBar(
                 controller: _tabController,
                 tabs: [
                   const _TabItem(
@@ -1648,9 +1628,11 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
                         : null,
                   ),
                 ],
+                  ),
+                ),
               ),
-              Expanded(
-                child: TabBarView(
+            ],
+            body: TabBarView(
                   controller: _tabController,
                   physics: const ClampingScrollPhysics(),
                   children: [
@@ -1670,8 +1652,6 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
                     _buildHistoryTab(context, theme),
                   ],
                 ),
-              ),
-            ],
           ),
         );
       },
@@ -1707,8 +1687,6 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
     _TaskState state,
     KanbanTask task,
   ) {
-    final hasDescription =
-        task.description != null && task.description!.trim().isNotEmpty;
     final tags = task.displayTags ?? const <String>[];
     final hasTags = tags.isNotEmpty;
 
@@ -1756,23 +1734,11 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 1. DESCRIÇÃO em destaque editorial (e editável no lugar)
-          _EditorialDescription(
-            text: hasDescription ? task.description!.trim() : null,
-            canEdit: _canEdit,
-            editing: _editingDescription,
-            saving: _savingDescription,
-            controller: _descCtrl,
-            onStartEdit: _startDescriptionEdit,
-            onCancel: () {
-              FocusScope.of(context).unfocus();
-              setState(() => _editingDescription = false);
-            },
-            onSave: _saveDescription,
-          ),
-          const SizedBox(height: 26),
-
-          // 2. RAIO-X — ficha técnica flush (valor, resultado, prazo, cadência…)
+          // A seção "Briefing" saiu daqui: era o bloco mais alto da aba e
+          // empurrava a ficha para baixo sem ser o que o corretor abre o
+          // card para ver. A descrição continua no card do board.
+          //
+          // 1. RAIO-X — ficha técnica flush (valor, resultado, prazo, cadência…)
           //
           // A etapa NÃO mora mais aqui: virou o trilho do funil no hero, onde
           // ela é desenho (percurso do lead) e não "mais uma linha de opção"
@@ -2966,27 +2932,29 @@ class _TaskState {
 // TRILHO DO FUNIL — percurso do lead (e a troca de etapa como consequência)
 // =============================================================================
 
-/// Fita horizontal com as etapas do funil na ORDEM real do board.
+/// Percurso do funil em UMA linha, com o NOME da etapa por extenso.
 ///
-/// Lê como um progresso: o que ficou para trás vem preenchido na cor da
-/// própria coluna (o caminho andado), a etapa ATUAL é uma pill sólida com
-/// nome, e o que falta aparece como nó vazado. Rola sozinho para deixar a
-/// etapa atual à vista.
+/// A fita anterior era uma régua de bolinhas numeradas com rolagem
+/// horizontal: número solto não diz nada ao corretor, que pediu justamente
+/// ver o NOME da coluna. Aqui o nome ocupa o centro, a posição vira texto
+/// ("etapa 4 de 9") e o progresso vira uma barra segmentada — que aguenta
+/// funil curto ou longo sem quebrar linha e SEM rolagem horizontal, porque
+/// os segmentos apenas afinam conforme a quantidade de colunas.
 ///
-/// Tocar num nó MOVE o card para lá — a ação nasce do desenho, sem virar
-/// "mais uma linha de opção" na ficha. Sem permissão de mover, o trilho
-/// continua visível (informação), apenas não responde ao toque.
-class _FunnelStageRail extends StatefulWidget {
+/// As setas avançam/voltam UMA etapa (o caso comum, num único toque);
+/// tocar no nome abre a lista completa para saltar para qualquer etapa —
+/// que é como o funil longo continua alcançável sem varrer a tela.
+class _FunnelStageBar extends StatelessWidget {
   final List<KanbanColumn> stages;
   final String currentColumnId;
   final bool canMove;
   final String? movingToColumnId;
   final void Function(KanbanColumn column) onPick;
 
-  /// Toque na etapa ATUAL — abre a lista completa (funil longo).
+  /// Toque no nome — abre a lista completa (funil longo).
   final VoidCallback onOpenList;
 
-  const _FunnelStageRail({
+  const _FunnelStageBar({
     required this.stages,
     required this.currentColumnId,
     required this.canMove,
@@ -2996,195 +2964,259 @@ class _FunnelStageRail extends StatefulWidget {
   });
 
   @override
-  State<_FunnelStageRail> createState() => _FunnelStageRailState();
-}
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
 
-class _FunnelStageRailState extends State<_FunnelStageRail> {
-  final ScrollController _scroll = ScrollController();
+    final idx = stages.indexWhere((c) => c.id == currentColumnId);
+    final atual = idx >= 0 ? stages[idx] : null;
+    final tone = _columnTone(atual?.color);
+    final ink = _columnInk(context, tone);
 
-  /// Largura aproximada de um nó não-atual — usada só para centralizar a
-  /// etapa atual na primeira pintura (não define o layout).
-  static const double _dotSlot = 34;
+    final movendo = movingToColumnId != null;
+    final podeVoltar = canMove && idx > 0 && !movendo;
+    final podeAvancar =
+        canMove && idx >= 0 && idx < stages.length - 1 && !movendo;
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _centerCurrent());
-  }
-
-  @override
-  void didUpdateWidget(covariant _FunnelStageRail old) {
-    super.didUpdateWidget(old);
-    if (old.currentColumnId != widget.currentColumnId) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _centerCurrent());
-    }
-  }
-
-  @override
-  void dispose() {
-    _scroll.dispose();
-    super.dispose();
-  }
-
-  void _centerCurrent() {
-    if (!_scroll.hasClients) return;
-    final idx =
-        widget.stages.indexWhere((c) => c.id == widget.currentColumnId);
-    if (idx < 0) return;
-    final alvo = (idx * _dotSlot) - 40;
-    _scroll.animateTo(
-      alvo.clamp(0.0, _scroll.position.maxScrollExtent),
-      duration: const Duration(milliseconds: 260),
-      curve: Curves.easeOutCubic,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Posição em texto: substitui a contagem que o usuário tinha de
+        // inferir contando bolinhas.
+        Row(
+          children: [
+            Container(
+              width: 3.5,
+              height: 11,
+              decoration: BoxDecoration(
+                color: tone,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Text(
+                idx >= 0
+                    ? 'ETAPA ${idx + 1} DE ${stages.length}'
+                    : 'ETAPA NÃO IDENTIFICADA',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.4,
+                  color: secondary,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 9),
+        Row(
+          children: [
+            _StageArrow(
+              icon: LucideIcons.chevronLeft,
+              tooltip: 'Etapa anterior',
+              enabled: podeVoltar,
+              tone: tone,
+              onTap: podeVoltar ? () => onPick(stages[idx - 1]) : null,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _StageNamePill(
+                label: atual?.title ?? 'Selecionar etapa',
+                tone: tone,
+                ink: ink,
+                isDark: isDark,
+                busy: movendo,
+                // Sem permissão de mover o nome continua legível (é
+                // informação), apenas não abre a lista.
+                onTap: canMove && !movendo ? onOpenList : null,
+              ),
+            ),
+            const SizedBox(width: 8),
+            _StageArrow(
+              icon: LucideIcons.chevronRight,
+              tooltip: 'Próxima etapa',
+              enabled: podeAvancar,
+              tone: tone,
+              onTap: podeAvancar ? () => onPick(stages[idx + 1]) : null,
+            ),
+          ],
+        ),
+        const SizedBox(height: 11),
+        _StageTrack(total: stages.length, currentIndex: idx, tone: tone),
+      ],
     );
   }
+}
+
+/// Seta de uma etapa. Fica apagada (não some) quando não há para onde ir —
+/// sumir botão faz o layout pular a cada movimentação.
+class _StageArrow extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final bool enabled;
+  final Color tone;
+  final VoidCallback? onTap;
+
+  const _StageArrow({
+    required this.icon,
+    required this.tooltip,
+    required this.enabled,
+    required this.tone,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final trilho = ThemeHelpers.borderColor(context).withValues(alpha: 0.5);
-    final atualIdx =
-        widget.stages.indexWhere((c) => c.id == widget.currentColumnId);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final borda = ThemeHelpers.borderColor(context);
+    final cor = enabled
+        ? tone
+        : ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.35);
 
-    return SizedBox(
-      height: 34,
-      child: ListView.builder(
-        controller: _scroll,
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        padding: EdgeInsets.zero,
-        itemCount: widget.stages.length,
-        itemBuilder: (context, i) {
-          final col = widget.stages[i];
-          final tone = _columnTone(col.color);
-          final ink = _columnInk(context, tone);
-          final isAtual = i == atualIdx;
-          final andado = atualIdx >= 0 && i < atualIdx;
-          final indo = widget.movingToColumnId == col.id;
-
-          // Conector: pintado até a etapa atual, apagado depois.
-          final conector = i == 0
-              ? const SizedBox.shrink()
-              : Container(
-                  width: 14,
-                  height: 2,
-                  color: andado || isAtual
-                      ? tone.withValues(alpha: 0.45)
-                      : trilho,
-                );
-
-          final Widget no;
-          if (isAtual || indo) {
-            no = AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOut,
-              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-              decoration: BoxDecoration(
-                color: tone,
-                borderRadius: BorderRadius.circular(999),
-                boxShadow: [
-                  BoxShadow(
-                    color: tone.withValues(alpha: 0.35),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: enabled
+            ? tone.withValues(alpha: isDark ? 0.14 : 0.08)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(11),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(11),
+          child: Container(
+            width: 36,
+            height: 36,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(11),
+              border: Border.all(
+                color: enabled
+                    ? tone.withValues(alpha: 0.35)
+                    : borda.withValues(alpha: 0.5),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (indo)
-                    const SizedBox(
-                      width: 11,
-                      height: 11,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor:
-                            AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    )
-                  else
-                    const Icon(Icons.circle, size: 7, color: Colors.white),
-                  const SizedBox(width: 7),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 130),
-                    child: Text(
-                      col.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 11.5,
-                        height: 1,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          } else {
-            // Etapa andada = preenchida na cor dela; futura = vazada.
-            no = Tooltip(
-              message: col.title,
-              waitDuration: const Duration(milliseconds: 300),
-              child: Container(
-                width: 20,
-                height: 20,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: andado ? tone.withValues(alpha: 0.9) : Colors.transparent,
-                  border: Border.all(
-                    color: andado ? tone : trilho,
-                    width: andado ? 0 : 1.6,
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: andado
-                    ? const Icon(Icons.check_rounded,
-                        size: 12, color: Colors.white)
-                    : Text(
-                        '${i + 1}',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.w800,
-                          color: secondary,
-                          height: 1,
-                        ),
-                      ),
-              ),
-            );
-          }
+            ),
+            child: Icon(icon, size: 17, color: cor),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
-          final emVoo = widget.movingToColumnId != null;
-          // Nó comum move direto; a pill da etapa ATUAL abre a lista completa
-          // (atalho para funil longo, onde rolar o trilho cansa).
-          final VoidCallback? aoTocar = emVoo
-              ? null
-              : isAtual
-                  ? widget.onOpenList
-                  : (widget.canMove ? () => widget.onPick(col) : null);
+/// O nome da etapa — peça central. Pill sólida na cor da coluna, com o
+/// ícone de lista sinalizando que dá para trocar por ali.
+class _StageNamePill extends StatelessWidget {
+  final String label;
+  final Color tone;
+  final Color ink;
+  final bool isDark;
+  final bool busy;
+  final VoidCallback? onTap;
 
-          return Row(
+  const _StageNamePill({
+    required this.label,
+    required this.tone,
+    required this.ink,
+    required this.isDark,
+    required this.busy,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: tone,
+      borderRadius: BorderRadius.circular(11),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(11),
+        child: Container(
+          height: 36,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
             children: [
-              conector,
-              if (i > 0) const SizedBox(width: 2),
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: aoTocar,
-                  borderRadius: BorderRadius.circular(999),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 3),
-                    child: no,
+              // Expanded + uma linha só: nome longo vira reticências em vez
+              // de quebrar para baixo (regra do layout).
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.1,
+                    color: ink,
                   ),
                 ),
               ),
-              if (i > 0) const SizedBox(width: 2),
+              const SizedBox(width: 8),
+              if (busy)
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(ink),
+                  ),
+                )
+              else if (onTap != null)
+                Icon(
+                  LucideIcons.chevronsUpDown,
+                  size: 15,
+                  color: ink.withValues(alpha: 0.85),
+                ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Barra segmentada: um traço por etapa, preenchido até a atual.
+///
+/// Cada segmento é `Expanded`, então 4 ou 24 colunas cabem na mesma largura
+/// — os traços afinam, o layout não estoura e nada rola para o lado.
+class _StageTrack extends StatelessWidget {
+  final int total;
+  final int currentIndex;
+  final Color tone;
+
+  const _StageTrack({
+    required this.total,
+    required this.currentIndex,
+    required this.tone,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final vazio = ThemeHelpers.borderColor(context).withValues(alpha: 0.55);
+    return SizedBox(
+      height: 4,
+      child: Row(
+        children: List<Widget>.generate(total, (i) {
+          final andado = currentIndex >= 0 && i < currentIndex;
+          final atual = i == currentIndex;
+          return Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(right: i == total - 1 ? 0 : 3),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: atual
+                      ? tone
+                      : andado
+                          ? tone.withValues(alpha: 0.45)
+                          : vazio,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
           );
-        },
+        }),
       ),
     );
   }
@@ -3425,7 +3457,7 @@ class _TaskHeroHeader extends StatelessWidget {
           // mesma peça.
           if (stages.isNotEmpty && !editingTitle) ...[
             const SizedBox(height: 16),
-            _FunnelStageRail(
+            _FunnelStageBar(
               stages: stages,
               currentColumnId: task.columnId,
               canMove: canMoveStage,
@@ -3877,6 +3909,42 @@ class _TabItem {
     required this.color,
     this.badge,
   });
+}
+
+/// Prende a barra de abas no topo enquanto o resto rola.
+///
+/// Altura fixa em 51: os `Tab` têm `height: 50` e o container soma 1px de
+/// borda inferior. Um sliver persistente exige altura declarada — se ela
+/// divergir da real, a barra corta ou deixa fresta.
+class _PinnedTabBarDelegate extends SliverPersistentHeaderDelegate {
+  final Widget child;
+
+  const _PinnedTabBarDelegate({required this.child});
+
+  static const double _altura = 51;
+
+  @override
+  double get minExtent => _altura;
+
+  @override
+  double get maxExtent => _altura;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    // Fundo opaco: sem ele o conteúdo passaria POR TRÁS da barra presa.
+    return Material(
+      color: ThemeHelpers.backgroundColor(context),
+      child: SizedBox(height: _altura, child: child),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _PinnedTabBarDelegate old) =>
+      old.child != child;
 }
 
 class _MinimalTabBar extends StatelessWidget {
@@ -4491,243 +4559,6 @@ class _LeadContactAction extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-// =============================================================================
-// DESCRIPTION — editorial, sem caixa
-// =============================================================================
-
-/// Descrição "tipo pull-quote": eyebrow `BRIEFING` em cima, texto grande
-/// com leading 1.55, e uma borda accent fina (3px) à esquerda fazendo o
-/// papel de "régua editorial". Sem container cinza padrão.
-///
-/// Quando vazia: mensagem explicitamente discreta com ícone, sem
-/// container — fica claro que está vazio sem ocupar muito espaço.
-class _EditorialDescription extends StatelessWidget {
-  final String? text;
-
-  /// Edição no lugar: o briefing vira campo onde ele é lido, sem sheet.
-  final bool canEdit;
-  final bool editing;
-  final bool saving;
-  final TextEditingController controller;
-  final VoidCallback onStartEdit;
-  final VoidCallback onCancel;
-  final VoidCallback onSave;
-
-  const _EditorialDescription({
-    required this.text,
-    required this.canEdit,
-    required this.editing,
-    required this.saving,
-    required this.controller,
-    required this.onStartEdit,
-    required this.onCancel,
-    required this.onSave,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final border = ThemeHelpers.borderColor(context);
-    const accent = _kBriefingTone;
-    final empty = text == null || text!.isEmpty;
-    final hasText = !empty;
-    final length = hasText ? text!.length : 0;
-
-    if (editing) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                'BRIEFING',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  letterSpacing: 2.6,
-                  fontWeight: FontWeight.w900,
-                  color: accent,
-                  fontSize: 10,
-                  height: 1,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Container(
-                  height: 1,
-                  color: border.withValues(alpha: 0.35),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: controller,
-            autofocus: true,
-            enabled: !saving,
-            minLines: 4,
-            maxLines: 12,
-            maxLength: 4000,
-            textCapitalization: TextCapitalization.sentences,
-            keyboardType: TextInputType.multiline,
-            style: theme.textTheme.bodyLarge?.copyWith(
-              height: 1.5,
-              fontSize: 14.5,
-              fontWeight: FontWeight.w500,
-            ),
-            decoration: InputDecoration(
-              hintText: 'Contexto da negociação, combinados, próximos passos…',
-              hintStyle: theme.textTheme.bodyMedium?.copyWith(
-                color: secondary,
-                fontWeight: FontWeight.w500,
-              ),
-              counterText: '',
-              filled: true,
-              fillColor: border.withValues(alpha: isDark ? 0.16 : 0.1),
-              contentPadding: const EdgeInsets.all(14),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide(color: border.withValues(alpha: 0.5)),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide(color: border.withValues(alpha: 0.5)),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide(
-                  color: accent.withValues(alpha: 0.7),
-                  width: 1.5,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          _InlineEditBar(
-            onCancel: onCancel,
-            onSave: onSave,
-            saving: saving,
-            helper: 'Visível para todo o time',
-          ),
-        ],
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Eyebrow + título "Briefing" — alinhado, mas mais leve que o
-        // _SectionHeader padrão (sem o stripe vertical de 4px à esquerda).
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Text(
-              'BRIEFING',
-              style: theme.textTheme.labelSmall?.copyWith(
-                letterSpacing: 2.6,
-                fontWeight: FontWeight.w900,
-                color: accent,
-                fontSize: 10,
-                height: 1,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Container(
-                height: 1,
-                color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
-              ),
-            ),
-            if (hasText) ...[
-              const SizedBox(width: 10),
-              Text(
-                '$length caracteres',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: secondary,
-                  letterSpacing: 0.4,
-                ),
-              ),
-            ],
-            // O texto é selecionável, então o lápis vive no eyebrow: toque
-            // no corpo continua servindo para copiar.
-            if (canEdit && hasText) ...[
-              const SizedBox(width: 6),
-              _MicroEditButton(onTap: onStartEdit, tooltip: 'Editar briefing'),
-            ],
-          ],
-        ),
-        const SizedBox(height: 12),
-
-        if (empty)
-          InkWell(
-            onTap: canEdit ? onStartEdit : null,
-            borderRadius: BorderRadius.circular(10),
-            child: Padding(
-              padding: const EdgeInsets.only(left: 14, top: 4, bottom: 4),
-              child: Row(
-                children: [
-                  Icon(Icons.short_text_rounded, size: 16, color: secondary),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      canEdit
-                          ? 'Sem descrição. Toque para escrever o briefing.'
-                          : 'Sem descrição.',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: secondary,
-                        fontWeight: FontWeight.w600,
-                        height: 1.4,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  ),
-                  if (canEdit) ...[
-                    const SizedBox(width: 8),
-                    Icon(
-                      Icons.edit_rounded,
-                      size: 13,
-                      color: _kBriefingTone.withValues(alpha: 0.8),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          )
-        else
-          // Régua accent à esquerda + texto editorial generoso
-          IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Container(
-                  width: 3,
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.55),
-                    borderRadius: BorderRadius.circular(99),
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: SelectableText(
-                    text!,
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      height: 1.55,
-                      fontSize: 15,
-                      letterSpacing: -0.1,
-                      color: ThemeHelpers.textColor(context),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-      ],
     );
   }
 }

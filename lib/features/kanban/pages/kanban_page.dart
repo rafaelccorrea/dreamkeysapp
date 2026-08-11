@@ -1634,7 +1634,9 @@ class _KanbanPageState extends State<KanbanPage> {
 
     if (!(controller.permissions?.canMoveTasks ?? false)) {
       return GestureDetector(
-        onDoubleTap: () {
+        // Clique ÚNICO abre o card: duplo toque não é gesto de lista em
+        // celular — o corretor tocava uma vez e nada acontecia.
+        onTap: () {
           Navigator.push(
             context,
             adaptivePageRoute<void>(builder: (_) => TaskDetailsPage(task: task)),
@@ -1675,7 +1677,7 @@ class _KanbanPageState extends State<KanbanPage> {
       ),
       childWhenDragging: Opacity(opacity: 0.28, child: _buildTaskCard(task)),
       child: GestureDetector(
-        onDoubleTap: () {
+        onTap: () {
           Navigator.push(
             context,
             adaptivePageRoute<void>(builder: (_) => TaskDetailsPage(task: task)),
@@ -1964,7 +1966,9 @@ class _KanbanPageState extends State<KanbanPage> {
     final hasDescription = descriptionText.isNotEmpty;
 
     return GestureDetector(
-      onDoubleTap: bulkMode
+      // Em modo seleção o toque pertence ao check (InkWell de fora): aqui
+      // fica nulo para não roubar o gesto.
+      onTap: bulkMode
           ? null
           : () {
               Navigator.push(
