@@ -47,6 +47,9 @@ class _MasterBillingPageState extends State<MasterBillingPage> {
   bool _accountsLoading = true;
   bool _accountsLoaded = false;
   String? _accountsError;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _accountsErrorStatus = 0;
   String? _busyAccountId;
 
   BillingAccountFilter _filter = BillingAccountFilter.all;
@@ -88,6 +91,7 @@ class _MasterBillingPageState extends State<MasterBillingPage> {
     setState(() {
       _accountsLoading = true;
       _accountsError = null;
+      _accountsErrorStatus = 0;
     });
     final res = await PlatformAdminService.instance
         .listAccounts(search: _appliedSearch);
@@ -99,6 +103,7 @@ class _MasterBillingPageState extends State<MasterBillingPage> {
         _accounts = res.data!;
       } else {
         _accountsError = res.message ?? 'Erro ao listar as contas';
+        _accountsErrorStatus = res.statusCode;
       }
     });
   }
@@ -702,7 +707,11 @@ class _MasterBillingPageState extends State<MasterBillingPage> {
     if (_accountsLoading && _accounts.isEmpty) {
       child = const MasterCardSkeleton(rows: 4);
     } else if (_accountsError != null && _accounts.isEmpty) {
-      child = MasterErrorState(message: _accountsError!, onRetry: _loadAccounts);
+      child = MasterErrorState(
+        message: _accountsError!,
+        statusCode: _accountsErrorStatus,
+        onRetry: _loadAccounts,
+      );
     } else if (visible.isEmpty) {
       final hasSearch = _appliedSearch.isNotEmpty;
       child = MasterEmptyState(

@@ -9,6 +9,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/state/screen_state_cache.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../models/admin_user_model.dart';
@@ -38,6 +39,9 @@ class _UsersPageState extends State<UsersPage> {
   bool _loadingMore = false;
   bool _refetching = false;
   String? _error;
+  // Sem o código HTTP o erro não sabe dizer se foi permissão ou servidor.
+  int _errorStatus = 0;
+  Object? _errorRaw;
 
   List<AdminUser> _users = [];
   int _page = 1;
@@ -121,6 +125,8 @@ class _UsersPageState extends State<UsersPage> {
       _loading = true;
       _refetching = _users.isNotEmpty;
       _error = null;
+      _errorStatus = 0;
+      _errorRaw = null;
       _page = 1;
     });
     final res = await AdminUsersService.instance.listUsers(
@@ -148,6 +154,8 @@ class _UsersPageState extends State<UsersPage> {
         _total = res.data!.total;
       } else {
         _error = res.message ?? 'Erro ao listar usuários';
+        _errorStatus = res.statusCode;
+        _errorRaw = res.error;
       }
     });
     // Resultados carregados → baixa o teclado (evita ficar tampando a lista).
@@ -328,7 +336,12 @@ class _UsersPageState extends State<UsersPage> {
             if (_loading)
               const _UsersShimmer()
             else if (_error != null)
-              _ErrorBlock(message: _error!, onRetry: _reload)
+              _ErrorBlock(
+                message: _error!,
+                statusCode: _errorStatus,
+                error: _errorRaw,
+                onRetry: _reload,
+              )
             else if (_users.isEmpty)
               const _EmptyBlock()
             else
@@ -1815,35 +1828,26 @@ class _EmptyBlock extends StatelessWidget {
 }
 
 class _ErrorBlock extends StatelessWidget {
-  const _ErrorBlock({required this.message, required this.onRetry});
+  const _ErrorBlock({
+    required this.message,
+    required this.onRetry,
+    this.statusCode = 0,
+    this.error,
+  });
 
   final String message;
-  final VoidCallback onRetry;
+  final int statusCode;
+  final Object? error;
+  final Future<void> Function() onRetry;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        children: [
-          Icon(LucideIcons.alertCircle, color: Colors.red.shade400, size: 32),
-          const SizedBox(height: 8),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: ThemeHelpers.textSecondaryColor(context),
-              fontSize: 13,
-            ),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            icon: const Icon(LucideIcons.refreshCcw, size: 16),
-            onPressed: onRetry,
-            label: const Text('Tentar novamente'),
-          ),
-        ],
-      ),
+    return AppErrorState.fromApi(
+      message: message,
+      statusCode: statusCode,
+      error: error,
+      onRetry: onRetry,
+      dense: true,
     );
   }
 }

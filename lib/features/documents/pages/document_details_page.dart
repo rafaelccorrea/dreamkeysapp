@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
@@ -24,6 +25,7 @@ class _DocumentDetailsPageState extends State<DocumentDetailsPage> {
   Document? _document;
   bool _isLoading = true;
   String? _errorMessage;
+  int _errorStatus = 0;
 
   @override
   void initState() {
@@ -35,6 +37,7 @@ class _DocumentDetailsPageState extends State<DocumentDetailsPage> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _errorStatus = 0;
     });
 
     final response = await _documentService.getDocumentById(widget.documentId);
@@ -48,6 +51,7 @@ class _DocumentDetailsPageState extends State<DocumentDetailsPage> {
       } else {
         setState(() {
           _errorMessage = response.message ?? 'Erro ao carregar documento';
+          _errorStatus = response.statusCode;
           _isLoading = false;
         });
       }
@@ -77,34 +81,10 @@ class _DocumentDetailsPageState extends State<DocumentDetailsPage> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _errorMessage != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.error_outline,
-                          size: 64,
-                          color: AppColors.status.error,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          _errorMessage!,
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            color: ThemeHelpers.textColor(context),
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        ElevatedButton.icon(
-                          onPressed: _loadDocument,
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('Tentar Novamente'),
-                        ),
-                      ],
-                    ),
-                  ),
+              ? AppErrorState.fromApi(
+                  message: _errorMessage,
+                  statusCode: _errorStatus,
+                  onRetry: _loadDocument,
                 )
               : _document == null
                   ? const Center(child: Text('Documento não encontrado'))

@@ -35,6 +35,9 @@ class _SubscriptionPlansPageState extends State<SubscriptionPlansPage> {
 
   bool _loading = true;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   List<PricingPlan> _plans = const [];
   String _currentPlanKey = '';
   final Set<String> _expandedModules = {};
@@ -76,6 +79,7 @@ class _SubscriptionPlansPageState extends State<SubscriptionPlansPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
 
     final results = await Future.wait([
@@ -92,8 +96,10 @@ class _SubscriptionPlansPageState extends State<SubscriptionPlansPage> {
       if (plansRes.success && plansRes.data != null) {
         _plans = (plansRes.data as List<PricingPlan>?) ?? const [];
         _error = null;
+        _errorStatus = 0;
       } else {
         _error = plansRes.message ?? 'Erro ao carregar planos';
+        _errorStatus = plansRes.statusCode;
       }
       // Plano atual (silencioso — 404 significa "sem assinatura").
       final usage =
@@ -140,7 +146,11 @@ class _SubscriptionPlansPageState extends State<SubscriptionPlansPage> {
     } else if (_error != null) {
       body = Padding(
         padding: const EdgeInsets.fromLTRB(_kPadH, 40, _kPadH, 0),
-        child: SubsErrorState(message: _error!, onRetry: _load),
+        child: SubsErrorState(
+          message: _error!,
+          statusCode: _errorStatus,
+          onRetry: _load,
+        ),
       );
     } else if (_plans.isEmpty) {
       body = Padding(

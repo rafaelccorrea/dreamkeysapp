@@ -3,6 +3,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../models/sdr_settings_model.dart';
 import '../services/sdr_service.dart';
@@ -45,6 +46,7 @@ class _SdrConfigSheetState extends State<SdrConfigSheet> {
   bool _loading = false;
   bool _saving = false;
   String? _loadError;
+  int _loadErrorStatus = 0;
 
   @override
   void initState() {
@@ -69,9 +71,11 @@ class _SdrConfigSheetState extends State<SdrConfigSheet> {
       if (res.success && res.data != null) {
         _settings = res.data;
         _original = res.data;
+        _loadError = null;
+        _loadErrorStatus = 0;
       } else {
-        _loadError =
-            res.message ?? 'Erro ao carregar configurações do agente';
+        _loadError = res.message ?? 'Erro ao carregar configurações do agente';
+        _loadErrorStatus = res.statusCode;
       }
     });
   }
@@ -674,43 +678,16 @@ class _SdrConfigSheetState extends State<SdrConfigSheet> {
   }
 
   Widget _buildLoadError(BuildContext context, ScrollController controller) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final danger =
-        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    // Lista para o sheet continuar arrastável quando o corpo é só o erro.
     return ListView(
       controller: controller,
-      padding: const EdgeInsets.fromLTRB(28, 32, 28, 40),
+      padding: const EdgeInsets.only(top: 12, bottom: 32),
       children: [
-        Center(
-          child: Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: danger.withValues(alpha: 0.12),
-              border: Border.all(color: danger.withValues(alpha: 0.32)),
-            ),
-            child: Icon(LucideIcons.cloudOff, color: danger, size: 24),
-          ),
-        ),
-        const SizedBox(height: 14),
-        Text(
-          _loadError ?? 'Erro ao carregar configurações do agente',
-          textAlign: TextAlign.center,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: ThemeHelpers.textColor(context),
-            fontWeight: FontWeight.w700,
-            height: 1.35,
-          ),
-        ),
-        const SizedBox(height: 14),
-        Center(
-          child: OutlinedButton.icon(
-            onPressed: _fetch,
-            icon: const Icon(LucideIcons.refreshCw, size: 15),
-            label: const Text('Tentar novamente'),
-          ),
+        AppErrorState.fromApi(
+          message: _loadError,
+          statusCode: _loadErrorStatus,
+          onRetry: _fetch,
+          dense: true,
         ),
       ],
     );

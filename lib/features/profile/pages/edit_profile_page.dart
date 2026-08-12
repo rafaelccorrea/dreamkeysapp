@@ -4,8 +4,10 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../../../../shared/services/profile_service.dart';
 import '../../../../shared/services/tag_service.dart';
+import '../../../../shared/utils/error_cause.dart';
 import '../../../../shared/utils/input_formatters.dart';
 import '../../../../shared/utils/masks.dart';
+import '../../../../shared/widgets/app_error_state.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/custom_button.dart';
 import '../../../../shared/widgets/custom_text_field.dart';
@@ -44,6 +46,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
   bool _isLoadingTags = false;
   bool _isSaving = false;
   String? _errorMessage;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
+  ErrorCause? _errorCause;
 
   @override
   void initState() {
@@ -63,6 +69,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _errorStatus = 0;
+      _errorCause = null;
     });
 
     try {
@@ -83,6 +91,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
         } else {
           setState(() {
             _errorMessage = response.message ?? 'Erro ao carregar perfil';
+            _errorStatus = response.statusCode;
             _isLoading = false;
           });
         }
@@ -90,6 +99,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     } catch (e) {
       if (mounted) {
         setState(() {
+          _errorCause = ErrorCause.fromException(e);
           _errorMessage = 'Erro ao conectar com o servidor';
           _isLoading = false;
         });
@@ -520,46 +530,16 @@ class _EditProfilePageState extends State<EditProfilePage> {
   // ─── Erro (editorial, com retry) ─────────────────────────────────────────
 
   Widget _buildErrorState(BuildContext context, ThemeData theme, Color brand) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: brand.withValues(alpha: 0.12),
-              border: Border.all(color: brand.withValues(alpha: 0.35)),
-            ),
-            alignment: Alignment.center,
-            child: Icon(Icons.error_outline_rounded, color: brand, size: 26),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Erro ao carregar perfil',
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w900,
-              letterSpacing: -0.4,
-              color: ThemeHelpers.textColor(context),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            _errorMessage ?? 'Erro desconhecido',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
-            ),
-          ),
-          const SizedBox(height: 22),
-          CustomButton(
-            text: 'Tentar Novamente',
-            onPressed: _loadProfile,
-            icon: Icons.refresh,
-          ),
-        ],
-      ),
+    // Exceção solta traz seu próprio diagnóstico; falha de API vem da resposta.
+    final cause = _errorCause;
+    if (cause != null) {
+      return AppErrorState(cause: cause, onRetry: _loadProfile, dense: true);
+    }
+    return AppErrorState.fromApi(
+      message: _errorMessage,
+      statusCode: _errorStatus,
+      onRetry: _loadProfile,
+      dense: true,
     );
   }
 

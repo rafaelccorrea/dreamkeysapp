@@ -39,6 +39,9 @@ class _CompetitionFormPageState extends State<CompetitionFormPage> {
   bool _loadingCompetition = false;
   bool _saving = false;
   String? _loadError;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _loadErrorStatus = 0;
   Competition? _competition;
 
   CompetitionType _type = CompetitionType.individual;
@@ -83,6 +86,7 @@ class _CompetitionFormPageState extends State<CompetitionFormPage> {
     setState(() {
       _loadingCompetition = true;
       _loadError = null;
+      _loadErrorStatus = 0;
     });
     final res =
         await CompetitionService.instance.getById(widget.competitionId!);
@@ -110,6 +114,7 @@ class _CompetitionFormPageState extends State<CompetitionFormPage> {
         _limitTeams = _selectedTeamIds.isNotEmpty;
       } else {
         _loadError = res.message ?? 'Erro ao carregar competição';
+        _loadErrorStatus = res.statusCode;
       }
     });
   }
@@ -351,7 +356,10 @@ class _CompetitionFormPageState extends State<CompetitionFormPage> {
               ? Padding(
                   padding: const EdgeInsets.fromLTRB(_padH, 60, _padH, 24),
                   child: GamErrorState(
-                      message: _loadError!, onRetry: _loadCompetition),
+                    message: _loadError!,
+                    statusCode: _loadErrorStatus,
+                    onRetry: _loadCompetition,
+                  ),
                 )
               : _buildForm(context),
     );

@@ -10,6 +10,8 @@ import '../../../../shared/services/module_access_service.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
 import '../../../../shared/widgets/shimmer_image.dart';
+import '../../../../shared/widgets/app_error_state.dart';
+import '../../../../shared/utils/error_cause.dart';
 import '../../../../shared/state/screen_state_cache.dart';
 import '../../../../core/constants/feature_visibility.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -110,6 +112,11 @@ class _PropertiesPageState extends State<PropertiesPage> {
   int _totalPages = 1;
   int _total = 0;
   String? _errorMessage;
+  // Guardar o código HTTP junto da mensagem é o que permite dizer se foi
+  // permissão, sessão ou servidor — a mensagem sozinha não distingue.
+  int _errorStatus = 0;
+  Object? _errorDetail;
+  bool _errorFromException = false;
   PropertyFilters? _filters;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
@@ -338,6 +345,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
       setState(() {
         _isLoading = true;
         _errorMessage = null;
+        _errorStatus = 0;
+        _errorDetail = null;
+        _errorFromException = false;
       });
     }
 
@@ -372,6 +382,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
                 _globalStats = gs;
               }
               _errorMessage = null;
+              _errorStatus = 0;
+              _errorDetail = null;
+              _errorFromException = false;
               _isLoading = false;
               _hasLoadedOnce = true;
             }, defer: useSilent);
@@ -381,6 +394,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
           _applyPropertiesListState(() {
             _errorMessage =
                 response.message ?? 'Erro ao carregar propriedades';
+            _errorStatus = response.statusCode;
+            _errorDetail = response.error;
+            _errorFromException = false;
             if (!useSilent) {
               _globalStats = null;
             }
@@ -394,6 +410,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
         _searchRefreshingNotifier.value = false;
         _applyPropertiesListState(() {
           _errorMessage = 'Erro ao conectar com o servidor';
+          _errorStatus = 0;
+          _errorDetail = e;
+          _errorFromException = true;
           if (!useSilent) {
             _globalStats = null;
           }
@@ -1701,31 +1720,63 @@ class _PropertiesPageState extends State<PropertiesPage> {
     );
   }
 
+  /// Diagnóstico atual da listagem — a mesma fonte para a faixa inline e para
+  /// o estado de tela cheia.
+  ErrorCause _currentErrorCause() {
+    if (_errorFromException && _errorDetail != null) {
+      return ErrorCause.fromException(_errorDetail!);
+    }
+    return ErrorCause.fromApi(
+      message: _errorMessage,
+      statusCode: _errorStatus,
+      error: _errorDetail,
+    );
+  }
+
+  /// Faixa fina sobre a grade já populada: aqui o conteúdo continua visível,
+  /// então o estado grande roubaria a tela. Mantém-se compacto, mas com o
+  /// título e o próximo passo vindos do mesmo diagnóstico.
   Widget _buildInlineListError(BuildContext context) {
     final theme = Theme.of(context);
-    final err = AppColors.status.error;
+    final cause = _currentErrorCause();
     return Material(
-      color: err.withValues(alpha: 0.08),
+      color: cause.tone.withValues(alpha: 0.08),
       borderRadius: BorderRadius.circular(12),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Row(
           children: [
-            Icon(Icons.error_outline_rounded, size: 18, color: err),
+            Icon(cause.icon, size: 18, color: cause.tone),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                _errorMessage ?? 'Erro ao atualizar a listagem.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: ThemeHelpers.textColor(context),
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    cause.title,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: ThemeHelpers.textColor(context),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    cause.action,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontSize: 11.5,
+                      height: 1.3,
+                      color: ThemeHelpers.textSecondaryColor(context),
+                    ),
+                  ),
+                ],
               ),
             ),
-            TextButton(
-              onPressed: () => _reloadList(),
-              child: const Text('Tentar'),
-            ),
+            if (cause.retryable)
+              TextButton(
+                onPressed: () => _reloadList(),
+                child: const Text('Tentar'),
+              ),
           ],
         ),
       ),
@@ -1733,124 +1784,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
   }
 
   Widget _buildErrorState(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final err = AppColors.status.error;
-    final borderCol = ThemeHelpers.borderColor(context);
-    final muted = ThemeHelpers.textSecondaryColor(context);
-    final bg = isDark
-        ? AppColors.background.backgroundSecondaryDarkMode
-        : AppColors.background.backgroundSecondary;
-
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 380),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: bg,
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(
-                color: borderCol.withValues(alpha: isDark ? 0.48 : 0.62),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: isDark ? 0.26 : 0.075),
-                  blurRadius: 22,
-                  offset: const Offset(0, 8),
-                  spreadRadius: -6,
-                ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(21),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    height: 3,
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          err.withValues(alpha: 0.82),
-                          err.withValues(alpha: 0.18),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(22, 22, 22, 20),
-                    child: Column(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: err.withValues(alpha: 0.09),
-                            border: Border.all(
-                              color: err.withValues(alpha: 0.2),
-                              width: 1,
-                            ),
-                          ),
-                          child: Icon(
-                            Icons.error_outline_rounded,
-                            size: 28,
-                            color: err.withValues(alpha: 0.92),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Não foi possível carregar',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.25,
-                            color: ThemeHelpers.textColor(context),
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _errorMessage ??
-                              'Verifique sua conexão ou tente novamente.',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: muted,
-                            height: 1.45,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 20),
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.tonalIcon(
-                            onPressed: () => _loadProperties(refresh: true),
-                            icon: Icon(
-                              Icons.refresh_rounded,
-                              size: 19,
-                              color: AppColors.primary.primary,
-                            ),
-                            label: const Text(
-                              'Tentar novamente',
-                              style: TextStyle(fontWeight: FontWeight.w700),
-                            ),
-                            style: FilledButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
+    return AppErrorState(
+      cause: _currentErrorCause(),
+      onRetry: () => _loadProperties(refresh: true),
     );
   }
 

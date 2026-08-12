@@ -48,6 +48,9 @@ class _McmvLeadDetailsPageState extends State<McmvLeadDetailsPage> {
   bool _loading = false;
   bool _processing = false;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
 
   bool get _canView =>
       mcmvModuleEnabled() &&
@@ -72,6 +75,7 @@ class _McmvLeadDetailsPageState extends State<McmvLeadDetailsPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
     final res = await McmvService.instance.findLeadById(widget.leadId);
     if (!mounted) return;
@@ -81,6 +85,7 @@ class _McmvLeadDetailsPageState extends State<McmvLeadDetailsPage> {
         _lead = res.data;
       } else {
         _error = res.message ?? 'Erro ao carregar lead';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -220,7 +225,11 @@ class _McmvLeadDetailsPageState extends State<McmvLeadDetailsPage> {
     } else if (_error != null && _lead == null) {
       body = Padding(
         padding: const EdgeInsets.symmetric(horizontal: _kPadH, vertical: 24),
-        child: McmvErrorState(message: _error!, onRetry: _fetch),
+        child: McmvErrorState(
+          message: _error!,
+          statusCode: _errorStatus,
+          onRetry: _fetch,
+        ),
       );
     } else if (_lead == null) {
       body = Padding(

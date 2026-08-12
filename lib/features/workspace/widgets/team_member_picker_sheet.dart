@@ -5,6 +5,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/workspace_directory_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
 
 /// Usuário escolhido para entrar na equipe — carrega e-mail junto para a
 /// linha de membro do formulário ficar rica (nome + e-mail discreto).
@@ -58,6 +59,9 @@ class _TeamMemberPickerSheetState extends State<_TeamMemberPickerSheet> {
   List<CompanyUserRow> _users = const [];
   bool _loading = true;
   String? _error;
+  // Sem o código HTTP o erro não sabe dizer se foi permissão ou servidor.
+  int _errorStatus = 0;
+  Object? _errorRaw;
   String _query = '';
 
   @override
@@ -76,6 +80,8 @@ class _TeamMemberPickerSheetState extends State<_TeamMemberPickerSheet> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
+      _errorRaw = null;
     });
     final res = await AdminUsersService.instance.listUsers(limit: 200);
     if (!mounted) return;
@@ -88,6 +94,8 @@ class _TeamMemberPickerSheetState extends State<_TeamMemberPickerSheet> {
           );
       } else {
         _error = res.message ?? 'Erro ao carregar usuários';
+        _errorStatus = res.statusCode;
+        _errorRaw = res.error;
       }
     });
   }
@@ -381,33 +389,12 @@ class _TeamMemberPickerSheetState extends State<_TeamMemberPickerSheet> {
   }
 
   Widget _buildError(BuildContext context) {
-    final theme = Theme.of(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.cloudOff, size: 32, color: secondary),
-            const SizedBox(height: 10),
-            Text(
-              _error ?? 'Erro ao carregar usuários',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: _load,
-              icon: const Icon(LucideIcons.refreshCw, size: 15),
-              label: const Text('Tentar novamente'),
-            ),
-          ],
-        ),
-      ),
+    return AppErrorState.fromApi(
+      message: _error,
+      statusCode: _errorStatus,
+      error: _errorRaw,
+      onRetry: _load,
+      dense: true,
     );
   }
 }

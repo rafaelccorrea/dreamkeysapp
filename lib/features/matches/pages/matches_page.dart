@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../../shared/utils/error_cause.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../../../core/theme/theme_helpers.dart';
@@ -34,6 +36,10 @@ class _MatchesPageState extends State<MatchesPage> {
   int _currentPage = 1;
   int _totalPages = 1;
   String? _errorMessage;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
+  ErrorCause? _errorCause;
   MatchStatus? _statusFilter;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
@@ -74,6 +80,8 @@ class _MatchesPageState extends State<MatchesPage> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _errorStatus = 0;
+      _errorCause = null;
     });
 
     try {
@@ -100,6 +108,7 @@ class _MatchesPageState extends State<MatchesPage> {
         } else {
           setState(() {
             _errorMessage = response.message ?? 'Erro ao carregar matches';
+            _errorStatus = response.statusCode;
             _isLoading = false;
             _isLoadingMore = false;
           });
@@ -108,6 +117,7 @@ class _MatchesPageState extends State<MatchesPage> {
     } catch (e) {
       if (mounted) {
         setState(() {
+          _errorCause = ErrorCause.fromException(e);
           _errorMessage = 'Erro de conexão: $e';
           _isLoading = false;
           _isLoadingMore = false;
@@ -424,31 +434,18 @@ class _MatchesPageState extends State<MatchesPage> {
   }
 
   Widget _buildErrorState(BuildContext context, ThemeData theme) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: Colors.red,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              _errorMessage ?? 'Erro ao carregar matches',
-              style: theme.textTheme.bodyLarge,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: () => _loadMatches(refresh: true),
-              child: const Text('Tentar novamente'),
-            ),
-          ],
-        ),
-      ),
+    // Exceção solta traz seu próprio diagnóstico; falha de API vem da resposta.
+    final cause = _errorCause;
+    if (cause != null) {
+      return AppErrorState(
+        cause: cause,
+        onRetry: () => _loadMatches(refresh: true),
+      );
+    }
+    return AppErrorState.fromApi(
+      message: _errorMessage,
+      statusCode: _errorStatus,
+      onRetry: () => _loadMatches(refresh: true),
     );
   }
 

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../../shared/utils/error_cause.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../../../core/theme/app_colors.dart';
@@ -27,7 +29,8 @@ class _DocumentsPageState extends State<DocumentsPage>
   List<Document> _documents = [];
   int _currentPage = 1;
   int _totalPages = 1;
-  String? _errorMessage;
+  /// Diagnóstico da falha (API ou exceção) — preserva o código HTTP.
+  ErrorCause? _errorCause;
   DocumentFilters? _filters;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
@@ -252,7 +255,7 @@ class _DocumentsPageState extends State<DocumentsPage>
 
     setState(() {
       _isLoading = true;
-      _errorMessage = null;
+      _errorCause = null;
     });
 
     try {
@@ -279,6 +282,7 @@ class _DocumentsPageState extends State<DocumentsPage>
               _allDocuments.addAll(documents);
             }
             _totalPages = response.data!.pagination?.totalPages ?? 1;
+            _errorCause = null;
             _isLoading = false;
             _isLoadingMore = false;
           });
@@ -288,7 +292,10 @@ class _DocumentsPageState extends State<DocumentsPage>
           }
         } else {
           setState(() {
-            _errorMessage = response.message ?? 'Erro ao carregar documentos';
+            _errorCause = ErrorCause.fromApi(
+              message: response.message,
+              statusCode: response.statusCode,
+            );
             _isLoading = false;
             _isLoadingMore = false;
           });
@@ -298,7 +305,7 @@ class _DocumentsPageState extends State<DocumentsPage>
       debugPrint('❌ [DOCUMENTS_PAGE] Erro: $e');
       if (mounted) {
         setState(() {
-          _errorMessage = 'Erro ao conectar com o servidor';
+          _errorCause = ErrorCause.fromException(e);
           _isLoading = false;
           _isLoadingMore = false;
         });
@@ -437,7 +444,7 @@ class _DocumentsPageState extends State<DocumentsPage>
           Expanded(
             child: _isLoading && _documents.isEmpty
                 ? _buildSkeleton(context, theme)
-                : _errorMessage != null && _documents.isEmpty
+                : _errorCause != null && _documents.isEmpty
                     ? _buildErrorState(context, theme)
                     : TabBarView(
                         controller: _tabController,
@@ -564,41 +571,9 @@ class _DocumentsPageState extends State<DocumentsPage>
   }
 
   Widget _buildErrorState(BuildContext context, ThemeData theme) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: AppColors.status.error,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Erro ao carregar documentos',
-              style: theme.textTheme.titleLarge?.copyWith(
-                color: ThemeHelpers.textColor(context),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _errorMessage ?? 'Erro desconhecido',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: ThemeHelpers.textSecondaryColor(context),
-              ),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: () => _loadDocuments(refresh: true),
-              icon: const Icon(Icons.refresh),
-              label: const Text('Tentar Novamente'),
-            ),
-          ],
-        ),
-      ),
+    return AppErrorState(
+      cause: _errorCause!,
+      onRetry: () => _loadDocuments(refresh: true),
     );
   }
 

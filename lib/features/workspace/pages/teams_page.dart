@@ -8,6 +8,7 @@ import '../../../core/constants/app_permissions.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/state/screen_state_cache.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../models/company_team_model.dart';
@@ -35,6 +36,9 @@ class _TeamsPageState extends State<TeamsPage> {
   bool _loading = true;
   bool _loadingMore = false;
   String? _error;
+  // Sem o código HTTP o erro não sabe dizer se foi permissão ou servidor.
+  int _errorStatus = 0;
+  Object? _errorRaw;
 
   List<CompanyTeam> _teams = [];
   int _page = 1;
@@ -117,6 +121,8 @@ class _TeamsPageState extends State<TeamsPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
+      _errorRaw = null;
       _page = 1;
     });
     final res = await CompanyTeamService.instance.listTeams(
@@ -141,6 +147,8 @@ class _TeamsPageState extends State<TeamsPage> {
         _total = res.data!.total;
       } else {
         _error = res.message ?? 'Erro ao listar equipes';
+        _errorStatus = res.statusCode;
+        _errorRaw = res.error;
       }
     });
   }
@@ -296,7 +304,12 @@ class _TeamsPageState extends State<TeamsPage> {
             if (_loading)
               const _TeamsShimmer()
             else if (_error != null)
-              _ErrorBlock(message: _error!, onRetry: _reload)
+              _ErrorBlock(
+                message: _error!,
+                statusCode: _errorStatus,
+                error: _errorRaw,
+                onRetry: _reload,
+              )
             else if (_teams.isEmpty)
               const _EmptyBlock()
             else
@@ -1995,35 +2008,26 @@ class _EmptyBlock extends StatelessWidget {
 }
 
 class _ErrorBlock extends StatelessWidget {
-  const _ErrorBlock({required this.message, required this.onRetry});
+  const _ErrorBlock({
+    required this.message,
+    required this.onRetry,
+    this.statusCode = 0,
+    this.error,
+  });
 
   final String message;
+  final int statusCode;
+  final Object? error;
   final Future<void> Function() onRetry;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        children: [
-          Icon(LucideIcons.alertCircle, color: Colors.red.shade400, size: 32),
-          const SizedBox(height: 8),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: ThemeHelpers.textSecondaryColor(context),
-              fontSize: 13,
-            ),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            icon: const Icon(LucideIcons.refreshCcw, size: 16),
-            onPressed: onRetry,
-            label: const Text('Tentar novamente'),
-          ),
-        ],
-      ),
+    return AppErrorState.fromApi(
+      message: message,
+      statusCode: statusCode,
+      error: error,
+      onRetry: onRetry,
+      dense: true,
     );
   }
 }

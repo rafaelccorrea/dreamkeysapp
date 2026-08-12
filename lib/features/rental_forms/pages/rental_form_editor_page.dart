@@ -10,6 +10,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/utils/input_formatters.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../workspace/models/admin_user_model.dart';
 import '../../workspace/services/admin_users_service.dart';
@@ -40,6 +41,7 @@ class _RentalFormEditorPageState extends State<RentalFormEditorPage> {
   // ── Estado da ficha ───────────────────────────────────────────────────────
   bool _loading = true;
   String? _loadError;
+  int _loadErrorStatus = 0;
   RentalForm? _form;
   RentalFormStatus _status = RentalFormStatus.pending;
 
@@ -136,8 +138,8 @@ class _RentalFormEditorPageState extends State<RentalFormEditorPage> {
     if (!res.success || res.data == null) {
       setState(() {
         _loading = false;
-        _loadError =
-            res.message ?? 'Ficha não encontrada ou sem permissão.';
+        _loadError = res.message ?? 'Ficha não encontrada ou sem permissão.';
+        _loadErrorStatus = res.statusCode;
       });
       return;
     }
@@ -608,7 +610,11 @@ class _RentalFormEditorPageState extends State<RentalFormEditorPage> {
         title: 'Ficha de locação',
         currentBottomNavIndex: -1,
         showBottomNavigation: false,
-        body: _LoadError(message: _loadError!, onRetry: _load),
+        body: AppErrorState.fromApi(
+          message: _loadError,
+          statusCode: _loadErrorStatus,
+          onRetry: _load,
+        ),
       );
     }
 
@@ -1945,66 +1951,6 @@ class _ShimmerBox extends StatelessWidget {
         color: (isDark ? Colors.white : Colors.black)
             .withValues(alpha: isDark ? 0.07 : 0.06),
         borderRadius: BorderRadius.circular(radius),
-      ),
-    );
-  }
-}
-
-class _LoadError extends StatelessWidget {
-  const _LoadError({required this.message, required this.onRetry});
-  final String message;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    final muted = ThemeHelpers.textSecondaryColor(context);
-    final accent = Theme.of(context).brightness == Brightness.dark
-        ? AppColors.primary.primaryDarkMode
-        : AppColors.primary.primary;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(LucideIcons.cloudOff, size: 52, color: muted),
-            const SizedBox(height: 12),
-            Text(
-              'Não foi possível abrir a ficha',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: muted),
-            ),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(
-              onPressed: onRetry,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: accent,
-                side: BorderSide(color: accent.withValues(alpha: 0.5)),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              icon: const Icon(LucideIcons.refreshCw, size: 16),
-              label: const Text(
-                'Tentar novamente',
-                style: TextStyle(fontWeight: FontWeight.w800),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

@@ -6,6 +6,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../models/rental_models.dart';
@@ -41,6 +42,7 @@ class _RentalDashboardPageState extends State<RentalDashboardPage> {
   RentalDashboardData? _data;
   bool _loading = true;
   String? _error;
+  int _errorStatus = 0;
 
   int _periodMonths = 12;
   RentalStatus? _status;
@@ -68,6 +70,7 @@ class _RentalDashboardPageState extends State<RentalDashboardPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
     final res = await RentalService.instance.getDashboard(
       periodMonths: _periodMonths,
@@ -80,7 +83,10 @@ class _RentalDashboardPageState extends State<RentalDashboardPage> {
       if (res.success && res.data != null) {
         _data = res.data!;
       } else {
-        _error = res.message ?? 'Erro ao carregar dashboard de locações';
+        _error = res.message;
+        // Guardar o código HTTP é o que permite dizer a causa real: sem ele,
+        // 403 (sem permissão) e 500 (servidor fora) viram a mesma frase.
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -1173,43 +1179,16 @@ class _RentalDashboardPageState extends State<RentalDashboardPage> {
   }
 
   Widget _buildError(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final danger =
-        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    // ListView mantém o pull-to-refresh vivo: o estado de erro precisa
+    // continuar arrastável, senão a única saída vira o botão.
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.all(28),
+      padding: const EdgeInsets.symmetric(vertical: 40),
       children: [
-        const SizedBox(height: 60),
-        Center(
-          child: Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: danger.withValues(alpha: 0.12),
-              border: Border.all(color: danger.withValues(alpha: 0.32)),
-            ),
-            child: Icon(LucideIcons.cloudOff, color: danger, size: 28),
-          ),
-        ),
-        const SizedBox(height: 14),
-        Text(
-          _error ?? 'Erro ao carregar dashboard',
-          textAlign: TextAlign.center,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: ThemeHelpers.textColor(context),
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 12),
-        Center(
-          child: OutlinedButton.icon(
-            onPressed: _load,
-            icon: const Icon(LucideIcons.refreshCw, size: 16),
-            label: const Text('Tentar novamente'),
-          ),
+        AppErrorState.fromApi(
+          message: _error,
+          statusCode: _errorStatus,
+          onRetry: _load,
         ),
       ],
     );

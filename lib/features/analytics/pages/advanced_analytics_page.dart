@@ -52,6 +52,9 @@ class _AdvancedAnalyticsPageState extends State<AdvancedAnalyticsPage> {
   PerformanceDashboard? _performance;
   bool _performanceLoading = true;
   String? _performanceError;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _performanceErrorStatus = 0;
 
   PendingMatchesSummary? _pending;
   bool _pendingLoading = true;
@@ -59,15 +62,24 @@ class _AdvancedAnalyticsPageState extends State<AdvancedAnalyticsPage> {
   List<BrokerPerformance>? _brokers;
   bool _brokersLoading = true;
   String? _brokersError;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _brokersErrorStatus = 0;
   int _brokersToShow = 3;
 
   ConversionFunnelData? _funnel;
   bool _funnelLoading = true;
   String? _funnelError;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _funnelErrorStatus = 0;
 
   ChurnAnalysis? _churn;
   bool _churnLoading = true;
   String? _churnError;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _churnErrorStatus = 0;
   int _churnToShow = 3;
 
   CapturesStats? _captures;
@@ -104,9 +116,13 @@ class _AdvancedAnalyticsPageState extends State<AdvancedAnalyticsPage> {
       _churnLoading = true;
       _capturesLoading = true;
       _performanceError = null;
+      _performanceErrorStatus = 0;
       _brokersError = null;
+      _brokersErrorStatus = 0;
       _funnelError = null;
+      _funnelErrorStatus = 0;
       _churnError = null;
+      _churnErrorStatus = 0;
       _brokersToShow = 3;
       _churnToShow = 3;
     });
@@ -133,6 +149,7 @@ class _AdvancedAnalyticsPageState extends State<AdvancedAnalyticsPage> {
         _performance = res.data;
       } else if (_performance == null) {
         _performanceError = res.message;
+        _performanceErrorStatus = res.statusCode;
       }
     });
   }
@@ -160,6 +177,7 @@ class _AdvancedAnalyticsPageState extends State<AdvancedAnalyticsPage> {
         _brokers = res.data;
       } else if (_brokers == null) {
         _brokersError = res.message;
+        _brokersErrorStatus = res.statusCode;
       }
     });
   }
@@ -177,6 +195,7 @@ class _AdvancedAnalyticsPageState extends State<AdvancedAnalyticsPage> {
         _funnel = res.data;
       } else if (_funnel == null) {
         _funnelError = res.message;
+        _funnelErrorStatus = res.statusCode;
       }
     });
   }
@@ -190,6 +209,7 @@ class _AdvancedAnalyticsPageState extends State<AdvancedAnalyticsPage> {
         _churn = res.data;
       } else if (_churn == null) {
         _churnError = res.message;
+        _churnErrorStatus = res.statusCode;
       }
     });
   }
@@ -462,6 +482,7 @@ class _AdvancedAnalyticsPageState extends State<AdvancedAnalyticsPage> {
     if (_performanceError != null && _performance == null) {
       return AnalyticsErrorState(
         message: _performanceError!,
+        statusCode: _performanceErrorStatus,
         onRetry: _loadAll,
       );
     }
@@ -775,7 +796,11 @@ class _AdvancedAnalyticsPageState extends State<AdvancedAnalyticsPage> {
 
     if (_brokersLoading && _brokers == null) return _sectionSkeleton();
     if (_brokersError != null && (_brokers?.isEmpty ?? true)) {
-      return AnalyticsErrorState(message: _brokersError!, onRetry: _loadAll);
+      return AnalyticsErrorState(
+        message: _brokersError!,
+        statusCode: _brokersErrorStatus,
+        onRetry: _loadAll,
+      );
     }
     final brokers = _brokers ?? const <BrokerPerformance>[];
     if (brokers.isEmpty) {
@@ -1034,7 +1059,11 @@ class _AdvancedAnalyticsPageState extends State<AdvancedAnalyticsPage> {
 
     if (_funnelLoading && _funnel == null) return _sectionSkeleton();
     if (_funnelError != null && _funnel == null) {
-      return AnalyticsErrorState(message: _funnelError!, onRetry: _loadAll);
+      return AnalyticsErrorState(
+        message: _funnelError!,
+        statusCode: _funnelErrorStatus,
+        onRetry: _loadAll,
+      );
     }
     final funnel = _funnel;
     if (funnel == null || funnel.stages.isEmpty) {
@@ -1325,7 +1354,11 @@ class _AdvancedAnalyticsPageState extends State<AdvancedAnalyticsPage> {
 
     if (_churnLoading && _churn == null) return _sectionSkeleton();
     if (_churnError != null && !(_churn?.hasData ?? false)) {
-      return AnalyticsErrorState(message: _churnError!, onRetry: _loadAll);
+      return AnalyticsErrorState(
+        message: _churnError!,
+        statusCode: _churnErrorStatus,
+        onRetry: _loadAll,
+      );
     }
     final churn = _churn ?? ChurnAnalysis.empty;
     if (!churn.hasData) {

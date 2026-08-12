@@ -28,6 +28,9 @@ class _GamificationSettingsPageState extends State<GamificationSettingsPage> {
   bool _loading = true;
   bool _saving = false;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   GamificationConfig? _config;
 
   final _welcomeController = TextEditingController();
@@ -64,6 +67,7 @@ class _GamificationSettingsPageState extends State<GamificationSettingsPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
     final res = await GamificationService.instance.getConfig();
     if (!mounted) return;
@@ -79,6 +83,7 @@ class _GamificationSettingsPageState extends State<GamificationSettingsPage> {
         _pointControllers.clear();
       } else {
         _error = res.message ?? 'Erro ao carregar configuração';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -168,7 +173,11 @@ class _GamificationSettingsPageState extends State<GamificationSettingsPage> {
           : _error != null
               ? Padding(
                   padding: const EdgeInsets.fromLTRB(_padH, 60, _padH, 24),
-                  child: GamErrorState(message: _error!, onRetry: _load),
+                  child: GamErrorState(
+                    message: _error!,
+                    statusCode: _errorStatus,
+                    onRetry: _load,
+                  ),
                 )
               : _buildForm(context),
     );

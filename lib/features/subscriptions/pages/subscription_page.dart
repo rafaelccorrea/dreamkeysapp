@@ -44,6 +44,9 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
   bool _loading = true;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   bool _managedExempt = false;
   SubscriptionAccessInfo? _access;
   ActiveSubscription? _active;
@@ -93,6 +96,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
 
     // Conta gerenciada isenta não tem assinatura própria — detectamos antes
@@ -134,6 +138,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
       _error = (activeOk || usageOk)
           ? null
           : (usageRes.message ?? 'Erro ao carregar sua assinatura');
+      _errorStatus = _error == null ? 0 : usageRes.statusCode;
     });
   }
 
@@ -208,7 +213,11 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     } else if (_error != null) {
       body = Padding(
         padding: const EdgeInsets.fromLTRB(_kPadH, 40, _kPadH, 0),
-        child: SubsErrorState(message: _error!, onRetry: _load),
+        child: SubsErrorState(
+          message: _error!,
+          statusCode: _errorStatus,
+          onRetry: _load,
+        ),
       );
     } else if (_managedExempt) {
       body = _buildManagedExempt(context);

@@ -3,6 +3,8 @@ import 'package:intl/intl.dart';
 import '../../../../shared/services/property_offers_service.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
+import '../../../../shared/widgets/app_error_state.dart';
+import '../../../../shared/utils/error_cause.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 
@@ -31,6 +33,11 @@ class _OfferDetailsPageState extends State<OfferDetailsPage> {
   bool _isLoading = true;
   PropertyOffer? _offer;
   String? _errorMessage;
+  // Guardados junto da mensagem: sem o código HTTP não dá pra distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
+  Object? _errorDetail;
+  bool _errorFromException = false;
   bool _isProcessing = false;
   final TextEditingController _responseMessageController = TextEditingController();
 
@@ -50,6 +57,9 @@ class _OfferDetailsPageState extends State<OfferDetailsPage> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _errorStatus = 0;
+      _errorDetail = null;
+      _errorFromException = false;
     });
 
     try {
@@ -64,6 +74,8 @@ class _OfferDetailsPageState extends State<OfferDetailsPage> {
         } else {
           setState(() {
             _errorMessage = response.message ?? 'Erro ao carregar oferta';
+            _errorStatus = response.statusCode;
+            _errorDetail = response.error;
             _isLoading = false;
           });
         }
@@ -73,6 +85,9 @@ class _OfferDetailsPageState extends State<OfferDetailsPage> {
       if (mounted) {
         setState(() {
           _errorMessage = 'Erro ao conectar com o servidor';
+          _errorStatus = 0;
+          _errorDetail = e;
+          _errorFromException = true;
           _isLoading = false;
         });
       }
@@ -238,7 +253,7 @@ class _OfferDetailsPageState extends State<OfferDetailsPage> {
       body: _isLoading
           ? _buildSkeleton(context)
           : _errorMessage != null
-          ? _buildErrorState(context, theme)
+          ? _buildErrorState(context)
           : _offer != null
           ? _buildOfferDetails(context, theme, _offer!)
           : const SizedBox.shrink(),
@@ -274,35 +289,18 @@ class _OfferDetailsPageState extends State<OfferDetailsPage> {
     );
   }
 
-  Widget _buildErrorState(BuildContext context, ThemeData theme) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: AppColors.status.error,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              _errorMessage ?? 'Erro ao carregar oferta',
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: ThemeHelpers.textSecondaryColor(context),
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: _loadOffer,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Tentar novamente'),
-            ),
-          ],
-        ),
-      ),
+  Widget _buildErrorState(BuildContext context) {
+    if (_errorFromException && _errorDetail != null) {
+      return AppErrorState(
+        cause: ErrorCause.fromException(_errorDetail!),
+        onRetry: _loadOffer,
+      );
+    }
+    return AppErrorState.fromApi(
+      message: _errorMessage,
+      statusCode: _errorStatus,
+      error: _errorDetail,
+      onRetry: _loadOffer,
     );
   }
 

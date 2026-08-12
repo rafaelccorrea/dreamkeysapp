@@ -6,6 +6,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/custom_text_field.dart';
 import '../../../shared/widgets/skeleton_box.dart';
@@ -39,6 +40,7 @@ class _AssetDetailsPageState extends State<AssetDetailsPage> {
   bool _loading = true;
   bool _movementsLoading = true;
   String? _error;
+  int _errorStatus = 0;
 
   bool get _canUpdate =>
       ModuleAccessService.instance.hasPermission('asset:update');
@@ -72,8 +74,10 @@ class _AssetDetailsPageState extends State<AssetDetailsPage> {
       if (res.success && res.data != null) {
         _asset = res.data!;
         _error = null;
+        _errorStatus = 0;
       } else {
         _error = res.message ?? 'Erro ao carregar patrimônio';
+        _errorStatus = res.statusCode;
       }
     });
     _loadMovements();
@@ -166,7 +170,7 @@ class _AssetDetailsPageState extends State<AssetDetailsPage> {
 
   Widget _buildBody(BuildContext context) {
     if (_loading && _asset == null) return _buildSkeleton(context);
-    if (_error != null && _asset == null) return _buildError(context, _error!);
+    if (_error != null && _asset == null) return _buildError(context);
     final a = _asset!;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cSpecs =
@@ -851,45 +855,11 @@ class _AssetDetailsPageState extends State<AssetDetailsPage> {
     );
   }
 
-  Widget _buildError(BuildContext context, String message) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final danger =
-        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 80, 16, 40),
-      children: [
-        Column(
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: danger.withValues(alpha: 0.12),
-                border: Border.all(color: danger.withValues(alpha: 0.32)),
-              ),
-              child: Icon(LucideIcons.cloudOff, color: danger, size: 28),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: () => _load(),
-              icon: const Icon(LucideIcons.refreshCw, size: 16),
-              label: const Text('Tentar novamente'),
-            ),
-          ],
-        ),
-      ],
+  Widget _buildError(BuildContext context) {
+    return AppErrorState.fromApi(
+      message: _error,
+      statusCode: _errorStatus,
+      onRetry: _load,
     );
   }
 }

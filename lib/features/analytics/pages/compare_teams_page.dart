@@ -43,6 +43,9 @@ class _CompareTeamsPageState extends State<CompareTeamsPage> {
   List<TeamOption> _teams = const [];
   bool _teamsLoading = true;
   String? _teamsError;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _teamsErrorStatus = 0;
   final Set<String> _selectedIds = <String>{};
 
   DateTime? _startDate;
@@ -55,6 +58,9 @@ class _CompareTeamsPageState extends State<CompareTeamsPage> {
   TeamsComparison? _result;
   bool _comparing = false;
   String? _compareError;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _compareErrorStatus = 0;
 
   bool get _canCompare =>
       ModuleAccessService.instance.hasPermission('performance:compare');
@@ -77,6 +83,7 @@ class _CompareTeamsPageState extends State<CompareTeamsPage> {
     setState(() {
       _teamsLoading = true;
       _teamsError = null;
+      _teamsErrorStatus = 0;
     });
     final res = await AnalyticsService.instance.getTeams();
     if (!mounted) return;
@@ -86,6 +93,7 @@ class _CompareTeamsPageState extends State<CompareTeamsPage> {
         _teams = res.data!;
       } else {
         _teamsError = res.message ?? 'Erro ao carregar equipes';
+        _teamsErrorStatus = res.statusCode;
       }
     });
   }
@@ -149,6 +157,7 @@ class _CompareTeamsPageState extends State<CompareTeamsPage> {
     setState(() {
       _comparing = true;
       _compareError = null;
+      _compareErrorStatus = 0;
     });
     final res = await AnalyticsService.instance.compareTeams(
       teamIds: _selectedIds.toList(),
@@ -161,6 +170,7 @@ class _CompareTeamsPageState extends State<CompareTeamsPage> {
         _result = res.data;
       } else {
         _compareError = res.message ?? 'Erro ao comparar equipes';
+        _compareErrorStatus = res.statusCode;
       }
     });
   }
@@ -229,6 +239,7 @@ class _CompareTeamsPageState extends State<CompareTeamsPage> {
                       const SizedBox(height: 10),
                       AnalyticsErrorState(
                         message: _compareError!,
+                        statusCode: _compareErrorStatus,
                         onRetry: _compare,
                       ),
                     ] else if (_result != null) ...[
@@ -328,7 +339,11 @@ class _CompareTeamsPageState extends State<CompareTeamsPage> {
             ),
           )
         else if (_teamsError != null)
-          AnalyticsErrorState(message: _teamsError!, onRetry: _loadTeams)
+          AnalyticsErrorState(
+            message: _teamsError!,
+            statusCode: _teamsErrorStatus,
+            onRetry: _loadTeams,
+          )
         else if (_teams.isEmpty)
           AnalyticsEmptyState(
             icon: LucideIcons.network,

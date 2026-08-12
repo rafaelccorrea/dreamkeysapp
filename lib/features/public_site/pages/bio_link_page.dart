@@ -50,6 +50,9 @@ class _BioLinkPageState extends State<BioLinkPage> {
   BioPageConfig? _page;
   bool _loading = true;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
 
   // Publicação
   bool _publishing = false;
@@ -153,6 +156,7 @@ class _BioLinkPageState extends State<BioLinkPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
     final res = await BioPageService.instance.getPage();
     if (!mounted) return;
@@ -162,6 +166,7 @@ class _BioLinkPageState extends State<BioLinkPage> {
         _applyPage(res.data!, resetDrafts: true);
       } else {
         _error = res.message ?? 'Erro ao carregar a página Link in Bio';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -513,7 +518,11 @@ class _BioLinkPageState extends State<BioLinkPage> {
                       _kPagePadH,
                       _kPagePadBottom,
                     ),
-                    child: SiteErrorState(message: _error!, onRetry: _load),
+                    child: SiteErrorState(
+                      message: _error!,
+                      statusCode: _errorStatus,
+                      onRetry: _load,
+                    ),
                   ),
                 ]
               : [

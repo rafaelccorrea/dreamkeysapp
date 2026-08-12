@@ -9,6 +9,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/utils/input_formatters.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../models/rental_models.dart';
@@ -47,6 +48,7 @@ class _RentalDetailsPageState extends State<RentalDetailsPage> {
   Rental? _rental;
   bool _loading = true;
   String? _error;
+  int _errorStatus = 0;
 
   _DetailTab _activeTab = _DetailTab.summary;
 
@@ -55,6 +57,7 @@ class _RentalDetailsPageState extends State<RentalDetailsPage> {
   bool _paymentsLoading = false;
   bool _paymentsLoaded = false;
   String? _paymentsError;
+  int _paymentsErrorStatus = 0;
   bool _generating = false;
 
   // Histórico
@@ -62,6 +65,7 @@ class _RentalDetailsPageState extends State<RentalDetailsPage> {
   bool _historyLoading = false;
   bool _historyLoaded = false;
   String? _historyError;
+  int _historyErrorStatus = 0;
   int _historyPage = 1;
   int _historyTotalPages = 1;
   bool _historyLoadingMore = false;
@@ -71,6 +75,7 @@ class _RentalDetailsPageState extends State<RentalDetailsPage> {
   bool _commentsLoading = false;
   bool _commentsLoaded = false;
   String? _commentsError;
+  int _commentsErrorStatus = 0;
   int _commentsPage = 1;
   int _commentsTotalPages = 1;
   bool _commentsLoadingMore = false;
@@ -123,7 +128,8 @@ class _RentalDetailsPageState extends State<RentalDetailsPage> {
         _rental = res.data!;
         _error = null;
       } else {
-        _error = res.message ?? 'Erro ao carregar locação';
+        _error = res.message;
+        _errorStatus = res.statusCode;
       }
     });
     if (_rental != null && _activeTab == _DetailTab.payments) {
@@ -162,7 +168,8 @@ class _RentalDetailsPageState extends State<RentalDetailsPage> {
       if (res.success && res.data != null) {
         _payments = res.data!;
       } else {
-        _paymentsError = res.message ?? 'Erro ao carregar pagamentos';
+        _paymentsError = res.message;
+        _paymentsErrorStatus = res.statusCode;
       }
     });
   }
@@ -190,7 +197,8 @@ class _RentalDetailsPageState extends State<RentalDetailsPage> {
         _historyPage = res.data!.page;
         _historyTotalPages = res.data!.totalPages;
       } else if (!more) {
-        _historyError = res.message ?? 'Erro ao carregar histórico';
+        _historyError = res.message;
+        _historyErrorStatus = res.statusCode;
       }
     });
   }
@@ -219,7 +227,8 @@ class _RentalDetailsPageState extends State<RentalDetailsPage> {
         _commentsPage = res.data!.page;
         _commentsTotalPages = res.data!.totalPages;
       } else if (!more) {
-        _commentsError = res.message ?? 'Erro ao carregar comentários';
+        _commentsError = res.message;
+        _commentsErrorStatus = res.statusCode;
       }
     });
   }
@@ -1243,7 +1252,7 @@ class _RentalDetailsPageState extends State<RentalDetailsPage> {
       return _listSkeleton();
     }
     if (_paymentsError != null && _payments.isEmpty) {
-      return _panelError(context, _paymentsError!, _loadPayments);
+      return _panelError(context, _paymentsError, _paymentsErrorStatus, _loadPayments);
     }
 
     final paid = _payments.where((p) => p.isPaid).length;
@@ -1581,7 +1590,7 @@ class _RentalDetailsPageState extends State<RentalDetailsPage> {
 
     if (_historyLoading && _history.isEmpty) return _listSkeleton();
     if (_historyError != null && _history.isEmpty) {
-      return _panelError(context, _historyError!, _loadHistory);
+      return _panelError(context, _historyError, _historyErrorStatus, () => _loadHistory());
     }
     if (_history.isEmpty) {
       return _panelEmpty(
@@ -1804,7 +1813,7 @@ class _RentalDetailsPageState extends State<RentalDetailsPage> {
     if (_commentsLoading && _comments.isEmpty) {
       body = _listSkeleton();
     } else if (_commentsError != null && _comments.isEmpty) {
-      body = _panelError(context, _commentsError!, _loadComments);
+      body = _panelError(context, _commentsError, _commentsErrorStatus, () => _loadComments());
     } else if (_comments.isEmpty) {
       body = _panelEmpty(
         context,
@@ -2014,34 +2023,19 @@ class _RentalDetailsPageState extends State<RentalDetailsPage> {
     );
   }
 
+  /// Erro de um painel interno (pagamentos/histórico/comentários). O
+  /// [statusCode] é o que separa "sem permissão" de "servidor fora do ar".
   Widget _panelError(
-      BuildContext context, String message, VoidCallback onRetry) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final danger =
-        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 4),
-      child: Column(
-        children: [
-          Icon(LucideIcons.cloudOff, color: danger, size: 30),
-          const SizedBox(height: 10),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: ThemeHelpers.textColor(context),
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(LucideIcons.refreshCw, size: 15),
-            label: const Text('Tentar novamente'),
-          ),
-        ],
-      ),
+    BuildContext context,
+    String? message,
+    int statusCode,
+    Future<void> Function() onRetry,
+  ) {
+    return AppErrorState.fromApi(
+      message: message,
+      statusCode: statusCode,
+      onRetry: onRetry,
+      dense: true,
     );
   }
 
@@ -2114,43 +2108,15 @@ class _RentalDetailsPageState extends State<RentalDetailsPage> {
   }
 
   Widget _buildError(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final danger =
-        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    // ListView preserva o pull-to-refresh no estado de erro.
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.all(28),
+      padding: const EdgeInsets.symmetric(vertical: 40),
       children: [
-        const SizedBox(height: 60),
-        Center(
-          child: Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: danger.withValues(alpha: 0.12),
-              border: Border.all(color: danger.withValues(alpha: 0.32)),
-            ),
-            child: Icon(LucideIcons.cloudOff, color: danger, size: 28),
-          ),
-        ),
-        const SizedBox(height: 14),
-        Text(
-          _error ?? 'Erro ao carregar locação',
-          textAlign: TextAlign.center,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: ThemeHelpers.textColor(context),
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 12),
-        Center(
-          child: OutlinedButton.icon(
-            onPressed: _load,
-            icon: const Icon(LucideIcons.refreshCw, size: 16),
-            label: const Text('Tentar novamente'),
-          ),
+        AppErrorState.fromApi(
+          message: _error,
+          statusCode: _errorStatus,
+          onRetry: _load,
         ),
       ],
     );

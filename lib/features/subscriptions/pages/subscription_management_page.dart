@@ -62,6 +62,9 @@ class _SubscriptionManagementPageState
   bool _loading = true;
   bool _loadingMore = false;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
 
   final TextEditingController _searchController = TextEditingController();
   Timer? _searchDebounce;
@@ -132,6 +135,7 @@ class _SubscriptionManagementPageState
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
     final res = await SubscriptionsService.instance
         .getAllSubscriptions(filters: _effectiveFilters(1));
@@ -141,8 +145,10 @@ class _SubscriptionManagementPageState
       if (res.success && res.data != null) {
         _result = res.data!;
         _error = null;
+        _errorStatus = 0;
       } else {
         _error = res.message ?? 'Erro ao carregar assinaturas';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -691,7 +697,11 @@ class _SubscriptionManagementPageState
     if (_loading && _result.items.isEmpty) {
       child = _buildSkeleton();
     } else if (_error != null && _result.items.isEmpty) {
-      child = SubsErrorState(message: _error!, onRetry: _load);
+      child = SubsErrorState(
+        message: _error!,
+        statusCode: _errorStatus,
+        onRetry: _load,
+      );
     } else if (_result.items.isEmpty) {
       child = _buildEmpty(context, tone);
     } else {

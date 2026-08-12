@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../models/automation_models.dart';
@@ -33,6 +34,7 @@ class _AutomationDetailsPageState extends State<AutomationDetailsPage> {
   AutomationConfig _config = const AutomationConfig();
   bool _loading = true;
   String? _error;
+  int _errorStatus = 0;
   bool _saving = false;
   bool _toggling = false;
   bool _dirty = false;
@@ -77,8 +79,11 @@ class _AutomationDetailsPageState extends State<AutomationDetailsPage> {
             averageExecutionTime: 0,
           );
         }
+        _error = null;
+        _errorStatus = 0;
       } else {
         _error = detailRes.message ?? 'Erro ao carregar automação';
+        _errorStatus = detailRes.statusCode;
       }
     });
   }
@@ -154,7 +159,7 @@ class _AutomationDetailsPageState extends State<AutomationDetailsPage> {
       body: _loading
           ? _buildSkeleton(context)
           : _error != null
-              ? _buildError(context, _error!)
+              ? _buildError(context)
               : _buildContent(context),
     );
   }
@@ -644,44 +649,11 @@ class _AutomationDetailsPageState extends State<AutomationDetailsPage> {
     );
   }
 
-  Widget _buildError(BuildContext context, String message) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final danger =
-        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: danger.withValues(alpha: 0.12),
-                border: Border.all(color: danger.withValues(alpha: 0.32)),
-              ),
-              child: Icon(LucideIcons.cloudOff, color: danger, size: 28),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: _load,
-              icon: const Icon(LucideIcons.refreshCw, size: 16),
-              label: const Text('Tentar novamente'),
-            ),
-          ],
-        ),
-      ),
+  Widget _buildError(BuildContext context) {
+    return AppErrorState.fromApi(
+      message: _error,
+      statusCode: _errorStatus,
+      onRetry: _load,
     );
   }
 }

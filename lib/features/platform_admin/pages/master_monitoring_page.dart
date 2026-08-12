@@ -44,6 +44,9 @@ class _MasterMonitoringPageState extends State<MasterMonitoringPage> {
   bool _loading = true;
   bool _loaded = false;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   DateTime? _lastUpdated;
   String? _busyUserId;
 
@@ -77,6 +80,7 @@ class _MasterMonitoringPageState extends State<MasterMonitoringPage> {
       setState(() {
         _loading = true;
         _error = null;
+        _errorStatus = 0;
       });
     }
     final results = await Future.wait([
@@ -96,8 +100,10 @@ class _MasterMonitoringPageState extends State<MasterMonitoringPage> {
         _users = (usersRes.data as OnlineUsersResult).users;
         _lastUpdated = DateTime.now();
         _error = null;
+        _errorStatus = 0;
       } else if (!silent && _users.isEmpty) {
         _error = usersRes.message ?? 'Erro ao carregar a monitoria';
+        _errorStatus = usersRes.statusCode;
       }
     });
   }
@@ -460,7 +466,11 @@ class _MasterMonitoringPageState extends State<MasterMonitoringPage> {
     if (_loading && _users.isEmpty && !_loaded) {
       child = _buildSkeleton();
     } else if (_error != null && _users.isEmpty) {
-      child = MasterErrorState(message: _error!, onRetry: _load);
+      child = MasterErrorState(
+        message: _error!,
+        statusCode: _errorStatus,
+        onRetry: _load,
+      );
     } else if (visible.isEmpty) {
       final hasSearch = _appliedSearch.isNotEmpty;
       child = MasterEmptyState(

@@ -72,6 +72,12 @@ class _MultichannelAnalyticsPageState extends State<MultichannelAnalyticsPage> {
 
   bool _loading = true;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
+  // Empresa sem imóvel não é falha: é pré-condição vazia. Renderiza estado
+  // vazio, nunca estado de erro.
+  bool _noProperties = false;
 
   bool get _canView =>
       ModuleAccessService.instance.hasPermission('public_analytics:view');
@@ -92,6 +98,8 @@ class _MultichannelAnalyticsPageState extends State<MultichannelAnalyticsPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
+      _noProperties = false;
     });
 
     if (_cities.isEmpty) {
@@ -106,8 +114,7 @@ class _MultichannelAnalyticsPageState extends State<MultichannelAnalyticsPage> {
     if (effective.isEmpty) {
       setState(() {
         _loading = false;
-        _error =
-            'Sua empresa ainda não possui imóveis cadastrados. Cadastre ao menos um imóvel para ver os analytics.';
+        _noProperties = true;
       });
       return;
     }
@@ -136,8 +143,10 @@ class _MultichannelAnalyticsPageState extends State<MultichannelAnalyticsPage> {
       if (sourcesRes.success && sourcesRes.data != null) {
         _sources = sourcesRes.data as SourcesSummary;
         _error = null;
+        _errorStatus = 0;
       } else if (_sources == null) {
         _error = sourcesRes.message ?? 'Erro ao carregar análise multicanal';
+        _errorStatus = sourcesRes.statusCode;
       }
       if (results.length > 1) {
         final engRes = results[1];
@@ -287,16 +296,30 @@ class _MultichannelAnalyticsPageState extends State<MultichannelAnalyticsPage> {
               constraints: BoxConstraints(minHeight: constraints.maxHeight),
               child: _loading && _sources == null
                   ? _buildSkeleton(context)
-                  : _error != null && _sources == null
+                  : _noProperties
                       ? Padding(
                           padding: const EdgeInsets.fromLTRB(
                               _kPadH, 48, _kPadH, _kPadBottom),
-                          child: AnalyticsErrorState(
-                            message: _error!,
-                            onRetry: _loadAll,
+                          child: AnalyticsEmptyState(
+                            icon: LucideIcons.building2,
+                            title: 'Nenhum imóvel cadastrado',
+                            body:
+                                'Sua empresa ainda não possui imóveis cadastrados. '
+                                'Cadastre ao menos um imóvel para ver os analytics.',
+                            tone: AnalyticsTones.accent(context),
                           ),
                         )
-                      : _buildContent(context),
+                      : _error != null && _sources == null
+                          ? Padding(
+                              padding: const EdgeInsets.fromLTRB(
+                                  _kPadH, 48, _kPadH, _kPadBottom),
+                              child: AnalyticsErrorState(
+                                message: _error!,
+                                statusCode: _errorStatus,
+                                onRetry: _loadAll,
+                              ),
+                            )
+                          : _buildContent(context),
             ),
           ),
         ),

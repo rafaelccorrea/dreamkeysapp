@@ -11,6 +11,8 @@ import '../../../core/routes/app_routes.dart';
 import '../../../shared/services/secure_storage_service.dart';
 import '../../../shared/services/profile_service.dart';
 import '../../../shared/utils/jwt_utils.dart';
+import '../../../shared/utils/error_cause.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../models/chat_models.dart';
 import '../services/chat_api_service.dart';
 import '../services/chat_socket_service.dart';
@@ -44,6 +46,10 @@ class _ChatPageState extends State<ChatPage>
   bool _isLoadingMessages = false;
   bool _isLoadingUsers = false;
   String? _errorMessage;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
+  ErrorCause? _errorCause;
 
   int _messageOffset = 0;
   static const int _messagesLimit = 50;
@@ -316,6 +322,8 @@ class _ChatPageState extends State<ChatPage>
     setState(() {
       _isLoadingRooms = true;
       _errorMessage = null;
+      _errorStatus = 0;
+      _errorCause = null;
     });
 
     try {
@@ -343,11 +351,13 @@ class _ChatPageState extends State<ChatPage>
       } else {
         setState(() {
           _errorMessage = response.message ?? 'Erro ao carregar conversas';
+          _errorStatus = response.statusCode;
           _isLoadingRooms = false;
         });
       }
     } catch (e) {
       setState(() {
+        _errorCause = ErrorCause.fromException(e);
         _errorMessage = 'Erro ao carregar conversas: ${e.toString()}';
         _isLoadingRooms = false;
       });
@@ -684,25 +694,16 @@ class _ChatPageState extends State<ChatPage>
               : _isLoadingRooms
               ? _buildRoomsShimmer(context)
               : _errorMessage != null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        _errorMessage!,
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: _loadRooms,
-                        child: const Text('Tentar novamente'),
-                      ),
-                    ],
-                  ),
-                )
+              ? (_errorCause != null
+                    ? AppErrorState(
+                        cause: _errorCause!,
+                        onRetry: _loadRooms,
+                      )
+                    : AppErrorState.fromApi(
+                        message: _errorMessage,
+                        statusCode: _errorStatus,
+                        onRetry: _loadRooms,
+                      ))
               : _rooms.isEmpty
               ? Center(
                   child: Column(

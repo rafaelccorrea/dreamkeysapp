@@ -9,6 +9,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/minimal_body_chrome.dart';
 import '../../../shared/widgets/skeleton_box.dart';
@@ -78,6 +79,7 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
 
   bool _isLoading = true;
   String? _errorMessage;
+  int _errorStatus = 0;
   SdrMetrics _metrics = SdrMetrics.empty;
   SdrDashboardFilters _filters = SdrDashboardFilters.initial;
   List<SdrTeamOption> _teams = const [];
@@ -143,12 +145,14 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
       if (res.success && res.data != null) {
         _metrics = res.data!;
         _errorMessage = null;
+        _errorStatus = 0;
         _teamVisible = _kTeamPageSize;
         _brokersVisible = _kBrokersPageSize;
         _sourcesVisible = _kSourcesPageSize;
         _campaignsVisible = _kCampaignsPageSize;
       } else {
         _errorMessage = res.message ?? 'Erro ao carregar métricas do SDR';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -1622,42 +1626,10 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
   }
 
   Widget _buildError(BuildContext context) {
-    final theme = Theme.of(context);
-    final danger = _red(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: danger.withValues(alpha: 0.12),
-                border: Border.all(color: danger.withValues(alpha: 0.32)),
-              ),
-              child: Icon(LucideIcons.cloudOff, color: danger, size: 28),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              _errorMessage ?? 'Erro ao carregar métricas do SDR',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: _loadMetrics,
-              icon: const Icon(LucideIcons.refreshCw, size: 16),
-              label: const Text('Tentar novamente'),
-            ),
-          ],
-        ),
-      ),
+    return AppErrorState.fromApi(
+      message: _errorMessage,
+      statusCode: _errorStatus,
+      onRetry: _loadMetrics,
     );
   }
 

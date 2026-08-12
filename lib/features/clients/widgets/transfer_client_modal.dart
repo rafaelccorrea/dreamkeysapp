@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../services/client_service.dart';
 
 /// Modal para transferir cliente para outro responsável.
@@ -36,6 +37,10 @@ class _TransferClientModalState extends State<TransferClientModal> {
   bool _isLoading = true;
   bool _isTransferring = false;
   String? _errorMessage;
+  // Código HTTP guardado junto: "sem permissão" e "servidor fora" não podem
+  // continuar caindo no mesmo texto genérico.
+  int _errorStatus = 0;
+  Object? _errorRaw;
   String _query = '';
 
   @override
@@ -60,6 +65,8 @@ class _TransferClientModalState extends State<TransferClientModal> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _errorStatus = 0;
+      _errorRaw = null;
     });
 
     try {
@@ -76,13 +83,17 @@ class _TransferClientModalState extends State<TransferClientModal> {
       } else {
         setState(() {
           _errorMessage = response.message ?? 'Erro ao carregar usuários';
+          _errorStatus = response.statusCode;
+          _errorRaw = response.error;
           _isLoading = false;
         });
       }
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _errorMessage = 'Erro ao conectar com o servidor';
+        _errorStatus = 0;
+        _errorRaw = e;
         _isLoading = false;
       });
     }
@@ -511,41 +522,12 @@ class _TransferClientModalState extends State<TransferClientModal> {
   }
 
   Widget _buildErrorState(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppColors.status.error.withValues(alpha: 0.10),
-            ),
-            child: Icon(
-              Icons.error_outline,
-              size: 36,
-              color: AppColors.status.error,
-            ),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            _errorMessage!,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: ThemeHelpers.textColor(context),
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: _loadUsers,
-            icon: const Icon(Icons.refresh_rounded, size: 18),
-            label: const Text('Tentar novamente'),
-          ),
-        ],
-      ),
+    return AppErrorState.fromApi(
+      message: _errorMessage,
+      statusCode: _errorStatus,
+      error: _errorRaw,
+      onRetry: _loadUsers,
+      dense: true,
     );
   }
 

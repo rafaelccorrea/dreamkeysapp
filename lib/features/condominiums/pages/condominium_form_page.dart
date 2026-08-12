@@ -32,6 +32,9 @@ class _CondominiumFormPageState extends State<CondominiumFormPage> {
 
   bool _loadingExisting = false;
   String? _loadError;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _loadErrorStatus = 0;
   bool _submitting = false;
 
   bool get _isEdit => widget.isEdit;
@@ -58,6 +61,7 @@ class _CondominiumFormPageState extends State<CondominiumFormPage> {
     setState(() {
       _loadingExisting = true;
       _loadError = null;
+      _loadErrorStatus = 0;
     });
     final res =
         await CondominiumService.instance.getById(widget.condominiumId!);
@@ -68,6 +72,7 @@ class _CondominiumFormPageState extends State<CondominiumFormPage> {
         _prefill(res.data!);
       } else {
         _loadError = res.message ?? 'Erro ao carregar condomínio';
+        _loadErrorStatus = res.statusCode;
       }
     });
   }
@@ -239,7 +244,11 @@ class _CondominiumFormPageState extends State<CondominiumFormPage> {
     if (_loadingExisting) {
       body = _buildSkeleton(context);
     } else if (_loadError != null) {
-      body = EstateErrorState(message: _loadError!, onRetry: _loadExisting);
+      body = EstateErrorState(
+        message: _loadError!,
+        statusCode: _loadErrorStatus,
+        onRetry: _loadExisting,
+      );
     } else {
       body = _buildForm(context);
     }

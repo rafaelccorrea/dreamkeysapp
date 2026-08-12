@@ -43,6 +43,9 @@ class _CompareUsersPageState extends State<CompareUsersPage> {
   List<MemberOption> _members = const [];
   bool _membersLoading = true;
   String? _membersError;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _membersErrorStatus = 0;
   final Set<String> _selectedIds = <String>{};
   final TextEditingController _searchController = TextEditingController();
   String _search = '';
@@ -57,6 +60,9 @@ class _CompareUsersPageState extends State<CompareUsersPage> {
   UsersComparison? _result;
   bool _comparing = false;
   String? _compareError;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _compareErrorStatus = 0;
 
   bool get _canCompare =>
       ModuleAccessService.instance.hasPermission('performance:compare');
@@ -80,6 +86,7 @@ class _CompareUsersPageState extends State<CompareUsersPage> {
     setState(() {
       _membersLoading = true;
       _membersError = null;
+      _membersErrorStatus = 0;
     });
     final res = await AnalyticsService.instance.getCompanyMembers();
     if (!mounted) return;
@@ -89,6 +96,7 @@ class _CompareUsersPageState extends State<CompareUsersPage> {
         _members = res.data!;
       } else {
         _membersError = res.message ?? 'Erro ao carregar corretores';
+        _membersErrorStatus = res.statusCode;
       }
     });
   }
@@ -154,6 +162,7 @@ class _CompareUsersPageState extends State<CompareUsersPage> {
     setState(() {
       _comparing = true;
       _compareError = null;
+      _compareErrorStatus = 0;
     });
     final res = await AnalyticsService.instance.compareUsers(
       userIds: _selectedIds.toList(),
@@ -166,6 +175,7 @@ class _CompareUsersPageState extends State<CompareUsersPage> {
         _result = res.data;
       } else {
         _compareError = res.message ?? 'Erro ao comparar corretores';
+        _compareErrorStatus = res.statusCode;
       }
     });
   }
@@ -234,6 +244,7 @@ class _CompareUsersPageState extends State<CompareUsersPage> {
                       const SizedBox(height: 10),
                       AnalyticsErrorState(
                         message: _compareError!,
+                        statusCode: _compareErrorStatus,
                         onRetry: _compare,
                       ),
                     ] else if (_result != null) ...[
@@ -342,7 +353,11 @@ class _CompareUsersPageState extends State<CompareUsersPage> {
             ),
           )
         else if (_membersError != null)
-          AnalyticsErrorState(message: _membersError!, onRetry: _loadMembers)
+          AnalyticsErrorState(
+            message: _membersError!,
+            statusCode: _membersErrorStatus,
+            onRetry: _loadMembers,
+          )
         else ...[
           TextField(
             controller: _searchController,

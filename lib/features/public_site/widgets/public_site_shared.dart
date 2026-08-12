@@ -3,6 +3,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/widgets/app_error_state.dart';
 
 /// Widgets compartilhados entre **Meu Site** e **Link in Bio** — mesma
 /// gramática flush das telas de referência (abas com sublinhado, cabeçalho
@@ -558,70 +559,31 @@ class SiteEmptyState extends StatelessWidget {
   }
 }
 
+/// Estado de erro com retry — delega ao padrão do app.
+///
+/// [statusCode] é o código HTTP da resposta que falhou; sem ele não dá para
+/// separar "sem permissão" de "servidor fora do ar".
 class SiteErrorState extends StatelessWidget {
   final String message;
   final VoidCallback onRetry;
+  final int statusCode;
+  final bool dense;
 
   const SiteErrorState({
     super.key,
     required this.message,
     required this.onRetry,
+    this.statusCode = 0,
+    this.dense = true,
   });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final danger = isDark
-        ? AppColors.status.errorDarkMode
-        : AppColors.status.error;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 4),
-      child: Column(
-        children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: danger.withValues(alpha: 0.12),
-              border: Border.all(color: danger.withValues(alpha: 0.32)),
-            ),
-            child: Icon(LucideIcons.cloudOff, color: danger, size: 28),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: ThemeHelpers.textColor(context),
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 12),
-          // Neutro de propósito — o tema pinta OutlinedButton com o vermelho
-          // da marca, que aqui leria como mais um alerta, não como saída.
-          OutlinedButton.icon(
-            onPressed: onRetry,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: ThemeHelpers.textColor(context),
-              side: BorderSide(color: ThemeHelpers.borderColor(context)),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 18,
-                vertical: 11,
-              ),
-            ),
-            icon: const Icon(LucideIcons.refreshCw, size: 16),
-            label: const Text(
-              'Tentar novamente',
-              style: TextStyle(fontWeight: FontWeight.w800),
-            ),
-          ),
-        ],
-      ),
+    return AppErrorState.fromApi(
+      message: message,
+      statusCode: statusCode,
+      onRetry: () async => onRetry(),
+      dense: dense,
     );
   }
 }

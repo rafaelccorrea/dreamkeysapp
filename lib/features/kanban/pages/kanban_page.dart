@@ -13,6 +13,7 @@ import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/utils/broker_contact_actions.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../models/kanban_models.dart';
 import '../controllers/kanban_controller.dart';
@@ -212,28 +213,12 @@ class _KanbanPageState extends State<KanbanPage> {
           body: controller.shouldShowKanbanSkeleton
               ? const KanbanSkeleton()
               : controller.error != null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.error_outline,
-                        size: 64,
-                        color: theme.colorScheme.error,
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        controller.error!,
-                        style: theme.textTheme.bodyLarge,
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: () => controller.loadBoard(),
-                        child: const Text('Tentar Novamente'),
-                      ),
-                    ],
-                  ),
+              ? AppErrorState.fromApi(
+                  message: controller.error,
+                  // O controller guarda só a mensagem — sem código HTTP, o
+                  // diagnóstico cai na família genérica. A mensagem do
+                  // backend é preservada como causa.
+                  onRetry: () => controller.loadBoard(),
                 )
               : _buildKanbanBoard(controller),
         );

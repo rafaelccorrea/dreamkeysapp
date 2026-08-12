@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../shared/utils/error_cause.dart';
 import '../models/appointment_model.dart';
 import '../services/appointment_service.dart';
 
@@ -23,6 +24,10 @@ class AppointmentController extends ChangeNotifier {
   bool _loading = false;
   bool _loadingMore = false;
   String? _error;
+  // Guardados ao lado da mensagem: só o código HTTP (ou a exceção crua)
+  // permite dizer se foi permissão, sessão expirada ou servidor fora do ar.
+  int _errorStatus = 0;
+  Object? _errorRaw;
   bool _hasMore = true;
 
   // Filtros
@@ -57,6 +62,44 @@ class AppointmentController extends ChangeNotifier {
   bool get loading => _loading;
   bool get loadingMore => _loadingMore;
   String? get error => _error;
+  int get errorStatus => _errorStatus;
+  Object? get errorRaw => _errorRaw;
+
+  /// Diagnóstico pronto da última falha. Quando não houve resposta HTTP (o
+  /// pedido morreu antes), classifica pela exceção; caso contrário, pelo
+  /// código devolvido pelo servidor.
+  ErrorCause? get errorCause {
+    if (_error == null) return null;
+    if (_errorStatus == 0 && _errorRaw != null) {
+      return ErrorCause.fromException(_errorRaw!);
+    }
+    return ErrorCause.fromApi(
+      message: _error,
+      statusCode: _errorStatus,
+      error: _errorRaw,
+    );
+  }
+
+  void _clearError() {
+    _error = null;
+    _errorStatus = 0;
+    _errorRaw = null;
+  }
+
+  void _setApiError(String message, int statusCode, Object? raw) {
+    _error = message;
+    _errorStatus = statusCode;
+    _errorRaw = raw;
+  }
+
+  /// A exceção crua não entra na mensagem: ela vai para o detalhe técnico,
+  /// que fica recolhido, em vez de despejar um SocketException na tela.
+  void _setThrownError(String message, Object e) {
+    _error = message;
+    _errorStatus = 0;
+    _errorRaw = e;
+  }
+
   bool get hasMore => _hasMore;
   String? get filterStatus => _filterStatus;
   String? get filterType => _filterType;
@@ -146,7 +189,7 @@ class AppointmentController extends ChangeNotifier {
     ensureWindowCovers(DateTime.now());
 
     _loading = true;
-    _error = null;
+    _clearError();
     notifyListeners();
 
     try {
@@ -166,14 +209,15 @@ class AppointmentController extends ChangeNotifier {
       if (response.success && response.data != null) {
         _appointments = response.data!.appointments;
         _hasMore = false;
-        _error = null;
+        _clearError();
       } else {
-        _error = response.message ?? 'Erro ao carregar agendamentos';
+        _setApiError(response.message ?? 'Erro ao carregar agendamentos',
+            response.statusCode, response.error);
       }
     } catch (e, stackTrace) {
       debugPrint('❌ [APPOINTMENT_CTRL] Erro ao carregar: $e');
       debugPrint('📚 [APPOINTMENT_CTRL] StackTrace: $stackTrace');
-      _error = 'Erro ao carregar agendamentos: ${e.toString()}';
+      _setThrownError('Erro ao carregar agendamentos', e);
     } finally {
       _loading = false;
       _loadingMore = false;
@@ -184,7 +228,7 @@ class AppointmentController extends ChangeNotifier {
   /// Busca um agendamento por ID
   Future<void> loadAppointmentById(String id) async {
     _loading = true;
-    _error = null;
+    _clearError();
     notifyListeners();
 
     try {
@@ -192,15 +236,16 @@ class AppointmentController extends ChangeNotifier {
 
       if (response.success && response.data != null) {
         _selectedAppointment = response.data;
-        _error = null;
+        _clearError();
       } else {
-        _error = response.message ?? 'Erro ao carregar agendamento';
+        _setApiError(response.message ?? 'Erro ao carregar agendamento',
+            response.statusCode, response.error);
         _selectedAppointment = null;
       }
     } catch (e, stackTrace) {
       debugPrint('❌ [APPOINTMENT_CTRL] Erro ao buscar: $e');
       debugPrint('📚 [APPOINTMENT_CTRL] StackTrace: $stackTrace');
-      _error = 'Erro ao buscar agendamento: ${e.toString()}';
+      _setThrownError('Erro ao buscar agendamento', e);
       _selectedAppointment = null;
     } finally {
       _loading = false;
@@ -211,7 +256,7 @@ class AppointmentController extends ChangeNotifier {
   /// Cria um novo agendamento
   Future<bool> createAppointment(CreateAppointmentData data) async {
     _loading = true;
-    _error = null;
+    _clearError();
     notifyListeners();
 
     try {
@@ -219,18 +264,19 @@ class AppointmentController extends ChangeNotifier {
 
       if (response.success && response.data != null) {
         _appointments.insert(0, response.data!);
-        _error = null;
+        _clearError();
         notifyListeners();
         return true;
       } else {
-        _error = response.message ?? 'Erro ao criar agendamento';
+        _setApiError(response.message ?? 'Erro ao criar agendamento',
+            response.statusCode, response.error);
         notifyListeners();
         return false;
       }
     } catch (e, stackTrace) {
       debugPrint('❌ [APPOINTMENT_CTRL] Erro ao criar: $e');
       debugPrint('📚 [APPOINTMENT_CTRL] StackTrace: $stackTrace');
-      _error = 'Erro ao criar agendamento: ${e.toString()}';
+      _setThrownError('Erro ao criar agendamento', e);
       notifyListeners();
       return false;
     } finally {
@@ -242,7 +288,7 @@ class AppointmentController extends ChangeNotifier {
   /// Atualiza um agendamento
   Future<bool> updateAppointment(String id, UpdateAppointmentData data) async {
     _loading = true;
-    _error = null;
+    _clearError();
     notifyListeners();
 
     try {
@@ -256,18 +302,19 @@ class AppointmentController extends ChangeNotifier {
         if (_selectedAppointment?.id == id) {
           _selectedAppointment = response.data;
         }
-        _error = null;
+        _clearError();
         notifyListeners();
         return true;
       } else {
-        _error = response.message ?? 'Erro ao atualizar agendamento';
+        _setApiError(response.message ?? 'Erro ao atualizar agendamento',
+            response.statusCode, response.error);
         notifyListeners();
         return false;
       }
     } catch (e, stackTrace) {
       debugPrint('❌ [APPOINTMENT_CTRL] Erro ao atualizar: $e');
       debugPrint('📚 [APPOINTMENT_CTRL] StackTrace: $stackTrace');
-      _error = 'Erro ao atualizar agendamento: ${e.toString()}';
+      _setThrownError('Erro ao atualizar agendamento', e);
       notifyListeners();
       return false;
     } finally {
@@ -279,7 +326,7 @@ class AppointmentController extends ChangeNotifier {
   /// Exclui um agendamento
   Future<bool> deleteAppointment(String id) async {
     _loading = true;
-    _error = null;
+    _clearError();
     notifyListeners();
 
     try {
@@ -290,18 +337,19 @@ class AppointmentController extends ChangeNotifier {
         if (_selectedAppointment?.id == id) {
           _selectedAppointment = null;
         }
-        _error = null;
+        _clearError();
         notifyListeners();
         return true;
       } else {
-        _error = response.message ?? 'Erro ao excluir agendamento';
+        _setApiError(response.message ?? 'Erro ao excluir agendamento',
+            response.statusCode, response.error);
         notifyListeners();
         return false;
       }
     } catch (e, stackTrace) {
       debugPrint('❌ [APPOINTMENT_CTRL] Erro ao excluir: $e');
       debugPrint('📚 [APPOINTMENT_CTRL] StackTrace: $stackTrace');
-      _error = 'Erro ao excluir agendamento: ${e.toString()}';
+      _setThrownError('Erro ao excluir agendamento', e);
       notifyListeners();
       return false;
     } finally {
@@ -506,7 +554,7 @@ class AppointmentController extends ChangeNotifier {
     _selectedAppointment = null;
     _invites.clear();
     _pendingInvites.clear();
-    _error = null;
+    _clearError();
     _loading = false;
     _loadingMore = false;
     _hasMore = true;

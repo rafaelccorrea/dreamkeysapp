@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../../shared/utils/error_cause.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../../../core/routes/app_routes.dart';
@@ -23,7 +25,9 @@ class _InspectionsPageState extends State<InspectionsPage> {
   List<Inspection> _inspections = [];
   int _currentPage = 1;
   int _totalPages = 1;
-  String? _errorMessage;
+  /// Diagnóstico da falha (API ou exceção) — guarda o código HTTP junto da
+  /// mensagem, senão "sem permissão" e "servidor fora" viram o mesmo texto.
+  ErrorCause? _errorCause;
   InspectionFilters? _filters;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
@@ -63,7 +67,7 @@ class _InspectionsPageState extends State<InspectionsPage> {
 
     setState(() {
       _isLoading = true;
-      _errorMessage = null;
+      _errorCause = null;
     });
 
     try {
@@ -89,12 +93,16 @@ class _InspectionsPageState extends State<InspectionsPage> {
               _inspections.addAll(response.data!.inspections);
             }
             _totalPages = response.data!.totalPages;
+            _errorCause = null;
             _isLoading = false;
             _isLoadingMore = false;
           });
         } else {
           setState(() {
-            _errorMessage = response.message ?? 'Erro ao carregar vistorias';
+            _errorCause = ErrorCause.fromApi(
+              message: response.message,
+              statusCode: response.statusCode,
+            );
             _isLoading = false;
             _isLoadingMore = false;
           });
@@ -103,7 +111,7 @@ class _InspectionsPageState extends State<InspectionsPage> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorMessage = 'Erro ao conectar com o servidor';
+          _errorCause = ErrorCause.fromException(e);
           _isLoading = false;
           _isLoadingMore = false;
         });
@@ -216,7 +224,7 @@ class _InspectionsPageState extends State<InspectionsPage> {
             Expanded(
               child: _isLoading && _inspections.isEmpty
                   ? _buildSkeleton(context, theme)
-                  : _errorMessage != null && _inspections.isEmpty
+                  : _errorCause != null && _inspections.isEmpty
                       ? _buildErrorState(context, theme)
                       : _inspections.isEmpty
                           ? _buildEmptyState(context, theme)
@@ -290,32 +298,9 @@ class _InspectionsPageState extends State<InspectionsPage> {
   }
 
   Widget _buildErrorState(BuildContext context, ThemeData theme) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: ThemeHelpers.textSecondaryColor(context),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              _errorMessage ?? 'Erro ao carregar vistorias',
-              style: theme.textTheme.bodyLarge,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: _loadInspections,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Tentar novamente'),
-            ),
-          ],
-        ),
-      ),
+    return AppErrorState(
+      cause: _errorCause!,
+      onRetry: () => _loadInspections(refresh: true),
     );
   }
 

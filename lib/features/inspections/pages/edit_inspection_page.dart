@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../../shared/utils/error_cause.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/custom_text_field.dart';
 import '../../../shared/widgets/masked_text_field.dart';
@@ -54,7 +56,8 @@ class _EditInspectionPageState extends State<EditInspectionPage> {
   bool _isLoadingInspection = true;
   bool _isLoadingUsers = false;
   List<Map<String, dynamic>> _users = [];
-  String? _errorMessage;
+  /// Diagnóstico da falha (API ou exceção) — carrega o código HTTP junto.
+  ErrorCause? _errorCause;
 
   @override
   void initState() {
@@ -78,7 +81,7 @@ class _EditInspectionPageState extends State<EditInspectionPage> {
   Future<void> _loadInspection() async {
     setState(() {
       _isLoadingInspection = true;
-      _errorMessage = null;
+      _errorCause = null;
     });
 
     try {
@@ -119,11 +122,15 @@ class _EditInspectionPageState extends State<EditInspectionPage> {
             _responsibleDocumentController.text = inspection.responsibleDocument ?? '';
             _responsiblePhoneController.text = inspection.responsiblePhone ?? '';
             
+            _errorCause = null;
             _isLoadingInspection = false;
           });
         } else {
           setState(() {
-            _errorMessage = response.message ?? 'Erro ao carregar vistoria';
+            _errorCause = ErrorCause.fromApi(
+              message: response.message,
+              statusCode: response.statusCode,
+            );
             _isLoadingInspection = false;
           });
         }
@@ -131,7 +138,7 @@ class _EditInspectionPageState extends State<EditInspectionPage> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorMessage = 'Erro de conexão: ${e.toString()}';
+          _errorCause = ErrorCause.fromException(e);
           _isLoadingInspection = false;
         });
       }
@@ -438,35 +445,10 @@ class _EditInspectionPageState extends State<EditInspectionPage> {
       );
     }
 
-    if (_errorMessage != null) {
+    if (_errorCause != null) {
       return AppScaffold(
         title: 'Editar Vistoria',
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.error_outline,
-                  size: 64,
-                  color: ThemeHelpers.textSecondaryColor(context),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  _errorMessage!,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton.icon(
-                  onPressed: _loadInspection,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Tentar Novamente'),
-                ),
-              ],
-            ),
-          ),
-        ),
+        body: AppErrorState(cause: _errorCause!, onRetry: _loadInspection),
       );
     }
 

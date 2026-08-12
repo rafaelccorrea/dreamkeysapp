@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/utils/input_formatters.dart';
 import '../../../shared/utils/masks.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../clients/services/client_service.dart';
 import '../models/kanban_models.dart';
 import '../services/kanban_service.dart';
@@ -993,6 +994,10 @@ class _TaskAssigneeSheetState extends State<TaskAssigneeSheet> {
   List<ProjectMember> _members = const [];
   bool _loading = true;
   String? _error;
+  // Guardar o código HTTP é o que separa "você não tem acesso a este funil"
+  // (403) de "o servidor caiu" (5xx) — antes os dois caíam no mesmo aviso.
+  int _errorStatus = 0;
+  Object? _errorDetail;
   String _query = '';
 
   @override
@@ -1014,6 +1019,8 @@ class _TaskAssigneeSheetState extends State<TaskAssigneeSheet> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
+      _errorDetail = null;
     });
     final r = await KanbanService.instance.getProjectMembers(widget.projectId);
     if (!mounted) return;
@@ -1021,8 +1028,13 @@ class _TaskAssigneeSheetState extends State<TaskAssigneeSheet> {
       _loading = false;
       if (r.success && r.data != null) {
         _members = r.data!;
+        _error = null;
+        _errorStatus = 0;
+        _errorDetail = null;
       } else {
         _error = r.message ?? 'Não foi possível carregar a equipe do funil.';
+        _errorStatus = r.statusCode;
+        _errorDetail = r.error;
       }
     });
   }
@@ -1065,10 +1077,14 @@ class _TaskAssigneeSheetState extends State<TaskAssigneeSheet> {
             child: _loading
                 ? const _SheetLoader(tone: _tone)
                 : _error != null
-                    ? TaskSheetStatus(
-                        icon: Icons.cloud_off_rounded,
-                        message: _error!,
-                        onRetry: _load,
+                    ? SingleChildScrollView(
+                        child: AppErrorState.fromApi(
+                          message: _error,
+                          statusCode: _errorStatus,
+                          error: _errorDetail,
+                          dense: true,
+                          onRetry: _load,
+                        ),
                       )
                     : visible.isEmpty
                         ? const TaskSheetStatus(
@@ -1208,6 +1224,10 @@ class _TaskLinkPickerSheetState extends State<TaskLinkPickerSheet> {
   Timer? _debounce;
   bool _loading = true;
   String? _error;
+  // Código HTTP junto: sem ele, "sem permissão na carteira de clientes" e
+  // "servidor fora do ar" chegam idênticos na busca.
+  int _errorStatus = 0;
+  Object? _errorDetail;
   List<TaskLinkSelection> _items = const [];
   List<String?> _helpers = const [];
 
@@ -1241,6 +1261,8 @@ class _TaskLinkPickerSheetState extends State<TaskLinkPickerSheet> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
+      _errorDetail = null;
     });
     final term = _search.text.trim();
     final search = term.isEmpty ? null : term;
@@ -1264,8 +1286,13 @@ class _TaskLinkPickerSheetState extends State<TaskLinkPickerSheet> {
                 if ((c.email ?? '').trim().isNotEmpty) c.email!.trim(),
               ].join(' · '),
           ];
+          _error = null;
+          _errorStatus = 0;
+          _errorDetail = null;
         } else {
           _error = r.message ?? 'Não foi possível carregar os clientes.';
+          _errorStatus = r.statusCode;
+          _errorDetail = r.error;
         }
       });
       return;
@@ -1288,8 +1315,13 @@ class _TaskLinkPickerSheetState extends State<TaskLinkPickerSheet> {
               if ((p.city ?? '').trim().isNotEmpty) p.city!.trim(),
             ].join(' · '),
         ];
+        _error = null;
+        _errorStatus = 0;
+        _errorDetail = null;
       } else {
         _error = r.message ?? 'Não foi possível carregar os imóveis.';
+        _errorStatus = r.statusCode;
+        _errorDetail = r.error;
       }
     });
   }
@@ -1352,10 +1384,14 @@ class _TaskLinkPickerSheetState extends State<TaskLinkPickerSheet> {
             child: _loading
                 ? const _SheetLoader(tone: _tone)
                 : _error != null
-                    ? TaskSheetStatus(
-                        icon: Icons.cloud_off_rounded,
-                        message: _error!,
-                        onRetry: _load,
+                    ? SingleChildScrollView(
+                        child: AppErrorState.fromApi(
+                          message: _error,
+                          statusCode: _errorStatus,
+                          error: _errorDetail,
+                          dense: true,
+                          onRetry: _load,
+                        ),
                       )
                     : _items.isEmpty
                         ? TaskSheetStatus(
@@ -2576,6 +2612,10 @@ class _TaskPeopleMultiSelectSheetState
   final List<KanbanUser> _selected = [];
   bool _loading = true;
   String? _error;
+  // Idem: o código HTTP é o que diferencia falta de permissão na lista de
+  // pessoas da empresa de uma indisponibilidade do servidor.
+  int _errorStatus = 0;
+  Object? _errorDetail;
   String _query = '';
 
   @override
@@ -2606,6 +2646,8 @@ class _TaskPeopleMultiSelectSheetState
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
+      _errorDetail = null;
     });
     final r = await KanbanService.instance.getCompanyMembersSimple();
     if (!mounted) return;
@@ -2613,8 +2655,13 @@ class _TaskPeopleMultiSelectSheetState
       _loading = false;
       if (r.success && r.data != null) {
         _members = r.data!;
+        _error = null;
+        _errorStatus = 0;
+        _errorDetail = null;
       } else {
         _error = r.message ?? 'Não foi possível carregar as pessoas.';
+        _errorStatus = r.statusCode;
+        _errorDetail = r.error;
       }
     });
   }
@@ -2740,10 +2787,14 @@ class _TaskPeopleMultiSelectSheetState
             child: _loading
                 ? _SheetLoader(tone: widget.tone)
                 : _error != null
-                    ? TaskSheetStatus(
-                        icon: Icons.cloud_off_rounded,
-                        message: _error!,
-                        onRetry: _load,
+                    ? SingleChildScrollView(
+                        child: AppErrorState.fromApi(
+                          message: _error,
+                          statusCode: _errorStatus,
+                          error: _errorDetail,
+                          dense: true,
+                          onRetry: _load,
+                        ),
                       )
                     : visible.isEmpty
                         ? const TaskSheetStatus(

@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/secure_storage_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../controllers/kanban_controller.dart';
 import '../models/kanban_models.dart';
 import '../services/kanban_service.dart';
@@ -135,7 +136,16 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
   bool _loadingProjects = true;
   bool _submitting = false;
   String? _loadError;
+  // Código HTTP guardado junto da mensagem: sem ele "sem permissão no funil" e
+  // "servidor fora do ar" chegam na tela com a mesma cara.
+  int _loadErrorStatus = 0;
+  Object? _loadErrorDetail;
+  // Falha resolvida no aparelho (funil atual não identificado) — não é resposta
+  // do servidor, então não vira diagnóstico HTTP.
+  bool _loadErrorLocal = false;
   String? _projectsLoadError;
+  int _projectsLoadErrorStatus = 0;
+  Object? _projectsLoadErrorDetail;
   List<KanbanUser> _memberUsers = [];
   List<KanbanProject> _companyProjects = [];
   List<KanbanSimpleColumn> _destinationColumns = [];
@@ -211,6 +221,8 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
     setState(() {
       _loadingProjects = true;
       _projectsLoadError = null;
+      _projectsLoadErrorStatus = 0;
+      _projectsLoadErrorDetail = null;
     });
     final c = context.read<KanbanController>();
     final originId = _originProjectId(c);
@@ -221,6 +233,8 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
       list = List<KanbanProject>.from(res.data!);
     } else {
       _projectsLoadError = res.message;
+      _projectsLoadErrorStatus = res.statusCode;
+      _projectsLoadErrorDetail = res.error;
       list = List<KanbanProject>.from(c.projects);
     }
     final ids = list.map((p) => p.id).toSet();
@@ -307,12 +321,18 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
       setState(() {
         _loadingMembers = false;
         _loadError = 'Funil atual não identificado.';
+        _loadErrorStatus = 0;
+        _loadErrorDetail = null;
+        _loadErrorLocal = true;
       });
       return;
     }
     setState(() {
       _loadingMembers = true;
       _loadError = null;
+      _loadErrorStatus = 0;
+      _loadErrorDetail = null;
+      _loadErrorLocal = false;
     });
     final jwtId = await _jwtSubUserId();
     final res = await _kanbanService.getProjectMembers(pid);
@@ -360,6 +380,9 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
       setState(() {
         _loadingMembers = false;
         _loadError = res.message ?? 'Não foi possível carregar membros do funil.';
+        _loadErrorStatus = res.statusCode;
+        _loadErrorDetail = res.error;
+        _loadErrorLocal = false;
       });
     }
   }
@@ -615,12 +638,19 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
                             ),
                           ),
                         )
+                      else if (projects.isEmpty && _projectsLoadError != null)
+                        AppErrorState.fromApi(
+                          message: _projectsLoadError,
+                          statusCode: _projectsLoadErrorStatus,
+                          error: _projectsLoadErrorDetail,
+                          dense: true,
+                          onRetry: _loadCompanyProjects,
+                        )
                       else if (projects.isEmpty)
                         _EmptyFunnelCallout(
                           borderColor: border,
-                          message: _projectsLoadError != null
-                              ? 'Não foi possível carregar os funis da empresa. ${_projectsLoadError!}'
-                              : 'Nenhum funil disponível para transferência.',
+                          message:
+                              'Nenhum funil disponível para transferência.',
                         )
                       else
                         ...projects.map(
@@ -806,11 +836,19 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
                             ),
                           ),
                         )
-                      else if (_loadError != null)
+                      else if (_loadError != null && _loadErrorLocal)
                         _EmptyFunnelCallout(
                           borderColor: border,
                           isError: true,
                           message: _loadError!,
+                        )
+                      else if (_loadError != null)
+                        AppErrorState.fromApi(
+                          message: _loadError,
+                          statusCode: _loadErrorStatus,
+                          error: _loadErrorDetail,
+                          dense: true,
+                          onRetry: _loadMembers,
                         )
                       else if (_memberUsers.isEmpty)
                         _EmptyFunnelCallout(

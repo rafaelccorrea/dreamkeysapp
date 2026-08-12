@@ -9,6 +9,7 @@ import 'notification_item.dart';
 import '../../../core/notifications/app_toast.dart';
 import '../../../core/session/session_bootstrap.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../shared/widgets/app_error_state.dart';
 
 /// Lista de notificações com scroll infinito
 class NotificationList extends StatefulWidget {
@@ -137,33 +138,12 @@ class _NotificationListState extends State<NotificationList> {
         if (controller.error != null && controller.notifications.isEmpty) {
           return SizedBox(
             height: widget.maxHeight ?? 300,
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.error_outline,
-                    size: 48,
-                    color: isDark
-                        ? AppColors.status.errorDarkMode
-                        : AppColors.status.error,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    controller.error!,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: isDark
-                          ? AppColors.text.textDarkMode
-                          : AppColors.text.text,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 16),
-                  TextButton(
-                    onPressed: () => controller.loadNotifications(reset: true),
-                    child: const Text('Tentar novamente'),
-                  ),
-                ],
+            child: SingleChildScrollView(
+              child: AppErrorState.fromApi(
+                message: controller.error,
+                statusCode: controller.errorStatus,
+                onRetry: () => controller.loadNotifications(reset: true),
+                dense: true,
               ),
             ),
           );

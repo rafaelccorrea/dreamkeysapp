@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/workspace_directory_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
 
 /// Resultado da seleção de responsável.
 class PickedUser {
@@ -48,6 +49,7 @@ class _UserPickerSheetState extends State<_UserPickerSheet> {
   List<CompanyUserRow> _users = const [];
   bool _loading = true;
   String? _error;
+  int _errorStatus = 0;
   String _query = '';
 
   @override
@@ -77,8 +79,11 @@ class _UserPickerSheetState extends State<_UserPickerSheet> {
             .toList()
           ..sort((a, b) =>
               a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+        _error = null;
+        _errorStatus = 0;
       } else {
         _error = res.message ?? 'Erro ao carregar usuários';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -347,35 +352,11 @@ class _UserPickerSheetState extends State<_UserPickerSheet> {
   }
 
   Widget _buildError(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final danger =
-        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.cloudOff, size: 32, color: danger),
-            const SizedBox(height: 10),
-            Text(
-              _error ?? 'Erro ao carregar usuários',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: _load,
-              icon: const Icon(LucideIcons.refreshCw, size: 15),
-              label: const Text('Tentar novamente'),
-            ),
-          ],
-        ),
-      ),
+    return AppErrorState.fromApi(
+      message: _error,
+      statusCode: _errorStatus,
+      onRetry: _load,
+      dense: true,
     );
   }
 }

@@ -10,8 +10,9 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/api_service.dart';
 import '../../../shared/services/module_access_service.dart';
+import '../../../shared/utils/error_cause.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
-import '../../../shared/widgets/custom_button.dart';
 import '../../../shared/widgets/minimal_body_chrome.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../controllers/appointment_controller.dart';
@@ -2165,49 +2166,9 @@ class _CalendarPageState extends State<CalendarPage>
   // ERROR / SKELETON
   // ---------------------------------------------------------------------------
   Widget _buildErrorState(ThemeData theme, AppointmentController ctrl) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppColors.status.error.withValues(alpha: 0.10),
-              ),
-              child: Icon(
-                Icons.cloud_off_rounded,
-                size: 40,
-                color: AppColors.status.error,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Não conseguimos carregar a agenda',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w800,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              ctrl.error ?? '',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: ThemeHelpers.textSecondaryColor(context),
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 18),
-            CustomButton(
-              text: 'Tentar novamente',
-              icon: Icons.refresh_rounded,
-              onPressed: () => ctrl.loadAppointments(reset: true),
-            ),
-          ],
-        ),
-      ),
+    return AppErrorState(
+      cause: ctrl.errorCause ?? ErrorCause.fromApi(message: ctrl.error),
+      onRetry: () => ctrl.loadAppointments(reset: true),
     );
   }
 

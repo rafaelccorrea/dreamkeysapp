@@ -7,6 +7,8 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/property_service.dart';
+import '../../../shared/utils/error_cause.dart';
+import '../../../shared/widgets/app_error_state.dart';
 
 /// Modos de origem de endereço — espelho do web `PropertyCreationAddressMode`.
 enum PropertyCreationAddressMode {
@@ -1446,6 +1448,14 @@ class _EntityPickerSheetState extends State<_EntityPickerSheet> {
   bool _loadingMore = false;
   String? _error;
 
+  /// Código HTTP da última falha — sem ele "sem permissão" e "servidor fora
+  /// do ar" chegariam na tela com o mesmo texto.
+  int _errorStatus = 0;
+  Object? _errorDetail;
+
+  /// Falha sem resposta da API (exceção de rede/parse).
+  ErrorCause? _errorCause;
+
   @override
   void initState() {
     super.initState();
@@ -1490,6 +1500,9 @@ class _EntityPickerSheetState extends State<_EntityPickerSheet> {
       setState(() {
         _loading = true;
         _error = null;
+        _errorStatus = 0;
+        _errorDetail = null;
+        _errorCause = null;
         _page = 1;
       });
     } else {
@@ -1522,6 +1535,10 @@ class _EntityPickerSheetState extends State<_EntityPickerSheet> {
           _page = data.page;
           _totalPages = data.totalPages;
           _total = data.total;
+          _error = null;
+          _errorStatus = 0;
+          _errorDetail = null;
+          _errorCause = null;
           _loading = false;
           _loadingMore = false;
         });
@@ -1531,6 +1548,9 @@ class _EntityPickerSheetState extends State<_EntityPickerSheet> {
               (widget.kind == _PickerKind.condominium
                   ? 'Erro ao listar condomínios'
                   : 'Erro ao listar empreendimentos');
+          _errorStatus = r.statusCode;
+          _errorDetail = r.error;
+          _errorCause = null;
           _loading = false;
           _loadingMore = false;
         });
@@ -1539,6 +1559,9 @@ class _EntityPickerSheetState extends State<_EntityPickerSheet> {
       if (!mounted) return;
       setState(() {
         _error = 'Erro de conexão.';
+        _errorStatus = 0;
+        _errorDetail = e;
+        _errorCause = ErrorCause.fromException(e);
         _loading = false;
         _loadingMore = false;
       });
@@ -1697,30 +1720,20 @@ class _EntityPickerSheetState extends State<_EntityPickerSheet> {
         ),
       );
     }
-    if (_error != null && _items.isEmpty) {
+    if ((_error != null || _errorCause != null) && _items.isEmpty) {
+      final cause = _errorCause ??
+          ErrorCause.fromApi(
+            message: _error,
+            statusCode: _errorStatus,
+            error: _errorDetail,
+          );
       return Center(
         child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.error_outline_rounded,
-                  color: AppColors.status.error, size: 32),
-              const SizedBox(height: 10),
-              Text(
-                _error!,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: AppColors.status.error,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 12),
-              FilledButton.tonal(
-                onPressed: () => _fetchPage(reset: true),
-                child: const Text('Tentar novamente'),
-              ),
-            ],
+          padding: const EdgeInsets.all(16),
+          child: AppErrorState(
+            cause: cause,
+            dense: true,
+            onRetry: () => _fetchPage(reset: true),
           ),
         ),
       );

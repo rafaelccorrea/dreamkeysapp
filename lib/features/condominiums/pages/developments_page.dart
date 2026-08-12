@@ -28,6 +28,9 @@ class _TabState {
   bool loadingMore = false;
   bool loaded = false;
   String? error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int errorStatus = 0;
   int page = 1;
   int totalPages = 1;
   int total = 0;
@@ -37,6 +40,7 @@ class _TabState {
     items = const [];
     loaded = false;
     error = null;
+    errorStatus = 0;
     page = 1;
     totalPages = 1;
   }
@@ -164,7 +168,10 @@ class _DevelopmentsPageState extends State<DevelopmentsPage> {
     final st = _state[tab]!;
     setState(() {
       st.loading = true;
-      if (refresh) st.error = null;
+      if (refresh) {
+        st.error = null;
+        st.errorStatus = 0;
+      }
     });
     final res = await DevelopmentService.instance
         .getDevelopments(filters: _filtersFor(tab, 1));
@@ -178,8 +185,10 @@ class _DevelopmentsPageState extends State<DevelopmentsPage> {
         st.totalPages = res.data!.totalPages;
         st.total = res.data!.total;
         st.error = null;
+        st.errorStatus = 0;
       } else {
         st.error = res.message ?? 'Erro ao carregar empreendimentos';
+        st.errorStatus = res.statusCode;
       }
     });
   }
@@ -961,6 +970,7 @@ class _DevelopmentsPageState extends State<DevelopmentsPage> {
     } else if (st.error != null && st.items.isEmpty) {
       child = EstateErrorState(
         message: st.error!,
+        statusCode: st.errorStatus,
         onRetry: () => _loadTab(_activeTab, refresh: true),
       );
     } else if (st.items.isEmpty) {

@@ -10,7 +10,9 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../../../../shared/services/profile_service.dart';
 import '../../../../shared/services/theme_service.dart';
+import '../../../../shared/utils/error_cause.dart';
 import '../../../../shared/utils/masks.dart';
+import '../../../../shared/widgets/app_error_state.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/brand_wordmark_logo.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
@@ -47,6 +49,10 @@ class _ProfilePageState extends State<ProfilePage> {
   Profile? _profile;
   bool _isLoading = true;
   String? _errorMessage;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
+  ErrorCause? _errorCause;
 
   // Toast do avatar fica pendente e só é exibido DEPOIS que o sheet fecha —
   // antes o SnackBar aparecia atrás do modal.
@@ -65,6 +71,8 @@ class _ProfilePageState extends State<ProfilePage> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _errorStatus = 0;
+      _errorCause = null;
     });
     try {
       final response = await ProfileService.instance.getProfile();
@@ -77,12 +85,14 @@ class _ProfilePageState extends State<ProfilePage> {
       } else {
         setState(() {
           _errorMessage = response.message ?? 'Erro ao carregar perfil';
+          _errorStatus = response.statusCode;
           _isLoading = false;
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
+          _errorCause = ErrorCause.fromException(e);
           _errorMessage = 'Erro ao conectar com o servidor';
           _isLoading = false;
         });
@@ -1123,42 +1133,16 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Widget _buildErrorState(BuildContext context, ThemeData theme) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(
-          Icons.cloud_off_outlined,
-          size: 48,
-          color: AppColors.status.error.withValues(alpha: 0.9),
-        ),
-        const SizedBox(height: 18),
-        Text(
-          'Não foi possível carregar',
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w800,
-            color: ThemeHelpers.textColor(context),
-          ),
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 8),
-        Text(
-          _errorMessage ?? '',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(context),
-            height: 1.4,
-          ),
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 22),
-        TextButton.icon(
-          onPressed: _loadProfile,
-          icon: const Icon(Icons.refresh),
-          label: const Text('Tentar de novo'),
-          style: TextButton.styleFrom(
-            foregroundColor: _pBrand(theme.brightness == Brightness.dark),
-          ),
-        ),
-      ],
+    // Exceção solta traz seu próprio diagnóstico; falha de API vem da resposta.
+    final cause = _errorCause;
+    if (cause != null) {
+      return AppErrorState(cause: cause, onRetry: _loadProfile, dense: true);
+    }
+    return AppErrorState.fromApi(
+      message: _errorMessage,
+      statusCode: _errorStatus,
+      onRetry: _loadProfile,
+      dense: true,
     );
   }
 }

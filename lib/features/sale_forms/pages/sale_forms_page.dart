@@ -7,6 +7,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/sale_forms_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../widgets/sale_form_card.dart';
 import '../widgets/sale_form_type_modal.dart';
@@ -40,6 +41,9 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
   bool _loading = true;
   bool _loadingMore = false;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   bool _showDeletedOnly = false;
 
   @override
@@ -89,8 +93,10 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
       if (res.success && res.data != null) {
         _data = res.data;
         _error = null;
+        _errorStatus = 0;
       } else {
-        _error = res.message ?? 'Não foi possível carregar as fichas de venda.';
+        _error = res.message;
+        _errorStatus = res.statusCode;
       }
       if (statsRes.success && statsRes.data != null) {
         _stats = statsRes.data;
@@ -376,14 +382,11 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
                   )
                 else if (_error != null)
                   SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: _kPadH),
-                      child: Text(
-                        _error!,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                        ),
-                      ),
+                    child: AppErrorState.fromApi(
+                      message: _error,
+                      statusCode: _errorStatus,
+                      onRetry: _load,
+                      dense: true,
                     ),
                   )
                 else if (_data == null || _data!.items.isEmpty)

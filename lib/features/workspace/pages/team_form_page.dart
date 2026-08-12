@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../services/company_team_service.dart';
@@ -95,6 +96,9 @@ class _TeamFormPageState extends State<TeamFormPage> {
   bool _saving = false;
   bool _nameError = false;
   String? _error;
+  // Sem o código HTTP o erro não sabe dizer se foi permissão ou servidor.
+  int _errorStatus = 0;
+  Object? _errorRaw;
 
   /// Snapshot para detectar alterações não salvas.
   String _savedFingerprint = '';
@@ -179,6 +183,8 @@ class _TeamFormPageState extends State<TeamFormPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
+      _errorRaw = null;
     });
     final res = await CompanyTeamService.instance.getTeam(widget.teamId!);
     if (!mounted) return;
@@ -205,6 +211,8 @@ class _TeamFormPageState extends State<TeamFormPage> {
         _savedFingerprint = _fingerprint();
       } else {
         _error = res.message ?? 'Erro ao carregar equipe';
+        _errorStatus = res.statusCode;
+        _errorRaw = res.error;
       }
     });
   }
@@ -471,41 +479,11 @@ class _TeamFormPageState extends State<TeamFormPage> {
       );
 
   Widget _buildError() {
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: secondary.withValues(alpha: 0.1),
-              ),
-              child: Icon(LucideIcons.cloudOff, size: 28, color: secondary),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              _error!,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: secondary,
-              ),
-            ),
-            const SizedBox(height: 14),
-            FilledButton.tonalIcon(
-              onPressed: _load,
-              icon: const Icon(LucideIcons.rotateCcw, size: 16),
-              label: const Text('Tentar novamente'),
-            ),
-          ],
-        ),
-      ),
+    return AppErrorState.fromApi(
+      message: _error,
+      statusCode: _errorStatus,
+      error: _errorRaw,
+      onRetry: _load,
     );
   }
 

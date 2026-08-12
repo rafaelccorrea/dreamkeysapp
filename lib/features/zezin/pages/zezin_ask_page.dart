@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../models/zezin_models.dart';
@@ -38,6 +39,9 @@ class _ZezinAskPageState extends State<ZezinAskPage> {
   ZezinAvailability? _availability;
   bool _availabilityLoading = true;
   String? _availabilityError;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _availabilityErrorStatus = 0;
 
   List<ZezinSuggestedQuestion> _suggestions = const [];
   List<ZezinSuggestedQuestion> _followUps = const [];
@@ -52,6 +56,7 @@ class _ZezinAskPageState extends State<ZezinAskPage> {
   String? _threadTitle;
   bool _threadMessagesLoading = false;
   String? _threadMessagesError;
+  int _threadMessagesErrorStatus = 0;
 
   List<ZezinChatMessage> _messages = [];
   bool _sending = false;
@@ -89,6 +94,7 @@ class _ZezinAskPageState extends State<ZezinAskPage> {
     setState(() {
       _availabilityLoading = true;
       _availabilityError = null;
+      _availabilityErrorStatus = 0;
     });
     final res = await _service.getAvailability();
     if (!mounted) return;
@@ -97,6 +103,7 @@ class _ZezinAskPageState extends State<ZezinAskPage> {
         _availabilityLoading = false;
         _availabilityError =
             res.message ?? 'Não foi possível verificar o Zezin.';
+        _availabilityErrorStatus = res.statusCode;
       });
       return;
     }
@@ -150,6 +157,7 @@ class _ZezinAskPageState extends State<ZezinAskPage> {
       _followUps = const [];
       _threadMessagesLoading = true;
       _threadMessagesError = null;
+      _threadMessagesErrorStatus = 0;
     });
     final res = await _service.getThreadMessages(thread.threadId);
     if (!mounted) return;
@@ -160,6 +168,7 @@ class _ZezinAskPageState extends State<ZezinAskPage> {
       } else {
         _threadMessagesError =
             res.message ?? 'Não foi possível carregar a conversa.';
+        _threadMessagesErrorStatus = res.statusCode;
       }
     });
     _scrollToBottom(jump: true);
@@ -176,6 +185,7 @@ class _ZezinAskPageState extends State<ZezinAskPage> {
       _messages = [];
       _followUps = const [];
       _threadMessagesError = null;
+      _threadMessagesErrorStatus = 0;
     });
     _inputFocus.requestFocus();
   }
@@ -578,6 +588,7 @@ class _ZezinAskPageState extends State<ZezinAskPage> {
       return _buildErrorState(
         context,
         message: _availabilityError!,
+        statusCode: _availabilityErrorStatus,
         onRetry: _bootstrap,
       );
     }
@@ -601,6 +612,7 @@ class _ZezinAskPageState extends State<ZezinAskPage> {
       return _buildErrorState(
         context,
         message: _threadMessagesError!,
+        statusCode: _threadMessagesErrorStatus,
         onRetry: () {
           final id = _threadId;
           if (id != null) {
@@ -1103,45 +1115,12 @@ class _ZezinAskPageState extends State<ZezinAskPage> {
     BuildContext context, {
     required String message,
     required VoidCallback onRetry,
+    int statusCode = 0,
   }) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final danger =
-        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: danger.withValues(alpha: 0.12),
-                border: Border.all(color: danger.withValues(alpha: 0.32)),
-              ),
-              child: Icon(LucideIcons.cloudOff, color: danger, size: 28),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: onRetry,
-              icon: const Icon(LucideIcons.refreshCw, size: 16),
-              label: const Text('Tentar novamente'),
-            ),
-          ],
-        ),
-      ),
+    return AppErrorState.fromApi(
+      message: message,
+      statusCode: statusCode,
+      onRetry: () async => onRetry(),
     );
   }
 

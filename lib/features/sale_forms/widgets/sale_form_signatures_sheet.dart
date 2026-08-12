@@ -9,6 +9,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/sale_forms_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
 
 /// Bottom sheet de assinaturas da FICHA DE VENDA.
 ///
@@ -64,6 +65,7 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
   late TabController _tab;
   bool _loading = true;
   String? _error;
+  int _errorStatus = 0;
   bool _sending = false;
   bool _syncing = false;
   bool _invalidating = false;
@@ -127,8 +129,11 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
       _loading = false;
       if (sigsRes.success && sigsRes.data != null) {
         _signatures = sigsRes.data!;
+        _error = null;
+        _errorStatus = 0;
       } else {
         _error = sigsRes.message;
+        _errorStatus = sigsRes.statusCode;
       }
       if (autoRes.success && autoRes.data != null) {
         _autoSigners = autoRes.data!;
@@ -472,7 +477,18 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
       return const Center(child: CircularProgressIndicator());
     }
     if (_error != null && _signatures.isEmpty) {
-      return _LockedNotice(message: _error!);
+      return ListView(
+        controller: scroll,
+        padding: const EdgeInsets.only(top: 12, bottom: 28),
+        children: [
+          AppErrorState.fromApi(
+            message: _error,
+            statusCode: _errorStatus,
+            onRetry: _load,
+            dense: true,
+          ),
+        ],
+      );
     }
     final total = _signatures.length;
     final assinados = _signatures.where((s) => s.isSigned).length;

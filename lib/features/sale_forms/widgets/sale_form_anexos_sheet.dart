@@ -10,6 +10,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/sale_forms_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
 
 /// Bottom sheet de ANEXOS da ficha de venda — lista os anexos (foto da ficha
 /// física, comprovantes etc.), permite anexar (foto da câmera ou arquivo) e,
@@ -53,6 +54,7 @@ class _SaleFormAnexosSheetState extends State<_SaleFormAnexosSheet> {
   bool _loading = true;
   bool _uploading = false;
   String? _error;
+  int _errorStatus = 0;
   List<SaleFormAttachment> _anexos = const [];
   final ImagePicker _picker = ImagePicker();
 
@@ -82,8 +84,11 @@ class _SaleFormAnexosSheetState extends State<_SaleFormAnexosSheet> {
       _loading = false;
       if (res.success && res.data != null) {
         _anexos = res.data!;
+        _error = null;
+        _errorStatus = 0;
       } else {
         _error = res.message ?? 'Erro ao carregar anexos.';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -277,28 +282,18 @@ class _SaleFormAnexosSheetState extends State<_SaleFormAnexosSheet> {
       return const Center(child: CircularProgressIndicator());
     }
     if (_error != null && _anexos.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                _error!,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
-                    ),
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: _load,
-                icon: const Icon(Icons.refresh_rounded, size: 16),
-                label: const Text('Tentar novamente'),
-              ),
-            ],
+      // Lista (e não Center) para o sheet continuar arrastável pelo corpo.
+      return ListView(
+        controller: scroll,
+        padding: const EdgeInsets.only(top: 12, bottom: 24),
+        children: [
+          AppErrorState.fromApi(
+            message: _error,
+            statusCode: _errorStatus,
+            onRetry: _load,
+            dense: true,
           ),
-        ),
+        ],
       );
     }
     if (_anexos.isEmpty) {

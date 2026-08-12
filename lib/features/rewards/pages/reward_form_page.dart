@@ -45,6 +45,9 @@ class _RewardFormPageState extends State<RewardFormPage> {
   Reward? _existing;
   bool _loadingExisting = false;
   String? _loadError;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _loadErrorStatus = 0;
   bool _saving = false;
 
   bool get _isEdit => widget.rewardId != null;
@@ -79,6 +82,7 @@ class _RewardFormPageState extends State<RewardFormPage> {
     setState(() {
       _loadingExisting = true;
       _loadError = null;
+      _loadErrorStatus = 0;
     });
     final res = await RewardsService.instance.getRewardById(widget.rewardId!);
     if (!mounted) return;
@@ -88,6 +92,7 @@ class _RewardFormPageState extends State<RewardFormPage> {
         _prefill(res.data!);
       } else {
         _loadError = res.message ?? 'Erro ao carregar o prêmio';
+        _loadErrorStatus = res.statusCode;
       }
     });
   }
@@ -279,7 +284,11 @@ class _RewardFormPageState extends State<RewardFormPage> {
     if (_loadingExisting) {
       body = _buildSkeleton(context);
     } else if (_loadError != null) {
-      body = RewardsErrorState(message: _loadError!, onRetry: _loadExisting);
+      body = RewardsErrorState(
+        message: _loadError!,
+        statusCode: _loadErrorStatus,
+        onRetry: _loadExisting,
+      );
     } else {
       body = _buildForm(context);
     }

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/utils/json_datetime.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../controllers/appointment_controller.dart';
@@ -67,6 +68,10 @@ class _AppointmentInvitesPageState extends State<AppointmentInvitesPage> {
 
   bool _loading = false;
   String? _error;
+  // Código HTTP guardado junto da mensagem: é ele que diferencia permissão,
+  // sessão expirada e servidor fora do ar.
+  int _errorStatus = 0;
+  Object? _errorRaw;
 
   /// Convite sendo respondido agora (trava os botões de todos os itens para
   /// evitar resposta dupla em paralelo, igual ao `isLoading` do web).
@@ -106,6 +111,8 @@ class _AppointmentInvitesPageState extends State<AppointmentInvitesPage> {
       setState(() {
         _loading = true;
         _error = null;
+        _errorStatus = 0;
+        _errorRaw = null;
       });
     }
 
@@ -136,6 +143,8 @@ class _AppointmentInvitesPageState extends State<AppointmentInvitesPage> {
       setState(() {
         _loading = false;
         _error = null;
+        _errorStatus = 0;
+        _errorRaw = null;
         if (tab == 0) {
           _pending = data;
         } else {
@@ -148,7 +157,11 @@ class _AppointmentInvitesPageState extends State<AppointmentInvitesPage> {
         _loading = false;
         // Com lista já na tela (pull-to-refresh) o erro vira SnackBar; sem
         // lista vira estado de erro em tela cheia.
-        if (_activeList == null) _error = message;
+        if (_activeList == null) {
+          _error = message;
+          _errorStatus = res.statusCode;
+          _errorRaw = res.error;
+        }
       });
       if (refresh && _activeList != null) _snack(message, tone: _SnackTone.error);
     }
@@ -736,29 +749,12 @@ class _AppointmentInvitesPageState extends State<AppointmentInvitesPage> {
   }
 
   Widget _errorState(BuildContext context) {
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 64),
-      child: Column(
-        children: [
-          const Icon(Icons.cloud_off_rounded, size: 34, color: _tMute),
-          const SizedBox(height: 12),
-          Text(
-            _error ?? 'Erro ao carregar convites',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 13, color: secondary),
-          ),
-          const SizedBox(height: 10),
-          TextButton(
-            onPressed: _loading ? null : () => _load(),
-            style: TextButton.styleFrom(foregroundColor: _tAccent),
-            child: const Text(
-              'Tentar novamente',
-              style: TextStyle(fontWeight: FontWeight.w800),
-            ),
-          ),
-        ],
-      ),
+    return AppErrorState.fromApi(
+      message: _error,
+      statusCode: _errorStatus,
+      error: _errorRaw,
+      onRetry: _loading ? null : () => _load(),
+      dense: true,
     );
   }
 

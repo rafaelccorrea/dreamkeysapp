@@ -32,6 +32,9 @@ class _RewardsPageState extends State<RewardsPage> {
   List<Reward> _rewards = const [];
   bool _loading = true;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
 
   int _myPoints = 0;
   bool _pointsLoading = true;
@@ -69,6 +72,7 @@ class _RewardsPageState extends State<RewardsPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
     final res = await RewardsService.instance.getAvailableRewards();
     if (!mounted) return;
@@ -78,6 +82,7 @@ class _RewardsPageState extends State<RewardsPage> {
         _rewards = res.data!;
       } else {
         _error = res.message ?? 'Erro ao carregar o catálogo de prêmios';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -430,7 +435,11 @@ class _RewardsPageState extends State<RewardsPage> {
   Widget _buildBody(BuildContext context) {
     if (_loading && _rewards.isEmpty) return _buildSkeleton();
     if (_error != null && _rewards.isEmpty) {
-      return RewardsErrorState(message: _error!, onRetry: _loadRewards);
+      return RewardsErrorState(
+        message: _error!,
+        statusCode: _errorStatus,
+        onRetry: _loadRewards,
+      );
     }
     if (_rewards.isEmpty) {
       return RewardsEmptyState(

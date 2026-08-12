@@ -5,6 +5,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../models/visit_report_access.dart';
@@ -43,6 +44,7 @@ class _VisitReportFormPageState extends State<VisitReportFormPage> {
   VisitReport? _initialReport;
   bool _loadingExisting = false;
   String? _loadError;
+  int _loadErrorStatus = 0;
 
   String _clientId = '';
   String _clientName = '';
@@ -87,8 +89,11 @@ class _VisitReportFormPageState extends State<VisitReportFormPage> {
       _loadingExisting = false;
       if (res.success && res.data != null) {
         _prefill(res.data!);
+        _loadError = null;
+        _loadErrorStatus = 0;
       } else {
         _loadError = res.message ?? 'Relatório não encontrado.';
+        _loadErrorStatus = res.statusCode;
       }
     });
   }
@@ -782,35 +787,10 @@ class _VisitReportFormPageState extends State<VisitReportFormPage> {
   }
 
   Widget _buildLoadError(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final danger =
-        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.cloudOff, size: 34, color: danger),
-            const SizedBox(height: 12),
-            Text(
-              _loadError ?? 'Relatório não encontrado.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: _loadExisting,
-              icon: const Icon(LucideIcons.refreshCw, size: 16),
-              label: const Text('Tentar novamente'),
-            ),
-          ],
-        ),
-      ),
+    return AppErrorState.fromApi(
+      message: _loadError,
+      statusCode: _loadErrorStatus,
+      onRetry: _loadExisting,
     );
   }
 

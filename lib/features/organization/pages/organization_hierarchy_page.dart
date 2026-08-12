@@ -37,6 +37,9 @@ class _OrganizationHierarchyPageState
   List<OrgUser> _managersFromApi = const [];
   bool _loading = true;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
 
   final Set<String> _expanded = {};
 
@@ -114,6 +117,7 @@ class _OrganizationHierarchyPageState
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
     final results = await Future.wait([
       HierarchyService.instance.getUsers(),
@@ -136,6 +140,7 @@ class _OrganizationHierarchyPageState
               .map((u) => u.id));
       } else {
         _error = usersRes.message ?? 'Erro ao carregar usuários';
+        _errorStatus = usersRes.statusCode;
       }
     });
   }
@@ -457,7 +462,11 @@ class _OrganizationHierarchyPageState
     if (_loading && _users.isEmpty) {
       child = _buildSkeleton();
     } else if (_error != null && _users.isEmpty) {
-      child = OrgErrorState(message: _error!, onRetry: _load);
+      child = OrgErrorState(
+        message: _error!,
+        statusCode: _errorStatus,
+        onRetry: _load,
+      );
     } else if (_tab == _HierarchyTab.tree) {
       child = _buildTreePanel(context);
     } else {

@@ -37,6 +37,9 @@ class _MasterDomainsPageState extends State<MasterDomainsPage> {
   bool _loading = true;
   bool _loaded = false;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   String? _busyCompanyId;
 
   _DomainTab _tab = _DomainTab.all;
@@ -53,6 +56,7 @@ class _MasterDomainsPageState extends State<MasterDomainsPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
     final res = await PlatformAdminService.instance.listPendingDomains();
     if (!mounted) return;
@@ -63,6 +67,7 @@ class _MasterDomainsPageState extends State<MasterDomainsPage> {
         _items = res.data!;
       } else {
         _error = res.message ?? 'Erro ao carregar domínios pendentes';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -425,7 +430,11 @@ class _MasterDomainsPageState extends State<MasterDomainsPage> {
     if (_loading && _items.isEmpty && !_loaded) {
       child = const MasterCardSkeleton(rows: 3, showAvatar: true);
     } else if (_error != null && _items.isEmpty) {
-      child = MasterErrorState(message: _error!, onRetry: _load);
+      child = MasterErrorState(
+        message: _error!,
+        statusCode: _errorStatus,
+        onRetry: _load,
+      );
     } else if (visible.isEmpty) {
       child = MasterEmptyState(
         icon: LucideIcons.inbox,

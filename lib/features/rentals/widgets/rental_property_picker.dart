@@ -7,6 +7,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/property_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 
 final NumberFormat _money = NumberFormat.currency(
@@ -45,6 +46,7 @@ class _RentalPropertyPickerSheetState
   List<Property> _items = const [];
   bool _loading = true;
   String? _error;
+  int _errorStatus = 0;
 
   @override
   void initState() {
@@ -67,6 +69,7 @@ class _RentalPropertyPickerSheetState
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
     final q = _searchController.text.trim();
     final res = await PropertyService.instance.getProperties(
@@ -80,7 +83,8 @@ class _RentalPropertyPickerSheetState
       if (res.success && res.data != null) {
         _items = res.data!.data;
       } else {
-        _error = res.message ?? 'Erro ao carregar imóveis';
+        _error = res.message;
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -276,11 +280,11 @@ class _RentalPropertyPickerSheetState
       );
     }
     if (_error != null) {
-      return _StateMessage(
-        icon: LucideIcons.cloudOff,
-        title: _error!,
-        actionLabel: 'Tentar novamente',
-        onAction: _load,
+      return AppErrorState.fromApi(
+        message: _error,
+        statusCode: _errorStatus,
+        onRetry: _load,
+        dense: true,
       );
     }
     if (_items.isEmpty) {

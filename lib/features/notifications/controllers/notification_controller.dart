@@ -28,6 +28,9 @@ class NotificationController extends ChangeNotifier {
   bool _loading = false;
   bool _loadingMore = false;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   bool _hasMore = true;
   int _currentPage = 1;
   static const int _pageLimit = 20;
@@ -46,6 +49,10 @@ class NotificationController extends ChangeNotifier {
   bool get loading => _loading;
   bool get loadingMore => _loadingMore;
   String? get error => _error;
+
+  /// Código HTTP da última falha — sem ele a UI não distingue "sem permissão"
+  /// de "servidor fora do ar".
+  int get errorStatus => _errorStatus;
   bool get hasMore => _hasMore;
   bool get wsConnected => _wsConnected;
 
@@ -211,6 +218,7 @@ class NotificationController extends ChangeNotifier {
     }
 
     _error = null;
+    _errorStatus = 0;
     notifyListeners();
 
     try {
@@ -235,8 +243,10 @@ class NotificationController extends ChangeNotifier {
         _currentPage = listResponse.page;
         _hasMore = listResponse.page < listResponse.totalPages;
         _error = null;
+        _errorStatus = 0;
       } else {
         _error = response.message ?? 'Erro ao carregar notificações';
+        _errorStatus = response.statusCode;
       }
     } catch (e, stackTrace) {
       debugPrint('❌ [NOTIFICATION_CTRL] Erro ao carregar: $e');
@@ -278,6 +288,7 @@ class NotificationController extends ChangeNotifier {
     }
 
     _error = null;
+    _errorStatus = 0;
     notifyListeners();
 
     try {
@@ -300,8 +311,10 @@ class NotificationController extends ChangeNotifier {
         _currentPage = listResponse.page;
         _hasMore = listResponse.page < listResponse.totalPages;
         _error = null;
+        _errorStatus = 0;
       } else {
         _error = response.message ?? 'Erro ao carregar notificações não lidas';
+        _errorStatus = response.statusCode;
       }
     } catch (e, stackTrace) {
       debugPrint('❌ [NOTIFICATION_CTRL] Erro ao carregar não lidas: $e');
@@ -352,6 +365,7 @@ class NotificationController extends ChangeNotifier {
         return true;
       } else {
         _error = response.message ?? 'Erro ao marcar como lida';
+        _errorStatus = response.statusCode;
         notifyListeners();
         return false;
       }
@@ -404,6 +418,7 @@ class NotificationController extends ChangeNotifier {
         return true;
       } else {
         _error = response.message ?? 'Erro ao marcar todas como lidas';
+        _errorStatus = response.statusCode;
         notifyListeners();
         return false;
       }
@@ -440,6 +455,7 @@ class NotificationController extends ChangeNotifier {
         return true;
       } else {
         _error = response.message ?? 'Erro ao marcar múltiplas como lidas';
+        _errorStatus = response.statusCode;
         notifyListeners();
         return false;
       }
@@ -474,6 +490,7 @@ class NotificationController extends ChangeNotifier {
         return true;
       } else {
         _error = response.message ?? 'Erro ao excluir notificação';
+        _errorStatus = response.statusCode;
         notifyListeners();
         return false;
       }
@@ -532,6 +549,7 @@ class NotificationController extends ChangeNotifier {
     _notifications.clear();
     _unreadCount = 0;
     _error = null;
+    _errorStatus = 0;
     _currentPage = 1;
     _hasMore = true;
     notifyListeners();

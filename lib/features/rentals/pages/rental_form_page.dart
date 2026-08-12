@@ -8,6 +8,7 @@ import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/utils/input_formatters.dart';
 import '../../../shared/utils/masks.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../../clients/models/client_model.dart';
@@ -66,6 +67,7 @@ class _RentalFormPageState extends State<RentalFormPage> {
 
   bool _loadingRental = false;
   String? _loadError;
+  int _loadErrorStatus = 0;
   bool _saving = false;
   bool _searchingClient = false;
   bool _requireApproval = false;
@@ -123,13 +125,16 @@ class _RentalFormPageState extends State<RentalFormPage> {
     setState(() {
       _loadingRental = true;
       _loadError = null;
+      _loadErrorStatus = 0;
     });
     final res = await RentalService.instance.getById(widget.rentalId!);
     if (!mounted) return;
     if (!res.success || res.data == null) {
       setState(() {
         _loadingRental = false;
-        _loadError = res.message ?? 'Erro ao carregar locação';
+        _loadError = res.message;
+        // Código HTTP guardado: é ele que revela a causa real ao usuário.
+        _loadErrorStatus = res.statusCode;
       });
       return;
     }
@@ -1156,44 +1161,10 @@ class _RentalFormPageState extends State<RentalFormPage> {
   }
 
   Widget _buildLoadError(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final danger =
-        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: danger.withValues(alpha: 0.12),
-                border: Border.all(color: danger.withValues(alpha: 0.32)),
-              ),
-              child: Icon(LucideIcons.cloudOff, color: danger, size: 28),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              _loadError!,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: _loadRental,
-              icon: const Icon(LucideIcons.refreshCw, size: 16),
-              label: const Text('Tentar novamente'),
-            ),
-          ],
-        ),
-      ),
+    return AppErrorState.fromApi(
+      message: _loadError,
+      statusCode: _loadErrorStatus,
+      onRetry: _loadRental,
     );
   }
 }

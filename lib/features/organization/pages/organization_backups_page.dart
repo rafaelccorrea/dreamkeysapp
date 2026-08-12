@@ -57,6 +57,9 @@ class _OrganizationBackupsPageState extends State<OrganizationBackupsPage> {
   List<LeadsExportJob> _jobs = const [];
   bool _jobsLoading = true;
   String? _jobsError;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _jobsErrorStatus = 0;
   Timer? _pollTimer;
   String? _busyJobId;
 
@@ -64,6 +67,7 @@ class _OrganizationBackupsPageState extends State<OrganizationBackupsPage> {
   LeadsExportBackupList _backups = LeadsExportBackupList.empty;
   bool _backupsLoading = true;
   String? _backupsError;
+  int _backupsErrorStatus = 0;
   String _scope = 'mine';
   String? _busyBackupId;
 
@@ -141,6 +145,7 @@ class _OrganizationBackupsPageState extends State<OrganizationBackupsPage> {
       setState(() {
         _jobsLoading = true;
         _jobsError = null;
+        _jobsErrorStatus = 0;
       });
     }
     final res = await LeadsExportService.instance.listMyJobs();
@@ -156,6 +161,7 @@ class _OrganizationBackupsPageState extends State<OrganizationBackupsPage> {
         if (hadActive && !hasActive) _loadBackups(silent: true);
       } else if (!silent) {
         _jobsError = res.message ?? 'Erro ao carregar exportações';
+        _jobsErrorStatus = res.statusCode;
       }
     });
     _syncPolling();
@@ -166,6 +172,7 @@ class _OrganizationBackupsPageState extends State<OrganizationBackupsPage> {
       setState(() {
         _backupsLoading = true;
         _backupsError = null;
+        _backupsErrorStatus = 0;
       });
     }
     final res =
@@ -178,6 +185,7 @@ class _OrganizationBackupsPageState extends State<OrganizationBackupsPage> {
         _backupsError = null;
       } else if (!silent) {
         _backupsError = res.message ?? 'Erro ao carregar backups';
+        _backupsErrorStatus = res.statusCode;
       }
     });
   }
@@ -932,7 +940,11 @@ class _OrganizationBackupsPageState extends State<OrganizationBackupsPage> {
   Widget _buildActivityPanel(BuildContext context) {
     if (_jobsLoading && _jobs.isEmpty) return _buildJobsSkeleton();
     if (_jobsError != null && _jobs.isEmpty) {
-      return OrgErrorState(message: _jobsError!, onRetry: _loadJobs);
+      return OrgErrorState(
+        message: _jobsError!,
+        statusCode: _jobsErrorStatus,
+        onRetry: _loadJobs,
+      );
     }
     if (_jobs.isEmpty) {
       return OrgEmptyState(
@@ -1189,7 +1201,11 @@ class _OrganizationBackupsPageState extends State<OrganizationBackupsPage> {
         if (_backupsLoading && _backups.data.isEmpty)
           _buildJobsSkeleton()
         else if (_backupsError != null && _backups.data.isEmpty)
-          OrgErrorState(message: _backupsError!, onRetry: _loadBackups)
+          OrgErrorState(
+            message: _backupsError!,
+            statusCode: _backupsErrorStatus,
+            onRetry: _loadBackups,
+          )
         else if (_backups.data.isEmpty)
           OrgEmptyState(
             icon: LucideIcons.packageOpen,

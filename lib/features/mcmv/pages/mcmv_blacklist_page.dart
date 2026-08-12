@@ -38,6 +38,9 @@ class _McmvBlacklistPageState extends State<McmvBlacklistPage> {
   List<McmvBlacklistEntry> _items = const [];
   bool _loading = true;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   String? _removingId;
 
   _BlacklistScope _scope = _BlacklistScope.all;
@@ -94,8 +97,10 @@ class _McmvBlacklistPageState extends State<McmvBlacklistPage> {
       if (res.success && res.data != null) {
         _items = res.data!;
         _error = null;
+        _errorStatus = 0;
       } else {
         _error = res.message ?? 'Erro ao carregar blacklist';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -644,6 +649,7 @@ class _McmvBlacklistPageState extends State<McmvBlacklistPage> {
     } else if (_error != null && _items.isEmpty) {
       child = McmvErrorState(
         message: _error!,
+        statusCode: _errorStatus,
         onRetry: () => _load(refresh: true),
       );
     } else if (visible.isEmpty) {

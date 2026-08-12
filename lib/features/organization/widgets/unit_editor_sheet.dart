@@ -34,6 +34,9 @@ class _UnitEditorSheetState extends State<UnitEditorSheet> {
   List<CompanyMember> _members = const [];
   bool _membersLoading = true;
   String? _membersError;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _membersErrorStatus = 0;
   String _memberSearch = '';
   bool _saving = false;
 
@@ -65,6 +68,7 @@ class _UnitEditorSheetState extends State<UnitEditorSheet> {
     setState(() {
       _membersLoading = true;
       _membersError = null;
+      _membersErrorStatus = 0;
     });
     final res = await UnitService.instance.getAllMembers();
     if (!mounted) return;
@@ -76,6 +80,7 @@ class _UnitEditorSheetState extends State<UnitEditorSheet> {
         _members = sorted;
       } else {
         _membersError = res.message ?? 'Erro ao carregar membros';
+        _membersErrorStatus = res.statusCode;
       }
     });
   }
@@ -318,6 +323,7 @@ class _UnitEditorSheetState extends State<UnitEditorSheet> {
                     else if (_membersError != null)
                       OrgErrorState(
                         message: _membersError!,
+                        statusCode: _membersErrorStatus,
                         onRetry: _loadMembers,
                       )
                     else if (_filteredMembers.isEmpty)

@@ -12,6 +12,7 @@ import '../../../shared/services/secure_storage_service.dart';
 import '../../../shared/utils/jwt_utils.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../models/whatsapp_models.dart';
 import '../services/whatsapp_service.dart';
 import '../widgets/whatsapp_conversation_card.dart';
@@ -24,6 +25,9 @@ class _TabState {
   bool loadingMore = false;
   bool loaded = false;
   String? error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int errorStatus = 0;
   int total = 0;
   bool get hasMore => items.length < total;
 }
@@ -183,7 +187,10 @@ class _WhatsAppInboxPageState extends State<WhatsAppInboxPage> {
     final st = _state[tab]!;
     setState(() {
       st.loading = true;
-      if (refresh) st.error = null;
+      if (refresh) {
+        st.error = null;
+        st.errorStatus = 0;
+      }
     });
     final res = await WhatsAppService.instance.getConversations(
       tab: tab,
@@ -201,8 +208,10 @@ class _WhatsAppInboxPageState extends State<WhatsAppInboxPage> {
         st.items = res.data!.conversations;
         st.total = res.data!.total;
         st.error = null;
+        st.errorStatus = 0;
       } else {
         st.error = res.message ?? 'Erro ao carregar conversas';
+        st.errorStatus = res.statusCode;
       }
     });
   }
@@ -255,6 +264,7 @@ class _WhatsAppInboxPageState extends State<WhatsAppInboxPage> {
         s.loaded = false;
         s.total = 0;
         s.error = null;
+        s.errorStatus = 0;
       }
       for (final t in _tabs) {
         _counts[t] = null;
@@ -843,7 +853,7 @@ class _WhatsAppInboxPageState extends State<WhatsAppInboxPage> {
     if (st.loading && st.items.isEmpty) {
       child = _buildSkeleton();
     } else if (st.error != null && st.items.isEmpty) {
-      child = _buildError(context, _activeTab, st.error!);
+      child = _buildError(context, _activeTab, st.error!, st.errorStatus);
     } else if (st.items.isEmpty) {
       child = _buildEmpty(context, _activeTab);
     } else {
@@ -1110,42 +1120,16 @@ class _WhatsAppInboxPageState extends State<WhatsAppInboxPage> {
   }
 
   Widget _buildError(
-      BuildContext context, WhatsAppAttendanceTab tab, String message) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final danger =
-        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 4),
-      child: Column(
-        children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: danger.withValues(alpha: 0.12),
-              border: Border.all(color: danger.withValues(alpha: 0.32)),
-            ),
-            child: Icon(LucideIcons.cloudOff, color: danger, size: 28),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: ThemeHelpers.textColor(context),
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: () => _loadTab(tab, refresh: true),
-            icon: const Icon(LucideIcons.refreshCw, size: 16),
-            label: const Text('Tentar novamente'),
-          ),
-        ],
-      ),
+    BuildContext context,
+    WhatsAppAttendanceTab tab,
+    String message,
+    int statusCode,
+  ) {
+    return AppErrorState.fromApi(
+      message: message,
+      statusCode: statusCode,
+      onRetry: () => _loadTab(tab, refresh: true),
+      dense: true,
     );
   }
 }

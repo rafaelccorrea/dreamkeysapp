@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/api_constants.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/minimal_body_chrome.dart';
 import '../../../shared/services/api_service.dart';
@@ -125,6 +126,7 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
   List<KanbanTaskComment> _comments = [];
   bool _loadingComments = false;
   String? _commentsError;
+  int _commentsErrorStatus = 0;
   final TextEditingController _commentController = TextEditingController();
   final FocusNode _commentFocus = FocusNode();
   final List<File> _selectedFiles = [];
@@ -157,6 +159,7 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
   List<HistoryEntry> _history = [];
   bool _loadingHistory = false;
   String? _historyError;
+  int _historyErrorStatus = 0;
 
   String? _currentUserId;
 
@@ -511,7 +514,8 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
         });
       } else {
         setState(() {
-          _commentsError = response.message ?? 'Erro ao carregar comentários';
+          _commentsError = response.message;
+          _commentsErrorStatus = response.statusCode;
           _loadingComments = false;
         });
       }
@@ -539,7 +543,8 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
         });
       } else {
         setState(() {
-          _historyError = response.message ?? 'Erro ao carregar histórico';
+          _historyError = response.message;
+          _historyErrorStatus = response.statusCode;
           _loadingHistory = false;
         });
       }
@@ -1929,7 +1934,8 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
               ? const _LoadingView()
               : _commentsError != null
                   ? _ErrorView(
-                      message: _commentsError!,
+                      message: _commentsError,
+                      statusCode: _commentsErrorStatus,
                       onRetry: _loadComments,
                     )
                   : _comments.isEmpty
@@ -2041,7 +2047,7 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
   Widget _buildHistoryTab(BuildContext context, ThemeData theme) {
     if (_loadingHistory) return const _LoadingView();
     if (_historyError != null) {
-      return _ErrorView(message: _historyError!, onRetry: _loadHistory);
+      return _ErrorView(message: _historyError, statusCode: _historyErrorStatus, onRetry: _loadHistory);
     }
     if (_history.isEmpty) {
       return const _EmptyState(
@@ -2071,6 +2077,7 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
   List<Map<String, dynamic>> _journey = [];
   bool _loadingJourney = false;
   String? _journeyError;
+  int _journeyErrorStatus = 0;
   bool _didLoadJourney = false;
 
   Future<void> _loadJourney() async {
@@ -2088,7 +2095,8 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
       });
     } else {
       setState(() {
-        _journeyError = r.message ?? 'Erro ao carregar jornada';
+        _journeyError = r.message;
+        _journeyErrorStatus = r.statusCode;
         _loadingJourney = false;
         _didLoadJourney = true;
       });
@@ -2098,7 +2106,7 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
   Widget _buildJourneyTab(BuildContext context, ThemeData theme) {
     if (_loadingJourney) return const _LoadingView();
     if (_journeyError != null) {
-      return _ErrorView(message: _journeyError!, onRetry: _loadJourney);
+      return _ErrorView(message: _journeyError, statusCode: _journeyErrorStatus, onRetry: _loadJourney);
     }
 
     final temTransfer = _transfers.isNotEmpty;
@@ -2293,6 +2301,7 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
   List<Attachment> _taskFiles = [];
   bool _loadingFiles = false;
   String? _filesError;
+  int _filesErrorStatus = 0;
   bool _didLoadFiles = false;
   bool _uploadingFiles = false;
 
@@ -2314,7 +2323,8 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
       });
     } else {
       setState(() {
-        _filesError = r.message ?? 'Erro ao listar arquivos';
+        _filesError = r.message;
+        _filesErrorStatus = r.statusCode;
         _loadingFiles = false;
         _didLoadFiles = true;
       });
@@ -2456,7 +2466,7 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
     const accent = _kFilesTone;
     if (_loadingFiles) return const _LoadingView();
     if (_filesError != null) {
-      return _ErrorView(message: _filesError!, onRetry: _loadTaskFiles);
+      return _ErrorView(message: _filesError, statusCode: _filesErrorStatus, onRetry: _loadTaskFiles);
     }
 
     final total = _taskFiles.length;
@@ -2534,6 +2544,7 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
   List<Appointment> _appointments = const [];
   bool _loadingAppointments = false;
   String? _appointmentsError;
+  int _appointmentsErrorStatus = 0;
   bool _didLoadAppointments = false;
   bool _creatingAppointment = false;
 
@@ -2562,7 +2573,8 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
       });
     } else {
       setState(() {
-        _appointmentsError = r.message ?? 'Erro ao carregar compromissos';
+        _appointmentsError = r.message;
+        _appointmentsErrorStatus = r.statusCode;
         _loadingAppointments = false;
         _didLoadAppointments = true;
       });
@@ -2612,7 +2624,8 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
     if (_loadingAppointments) return const _LoadingView();
     if (_appointmentsError != null) {
       return _ErrorView(
-        message: _appointmentsError!,
+        message: _appointmentsError,
+        statusCode: _appointmentsErrorStatus,
         onRetry: _loadAppointments,
       );
     }
@@ -2737,6 +2750,7 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
   Map<String, dynamic>? _taskMetrics;
   bool _loadingMetrics = false;
   String? _metricsError;
+  int _metricsErrorStatus = 0;
   bool _didLoadMetrics = false;
 
   bool get _canViewTaskAnalytics =>
@@ -2758,7 +2772,8 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
       });
     } else {
       setState(() {
-        _metricsError = r.message ?? 'Erro ao carregar métricas';
+        _metricsError = r.message;
+        _metricsErrorStatus = r.statusCode;
         _loadingMetrics = false;
         _didLoadMetrics = true;
       });
@@ -2776,7 +2791,7 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
     }
     if (_loadingMetrics) return const _LoadingView();
     if (_metricsError != null) {
-      return _ErrorView(message: _metricsError!, onRetry: _loadTaskMetrics);
+      return _ErrorView(message: _metricsError, statusCode: _metricsErrorStatus, onRetry: _loadTaskMetrics);
     }
     final m = _taskMetrics;
     if (m == null || m.isEmpty) {
@@ -8779,49 +8794,28 @@ class _LoadingView extends StatelessWidget {
   }
 }
 
+/// Erro de uma aba do card. Delega ao estado de erro padrão do app: o
+/// [statusCode] é o que permite dizer a causa REAL — sem ele, "sem
+/// permissão para ver o histórico" e "servidor fora do ar" viravam a mesma
+/// frase genérica.
 class _ErrorView extends StatelessWidget {
-  final String message;
-  final VoidCallback onRetry;
+  final String? message;
+  final int statusCode;
+  final Future<void> Function() onRetry;
 
-  const _ErrorView({required this.message, required this.onRetry});
+  const _ErrorView({
+    required this.message,
+    required this.onRetry,
+    this.statusCode = 0,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final danger = theme.colorScheme.error;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: danger.withValues(alpha: 0.12),
-                border: Border.all(color: danger.withValues(alpha: 0.36)),
-              ),
-              child: Icon(Icons.error_outline_rounded, color: danger, size: 26),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              message,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-                height: 1.4,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 14),
-            FilledButton.tonal(
-              onPressed: onRetry,
-              child: const Text('Tentar novamente'),
-            ),
-          ],
-        ),
-      ),
+    return AppErrorState.fromApi(
+      message: message,
+      statusCode: statusCode,
+      onRetry: onRetry,
+      dense: true,
     );
   }
 }

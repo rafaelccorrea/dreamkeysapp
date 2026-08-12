@@ -34,6 +34,9 @@ class _OrganizationUnitsPageState extends State<OrganizationUnitsPage> {
   List<OrgUnit> _units = const [];
   bool _loading = true;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
 
   _UnitFilter _filter = _UnitFilter.all;
   final TextEditingController _searchController = TextEditingController();
@@ -96,6 +99,7 @@ class _OrganizationUnitsPageState extends State<OrganizationUnitsPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
     final res = await UnitService.instance.list();
     if (!mounted) return;
@@ -105,6 +109,7 @@ class _OrganizationUnitsPageState extends State<OrganizationUnitsPage> {
         _units = res.data!;
       } else {
         _error = res.message ?? 'Erro ao carregar unidades';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -452,7 +457,11 @@ class _OrganizationUnitsPageState extends State<OrganizationUnitsPage> {
     if (_loading && _units.isEmpty) {
       child = _buildSkeleton();
     } else if (_error != null && _units.isEmpty) {
-      child = OrgErrorState(message: _error!, onRetry: _load);
+      child = OrgErrorState(
+        message: _error!,
+        statusCode: _errorStatus,
+        onRetry: _load,
+      );
     } else if (_visibleUnits.isEmpty) {
       child = _buildEmpty(context);
     } else {

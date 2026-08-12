@@ -8,6 +8,7 @@ import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../models/whatsapp_models.dart';
 import '../services/whatsapp_service.dart';
 import '../widgets/whatsapp_conversation_card.dart'
@@ -52,6 +53,9 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
   bool _loading = true;
   bool _loadingOlder = false;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   bool _sending = false;
   WhatsAppIntegrationStatus? _integrationStatus;
   Timer? _pollTimer;
@@ -131,6 +135,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
     final res = await WhatsAppService.instance.getMessages(
       phoneNumber: widget.phoneNumber,
@@ -146,6 +151,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
         _total = res.data!.total;
       } else {
         _error = res.message ?? 'Erro ao carregar mensagens';
+        _errorStatus = res.statusCode;
       }
     });
     if (res.success) _markInboundAsRead();
@@ -673,44 +679,11 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
   }
 
   Widget _buildError(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final danger =
-        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: danger.withValues(alpha: 0.12),
-                border: Border.all(color: danger.withValues(alpha: 0.32)),
-              ),
-              child: Icon(LucideIcons.cloudOff, color: danger, size: 28),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              _error ?? 'Erro ao carregar mensagens',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: _loadMessages,
-              icon: const Icon(LucideIcons.refreshCw, size: 16),
-              label: const Text('Tentar novamente'),
-            ),
-          ],
-        ),
-      ),
+    return AppErrorState.fromApi(
+      message: _error ?? 'Erro ao carregar mensagens',
+      statusCode: _errorStatus,
+      onRetry: _loadMessages,
+      dense: false,
     );
   }
 

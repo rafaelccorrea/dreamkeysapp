@@ -14,6 +14,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/property_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../models/property_change_request.dart';
@@ -73,26 +74,33 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
   bool get _canViewQueues =>
       _moduleAccess.hasAnyPermission(AppPermissions.approvalQueueMenu);
 
-  // Estado por aba.
+  // Estado por aba. Cada erro carrega o código HTTP que o originou: sem ele
+  // "sem permissão na fila" e "servidor fora do ar" chegariam na tela com a
+  // mesma frase, e o usuário insistiria num botão que nunca vai funcionar.
   bool _loadingMine = false;
   String? _errorMine;
+  int _errorStatusMine = 0;
   MyPendingResponse _myPending = MyPendingResponse.empty;
 
   bool _loadingAvailability = false;
   String? _errorAvailability;
+  int _errorStatusAvailability = 0;
   List<Property> _pendingAvailability = const [];
 
   bool _loadingPublication = false;
   String? _errorPublication;
+  int _errorStatusPublication = 0;
   List<Property> _pendingPublication = const [];
 
   bool _loadingOwner = false;
   String? _errorOwner;
+  int _errorStatusOwner = 0;
   List<Property> _pendingOwner = const [];
 
   bool _loadingRejectedAvail = false;
   bool _loadingRejectedPub = false;
   String? _errorRejected;
+  int _errorStatusRejected = 0;
   RejectedListResponse _rejectedAvail = RejectedListResponse.empty;
   RejectedListResponse _rejectedPub = RejectedListResponse.empty;
   RejectedCounts _rejectedCounts = RejectedCounts.zero;
@@ -100,6 +108,7 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
   // Aba "Edições" — solicitações de alteração de campos protegidos.
   bool _loadingEditRequests = false;
   String? _errorEditRequests;
+  int _errorStatusEditRequests = 0;
   PropertyChangeRequestList _editRequests = PropertyChangeRequestList.empty;
   PropertyChangeRequestStatus? _editRequestsFilter =
       PropertyChangeRequestStatus.pending;
@@ -189,6 +198,7 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
     setState(() {
       _loadingEditRequests = true;
       _errorEditRequests = null;
+      _errorStatusEditRequests = 0;
     });
     final res = await PropertyApprovalService.instance.listChangeRequests(
       status: _editRequestsFilter,
@@ -198,9 +208,12 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
       _loadingEditRequests = false;
       if (res.success && res.data != null) {
         _editRequests = res.data!;
+        _errorEditRequests = null;
+        _errorStatusEditRequests = 0;
       } else {
         _errorEditRequests =
             res.message ?? 'Erro ao carregar solicitações de edição';
+        _errorStatusEditRequests = res.statusCode;
       }
     });
   }
@@ -247,6 +260,7 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
     setState(() {
       _loadingMine = true;
       _errorMine = null;
+      _errorStatusMine = 0;
     });
     final res = await PropertyApprovalService.instance.getMyPending(
       filters: _filters(),
@@ -256,8 +270,11 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
       _loadingMine = false;
       if (res.success && res.data != null) {
         _myPending = res.data!;
+        _errorMine = null;
+        _errorStatusMine = 0;
       } else {
         _errorMine = res.message ?? 'Erro ao carregar suas pendências';
+        _errorStatusMine = res.statusCode;
       }
     });
   }
@@ -266,6 +283,7 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
     setState(() {
       _loadingAvailability = true;
       _errorAvailability = null;
+      _errorStatusAvailability = 0;
     });
     final res =
         await PropertyApprovalService.instance.getPendingAvailability(
@@ -276,9 +294,12 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
       _loadingAvailability = false;
       if (res.success && res.data != null) {
         _pendingAvailability = res.data!;
+        _errorAvailability = null;
+        _errorStatusAvailability = 0;
       } else {
         _errorAvailability =
             res.message ?? 'Erro ao carregar fila de disponibilidade';
+        _errorStatusAvailability = res.statusCode;
       }
     });
   }
@@ -287,6 +308,7 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
     setState(() {
       _loadingPublication = true;
       _errorPublication = null;
+      _errorStatusPublication = 0;
     });
     final res = await PropertyApprovalService.instance.getPendingPublication(
       filters: _filters(),
@@ -296,9 +318,12 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
       _loadingPublication = false;
       if (res.success && res.data != null) {
         _pendingPublication = res.data!;
+        _errorPublication = null;
+        _errorStatusPublication = 0;
       } else {
         _errorPublication =
             res.message ?? 'Erro ao carregar fila de publicação';
+        _errorStatusPublication = res.statusCode;
       }
     });
   }
@@ -307,6 +332,7 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
     setState(() {
       _loadingOwner = true;
       _errorOwner = null;
+      _errorStatusOwner = 0;
     });
     final res = await PropertyApprovalService.instance
         .getPendingOwnerAuthorization(filters: _filters());
@@ -315,8 +341,11 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
       _loadingOwner = false;
       if (res.success && res.data != null) {
         _pendingOwner = res.data!;
+        _errorOwner = null;
+        _errorStatusOwner = 0;
       } else {
         _errorOwner = res.message ?? 'Erro ao carregar autorizações';
+        _errorStatusOwner = res.statusCode;
       }
     });
   }
@@ -326,6 +355,7 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
       _loadingRejectedAvail = true;
       _loadingRejectedPub = true;
       _errorRejected = null;
+      _errorStatusRejected = 0;
     });
     final svc = PropertyApprovalService.instance;
     final results = await Future.wait([
@@ -352,11 +382,15 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
         _rejectedAvail = r0.data! as RejectedListResponse;
       } else if (r0.message != null) {
         _errorRejected = r0.message;
+        _errorStatusRejected = r0.statusCode;
       }
       if (r1.success && r1.data != null) {
         _rejectedPub = r1.data! as RejectedListResponse;
       } else if (r1.message != null) {
-        _errorRejected ??= r1.message;
+        if (_errorRejected == null) {
+          _errorRejected = r1.message;
+          _errorStatusRejected = r1.statusCode;
+        }
       }
       if (r2.success && r2.data != null) {
         _rejectedCounts = r2.data! as RejectedCounts;
@@ -2088,6 +2122,25 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
     }
   }
 
+  /// Código HTTP do erro da aba ativa — 0 quando não houve resposta do
+  /// servidor. É o que separa "sem permissão" de "servidor fora do ar".
+  int _currentTabErrorStatus() {
+    switch (_activeTab) {
+      case _Tab.mine:
+        return _errorStatusMine;
+      case _Tab.ownerAuth:
+        return _errorStatusOwner;
+      case _Tab.availability:
+        return _errorStatusAvailability;
+      case _Tab.publication:
+        return _errorStatusPublication;
+      case _Tab.rejected:
+        return _errorStatusRejected;
+      case _Tab.editRequests:
+        return _errorStatusEditRequests;
+    }
+  }
+
   bool _currentTabHasContent() {
     switch (_activeTab) {
       case _Tab.mine:
@@ -2400,41 +2453,13 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
   }
 
   Widget _buildPanelError() {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final danger = isDark
-        ? AppColors.status.errorDarkMode
-        : AppColors.status.error;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 4),
-      child: Column(
-        children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: danger.withValues(alpha: 0.12),
-              border: Border.all(color: danger.withValues(alpha: 0.32)),
-            ),
-            child: Icon(LucideIcons.cloudOff, color: danger, size: 28),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            _currentTabError() ?? 'Erro ao carregar',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: ThemeHelpers.textColor(context),
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: _refreshAll,
-            icon: const Icon(LucideIcons.refreshCw, size: 16),
-            label: const Text('Tentar novamente'),
-          ),
-        ],
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 4),
+      child: AppErrorState.fromApi(
+        message: _currentTabError(),
+        statusCode: _currentTabErrorStatus(),
+        dense: true,
+        onRetry: () => _refreshAll(),
       ),
     );
   }

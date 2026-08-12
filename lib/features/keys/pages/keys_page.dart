@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../../../core/routes/app_routes.dart';
@@ -26,6 +27,9 @@ class _KeysPageState extends State<KeysPage>
 
   // Estado geral
   String? _errorMessage;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   key_models.KeyFilters? _filters;
 
   // Tab 0: Todas as Chaves
@@ -93,6 +97,7 @@ class _KeysPageState extends State<KeysPage>
     setState(() {
       _isLoadingKeys = true;
       _errorMessage = null;
+      _errorStatus = 0;
     });
 
     try {
@@ -113,6 +118,7 @@ class _KeysPageState extends State<KeysPage>
         } else {
           setState(() {
             _errorMessage = response.message ?? 'Erro ao carregar chaves';
+            _errorStatus = response.statusCode;
             _isLoadingKeys = false;
           });
         }
@@ -131,6 +137,7 @@ class _KeysPageState extends State<KeysPage>
     setState(() {
       _isLoadingControls = true;
       _errorMessage = null;
+      _errorStatus = 0;
       _controlStatusFilter = status;
     });
 
@@ -146,6 +153,7 @@ class _KeysPageState extends State<KeysPage>
         } else {
           setState(() {
             _errorMessage = response.message ?? 'Erro ao carregar controles';
+            _errorStatus = response.statusCode;
             _isLoadingControls = false;
           });
         }
@@ -164,6 +172,7 @@ class _KeysPageState extends State<KeysPage>
     setState(() {
       _isLoadingUserControls = true;
       _errorMessage = null;
+      _errorStatus = 0;
     });
 
     try {
@@ -178,6 +187,7 @@ class _KeysPageState extends State<KeysPage>
         } else {
           setState(() {
             _errorMessage = response.message ?? 'Erro ao carregar suas chaves';
+            _errorStatus = response.statusCode;
             _isLoadingUserControls = false;
           });
         }
@@ -450,29 +460,10 @@ class _KeysPageState extends State<KeysPage>
     }
 
     if (_errorMessage != null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: ThemeHelpers.textSecondaryColor(context),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              _errorMessage!,
-              style: theme.textTheme.bodyLarge,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: () => _loadKeys(refresh: true),
-              icon: const Icon(Icons.refresh),
-              label: const Text('Tentar Novamente'),
-            ),
-          ],
-        ),
+      return AppErrorState.fromApi(
+        message: _errorMessage,
+        statusCode: _errorStatus,
+        onRetry: () => _loadKeys(refresh: true),
       );
     }
 
@@ -577,29 +568,10 @@ class _KeysPageState extends State<KeysPage>
     }
 
     if (_errorMessage != null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: ThemeHelpers.textSecondaryColor(context),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              _errorMessage!,
-              style: theme.textTheme.bodyLarge,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: () => _loadAllControls(),
-              icon: const Icon(Icons.refresh),
-              label: const Text('Tentar Novamente'),
-            ),
-          ],
-        ),
+      return AppErrorState.fromApi(
+        message: _errorMessage,
+        statusCode: _errorStatus,
+        onRetry: () => _loadAllControls(),
       );
     }
 
@@ -707,29 +679,10 @@ class _KeysPageState extends State<KeysPage>
     }
 
     if (_errorMessage != null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: ThemeHelpers.textSecondaryColor(context),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              _errorMessage!,
-              style: theme.textTheme.bodyLarge,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: () => _loadUserControls(),
-              icon: const Icon(Icons.refresh),
-              label: const Text('Tentar Novamente'),
-            ),
-          ],
-        ),
+      return AppErrorState.fromApi(
+        message: _errorMessage,
+        statusCode: _errorStatus,
+        onRetry: () => _loadUserControls(),
       );
     }
 
@@ -1335,6 +1288,7 @@ class _KeysPageState extends State<KeysPage>
     bool isLoading = true;
     List<key_models.KeyHistoryRecord> history = [];
     String? errorMessage;
+    int errorStatus = 0;
 
     await showModalBottomSheet(
       context: context,
@@ -1353,6 +1307,7 @@ class _KeysPageState extends State<KeysPage>
                   } else {
                     errorMessage =
                         response.message ?? 'Erro ao carregar histórico';
+                    errorStatus = response.statusCode;
                   }
                 });
               }
@@ -1412,22 +1367,11 @@ class _KeysPageState extends State<KeysPage>
                   child: isLoading
                       ? const Center(child: CircularProgressIndicator())
                       : errorMessage != null
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.error_outline,
-                                size: 48,
-                                color: ThemeHelpers.textSecondaryColor(context),
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                errorMessage!,
-                                style: Theme.of(context).textTheme.bodyMedium,
-                                textAlign: TextAlign.center,
-                              ),
-                            ],
+                      ? SingleChildScrollView(
+                          child: AppErrorState.fromApi(
+                            message: errorMessage,
+                            statusCode: errorStatus,
+                            dense: true,
                           ),
                         )
                       : history.isEmpty

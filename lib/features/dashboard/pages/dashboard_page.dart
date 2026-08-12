@@ -9,6 +9,8 @@ import '../../../../core/theme/theme_helpers.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../../../../shared/services/dashboard_service.dart';
 import '../../../../shared/services/module_access_service.dart';
+import '../../../../shared/utils/error_cause.dart';
+import '../../../../shared/widgets/app_error_state.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/minimal_body_chrome.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
@@ -49,6 +51,10 @@ class _DashboardPageState extends State<DashboardPage> {
   bool _isLoading = true;
   DashboardResponse? _dashboardData;
   String? _errorMessage;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
+  ErrorCause? _errorCause;
   DashboardFilters _filters = DashboardFilters.defaultFilters();
 
   @override
@@ -71,6 +77,8 @@ class _DashboardPageState extends State<DashboardPage> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _errorStatus = 0;
+      _errorCause = null;
     });
 
     try {
@@ -96,6 +104,7 @@ class _DashboardPageState extends State<DashboardPage> {
           setState(() {
             _errorMessage =
                 response.message ?? 'Erro ao carregar dados do dashboard';
+            _errorStatus = response.statusCode;
             _isLoading = false;
           });
         }
@@ -104,6 +113,7 @@ class _DashboardPageState extends State<DashboardPage> {
       debugPrint('❌ [DASHBOARD] Erro ao carregar dados: $e');
       if (mounted) {
         setState(() {
+          _errorCause = ErrorCause.fromException(e);
           _errorMessage = 'Erro ao conectar com o servidor';
           _isLoading = false;
         });
@@ -1307,34 +1317,16 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _buildErrorState(BuildContext context, ThemeData theme) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.error_outline, size: 64, color: AppColors.status.error),
-            const SizedBox(height: 16),
-            Text(
-              _errorMessage ?? 'Erro ao carregar dados',
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: ThemeHelpers.textSecondaryColor(context),
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: _loadDashboardData,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Tentar novamente'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary.primary,
-                foregroundColor: ThemeHelpers.onPrimaryColor(context),
-              ),
-            ),
-          ],
-        ),
-      ),
+    // Quando a falha veio de exceção solta, `_errorCause` já traz o
+    // diagnóstico; caso contrário monta-se a partir da resposta da API.
+    final cause = _errorCause;
+    if (cause != null) {
+      return AppErrorState(cause: cause, onRetry: _loadDashboardData);
+    }
+    return AppErrorState.fromApi(
+      message: _errorMessage,
+      statusCode: _errorStatus,
+      onRetry: _loadDashboardData,
     );
   }
 

@@ -44,6 +44,9 @@ class _GamificationPageState extends State<GamificationPage> {
 
   bool _loading = true;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   GamificationConfig? _config;
   GamificationDashboard? _dashboard;
   List<GamificationScore> _individualRankings = const [];
@@ -69,6 +72,7 @@ class _GamificationPageState extends State<GamificationPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
 
     // Config primeiro — se a gamificação estiver desativada, nem carrega o resto.
@@ -99,6 +103,7 @@ class _GamificationPageState extends State<GamificationPage> {
         _dashboard = dashRes.data as GamificationDashboard;
       } else if (_dashboard == null) {
         _error = dashRes.message ?? 'Erro ao carregar gamificação';
+        _errorStatus = dashRes.statusCode;
       }
       if (indRes.success && indRes.data != null) {
         _individualRankings = (indRes.data as List<GamificationScore>);
@@ -206,7 +211,11 @@ class _GamificationPageState extends State<GamificationPage> {
       return Padding(
         padding: const EdgeInsets.fromLTRB(
             _kPagePadH, 60, _kPagePadH, _kPagePadBottom),
-        child: GamErrorState(message: _error!, onRetry: _load),
+        child: GamErrorState(
+          message: _error!,
+          statusCode: _errorStatus,
+          onRetry: _load,
+        ),
       );
     }
 

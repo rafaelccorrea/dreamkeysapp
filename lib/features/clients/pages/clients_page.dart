@@ -9,6 +9,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/shell_visual_tokens.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/utils/masks.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../../../shared/state/screen_state_cache.dart';
@@ -80,6 +81,10 @@ class _ClientsPageState extends State<ClientsPage> {
   int _totalPages = 1;
   int _total = 0;
   String? _errorMessage;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
+  Object? _errorRaw;
   ClientSearchFilters? _filters;
   String _searchQuery = '';
   ClientStatistics? _statistics;
@@ -153,6 +158,8 @@ class _ClientsPageState extends State<ClientsPage> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _errorStatus = 0;
+      _errorRaw = null;
     });
 
     try {
@@ -183,14 +190,18 @@ class _ClientsPageState extends State<ClientsPage> {
       } else {
         setState(() {
           _errorMessage = response.message ?? 'Erro ao carregar clientes';
+          _errorStatus = response.statusCode;
+          _errorRaw = response.error;
           _isLoading = false;
           _isLoadingMore = false;
         });
       }
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _errorMessage = 'Erro ao conectar com o servidor';
+        _errorStatus = 0;
+        _errorRaw = e;
         _isLoading = false;
         _isLoadingMore = false;
       });
@@ -2263,60 +2274,14 @@ class _ClientsPageState extends State<ClientsPage> {
   }
 
   Widget _buildErrorState(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: AppColors.status.error.withValues(alpha: 0.10),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.cloud_off_outlined,
-                size: 48,
-                color: AppColors.status.error,
-              ),
-            ),
-            const SizedBox(height: 18),
-            Text(
-              'Não foi possível carregar a carteira',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _errorMessage ?? 'Erro desconhecido',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: ThemeHelpers.textSecondaryColor(context),
-              ),
-            ),
-            const SizedBox(height: 22),
-            FilledButton.icon(
-              onPressed: () {
-                _loadClients(refresh: true);
-                _loadStatistics();
-              },
-              icon: const Icon(Icons.refresh_rounded),
-              label: const Text('Tentar novamente'),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 13),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return AppErrorState.fromApi(
+      message: _errorMessage,
+      statusCode: _errorStatus,
+      error: _errorRaw,
+      onRetry: () async {
+        await _loadClients(refresh: true);
+        await _loadStatistics();
+      },
     );
   }
 

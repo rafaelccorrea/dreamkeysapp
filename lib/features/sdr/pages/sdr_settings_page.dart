@@ -8,6 +8,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../models/sdr_settings_model.dart';
@@ -36,6 +37,7 @@ class _SdrSettingsPageState extends State<SdrSettingsPage> {
   bool _isLoading = true;
   bool _isSaving = false;
   String? _errorMessage;
+  int _errorStatus = 0;
 
   /// Estado editável da tela (campos não textuais).
   SdrSettings? _settings;
@@ -123,9 +125,11 @@ class _SdrSettingsPageState extends State<SdrSettingsPage> {
       _isLoading = false;
       if (res.success && res.data != null) {
         _applyLoaded(res.data!);
+        _errorMessage = null;
+        _errorStatus = 0;
       } else {
-        _errorMessage =
-            res.message ?? 'Erro ao carregar configurações do SDR';
+        _errorMessage = res.message ?? 'Erro ao carregar configurações do SDR';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -1134,42 +1138,10 @@ class _SdrSettingsPageState extends State<SdrSettingsPage> {
   // ─── Estados ───────────────────────────────────────────────────────────────
 
   Widget _buildError(BuildContext context) {
-    final theme = Theme.of(context);
-    final danger = _red(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: danger.withValues(alpha: 0.12),
-                border: Border.all(color: danger.withValues(alpha: 0.32)),
-              ),
-              child: Icon(LucideIcons.cloudOff, color: danger, size: 28),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              _errorMessage ?? 'Erro ao carregar configurações do SDR',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: _loadSettings,
-              icon: const Icon(LucideIcons.refreshCw, size: 16),
-              label: const Text('Tentar novamente'),
-            ),
-          ],
-        ),
-      ),
+    return AppErrorState.fromApi(
+      message: _errorMessage,
+      statusCode: _errorStatus,
+      onRetry: _loadSettings,
     );
   }
 

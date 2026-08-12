@@ -11,6 +11,7 @@ import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../models/commission_model.dart';
 import '../services/commission_service.dart';
 import '../widgets/commission_card.dart';
@@ -33,6 +34,9 @@ class _TabState {
   bool loadingMore = false;
   bool loaded = false;
   String? error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int errorStatus = 0;
   int page = 1;
   int totalPages = 1;
   bool get hasMore => page < totalPages;
@@ -171,7 +175,10 @@ class _CommissionsPageState extends State<CommissionsPage> {
     final st = _state[tab]!;
     setState(() {
       st.loading = true;
-      if (refresh) st.error = null;
+      if (refresh) {
+        st.error = null;
+        st.errorStatus = 0;
+      }
     });
     final res = await CommissionService.instance.getCommissions(
       filters: _filtersFor(tab, 1),
@@ -185,8 +192,10 @@ class _CommissionsPageState extends State<CommissionsPage> {
         st.page = res.data!.page;
         st.totalPages = res.data!.totalPages;
         st.error = null;
+        st.errorStatus = 0;
       } else {
         st.error = res.message ?? 'Erro ao carregar comissões';
+        st.errorStatus = res.statusCode;
       }
     });
   }
@@ -655,7 +664,7 @@ class _CommissionsPageState extends State<CommissionsPage> {
     if (st.loading && st.items.isEmpty) {
       child = _buildSkeleton();
     } else if (st.error != null && st.items.isEmpty) {
-      child = _buildError(context, _activeTab, st.error!);
+      child = _buildError(context, _activeTab, st.error!, st.errorStatus);
     } else if (st.items.isEmpty) {
       child = _buildEmpty(context, _activeTab);
     } else {
@@ -996,42 +1005,17 @@ class _CommissionsPageState extends State<CommissionsPage> {
     );
   }
 
-  Widget _buildError(BuildContext context, CommissionTab tab, String message) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final danger =
-        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 4),
-      child: Column(
-        children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: danger.withValues(alpha: 0.12),
-              border: Border.all(color: danger.withValues(alpha: 0.32)),
-            ),
-            child: Icon(LucideIcons.cloudOff, color: danger, size: 28),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: ThemeHelpers.textColor(context),
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: () => _loadTab(tab, refresh: true),
-            icon: const Icon(LucideIcons.refreshCw, size: 16),
-            label: const Text('Tentar novamente'),
-          ),
-        ],
-      ),
+  Widget _buildError(
+    BuildContext context,
+    CommissionTab tab,
+    String message,
+    int statusCode,
+  ) {
+    return AppErrorState.fromApi(
+      message: message,
+      statusCode: statusCode,
+      onRetry: () => _loadTab(tab, refresh: true),
+      dense: true,
     );
   }
 

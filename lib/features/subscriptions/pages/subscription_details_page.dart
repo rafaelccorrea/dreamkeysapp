@@ -49,6 +49,9 @@ class _SubscriptionDetailsPageState extends State<SubscriptionDetailsPage> {
   SubscriptionUsage? _usage;
   bool _loadingUsage = true;
   String? _usageError;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _usageErrorStatus = 0;
   bool _acting = false;
 
   bool get _isMaster =>
@@ -74,6 +77,7 @@ class _SubscriptionDetailsPageState extends State<SubscriptionDetailsPage> {
     setState(() {
       _loadingUsage = true;
       _usageError = null;
+      _usageErrorStatus = 0;
     });
     final res = await SubscriptionsService.instance
         .getSubscriptionUsageById(widget.subscriptionId);
@@ -84,6 +88,7 @@ class _SubscriptionDetailsPageState extends State<SubscriptionDetailsPage> {
         _usage = res.data;
       } else {
         _usageError = res.message ?? 'Erro ao carregar uso da assinatura';
+        _usageErrorStatus = res.statusCode;
       }
     });
   }
@@ -419,7 +424,11 @@ class _SubscriptionDetailsPageState extends State<SubscriptionDetailsPage> {
         ],
       );
     } else if (_usageError != null) {
-      child = SubsErrorState(message: _usageError!, onRetry: _loadUsage);
+      child = SubsErrorState(
+        message: _usageError!,
+        statusCode: _usageErrorStatus,
+        onRetry: _loadUsage,
+      );
     } else if (_usage == null) {
       child = SubsEmptyState(
         icon: LucideIcons.gauge,

@@ -5,6 +5,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/sale_form_overview_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 
@@ -59,6 +60,7 @@ class _SaleFormsDashboardPageState extends State<SaleFormsDashboardPage> {
   SaleFormsOverview? _overview;
   bool _loading = true;
   String? _error;
+  int _errorStatus = 0;
 
   _Period _period = _Period.d30;
   DateTimeRange? _customRange;
@@ -146,6 +148,8 @@ class _SaleFormsDashboardPageState extends State<SaleFormsDashboardPage> {
       _loading = false;
       if (res.success && res.data != null) {
         _overview = res.data;
+        _error = null;
+        _errorStatus = 0;
         // Se o escopo esconder o ranking ativo, volta para o primeiro visível.
         final ui = res.data!.scopeUi;
         final visible = _visibleRankingTabs(ui);
@@ -154,6 +158,7 @@ class _SaleFormsDashboardPageState extends State<SaleFormsDashboardPage> {
         }
       } else {
         _error = res.message ?? 'Erro ao carregar o painel';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -212,28 +217,17 @@ class _SaleFormsDashboardPageState extends State<SaleFormsDashboardPage> {
   }
 
   Widget _buildError() {
-    final secondary = ThemeHelpers.textSecondaryColor(context);
+    // ListView (e não o layout cheio do componente) porque este corpo vive
+    // dentro de um RefreshIndicator: precisa continuar arrastável.
     return ListView(
-      padding: const EdgeInsets.fromLTRB(_padH, 80, _padH, 40),
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(_padH, 56, _padH, 40),
       children: [
-        Icon(LucideIcons.cloudOff, size: 40, color: secondary),
-        const SizedBox(height: 14),
-        Text(
-          _error ?? 'Erro ao carregar o painel',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: secondary,
-          ),
-        ),
-        const SizedBox(height: 16),
-        Center(
-          child: FilledButton.tonalIcon(
-            onPressed: _load,
-            icon: const Icon(LucideIcons.rotateCcw, size: 16),
-            label: const Text('Tentar novamente'),
-          ),
+        AppErrorState.fromApi(
+          message: _error,
+          statusCode: _errorStatus,
+          onRetry: _load,
+          dense: true,
         ),
       ],
     );

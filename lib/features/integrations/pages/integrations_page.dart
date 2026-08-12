@@ -9,6 +9,8 @@ import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import '../../../shared/widgets/app_error_state.dart';
+import '../../../shared/utils/error_cause.dart';
 import '../models/integration_model.dart';
 import '../services/integrations_service.dart';
 import '../widgets/integration_card.dart';
@@ -35,6 +37,10 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
 
   bool _loading = true;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
+  ErrorCause? _errorCause;
   Map<String, IntegrationStatusData> _statuses = {};
 
   final TextEditingController _searchController = TextEditingController();
@@ -98,6 +104,8 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
+      _errorCause = null;
     });
     try {
       final map =
@@ -110,6 +118,7 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
+        _errorCause = ErrorCause.fromException(e);
         _error = 'Erro ao carregar o status das integrações';
         _loading = false;
       });
@@ -733,41 +742,16 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
   }
 
   Widget _buildError(BuildContext context, String message) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final danger =
-        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 4),
-      child: Column(
-        children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: danger.withValues(alpha: 0.12),
-              border: Border.all(color: danger.withValues(alpha: 0.32)),
-            ),
-            child: Icon(LucideIcons.cloudOff, color: danger, size: 28),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: ThemeHelpers.textColor(context),
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: _loadStatuses,
-            icon: const Icon(LucideIcons.refreshCw, size: 16),
-            label: const Text('Tentar novamente'),
-          ),
-        ],
-      ),
+    // A carga aqui só falha por exceção — o diagnóstico vem dela.
+    final cause = _errorCause;
+    if (cause != null) {
+      return AppErrorState(cause: cause, onRetry: _loadStatuses, dense: true);
+    }
+    return AppErrorState.fromApi(
+      message: message,
+      statusCode: _errorStatus,
+      onRetry: _loadStatuses,
+      dense: true,
     );
   }
 }

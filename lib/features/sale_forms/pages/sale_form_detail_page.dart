@@ -5,6 +5,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/sale_forms_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../widgets/sale_form_anexos_sheet.dart';
 import '../widgets/sale_form_signatures_sheet.dart';
@@ -22,6 +23,8 @@ class SaleFormDetailPage extends StatefulWidget {
 class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
   bool _loading = true;
   String? _error;
+  // Sem o código HTTP não dá para distinguir "sem permissão" de "fora do ar".
+  int _errorStatus = 0;
   SaleForm? _form;
 
   // Resumo de assinaturas/anexos (carregado após a ficha; null = ainda carregando).
@@ -46,8 +49,11 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
       _loading = false;
       if (res.success && res.data != null) {
         _form = res.data;
+        _error = null;
+        _errorStatus = 0;
       } else {
         _error = res.message ?? 'Erro ao carregar a ficha de venda.';
+        _errorStatus = res.statusCode;
       }
     });
     if (res.success && res.data != null) {
@@ -126,28 +132,10 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
   }
 
   Widget _buildError() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              _error!,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                  ),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: _load,
-              icon: const Icon(Icons.refresh_rounded, size: 16),
-              label: const Text('Tentar novamente'),
-            ),
-          ],
-        ),
-      ),
+    return AppErrorState.fromApi(
+      message: _error,
+      statusCode: _errorStatus,
+      onRetry: _load,
     );
   }
 

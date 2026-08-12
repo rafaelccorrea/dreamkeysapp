@@ -35,6 +35,9 @@ class _AddPrizesPageState extends State<AddPrizesPage> {
 
   bool _loading = true;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   Competition? _competition;
 
   bool get _canCreate =>
@@ -52,6 +55,7 @@ class _AddPrizesPageState extends State<AddPrizesPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
     final res =
         await CompetitionService.instance.getById(widget.competitionId);
@@ -62,6 +66,7 @@ class _AddPrizesPageState extends State<AddPrizesPage> {
         _competition = res.data;
       } else {
         _error = res.message ?? 'Erro ao carregar competição';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -485,7 +490,11 @@ class _AddPrizesPageState extends State<AddPrizesPage> {
     if (_error != null) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(_padH, 60, _padH, 100),
-        child: GamErrorState(message: _error!, onRetry: _load),
+        child: GamErrorState(
+          message: _error!,
+          statusCode: _errorStatus,
+          onRetry: _load,
+        ),
       );
     }
 

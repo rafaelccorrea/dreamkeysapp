@@ -10,6 +10,8 @@ import '../../../../shared/services/gallery_service.dart';
 import '../../../../shared/services/cep_service.dart';
 import '../../../../shared/services/ai_service.dart';
 import '../../../../shared/services/secure_storage_service.dart';
+import '../../../../shared/utils/error_cause.dart';
+import '../../../../shared/widgets/app_error_state.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/custom_text_field.dart';
 import '../../../../shared/widgets/custom_button.dart';
@@ -158,6 +160,16 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
 
   bool _isLoading = false;
   bool _isLoadingProperty = false;
+
+  /// Falha ao carregar o imóvel em edição. Antes o erro era só um `debugPrint`
+  /// e o formulário abria VAZIO — salvar por cima apagaria o cadastro. Guardar
+  /// o código HTTP é o que separa "sem permissão" de "servidor fora do ar".
+  String? _loadPropertyError;
+  int _loadPropertyErrorStatus = 0;
+  Object? _loadPropertyErrorDetail;
+
+  /// Falha sem resposta da API (exceção de rede/parse).
+  ErrorCause? _loadPropertyErrorCause;
   /// ID do usuário logado (`capturedById` obrigatório no POST `/properties` do backend).
   String? _currentUserId;
 
@@ -838,6 +850,10 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
 
     setState(() {
       _isLoadingProperty = true;
+      _loadPropertyError = null;
+      _loadPropertyErrorStatus = 0;
+      _loadPropertyErrorDetail = null;
+      _loadPropertyErrorCause = null;
     });
 
     try {
@@ -845,12 +861,29 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         widget.propertyId!,
       );
 
-      if (mounted && response.success && response.data != null) {
-        final property = response.data!;
-        _populateForm(property);
+      if (mounted) {
+        if (response.success && response.data != null) {
+          final property = response.data!;
+          _populateForm(property);
+          _loadPropertyError = null;
+          _loadPropertyErrorStatus = 0;
+          _loadPropertyErrorDetail = null;
+          _loadPropertyErrorCause = null;
+        } else {
+          _loadPropertyError = response.message ?? 'Erro ao carregar o imóvel';
+          _loadPropertyErrorStatus = response.statusCode;
+          _loadPropertyErrorDetail = response.error;
+          _loadPropertyErrorCause = null;
+        }
       }
     } catch (e) {
       debugPrint('Erro ao carregar propriedade: $e');
+      if (mounted) {
+        _loadPropertyError = 'Erro ao carregar o imóvel';
+        _loadPropertyErrorStatus = 0;
+        _loadPropertyErrorDetail = e;
+        _loadPropertyErrorCause = ErrorCause.fromException(e);
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -3240,6 +3273,24 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         body: DecoratedBox(
           decoration: _wizardBackdropDecoration(context),
           child: _buildSkeleton(context, theme),
+        ),
+      );
+    }
+
+    // Edição que não conseguiu carregar o imóvel: mostrar o formulário vazio
+    // aqui seria pior que o erro — o usuário salvaria por cima do cadastro.
+    if (_loadPropertyError != null || _loadPropertyErrorCause != null) {
+      final cause = _loadPropertyErrorCause ??
+          ErrorCause.fromApi(
+            message: _loadPropertyError,
+            statusCode: _loadPropertyErrorStatus,
+            error: _loadPropertyErrorDetail,
+          );
+      return AppScaffold(
+        title: _wizardScaffoldTitle,
+        body: DecoratedBox(
+          decoration: _wizardBackdropDecoration(context),
+          child: AppErrorState(cause: cause, onRetry: _loadProperty),
         ),
       );
     }

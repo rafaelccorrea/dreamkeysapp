@@ -7,6 +7,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../../../shared/services/module_access_service.dart';
@@ -46,6 +47,10 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
   bool _silentLoading = false;
   bool _loadingMore = false;
   String? _error;
+  // Sem o código HTTP a tela não sabe distinguir "sem permissão nas tarefas"
+  // de "servidor fora do ar" — e acaba mandando tentar de novo nos dois casos.
+  int _errorStatus = 0;
+  Object? _errorDetail;
   SubTasksListResponse _response = SubTasksListResponse.empty;
   SubTasksListStats _heroStats = SubTasksListStats.zero;
 
@@ -99,8 +104,13 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
       }
       if (res.success && res.data != null) {
         _response = res.data!;
+        _error = null;
+        _errorStatus = 0;
+        _errorDetail = null;
       } else {
         _error = res.message ?? 'Erro ao carregar tarefas';
+        _errorStatus = res.statusCode;
+        _errorDetail = res.error;
       }
     });
     // Em paralelo, busca as contagens reais por bucket — sem cobrir
@@ -277,6 +287,8 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
       _silentLoading = true;
       _loadingMore = false;
       _error = null;
+      _errorStatus = 0;
+      _errorDetail = null;
     });
     final res = await KanbanSubtaskService.instance.getMySubTasks(
       filters: _filtersFor(_activeBucket),
@@ -291,8 +303,13 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
       }
       if (res.success && res.data != null) {
         _response = res.data!;
+        _error = null;
+        _errorStatus = 0;
+        _errorDetail = null;
       } else {
         _error = res.message ?? 'Erro ao carregar tarefas';
+        _errorStatus = res.statusCode;
+        _errorDetail = res.error;
       }
     });
     unawaited(_loadBaselineCounts());
@@ -1352,42 +1369,12 @@ class _KanbanSubtasksListPageState extends State<KanbanSubtasksListPage> {
   }
 
   Widget _buildError() {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final danger = isDark
-        ? AppColors.status.errorDarkMode
-        : AppColors.status.error;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 36),
-      child: Column(
-        children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: danger.withValues(alpha: 0.10),
-              border: Border.all(color: danger.withValues(alpha: 0.32)),
-            ),
-            child: Icon(LucideIcons.cloudOff, color: danger, size: 26),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            _error ?? 'Erro ao carregar',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: ThemeHelpers.textColor(context),
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: _refresh,
-            icon: const Icon(LucideIcons.refreshCw, size: 14),
-            label: const Text('Tentar novamente'),
-          ),
-        ],
-      ),
+    return AppErrorState.fromApi(
+      message: _error,
+      statusCode: _errorStatus,
+      error: _errorDetail,
+      dense: true,
+      onRetry: _refresh,
     );
   }
 

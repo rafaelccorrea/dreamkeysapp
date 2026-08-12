@@ -9,6 +9,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/check_in_service.dart';
 import '../../../shared/services/module_access_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 
@@ -26,6 +27,9 @@ class _CheckInListPageState extends State<CheckInListPage> {
   bool _bootLoading = true;
   bool _loadingMore = false;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   String _scope = 'mine';
   DateTime? _fromDate;
   DateTime? _toDate;
@@ -73,6 +77,7 @@ class _CheckInListPageState extends State<CheckInListPage> {
     setState(() {
       _bootLoading = true;
       _error = null;
+      _errorStatus = 0;
     });
     final res = await CheckInService.instance.listCheckIns(
       scope: _scope,
@@ -88,6 +93,7 @@ class _CheckInListPageState extends State<CheckInListPage> {
         _response = res.data!;
       } else {
         _error = res.message ?? 'Erro ao carregar histórico';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -308,7 +314,11 @@ class _CheckInListPageState extends State<CheckInListPage> {
             else if (_error != null && _response.data.isEmpty)
               SliverFillRemaining(
                 hasScrollBody: false,
-                child: _ErrorState(message: _error!, onRetry: _refresh),
+                child: _ErrorState(
+                  message: _error!,
+                  statusCode: _errorStatus,
+                  onRetry: _refresh,
+                ),
               )
             else if (_response.data.isEmpty)
               SliverFillRemaining(
@@ -1021,35 +1031,20 @@ class _EmptyState extends StatelessWidget {
 class _ErrorState extends StatelessWidget {
   final String message;
   final VoidCallback onRetry;
-  const _ErrorState({required this.message, required this.onRetry});
+  final int statusCode;
+  const _ErrorState({
+    required this.message,
+    required this.onRetry,
+    this.statusCode = 0,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final danger = AppColors.status.error;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 40, 24, 40),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(LucideIcons.cloudOff, color: danger, size: 38),
-          const SizedBox(height: 14),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: ThemeHelpers.textColor(context),
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(LucideIcons.refreshCw, size: 14),
-            label: const Text('Tentar novamente'),
-          ),
-        ],
-      ),
+    return AppErrorState.fromApi(
+      message: message,
+      statusCode: statusCode,
+      onRetry: () async => onRetry(),
+      dense: true,
     );
   }
 }

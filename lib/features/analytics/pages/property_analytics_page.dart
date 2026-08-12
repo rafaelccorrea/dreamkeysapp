@@ -53,6 +53,9 @@ class _PropertyAnalyticsPageState extends State<PropertyAnalyticsPage> {
   PropertyAnalyticsData? _data;
   bool _loading = true;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
 
   List<PropertyEngagement>? _engagement;
   bool _engagementLoading = true;
@@ -73,6 +76,7 @@ class _PropertyAnalyticsPageState extends State<PropertyAnalyticsPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
     final res = await AnalyticsService.instance
         .getPropertyAnalytics(filters: _filters);
@@ -83,6 +87,7 @@ class _PropertyAnalyticsPageState extends State<PropertyAnalyticsPage> {
         _data = res.data;
       } else if (_data == null) {
         _error = res.message ?? 'Erro ao carregar analytics de imóveis';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -161,6 +166,7 @@ class _PropertyAnalyticsPageState extends State<PropertyAnalyticsPage> {
                               _kPadH, 48, _kPadH, _kPadBottom),
                           child: AnalyticsErrorState(
                             message: _error!,
+                            statusCode: _errorStatus,
                             onRetry: _refreshAll,
                           ),
                         )

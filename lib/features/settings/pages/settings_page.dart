@@ -8,6 +8,8 @@ import '../../../../core/theme/theme_helpers.dart';
 import '../../../../shared/services/profile_service.dart';
 import '../../../../shared/services/settings_service.dart';
 import '../../../../shared/services/theme_service.dart';
+import '../../../../shared/utils/error_cause.dart';
+import '../../../../shared/widgets/app_error_state.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/brand_wordmark_logo.dart';
 import '../../../../shared/widgets/app_update_dialog.dart';
@@ -31,6 +33,10 @@ class _SettingsPageState extends State<SettingsPage> {
   Settings? _settings;
   Profile? _profile;
   String? _errorMessage;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
+  ErrorCause? _errorCause;
 
   String _appVersionLabel = '…';
 
@@ -74,6 +80,8 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _errorStatus = 0;
+      _errorCause = null;
     });
 
     try {
@@ -90,7 +98,8 @@ class _SettingsPageState extends State<SettingsPage> {
           }
           _isLoading = false;
           if (_settings == null && _profile == null) {
-            _errorMessage = 'Erro ao carregar dados';
+            _errorMessage = settingsResponse.message ?? 'Erro ao carregar dados';
+            _errorStatus = settingsResponse.statusCode;
           }
         });
       }
@@ -98,6 +107,7 @@ class _SettingsPageState extends State<SettingsPage> {
       debugPrint('❌ [SETTINGS PAGE] Erro: $e\n$stackTrace');
       if (mounted) {
         setState(() {
+          _errorCause = ErrorCause.fromException(e);
           _errorMessage = 'Erro ao conectar com o servidor';
           _isLoading = false;
         });
@@ -347,56 +357,15 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildErrorState(BuildContext context, ThemeData theme, Color brand) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 24, 20, 40),
-      physics: const AlwaysScrollableScrollPhysics(),
-      children: [
-        Text(
-          'ERRO',
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: AppColors.status.error,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 2.2,
-            fontSize: 10,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Não foi possível carregar',
-          style: theme.textTheme.headlineSmall?.copyWith(
-            fontWeight: FontWeight.w900,
-            letterSpacing: -0.6,
-            color: ThemeHelpers.textColor(context),
-            height: 1.05,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          _errorMessage ??
-              'Verifique a ligação e tente novamente. Se o problema persistir, contacte o suporte.',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(context),
-            height: 1.4,
-          ),
-        ),
-        const SizedBox(height: 22),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: FilledButton.icon(
-            onPressed: _loadData,
-            icon: const Icon(Icons.refresh_rounded),
-            label: const Text('Tentar novamente'),
-            style: FilledButton.styleFrom(
-              backgroundColor: brand,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-            ),
-          ),
-        ),
-      ],
+    // Exceção solta traz seu próprio diagnóstico; falha de API vem da resposta.
+    final cause = _errorCause;
+    if (cause != null) {
+      return AppErrorState(cause: cause, onRetry: _loadData);
+    }
+    return AppErrorState.fromApi(
+      message: _errorMessage,
+      statusCode: _errorStatus,
+      onRetry: _loadData,
     );
   }
 

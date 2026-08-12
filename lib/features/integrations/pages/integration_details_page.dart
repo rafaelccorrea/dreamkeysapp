@@ -7,6 +7,7 @@ import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../models/integration_model.dart';
 import '../services/integrations_service.dart';
 import '../widgets/integration_card.dart' show integrationStatusColor;
@@ -54,6 +55,9 @@ class _IntegrationDetailsPageState extends State<IntegrationDetailsPage> {
 
   bool _loading = true;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   IntegrationStatusData? _status;
 
   bool _toggling = false;
@@ -116,6 +120,7 @@ class _IntegrationDetailsPageState extends State<IntegrationDetailsPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
     final res = await _service.fetchStatus(def.key);
     if (!mounted) return;
@@ -125,6 +130,7 @@ class _IntegrationDetailsPageState extends State<IntegrationDetailsPage> {
         _status = res.data;
       } else {
         _error = res.message ?? 'Erro ao carregar o status da integração';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -1055,39 +1061,11 @@ class _IntegrationDetailsPageState extends State<IntegrationDetailsPage> {
   }
 
   Widget _buildError(BuildContext context, String message) {
-    final theme = Theme.of(context);
-    final danger = _danger(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 4),
-      child: Column(
-        children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: danger.withValues(alpha: 0.12),
-              border: Border.all(color: danger.withValues(alpha: 0.32)),
-            ),
-            child: Icon(LucideIcons.cloudOff, color: danger, size: 28),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: ThemeHelpers.textColor(context),
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: _load,
-            icon: const Icon(LucideIcons.refreshCw, size: 16),
-            label: const Text('Tentar novamente'),
-          ),
-        ],
-      ),
+    return AppErrorState.fromApi(
+      message: message,
+      statusCode: _errorStatus,
+      onRetry: _load,
+      dense: true,
     );
   }
 }

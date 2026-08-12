@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../models/admin_user_model.dart';
@@ -64,6 +65,9 @@ class _EditUserPageState extends State<EditUserPage> {
   bool _loading = true;
   bool _saving = false;
   String? _error;
+  // Sem o código HTTP o erro não sabe dizer se foi permissão ou servidor.
+  int _errorStatus = 0;
+  Object? _errorRaw;
 
   final List<MapEntry<String, List<UserPermission>>> _catalog = [];
   List<AdminUser> _managers = [];
@@ -100,6 +104,8 @@ class _EditUserPageState extends State<EditUserPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
+      _errorRaw = null;
     });
     final svc = AdminUsersService.instance;
     final results = await Future.wait([
@@ -147,6 +153,8 @@ class _EditUserPageState extends State<EditUserPage> {
       if (!catalogRes.success && _catalog.isEmpty) {
         _error =
             catalogRes.message ?? 'Não foi possível carregar as permissões.';
+        _errorStatus = catalogRes.statusCode;
+        _errorRaw = catalogRes.error;
       }
     });
   }
@@ -250,7 +258,12 @@ class _EditUserPageState extends State<EditUserPage> {
           const SizedBox(height: 11),
         ],
         if (_error != null && _catalog.isEmpty)
-          _ErrorInline(message: _error!, onRetry: _bootstrap)
+          _ErrorInline(
+            message: _error!,
+            statusCode: _errorStatus,
+            error: _errorRaw,
+            onRetry: _bootstrap,
+          )
         else
           _buildPermissionGrid(),
       ],
@@ -1717,34 +1730,25 @@ class _PrivilegedNote extends StatelessWidget {
 }
 
 class _ErrorInline extends StatelessWidget {
-  const _ErrorInline({required this.message, required this.onRetry});
+  const _ErrorInline({
+    required this.message,
+    required this.onRetry,
+    this.statusCode = 0,
+    this.error,
+  });
   final String message;
-  final VoidCallback onRetry;
+  final int statusCode;
+  final Object? error;
+  final Future<void> Function() onRetry;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 24),
-      child: Column(
-        children: [
-          Icon(LucideIcons.cloudOff,
-              size: 30, color: ThemeHelpers.textSecondaryColor(context)),
-          const SizedBox(height: 10),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-                color: ThemeHelpers.textSecondaryColor(context),
-                fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(LucideIcons.refreshCw, size: 15),
-            label: const Text('Tentar novamente'),
-          ),
-        ],
-      ),
+    return AppErrorState.fromApi(
+      message: message,
+      statusCode: statusCode,
+      error: error,
+      onRetry: onRetry,
+      dense: true,
     );
   }
 }

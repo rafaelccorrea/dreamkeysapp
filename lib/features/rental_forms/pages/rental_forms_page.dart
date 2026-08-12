@@ -5,6 +5,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../models/rental_form_model.dart';
 import '../services/rental_forms_service.dart';
@@ -43,6 +44,8 @@ class _RentalFormsPageState extends State<RentalFormsPage> {
   bool _loadingMore = false;
   bool _creating = false;
   String? _error;
+  // Sem o código HTTP não dá para separar falta de permissão de servidor fora.
+  int _errorStatus = 0;
 
   /// Filtro de status aplicado no cliente (a API só suporta `search`).
   RentalFormStatus? _statusFilter;
@@ -91,9 +94,11 @@ class _RentalFormsPageState extends State<RentalFormsPage> {
         _total = res.data!.total;
         _page = res.data!.page;
         _error = null;
+        _errorStatus = 0;
       } else {
         _error =
             res.message ?? 'Não foi possível carregar as fichas de locação.';
+        _errorStatus = res.statusCode;
       }
     });
     if (mounted) FocusScope.of(context).unfocus();
@@ -330,9 +335,13 @@ class _RentalFormsPageState extends State<RentalFormsPage> {
                     ),
                   )
                 else if (_error != null)
-                  SliverFillRemaining(
-                    hasScrollBody: false,
-                    child: _ErrorState(message: _error!, onRetry: _load),
+                  SliverToBoxAdapter(
+                    child: AppErrorState.fromApi(
+                      message: _error,
+                      statusCode: _errorStatus,
+                      onRetry: _load,
+                      dense: true,
+                    ),
                   )
                 else if (visible.isEmpty)
                   SliverFillRemaining(
@@ -914,56 +923,3 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-class _ErrorState extends StatelessWidget {
-  const _ErrorState({required this.message, required this.onRetry});
-  final String message;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    final muted = ThemeHelpers.textSecondaryColor(context);
-    final accent = _accent(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(LucideIcons.cloudOff, size: 52, color: muted),
-          const SizedBox(height: 12),
-          Text(
-            'Não foi possível carregar',
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style:
-                Theme.of(context).textTheme.bodySmall?.copyWith(color: muted),
-          ),
-          const SizedBox(height: 16),
-          OutlinedButton.icon(
-            onPressed: onRetry,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: accent,
-              side: BorderSide(color: accent.withValues(alpha: 0.5)),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            icon: const Icon(LucideIcons.refreshCw, size: 16),
-            label: const Text(
-              'Tentar novamente',
-              style: TextStyle(fontWeight: FontWeight.w800),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}

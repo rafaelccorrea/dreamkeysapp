@@ -5,6 +5,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../models/checklist_models.dart';
@@ -27,6 +28,9 @@ class _ChecklistDetailsPageState extends State<ChecklistDetailsPage> {
   Checklist? _checklist;
   bool _loading = true;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   final Set<String> _updatingItems = <String>{};
 
   @override
@@ -45,6 +49,7 @@ class _ChecklistDetailsPageState extends State<ChecklistDetailsPage> {
       setState(() {
         _loading = true;
         _error = null;
+        _errorStatus = 0;
       });
     }
     final res = await ChecklistService.instance.getById(widget.checklistId);
@@ -54,8 +59,10 @@ class _ChecklistDetailsPageState extends State<ChecklistDetailsPage> {
       if (res.success && res.data != null) {
         _checklist = res.data!;
         _error = null;
+        _errorStatus = 0;
       } else {
         _error = res.message ?? 'Erro ao carregar checklist';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -901,42 +908,16 @@ class _ChecklistDetailsPageState extends State<ChecklistDetailsPage> {
   }
 
   Widget _buildError(BuildContext context, String message) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final danger =
-        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    // ListView preservado: a tela usa pull-to-refresh e precisa rolar.
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 80, 16, 40),
       children: [
-        Column(
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: danger.withValues(alpha: 0.12),
-                border: Border.all(color: danger.withValues(alpha: 0.32)),
-              ),
-              child: Icon(LucideIcons.cloudOff, color: danger, size: 28),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: () => _load(),
-              icon: const Icon(LucideIcons.refreshCw, size: 16),
-              label: const Text('Tentar novamente'),
-            ),
-          ],
+        AppErrorState.fromApi(
+          message: message,
+          statusCode: _errorStatus,
+          onRetry: () => _load(),
+          dense: true,
         ),
       ],
     );

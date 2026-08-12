@@ -37,6 +37,9 @@ class _McmvLeadsPageState extends State<McmvLeadsPage> {
   bool _loading = true;
   bool _loadingMore = false;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   int _total = 0;
   int _page = 1;
   bool _hasNext = false;
@@ -85,8 +88,10 @@ class _McmvLeadsPageState extends State<McmvLeadsPage> {
         _page = res.data!.page;
         _hasNext = res.data!.hasNext;
         _error = null;
+        _errorStatus = 0;
       } else {
         _error = res.message ?? 'Erro ao carregar leads';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -704,6 +709,7 @@ class _McmvLeadsPageState extends State<McmvLeadsPage> {
     } else if (_error != null && _items.isEmpty) {
       child = McmvErrorState(
         message: _error!,
+        statusCode: _errorStatus,
         onRetry: () => _load(refresh: true),
       );
     } else if (visible.isEmpty) {

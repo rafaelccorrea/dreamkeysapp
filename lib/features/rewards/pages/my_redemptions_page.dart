@@ -35,6 +35,9 @@ class _MyRedemptionsPageState extends State<MyRedemptionsPage> {
   List<RewardRedemption> _redemptions = const [];
   bool _loading = true;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   _MyRedemptionsTab _activeTab = _MyRedemptionsTab.all;
 
   bool get _canView =>
@@ -54,6 +57,7 @@ class _MyRedemptionsPageState extends State<MyRedemptionsPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
     final res = await RewardsService.instance.getMyRedemptions();
     if (!mounted) return;
@@ -63,6 +67,7 @@ class _MyRedemptionsPageState extends State<MyRedemptionsPage> {
         _redemptions = res.data!;
       } else {
         _error = res.message ?? 'Erro ao carregar seus resgates';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -429,7 +434,11 @@ class _MyRedemptionsPageState extends State<MyRedemptionsPage> {
     if (_loading && _redemptions.isEmpty) {
       child = _buildSkeleton();
     } else if (_error != null && _redemptions.isEmpty) {
-      child = RewardsErrorState(message: _error!, onRetry: _load);
+      child = RewardsErrorState(
+        message: _error!,
+        statusCode: _errorStatus,
+        onRetry: _load,
+      );
     } else if (items.isEmpty) {
       child = _buildEmpty(context);
     } else {

@@ -3,6 +3,8 @@ import 'package:intl/intl.dart';
 import '../../../../shared/services/property_offers_service.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
+import '../../../../shared/widgets/app_error_state.dart';
+import '../../../../shared/utils/error_cause.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 
@@ -29,6 +31,10 @@ class _PropertyOffersPageState extends State<PropertyOffersPage> {
   bool _isLoading = true;
   List<PropertyOffer> _offers = [];
   String? _errorMessage;
+  // O código HTTP é o que separa "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
+  Object? _errorDetail;
+  bool _errorFromException = false;
 
   // Filtros
   String? _selectedStatus;
@@ -54,6 +60,9 @@ class _PropertyOffersPageState extends State<PropertyOffersPage> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _errorStatus = 0;
+      _errorDetail = null;
+      _errorFromException = false;
     });
 
     try {
@@ -118,6 +127,7 @@ class _PropertyOffersPageState extends State<PropertyOffersPage> {
               if (mounted) {
                 setState(() {
                   _errorMessage = 'Formato de dados inválido';
+                  _errorStatus = response.statusCode;
                   _isLoading = false;
                 });
               }
@@ -131,6 +141,8 @@ class _PropertyOffersPageState extends State<PropertyOffersPage> {
             if (mounted) {
               setState(() {
                 _errorMessage = 'Erro ao processar dados das ofertas';
+                _errorStatus = response.statusCode;
+                _errorDetail = castError;
                 _isLoading = false;
               });
             }
@@ -140,6 +152,8 @@ class _PropertyOffersPageState extends State<PropertyOffersPage> {
           if (mounted) {
             setState(() {
               _errorMessage = response.message ?? 'Erro ao carregar ofertas';
+              _errorStatus = response.statusCode;
+              _errorDetail = response.error;
               _isLoading = false;
             });
           }
@@ -150,7 +164,10 @@ class _PropertyOffersPageState extends State<PropertyOffersPage> {
       debugPrint('📚 [OFFERS_PAGE] StackTrace: $stackTrace');
       if (mounted) {
         setState(() {
-          _errorMessage = 'Erro ao conectar com o servidor: ${e.toString()}';
+          _errorMessage = 'Erro ao conectar com o servidor';
+          _errorStatus = 0;
+          _errorDetail = e;
+          _errorFromException = true;
           _isLoading = false;
         });
       }
@@ -211,31 +228,17 @@ class _PropertyOffersPageState extends State<PropertyOffersPage> {
   }
 
   Widget _buildErrorState(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.error_outline, size: 64, color: AppColors.status.error),
-            const SizedBox(height: 16),
-            Text(
-              _errorMessage ?? 'Erro ao carregar ofertas',
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: ThemeHelpers.textSecondaryColor(context),
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: _loadOffers,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Tentar novamente'),
-            ),
-          ],
-        ),
-      ),
+    if (_errorFromException && _errorDetail != null) {
+      return AppErrorState(
+        cause: ErrorCause.fromException(_errorDetail!),
+        onRetry: _loadOffers,
+      );
+    }
+    return AppErrorState.fromApi(
+      message: _errorMessage,
+      statusCode: _errorStatus,
+      error: _errorDetail,
+      onRetry: _loadOffers,
     );
   }
 

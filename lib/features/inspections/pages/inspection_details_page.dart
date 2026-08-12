@@ -5,6 +5,8 @@ import 'package:intl/intl.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/utils/error_cause.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/custom_button.dart';
 import '../../../shared/widgets/skeleton_box.dart';
@@ -29,7 +31,8 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
   bool _isLoading = true;
   bool _isLoadingHistory = false;
   bool _isUploadingPhoto = false;
-  String? _errorMessage;
+  /// Diagnóstico da falha (API ou exceção) — carrega o código HTTP junto.
+  ErrorCause? _errorCause;
   List<InspectionHistoryEntry> _history = [];
 
   @override
@@ -42,7 +45,7 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
   Future<void> _loadInspection() async {
     setState(() {
       _isLoading = true;
-      _errorMessage = null;
+      _errorCause = null;
     });
 
     try {
@@ -54,11 +57,15 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
         if (response.success && response.data != null) {
           setState(() {
             _inspection = response.data!;
+            _errorCause = null;
             _isLoading = false;
           });
         } else {
           setState(() {
-            _errorMessage = response.message ?? 'Erro ao carregar vistoria';
+            _errorCause = ErrorCause.fromApi(
+              message: response.message,
+              statusCode: response.statusCode,
+            );
             _isLoading = false;
           });
         }
@@ -66,7 +73,7 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorMessage = 'Erro de conexão: ${e.toString()}';
+          _errorCause = ErrorCause.fromException(e);
           _isLoading = false;
         });
       }
@@ -805,30 +812,8 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
       ],
       body: _isLoading
           ? _buildSkeleton(context)
-          : _errorMessage != null
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.error_outline,
-                      size: 64,
-                      color: ThemeHelpers.textSecondaryColor(context),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(_errorMessage!, textAlign: TextAlign.center),
-                    const SizedBox(height: 24),
-                    ElevatedButton.icon(
-                      onPressed: _loadInspection,
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Tentar Novamente'),
-                    ),
-                  ],
-                ),
-              ),
-            )
+          : _errorCause != null
+          ? AppErrorState(cause: _errorCause!, onRetry: _loadInspection)
           : _inspection == null
           ? const Center(child: Text('Vistoria não encontrada'))
           : RefreshIndicator(

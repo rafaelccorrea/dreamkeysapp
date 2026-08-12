@@ -5,6 +5,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../models/zezin_models.dart';
@@ -29,6 +30,9 @@ class _ZezinConfigPageState extends State<ZezinConfigPage> {
   ZezinAvailability? _availability;
   bool _loading = true;
   String? _loadError;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _loadErrorStatus = 0;
 
   ZezinConfig? _existingConfig;
   bool _saving = false;
@@ -69,6 +73,7 @@ class _ZezinConfigPageState extends State<ZezinConfigPage> {
     setState(() {
       _loading = true;
       _loadError = null;
+      _loadErrorStatus = 0;
     });
     final availabilityRes = await _service.getAvailability();
     if (!mounted) return;
@@ -77,6 +82,7 @@ class _ZezinConfigPageState extends State<ZezinConfigPage> {
         _loading = false;
         _loadError =
             availabilityRes.message ?? 'Não foi possível verificar o Zezin.';
+        _loadErrorStatus = availabilityRes.statusCode;
       });
       return;
     }
@@ -104,6 +110,7 @@ class _ZezinConfigPageState extends State<ZezinConfigPage> {
       } else {
         _loadError =
             configRes.message ?? 'Não foi possível carregar a configuração.';
+        _loadErrorStatus = configRes.statusCode;
       }
     });
   }
@@ -829,44 +836,11 @@ class _ZezinConfigPageState extends State<ZezinConfigPage> {
   }
 
   Widget _buildErrorState(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final danger =
-        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: danger.withValues(alpha: 0.12),
-                border: Border.all(color: danger.withValues(alpha: 0.32)),
-              ),
-              child: Icon(LucideIcons.cloudOff, color: danger, size: 28),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              _loadError ?? 'Não foi possível carregar.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: _bootstrap,
-              icon: const Icon(LucideIcons.refreshCw, size: 16),
-              label: const Text('Tentar novamente'),
-            ),
-          ],
-        ),
-      ),
+    return AppErrorState.fromApi(
+      message: _loadError ?? 'Não foi possível carregar.',
+      statusCode: _loadErrorStatus,
+      onRetry: _bootstrap,
+      dense: false,
     );
   }
 

@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../models/client_model.dart';
 import '../services/client_service.dart';
 
@@ -22,6 +23,9 @@ class _ClientInteractionsPanelState extends State<ClientInteractionsPanel> {
   List<ClientInteraction> _interactions = [];
   bool _isLoading = false;
   String? _errorMessage;
+  // O código HTTP acompanha a mensagem para o diagnóstico distinguir a causa.
+  int _errorStatus = 0;
+  Object? _errorRaw;
 
   @override
   void initState() {
@@ -39,6 +43,8 @@ class _ClientInteractionsPanelState extends State<ClientInteractionsPanel> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _errorStatus = 0;
+      _errorRaw = null;
     });
 
     try {
@@ -59,13 +65,17 @@ class _ClientInteractionsPanelState extends State<ClientInteractionsPanel> {
       } else {
         setState(() {
           _errorMessage = response.message ?? 'Erro ao carregar interações';
+          _errorStatus = response.statusCode;
+          _errorRaw = response.error;
           _isLoading = false;
         });
       }
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _errorMessage = 'Erro de conexão';
+        _errorStatus = 0;
+        _errorRaw = e;
         _isLoading = false;
       });
     }
@@ -264,40 +274,12 @@ class _ClientInteractionsPanelState extends State<ClientInteractionsPanel> {
   }
 
   Widget _buildErrorState(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: AppColors.status.error.withValues(alpha: 0.06),
-        border: Border.all(
-          color: AppColors.status.error.withValues(alpha: 0.20),
-        ),
-      ),
-      child: Column(
-        children: [
-          Icon(
-            Icons.cloud_off_outlined,
-            size: 36,
-            color: AppColors.status.error,
-          ),
-          const SizedBox(height: 10),
-          Text(
-            _errorMessage!,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: ThemeHelpers.textColor(context),
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: _loadInteractions,
-            icon: const Icon(Icons.refresh_rounded, size: 18),
-            label: const Text('Tentar novamente'),
-          ),
-        ],
-      ),
+    return AppErrorState.fromApi(
+      message: _errorMessage,
+      statusCode: _errorStatus,
+      error: _errorRaw,
+      onRetry: _loadInteractions,
+      dense: true,
     );
   }
 

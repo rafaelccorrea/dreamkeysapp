@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../models/kanban_models.dart';
 import '../services/kanban_service.dart';
@@ -31,6 +31,10 @@ class KanbanTaskDetailsPage extends StatefulWidget {
 class _KanbanTaskDetailsPageState extends State<KanbanTaskDetailsPage> {
   bool _loading = true;
   String? _error;
+  // O código HTTP acompanha a mensagem: 403 (card de outro funil) e 404 (card
+  // apagado) pedem respostas diferentes de uma queda de servidor.
+  int _errorStatus = 0;
+  Object? _errorDetail;
   KanbanTask? _task;
 
   @override
@@ -43,6 +47,8 @@ class _KanbanTaskDetailsPageState extends State<KanbanTaskDetailsPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
+      _errorDetail = null;
     });
     final res = await KanbanService.instance.getTaskById(widget.taskId);
     if (!mounted) return;
@@ -50,8 +56,13 @@ class _KanbanTaskDetailsPageState extends State<KanbanTaskDetailsPage> {
       _loading = false;
       if (res.success && res.data != null) {
         _task = res.data;
+        _error = null;
+        _errorStatus = 0;
+        _errorDetail = null;
       } else {
         _error = res.message ?? 'Não foi possível abrir esta negociação.';
+        _errorStatus = res.statusCode;
+        _errorDetail = res.error;
       }
     });
   }
@@ -99,67 +110,13 @@ class _KanbanTaskDetailsPageState extends State<KanbanTaskDetailsPage> {
   }
 
   Widget _buildError(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final danger = isDark
-        ? AppColors.status.errorDarkMode
-        : AppColors.status.error;
-
-    return Padding(
-      padding: const EdgeInsets.all(28),
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: danger.withValues(alpha: 0.12),
-                border: Border.all(color: danger.withValues(alpha: 0.32)),
-              ),
-              child: Icon(LucideIcons.alertTriangle, color: danger, size: 26),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              'Não foi possível abrir',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: ThemeHelpers.textColor(context),
-                letterSpacing: -0.2,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              _error ?? '',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: ThemeHelpers.textSecondaryColor(context),
-                height: 1.4,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(LucideIcons.arrowLeft, size: 16),
-                  label: const Text('Voltar'),
-                ),
-                const SizedBox(width: 12),
-                ElevatedButton.icon(
-                  onPressed: _load,
-                  icon: const Icon(LucideIcons.refreshCw, size: 16),
-                  label: const Text('Tentar novamente'),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
+    return AppErrorState.fromApi(
+      message: _error,
+      statusCode: _errorStatus,
+      error: _errorDetail,
+      onRetry: _load,
+      secondaryLabel: 'Voltar',
+      onSecondary: () => Navigator.of(context).pop(),
     );
   }
 }

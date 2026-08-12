@@ -39,6 +39,9 @@ class _PrizesPageState extends State<PrizesPage> {
 
   bool _loading = true;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   List<Prize> _prizes = const [];
   List<Competition> _competitions = const [];
 
@@ -70,6 +73,7 @@ class _PrizesPageState extends State<PrizesPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
     final results = await Future.wait([
       CompetitionService.instance.getAllPrizes(),
@@ -86,6 +90,7 @@ class _PrizesPageState extends State<PrizesPage> {
         _prizes = prizesRes.data as List<Prize>;
       } else {
         _error = prizesRes.message ?? 'Erro ao carregar prêmios';
+        _errorStatus = prizesRes.statusCode;
       }
       if (compsRes.success && compsRes.data != null) {
         _competitions = compsRes.data as List<Competition>;
@@ -646,7 +651,11 @@ class _PrizesPageState extends State<PrizesPage> {
     if (_error != null) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(_padH, 60, _padH, 100),
-        child: GamErrorState(message: _error!, onRetry: _load),
+        child: GamErrorState(
+          message: _error!,
+          statusCode: _errorStatus,
+          onRetry: _load,
+        ),
       );
     }
 

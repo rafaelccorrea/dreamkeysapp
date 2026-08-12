@@ -7,6 +7,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/widgets/app_error_state.dart';
 
 /// Cor de acento da marca (vermelho) adaptada ao tema.
 Color gamAccentColor(BuildContext context) {
@@ -423,52 +424,31 @@ class GamEmptyState extends StatelessWidget {
   }
 }
 
-/// Estado de erro com retry.
+/// Estado de erro com retry — delega ao padrão do app.
+///
+/// [statusCode] é o código HTTP da resposta que falhou; sem ele não dá para
+/// separar "sem permissão" de "servidor fora do ar".
 class GamErrorState extends StatelessWidget {
   final String message;
   final VoidCallback onRetry;
+  final int statusCode;
+  final bool dense;
 
   const GamErrorState({
     super.key,
     required this.message,
     required this.onRetry,
+    this.statusCode = 0,
+    this.dense = true,
   });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final danger = gamDanger(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 4),
-      child: Column(
-        children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: danger.withValues(alpha: 0.12),
-              border: Border.all(color: danger.withValues(alpha: 0.32)),
-            ),
-            child: Icon(LucideIcons.cloudOff, color: danger, size: 28),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: ThemeHelpers.textColor(context),
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(LucideIcons.refreshCw, size: 16),
-            label: const Text('Tentar novamente'),
-          ),
-        ],
-      ),
+    return AppErrorState.fromApi(
+      message: message,
+      statusCode: statusCode,
+      onRetry: () async => onRetry(),
+      dense: dense,
     );
   }
 }

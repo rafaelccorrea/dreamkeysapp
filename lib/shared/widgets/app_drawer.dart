@@ -16,6 +16,7 @@ import '../services/dashboard_service.dart';
 import '../services/permission_service.dart';
 import '../services/secure_storage_service.dart';
 import '../utils/avatar_url_resolver.dart';
+import 'logout_confirm_sheet.dart';
 import 'skeleton_box.dart';
 import '../../features/notifications/controllers/notification_controller.dart';
 import '../../features/chat/controllers/chat_unread_controller.dart';
@@ -2030,30 +2031,17 @@ class _AppDrawerState extends State<AppDrawer> {
       return;
     }
 
-    // Mostrar diálogo de confirmação
-    final confirm = await showDialog<bool>(
+    // A mensagem muda conforme a biometria: prometer "volta com um toque"
+    // para quem nunca ativou Face ID seria mentira.
+    final biometriaAtiva =
+        await SecureStorageService.instance.isBiometricEnabled();
+    if (!context.mounted) return;
+
+    final confirm = await showLogoutConfirmSheet(
       context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Sair'),
-        content: const Text(
-          'Sai da sessão neste aparelho. Se já ativou Face ID ou impressão digital, '
-          'pode voltar a entrar assim na próxima vez (ou com email e senha).',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            style: TextButton.styleFrom(
-              foregroundColor: Theme.of(dialogContext).colorScheme.error,
-            ),
-            child: const Text('Sair'),
-          ),
-        ],
-      ),
+      userName: _userName,
+      userEmail: _userEmail,
+      biometricEnabled: biometriaAtiva,
     );
 
     if (confirm == true) {

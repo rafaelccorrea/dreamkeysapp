@@ -6,6 +6,7 @@ import '../../../core/theme/theme_helpers.dart';
 import '../../../features/workspace/models/company_team_model.dart';
 import '../../../features/workspace/services/company_team_service.dart';
 import '../../../shared/services/sale_forms_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
 
 /// Resultado do modal de tipo + equipe.
 class SaleFormTypeChoice {
@@ -44,6 +45,7 @@ class _SaleFormTypeSheetState extends State<_SaleFormTypeSheet> {
 
   bool _loading = true;
   String? _error;
+  int _errorStatus = 0;
   List<CompanyTeam> _teams = [];
 
   Color get _accent => Theme.of(context).brightness == Brightness.dark
@@ -83,8 +85,11 @@ class _SaleFormTypeSheetState extends State<_SaleFormTypeSheet> {
                 (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
               );
         if (_teams.length == 1) _teamId = _teams.first.id;
+        _error = null;
+        _errorStatus = 0;
       } else {
         _error = res.message ?? 'Erro ao carregar equipes.';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -164,7 +169,12 @@ class _SaleFormTypeSheetState extends State<_SaleFormTypeSheet> {
         );
       }
       if (_error != null) {
-        return _ErrorRow(message: _error!, onRetry: _loadTeams);
+        return AppErrorState.fromApi(
+          message: _error,
+          statusCode: _errorStatus,
+          onRetry: _loadTeams,
+          dense: true,
+        );
       }
       if (_teams.isEmpty) {
         return Padding(
@@ -670,32 +680,3 @@ class _TeamSearch extends StatelessWidget {
   }
 }
 
-class _ErrorRow extends StatelessWidget {
-  const _ErrorRow({required this.message, required this.onRetry});
-  final String message;
-  final VoidCallback onRetry;
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 18),
-      child: Column(
-        children: [
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: ThemeHelpers.textSecondaryColor(context),
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(LucideIcons.refreshCw, size: 15),
-            label: const Text('Tentar novamente'),
-          ),
-        ],
-      ),
-    );
-  }
-}

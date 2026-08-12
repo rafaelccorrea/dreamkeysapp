@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../services/appointment_schedule_service.dart';
 
@@ -32,6 +33,9 @@ class ScheduleSettingsPage extends StatefulWidget {
 class _ScheduleSettingsPageState extends State<ScheduleSettingsPage> {
   bool _loading = true;
   String? _loadError;
+  // Sem o código HTTP não dá pra separar "sem permissão" de "servidor fora".
+  int _loadErrorStatus = 0;
+  Object? _loadErrorRaw;
   bool _saving = false;
 
   bool _enforceWorkingHours = true;
@@ -52,6 +56,8 @@ class _ScheduleSettingsPageState extends State<ScheduleSettingsPage> {
     setState(() {
       _loading = true;
       _loadError = null;
+      _loadErrorStatus = 0;
+      _loadErrorRaw = null;
     });
 
     final res =
@@ -79,6 +85,8 @@ class _ScheduleSettingsPageState extends State<ScheduleSettingsPage> {
       setState(() {
         _loading = false;
         _loadError = res.message ?? 'Erro ao carregar horários';
+        _loadErrorStatus = res.statusCode;
+        _loadErrorRaw = res.error;
       });
     }
   }
@@ -364,59 +372,11 @@ class _ScheduleSettingsPageState extends State<ScheduleSettingsPage> {
   // Estados de carga
   // ---------------------------------------------------------------------------
   Widget _buildErrorState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.wifi_off_rounded,
-              size: 40,
-              color: ThemeHelpers.textSecondaryColor(context),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              'Não deu pra carregar seus horários',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w800,
-                color: ThemeHelpers.textColor(context),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              _loadError ?? '',
-              textAlign: TextAlign.center,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w500,
-                color: ThemeHelpers.textSecondaryColor(context),
-                height: 1.4,
-              ),
-            ),
-            const SizedBox(height: 18),
-            OutlinedButton.icon(
-              onPressed: _load,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: ThemeHelpers.textColor(context),
-                side: BorderSide(color: ThemeHelpers.borderColor(context)),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text(
-                'Tentar novamente',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return AppErrorState.fromApi(
+      message: _loadError,
+      statusCode: _loadErrorStatus,
+      error: _loadErrorRaw,
+      onRetry: _load,
     );
   }
 

@@ -38,6 +38,9 @@ class _ApproveRedemptionsPageState extends State<ApproveRedemptionsPage> {
   List<RewardRedemption> _redemptions = const [];
   bool _loading = true;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   _ApproveTab _activeTab = _ApproveTab.pending;
 
   /// Id da solicitação sendo processada (trava as ações do card).
@@ -62,6 +65,7 @@ class _ApproveRedemptionsPageState extends State<ApproveRedemptionsPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
     // Sem status → todas as solicitações da empresa (contagens das abas).
     final res = await RewardsService.instance.getPendingRedemptions();
@@ -72,6 +76,7 @@ class _ApproveRedemptionsPageState extends State<ApproveRedemptionsPage> {
         _redemptions = res.data!.redemptions;
       } else {
         _error = res.message ?? 'Erro ao carregar as solicitações';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -532,7 +537,11 @@ class _ApproveRedemptionsPageState extends State<ApproveRedemptionsPage> {
     if (_loading && _redemptions.isEmpty) {
       child = _buildSkeleton();
     } else if (_error != null && _redemptions.isEmpty) {
-      child = RewardsErrorState(message: _error!, onRetry: _load);
+      child = RewardsErrorState(
+        message: _error!,
+        statusCode: _errorStatus,
+        onRetry: _load,
+      );
     } else if (items.isEmpty) {
       child = _buildEmpty(context);
     } else {

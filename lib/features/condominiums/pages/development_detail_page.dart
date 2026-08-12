@@ -32,6 +32,9 @@ class _DevelopmentDetailPageState extends State<DevelopmentDetailPage> {
   Development? _development;
   bool _loading = true;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   bool _changed = false;
 
   bool get _canView =>
@@ -56,6 +59,7 @@ class _DevelopmentDetailPageState extends State<DevelopmentDetailPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
     final res = await DevelopmentService.instance.getById(widget.developmentId);
     if (!mounted) return;
@@ -65,6 +69,7 @@ class _DevelopmentDetailPageState extends State<DevelopmentDetailPage> {
         _development = res.data;
       } else {
         _error = res.message ?? 'Erro ao carregar empreendimento';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -130,10 +135,16 @@ class _DevelopmentDetailPageState extends State<DevelopmentDetailPage> {
     if (_loading) {
       body = _buildSkeleton(context);
     } else if (_error != null) {
-      body = EstateErrorState(message: _error!, onRetry: _load);
+      body = EstateErrorState(
+        message: _error!,
+        statusCode: _errorStatus,
+        onRetry: _load,
+      );
     } else if (_development == null) {
       body = EstateErrorState(
         message: 'Empreendimento não encontrado',
+        // A resposta veio vazia: é o mesmo caso de registro ausente (404).
+        statusCode: 404,
         onRetry: _load,
       );
     } else {
