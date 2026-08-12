@@ -1124,7 +1124,10 @@ class _AppDrawerState extends State<AppDrawer> {
                     20,
                     4,
                     20,
-                    8 + MediaQuery.paddingOf(context).bottom,
+                    // Piso de 20: no Android com navegação por gestos o
+                    // safe area inferior é ~0 e o último item encostava na
+                    // borda. Somado ao inset quando ele existe (iPhone).
+                    20 + MediaQuery.paddingOf(context).bottom,
                   ),
                   children: [
                     Theme(
@@ -1758,6 +1761,11 @@ class _AppDrawerState extends State<AppDrawer> {
                               ),
                             ],
                           ),
+                          // Sair não é "mais um item do menu": é o rodapé.
+                          // Como linha densa colada no divisor ele ficava
+                          // espremido contra a borda inferior — no Android
+                          // com gestos o safe area é ~0 e não sobrava respiro.
+                          const SizedBox(height: 14),
                           Divider(
                             height: 1,
                             thickness: 1,
@@ -1765,19 +1773,9 @@ class _AppDrawerState extends State<AppDrawer> {
                               context,
                             ).withValues(alpha: 0.5),
                           ),
-                          _buildDrawerItem(
-                            context: context,
-                            currentRoute: activeRoute,
-                            route: '',
-                            icon: LucideIcons.logOut,
-                            activeIcon: LucideIcons.logOut,
-                            title: 'Sair',
-                            accent: accent,
-                            onTap: () {
-                              _handleLogout(context);
-                            },
-                            isDestructive: true,
-                          ),
+                          const SizedBox(height: 14),
+                          _buildLogoutButton(context),
+                          const SizedBox(height: 8),
                         ],
                       ),
                     ),
@@ -1787,6 +1785,57 @@ class _AppDrawerState extends State<AppDrawer> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  /// Rodapé do drawer: sair da conta.
+  ///
+  /// Altura fixa de 48 (alvo de toque confortável) e moldura própria, para
+  /// não competir com os itens de navegação nem se perder entre eles. Rosa
+  /// só aqui — é a única ação do menu que encerra algo.
+  Widget _buildLogoutButton(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    const tone = Color(0xFFE11D48);
+
+    return Material(
+      color: tone.withValues(alpha: isDark ? 0.12 : 0.07),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: () => _handleLogout(context),
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          height: 48,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: tone.withValues(alpha: 0.28)),
+          ),
+          child: Row(
+            children: [
+              Icon(LucideIcons.logOut, size: 18, color: tone),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Sair da conta',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.1,
+                    color: tone,
+                  ),
+                ),
+              ),
+              Icon(
+                LucideIcons.chevronRight,
+                size: 16,
+                color: tone.withValues(alpha: 0.6),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
