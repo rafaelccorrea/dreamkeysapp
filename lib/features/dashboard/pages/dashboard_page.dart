@@ -175,68 +175,22 @@ class _DashboardPageState extends State<DashboardPage> {
                       _buildStatsCards(context, theme),
                       if (_dashboardData != null) ...[
                         SizedBox(height: _kSectionGap),
-                        LayoutBuilder(
-                          builder: (context, c) {
-                            if (c.maxWidth < _kPerfActivityRowMinW) {
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  _buildPerformanceCard(context, theme),
-                                  SizedBox(height: _kSectionGap),
-                                  _buildActivitiesSection(context, theme),
-                                ],
-                              );
-                            }
-                            return Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  flex: 12,
-                                  child: _buildPerformanceCard(context, theme),
-                                ),
-                                SizedBox(width: _kSectionGap),
-                                Expanded(
-                                  flex: 10,
-                                  child: _buildActivitiesSection(
-                                    context,
-                                    theme,
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                        SizedBox(height: _kSectionGap),
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            final isWide = constraints.maxWidth >= _kTwoColMinW;
-                            final goals = _buildMonthlyGoalsSection(
-                              context,
-                              theme,
-                            );
-                            final conversions = _buildConversionMetrics(
-                              context,
-                              theme,
-                            );
-                            if (!isWide) {
-                              return Column(
-                                children: [
-                                  goals,
-                                  SizedBox(height: _kSectionGap),
-                                  conversions,
-                                ],
-                              );
-                            }
-                            return Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(child: goals),
-                                SizedBox(width: _kSectionGap),
-                                Expanded(child: conversions),
-                              ],
-                            );
-                          },
-                        ),
+                        // OCULTO a pedido: "Performance mensal" (meta/projecao/
+                        // ranking). Atividades assume a linha inteira.
+                        _buildActivitiesSection(context, theme),
+                        // OCULTO a pedido: "Metas mensais" (Objetivos) e a
+                        // seção de conversão inteira — os dois medidores que
+                        // ela trazia não são confiáveis nesta base:
+                        //   • Visitas → Vendas: as visitas não são lançadas
+                        //     como compromisso do tipo `visit` (5 no mês
+                        //     contra 26 fichas finalizadas), então a razão
+                        //     estoura e o backend corta em 100%. O medidor
+                        //     ficava cravado em 100% por um motivo errado.
+                        //   • Clientes → Fechamento: o cálculo está correto,
+                        //     mas o status "fechado" quase não é mantido
+                        //     (6 de 376 clientes ativos = 2% fixo).
+                        // Número que não se sustenta é pior que número
+                        // nenhum — induz decisão errada.
                         if (_dashboardData!
                             .gamification
                             .achievements
@@ -766,10 +720,6 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _dashboardSkeletonOperationsMiniChip(BuildContext context) {
-    return SkeletonBox(height: 54, borderRadius: 12, width: double.infinity);
-  }
-
   /// Espelha `_buildOperationsPulseBlock` (tile com borda, não caixa sólida).
   Widget _dashboardSkeletonPulseBlock(BuildContext context) {
     return Container(
@@ -877,17 +827,9 @@ class _DashboardPageState extends State<DashboardPage> {
               ],
             ),
           ),
-          const SizedBox(height: 10),
-          // Mini chips (Visitas, Chaves, Notas)
-          Row(
-            children: [
-              Expanded(child: _dashboardSkeletonOperationsMiniChip(context)),
-              const SizedBox(width: 8),
-              Expanded(child: _dashboardSkeletonOperationsMiniChip(context)),
-              const SizedBox(width: 8),
-              Expanded(child: _dashboardSkeletonOperationsMiniChip(context)),
-            ],
-          ),
+          // A fileira de mini chips (Visitas/Chaves/Notas) saiu da seção —
+          // o esqueleto tem de espelhar o que carrega de verdade, senão
+          // promete um bloco que nunca aparece.
           const SizedBox(height: 14),
           // Section divider (label + linha)
           Row(
@@ -1730,69 +1672,54 @@ class _DashboardPageState extends State<DashboardPage> {
     final cSuccess = isDark
         ? AppColors.status.successDarkMode
         : AppColors.status.success;
-    final cWarning = isDark
-        ? AppColors.status.warningDarkMode
-        : AppColors.status.warning;
+
+    // Só DOIS cards: "Vistorias" saiu (a empresa não usa o módulo) e
+    // "Comissões" também (o número não é confiável). Ficam lado a lado —
+    // é a leitura de painel, não uma lista empilhada.
+    final props = stats.myProperties;
+    final clientes = stats.myClients;
 
     final cards = [
-      _buildSummaryCard(
+      _buildHeroStatCard(
         context: context,
         theme: theme,
-        title: 'Imóveis',
-        caption: 'Na carteira',
-        value: _formatNumber(stats.myProperties),
+        eyebrow: 'Carteira',
+        value: _formatNumber(props),
+        unit: props == 1 ? 'imóvel ativo' : 'imóveis ativos',
+        action: 'Ver carteira',
         icon: Icons.home_work_outlined,
         color: cInfo,
         onTap: routeTap(AppRoutes.properties),
       ),
-      _buildSummaryCard(
+      _buildHeroStatCard(
         context: context,
         theme: theme,
-        title: 'Clientes',
-        caption: 'Ativos',
-        value: _formatNumber(stats.myClients),
+        eyebrow: 'Relacionamento',
+        value: _formatNumber(clientes),
+        unit: clientes == 1 ? 'cliente ativo' : 'clientes ativos',
+        action: 'Ver clientes',
         icon: Icons.groups_2_outlined,
         color: cSuccess,
         onTap: routeTap(AppRoutes.clients),
-      ),
-      _buildSummaryCard(
-        context: context,
-        theme: theme,
-        title: 'Vistorias',
-        caption: 'Realizadas',
-        value: _formatNumber(stats.myInspections),
-        icon: Icons.fact_check_outlined,
-        color: cWarning,
-        onTap: routeTap(AppRoutes.inspections),
-      ),
-      _buildSummaryCard(
-        context: context,
-        theme: theme,
-        title: 'Comissões',
-        caption: 'Acumulado',
-        value: _formatCurrency(stats.myCommissions),
-        icon: Icons.payments_outlined,
-        color: _dashboardAccentColor(context),
-        onTap: routeTap(AppRoutes.commissions),
       ),
     ];
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final columns = width >= 860
-            ? 4
-            : width > _kStatsHScrollMaxW
-            ? 2
-            : (width >= 340 ? 2 : 1);
-        final spacing = width >= 620 ? 10.0 : 8.0;
-        final itemWidth = (width - (spacing * (columns - 1))) / columns;
-        return Wrap(
-          spacing: spacing,
-          runSpacing: spacing,
-          children: cards
-              .map((card) => SizedBox(width: itemWidth, child: card))
-              .toList(),
+        final spacing = width >= 620 ? 12.0 : 10.0;
+        // Sempre lado a lado: são só dois: empilhar desperdiçaria a largura
+        // e quebraria a leitura de painel. `IntrinsicHeight` iguala a altura
+        // dos dois sem fixar pixel (rótulo de 1 ou 2 linhas não desalinha).
+        return IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(child: cards[0]),
+              SizedBox(width: spacing),
+              Expanded(child: cards[1]),
+            ],
+          ),
         );
       },
     );
@@ -1818,10 +1745,10 @@ class _DashboardPageState extends State<DashboardPage> {
             color: const Color(0xFFF59E0B),
           ),
           (
-            label: 'Matches',
-            value: _formatNumber(stats.myMatches),
-            icon: Icons.favorite_rounded,
-            color: const Color(0xFF10B981),
+            label: 'Visitas',
+            value: _formatNumber(activityStats?.totalVisits ?? 0),
+            icon: Icons.travel_explore_rounded,
+            color: const Color(0xFF818CF8),
           ),
         ];
 
@@ -1836,8 +1763,6 @@ class _DashboardPageState extends State<DashboardPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _buildOperationsKpiRail(context, theme, segments),
-          const SizedBox(height: 10),
-          _buildOperationsContextChips(context, theme, stats, activityStats),
           if (activityStats != null) ...[
             const SizedBox(height: 14),
             _buildPerformanceSectionDivider(
@@ -1934,172 +1859,31 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  /// Bloco "Pulso" — duas linhas inline dentro de um único container.
-  /// Linha 1: fluxo (visitas + agendamentos no mês).
-  /// Linha 2: conclusão (% concluído + barra animada + status semântico).
+  /// **Pulso operacional** — flush, sem caixa.
+  ///
+  /// A versão anterior encapsulava tudo num tile com fundo e borda, e as
+  /// cores viviam em alfa baixo — daí a leitura "desbotada e vaga". Aqui o
+  /// bloco encosta na seção (o painel já é a moldura) e a cor é **cheia**:
+  /// o percentual em tamanho de manchete no tom do diagnóstico, e a régua
+  /// de batimento pintada sem véu.
   Widget _buildOperationsPulseBlock(
     BuildContext context,
     ThemeData theme,
     DashboardActivityStats activityStats,
   ) {
     final isDark = theme.brightness == Brightness.dark;
-    final accent = _dashboardAccentColor(context);
-    final tone = _operationsCompletionTone(activityStats.completionRate);
-    final rate = (activityStats.completionRate / 100)
-        .clamp(0.0, 1.0)
-        .toDouble();
-    final pctRounded = activityStats.completionRate.round();
+    // O helper devolve label E cor juntos (Ótimo / No alvo / Atenção /
+    // Priorizar) — reusar os dois mantém o diagnóstico coerente.
+    final diag = _operationsCompletionTone(activityStats.completionRate);
+    final tone = diag.tone;
+    final pct = activityStats.completionRate.clamp(0.0, 100.0);
+    final pctRounded = pct.round();
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-      decoration: ShellVisualTokens.inlineTileDecoration(
-        context,
-        accent,
-        radius: 16,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _buildOperationsPulseFluxRow(
-            context: context,
-            theme: theme,
-            activityStats: activityStats,
-            isDark: isDark,
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 10),
-            child: Container(
-              height: 1,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    Colors.transparent,
-                    ShellVisualTokens.dashboardGlassBorder(context),
-                    Colors.transparent,
-                  ],
-                ),
-              ),
-            ),
-          ),
-          _buildOperationsPulseCompletionRow(
-            context: context,
-            theme: theme,
-            isDark: isDark,
-            rate: rate,
-            pctRounded: pctRounded,
-            tone: tone,
-          ),
-        ],
-      ),
-    );
-  }
+    const totalSegmentos = 12;
+    final preenchidos = (pct / 100 * totalSegmentos).round();
 
-  Widget _buildOperationsPulseFluxRow({
-    required BuildContext context,
-    required ThemeData theme,
-    required DashboardActivityStats activityStats,
-    required bool isDark,
-  }) {
-    const cool = Color(0xFF6366F1);
-    final visits = activityStats.totalVisits;
-    final monthAppt = activityStats.appointmentsThisMonth;
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(11),
-            gradient: LinearGradient(
-              colors: [
-                cool.withValues(alpha: isDark ? 0.5 : 0.42),
-                cool.withValues(alpha: isDark ? 0.24 : 0.22),
-              ],
-            ),
-          ),
-          child: const Icon(Icons.radar_rounded, size: 16, color: Colors.white),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'FLUXO OPERACIONAL',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: cool.withValues(alpha: isDark ? 0.95 : 0.88),
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.95,
-                  fontSize: 9.5,
-                  height: 1.1,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 3),
-              Text(
-                monthAppt == 1
-                    ? '1 agendamento este mês'
-                    : '${_formatNumber(monthAppt)} agendamentos este mês',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                  fontWeight: FontWeight.w700,
-                  height: 1.2,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 8),
-        // Valor à direita: número grande + label "visitas"
-        Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerRight,
-              child: Text(
-                _formatNumber(visits),
-                style: theme.textTheme.titleLarge?.copyWith(
-                  color: ThemeHelpers.textColor(context),
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.6,
-                  height: 1,
-                ),
-              ),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              visits == 1 ? 'visita' : 'visitas',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: cool.withValues(alpha: isDark ? 0.85 : 0.78),
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.35,
-                fontSize: 9.5,
-                height: 1,
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildOperationsPulseCompletionRow({
-    required BuildContext context,
-    required ThemeData theme,
-    required bool isDark,
-    required double rate,
-    required int pctRounded,
-    required ({String label, Color tone}) tone,
-  }) {
-    const teal = Color(0xFF14B8A6);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -2107,102 +1891,69 @@ class _DashboardPageState extends State<DashboardPage> {
         Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(11),
-                gradient: LinearGradient(
-                  colors: [
-                    tone.tone.withValues(alpha: isDark ? 0.5 : 0.42),
-                    tone.tone.withValues(alpha: isDark ? 0.24 : 0.22),
-                  ],
+            // Percentual em manchete: é o dado, não um rótulo.
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '$pctRounded',
+                  style: theme.textTheme.displaySmall?.copyWith(
+                    color: tone,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -2,
+                    height: 0.95,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
                 ),
-              ),
-              child: const Icon(
-                Icons.task_alt_rounded,
-                size: 16,
-                color: Colors.white,
-              ),
+                Text(
+                  '%',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: tone,
+                    fontWeight: FontWeight.w900,
+                    height: 1,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    'CONCLUSÃO DE TAREFAS',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: tone.tone.withValues(alpha: isDark ? 0.95 : 0.88),
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.95,
-                      fontSize: 9.5,
-                      height: 1.1,
+                  // Diagnóstico em pill SÓLIDA — sem véu de alfa baixo.
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 4,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: tone.tone,
-                          boxShadow: [
-                            BoxShadow(
-                              color: tone.tone.withValues(
-                                alpha: isDark ? 0.5 : 0.28,
-                              ),
-                              blurRadius: isDark ? 4 : 3,
-                              spreadRadius: isDark ? 0 : -0.5,
-                            ),
-                          ],
-                        ),
+                    decoration: BoxDecoration(
+                      color: tone,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      pctRounded > 0 ? diag.label : 'Sem dados',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: _inkOnTone(tone),
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.4,
+                        fontSize: 10,
+                        height: 1.1,
                       ),
-                      const SizedBox(width: 6),
-                      Text(
-                        tone.label,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: tone.tone,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 0.4,
-                          fontSize: 9.5,
-                          height: 1,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerRight,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.baseline,
-                textBaseline: TextBaseline.alphabetic,
-                children: [
-                  Text(
-                    '$pctRounded',
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      color: ThemeHelpers.textColor(context),
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.6,
-                      height: 1,
                     ),
                   ),
+                  const SizedBox(height: 6),
                   Text(
-                    '%',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: tone.tone.withValues(alpha: isDark ? 0.95 : 0.85),
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.2,
-                      height: 1,
+                    'das tarefas concluídas',
+                    maxLines: 2,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: secondary,
+                      fontWeight: FontWeight.w700,
+                      height: 1.25,
                     ),
                   ),
                 ],
@@ -2210,172 +1961,143 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
           ],
         ),
-        const SizedBox(height: 10),
-        // Barra de progresso animada com glow
+        const SizedBox(height: 14),
+        // Batimento: traços cheios na cor do diagnóstico, os vazios em
+        // hairline neutro. Sem alfa nos preenchidos — é o que tira o
+        // aspecto lavado.
         SizedBox(
           height: 8,
-          child: Stack(
+          child: Row(
             children: [
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(99),
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.07)
-                        : Colors.black.withValues(alpha: 0.05),
-                  ),
-                ),
-              ),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(99),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: TweenAnimationBuilder<double>(
-                    tween: Tween(begin: 0, end: rate),
-                    duration: const Duration(milliseconds: 750),
-                    curve: Curves.easeOutCubic,
-                    builder: (context, anim, _) => FractionallySizedBox(
-                      widthFactor: anim,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(99),
-                          gradient: LinearGradient(
-                            colors: [
-                              teal.withValues(alpha: 0.95),
-                              tone.tone.withValues(alpha: 0.95),
-                            ],
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: tone.tone.withValues(
-                                alpha: isDark ? 0.32 : 0.18,
-                              ),
-                              blurRadius: isDark ? 6 : 5,
-                              offset: Offset(0, isDark ? 2 : 1),
-                              spreadRadius: -2,
-                            ),
-                          ],
-                        ),
-                      ),
+              for (var i = 0; i < totalSegmentos; i++) ...[
+                if (i > 0) const SizedBox(width: 4),
+                Expanded(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(2),
+                      color: i < preenchidos
+                          ? tone
+                          : (isDark
+                              ? Colors.white.withValues(alpha: 0.10)
+                              : Colors.black.withValues(alpha: 0.07)),
                     ),
                   ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        // Contexto na horizontal, separado por um filete vertical em vez de
+        // caixas — mantém o flush e ainda distingue os dois números.
+        IntrinsicHeight(
+          child: Row(
+            children: [
+              Expanded(
+                child: _buildPulseFootItem(
+                  context: context,
+                  theme: theme,
+                  icon: Icons.travel_explore_rounded,
+                  value: _formatNumber(activityStats.totalVisits),
+                  label: activityStats.totalVisits == 1 ? 'visita' : 'visitas',
+                  color: const Color(0xFF6366F1),
+                ),
+              ),
+              Container(
+                width: 1,
+                margin: const EdgeInsets.symmetric(horizontal: 14),
+                color: ThemeHelpers.borderColor(
+                  context,
+                ).withValues(alpha: 0.55),
+              ),
+              Expanded(
+                child: _buildPulseFootItem(
+                  context: context,
+                  theme: theme,
+                  icon: Icons.event_available_rounded,
+                  value: _formatNumber(activityStats.appointmentsThisMonth),
+                  label: 'agenda no mês',
+                  color: const Color(0xFFF59E0B),
                 ),
               ),
             ],
           ),
         ),
-      ],
-    );
-  }
-
-  Widget _buildOperationsContextChips(
-    BuildContext context,
-    ThemeData theme,
-    DashboardStats stats,
-    DashboardActivityStats? activityStats,
-  ) {
-    final chips = <({IconData icon, String label, String value, Color color})>[
-      (
-        icon: Icons.travel_explore_rounded,
-        label: 'Visitas',
-        value: activityStats != null
-            ? _formatNumber(activityStats.totalVisits)
-            : '—',
-        color: const Color(0xFF818CF8),
-      ),
-      (
-        icon: Icons.vpn_key_rounded,
-        label: 'Chaves',
-        value: _formatNumber(stats.myKeys),
-        color: const Color(0xFFA78BFA),
-      ),
-      (
-        icon: Icons.sticky_note_2_rounded,
-        label: 'Notas',
-        value: _formatNumber(stats.myNotes),
-        color: const Color(0xFFF472B6),
-      ),
-    ];
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (var i = 0; i < chips.length; i++) ...[
-          if (i > 0) const SizedBox(width: 8),
-          Expanded(
-            child: _buildOperationsMiniChip(
-              context,
-              theme,
-              icon: chips[i].icon,
-              label: chips[i].label,
-              value: chips[i].value,
-              color: chips[i].color,
+        const SizedBox(height: 2),
+        // Linha de contexto: sem isto o "%" fica sem denominador visível.
+        Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: Text(
+            'Base: tarefas atribuídas a você no período do filtro.',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: secondary.withValues(alpha: 0.85),
+              fontWeight: FontWeight.w600,
+              height: 1.25,
             ),
           ),
-        ],
+        ),
       ],
     );
   }
 
-  Widget _buildOperationsMiniChip(
-    BuildContext context,
-    ThemeData theme, {
+  /// Tinta legível sobre fundo cheio — coluna clara pede tinta escura.
+  Color _inkOnTone(Color tone) =>
+      tone.computeLuminance() > 0.55 ? const Color(0xFF0F172A) : Colors.white;
+
+  /// Item do rodapé do pulso: ícone tonal + número + rótulo, numa linha só.
+  Widget _buildPulseFootItem({
+    required BuildContext context,
+    required ThemeData theme,
     required IconData icon,
-    required String label,
     required String value,
+    required String label,
     required Color color,
   }) {
     final isDark = theme.brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        color: color.withValues(alpha: isDark ? 0.1 : 0.06),
-        border: Border.all(
-          color: color.withValues(alpha: isDark ? 0.32 : 0.28),
+    return Row(
+      children: [
+        Container(
+          width: 24,
+          height: 24,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            color: color.withValues(alpha: isDark ? 0.18 : 0.11),
+          ),
+          child: Icon(icon, size: 13, color: color),
         ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Icon(icon, size: 14, color: color.withValues(alpha: 0.95)),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
+        const SizedBox(width: 8),
+        Expanded(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
               children: [
                 Text(
-                  label.toUpperCase(),
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: color.withValues(alpha: isDark ? 0.92 : 0.82),
+                  value,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: ThemeHelpers.textColor(context),
                     fontWeight: FontWeight.w900,
-                    letterSpacing: 0.85,
-                    fontSize: 9.5,
                     height: 1,
+                    letterSpacing: -0.3,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 3),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    value,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: ThemeHelpers.textColor(context),
-                      fontWeight: FontWeight.w900,
-                      height: 1,
-                      letterSpacing: -0.3,
-                    ),
+                const SizedBox(width: 5),
+                Text(
+                  label,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ],
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -4389,174 +4111,6 @@ class _DashboardPageState extends State<DashboardPage> {
     return const Color(0xFFEC4899);
   }
 
-  Widget _buildConversionMetrics(BuildContext context, ThemeData theme) {
-    final metrics = _dashboardData?.conversionMetrics;
-    if (metrics == null) return const SizedBox.shrink();
-    final isDark = theme.brightness == Brightness.dark;
-
-    // 3 indicadores: 2 taxas (gauge) + 1 contagem (matches).
-    final visitsGauge = _ConversionGaugeData(
-      label: 'Visitas → Vendas',
-      shortLabel: 'Visitas',
-      percentage: metrics.visitsToSales,
-      icon: Icons.show_chart_rounded,
-      baseColor: const Color(0xFF6366F1),
-    );
-    final clientsGauge = _ConversionGaugeData(
-      label: 'Clientes → Fechados',
-      shortLabel: 'Clientes',
-      percentage: metrics.clientsToClosed,
-      icon: Icons.handshake_rounded,
-      baseColor: const Color(0xFFEC4899),
-    );
-
-    return _buildDashboardPanel(
-      context: context,
-      title: 'Métricas de conversão',
-      eyebrow: 'EFICIÊNCIA',
-      icon: Icons.insights_outlined,
-      elevatedSurface: false,
-      trailing: _buildConversionTrailingTag(
-        theme: theme,
-        gauges: [visitsGauge, clientsGauge],
-        isDark: isDark,
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final w = constraints.maxWidth;
-          final wideRow = w >= 460;
-          final mediumRow = w >= 320;
-
-          final gaugeVisits = _buildConversionGaugeTile(
-            context: context,
-            theme: theme,
-            data: visitsGauge,
-            isDark: isDark,
-          );
-          final gaugeClients = _buildConversionGaugeTile(
-            context: context,
-            theme: theme,
-            data: clientsGauge,
-            isDark: isDark,
-          );
-          final matchesTile = _buildConversionMatchesTile(
-            context: context,
-            theme: theme,
-            count: metrics.matchesAccepted,
-            isDark: isDark,
-          );
-
-          if (wideRow) {
-            return IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(flex: 5, child: gaugeVisits),
-                  const SizedBox(width: 10),
-                  Expanded(flex: 5, child: gaugeClients),
-                  const SizedBox(width: 10),
-                  Expanded(flex: 4, child: matchesTile),
-                ],
-              ),
-            );
-          }
-          if (mediumRow) {
-            // 2 gauges em row + matches abaixo (mais compacto que 3 colunas estreitas)
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                IntrinsicHeight(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(child: gaugeVisits),
-                      const SizedBox(width: 10),
-                      Expanded(child: gaugeClients),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 10),
-                matchesTile,
-              ],
-            );
-          }
-          // Stretto extremo — empilha tudo
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              gaugeVisits,
-              const SizedBox(height: 10),
-              gaugeClients,
-              const SizedBox(height: 10),
-              matchesTile,
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  /// Tag agregada no header — média das taxas, com tom verde/amarelo/vermelho.
-  Widget _buildConversionTrailingTag({
-    required ThemeData theme,
-    required List<_ConversionGaugeData> gauges,
-    required bool isDark,
-  }) {
-    final avg = gauges.isEmpty
-        ? 0.0
-        : gauges.map((g) => g.percentage).reduce((a, b) => a + b) /
-              gauges.length;
-    final tone = _conversionTone(avg);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(10, 5, 11, 5),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        gradient: LinearGradient(
-          colors: [
-            tone.withValues(alpha: isDark ? 0.32 : 0.18),
-            tone.withValues(alpha: isDark ? 0.16 : 0.09),
-          ],
-        ),
-        border: Border.all(color: tone.withValues(alpha: 0.5)),
-        boxShadow: [
-          BoxShadow(
-            color: tone.withValues(alpha: isDark ? 0.22 : 0.1),
-            blurRadius: isDark ? 10 : 6,
-            offset: Offset(0, isDark ? 3 : 2),
-            spreadRadius: -2,
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.adjust_rounded, size: 14, color: tone),
-          const SizedBox(width: 5),
-          Text(
-            '${avg.toStringAsFixed(1)}%',
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: tone,
-              fontWeight: FontWeight.w900,
-              letterSpacing: -0.1,
-              height: 1,
-            ),
-          ),
-          const SizedBox(width: 4),
-          Text(
-            'média',
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: tone.withValues(alpha: 0.85),
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.4,
-              fontSize: 9.5,
-              height: 1,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   /// Tonalidade comum a todos os indicadores de eficiência.
   Color _conversionTone(double pct) {
     if (pct >= 50) return const Color(0xFF10B981);
@@ -4564,347 +4118,11 @@ class _DashboardPageState extends State<DashboardPage> {
     return const Color(0xFFEF4444);
   }
 
-  Widget _buildConversionGaugeTile({
-    required BuildContext context,
-    required ThemeData theme,
-    required _ConversionGaugeData data,
-    required bool isDark,
-  }) {
-    final tone = _conversionTone(data.percentage);
-    final pct01 = (data.percentage / 100).clamp(0.0, 1.0).toDouble();
-    final base = data.baseColor;
-
-    return Container(
-      clipBehavior: Clip.antiAlias,
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            base.withValues(alpha: isDark ? 0.18 : 0.1),
-            base.withValues(alpha: isDark ? 0.05 : 0.04),
-          ],
-        ),
-        border: Border.all(color: base.withValues(alpha: isDark ? 0.32 : 0.3)),
-        boxShadow: isDark
-            ? null
-            : [
-                BoxShadow(
-                  color: const Color(0xFF1A2340).withValues(alpha: 0.055),
-                  blurRadius: 12,
-                  offset: const Offset(0, 3),
-                  spreadRadius: -4,
-                ),
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.022),
-                  blurRadius: 5,
-                  offset: const Offset(0, 1),
-                  spreadRadius: -1,
-                ),
-              ],
-      ),
-      child: Stack(
-        children: [
-          // Orbe sutil de fundo
-          Positioned(
-            right: -16,
-            top: -22,
-            child: IgnorePointer(
-              child: Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: base.withValues(alpha: isDark ? 0.1 : 0.065),
-                ),
-              ),
-            ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(9),
-                      gradient: LinearGradient(
-                        colors: [
-                          base.withValues(alpha: isDark ? 0.5 : 0.42),
-                          base.withValues(alpha: isDark ? 0.24 : 0.22),
-                        ],
-                      ),
-                    ),
-                    child: Icon(
-                      data.icon,
-                      size: 13,
-                      color: Colors.white.withValues(alpha: 0.96),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      data.label.toUpperCase(),
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: base.withValues(alpha: isDark ? 0.95 : 0.88),
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.85,
-                        fontSize: 9.5,
-                        height: 1.15,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              // Gauge semi-circular animado
-              SizedBox(
-                height: 70,
-                child: TweenAnimationBuilder<double>(
-                  tween: Tween(begin: 0, end: pct01),
-                  duration: const Duration(milliseconds: 900),
-                  curve: Curves.easeOutCubic,
-                  builder: (context, anim, _) => Stack(
-                    children: [
-                      Positioned.fill(
-                        child: CustomPaint(
-                          painter: _ConversionGaugePainter(
-                            progress: anim,
-                            color: tone,
-                            trackColor: isDark
-                                ? Colors.white.withValues(alpha: 0.07)
-                                : base.withValues(alpha: 0.1),
-                            tickColor: base,
-                          ),
-                        ),
-                      ),
-                      // Número grande no centro do arco
-                      Align(
-                        alignment: Alignment.bottomCenter,
-                        child: Padding(
-                          padding: const EdgeInsets.only(bottom: 2),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                '${(anim * 100).toStringAsFixed(1)}%',
-                                style: theme.textTheme.headlineSmall?.copyWith(
-                                  color: ThemeHelpers.textColor(context),
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: -0.85,
-                                  height: 1,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
-              // Mini-status com bolinha tonal e label semântico
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: tone,
-                      boxShadow: [
-                        BoxShadow(
-                          color: tone.withValues(alpha: isDark ? 0.55 : 0.32),
-                          blurRadius: isDark ? 5 : 4,
-                          spreadRadius: isDark ? 0 : -0.5,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    _conversionStatusLabel(data.percentage),
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: tone,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.4,
-                      fontSize: 9.5,
-                      height: 1,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
   String _conversionStatusLabel(double pct) {
     if (pct >= 50) return 'EXCELENTE';
     if (pct >= 25) return 'EM RITMO';
     if (pct > 0) return 'PRECISA ATENÇÃO';
     return 'SEM REGISTRO';
-  }
-
-  Widget _buildConversionMatchesTile({
-    required BuildContext context,
-    required ThemeData theme,
-    required int count,
-    required bool isDark,
-  }) {
-    const base = Color(0xFF10B981);
-    return Container(
-      clipBehavior: Clip.antiAlias,
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            base.withValues(alpha: isDark ? 0.2 : 0.12),
-            base.withValues(alpha: isDark ? 0.06 : 0.04),
-          ],
-        ),
-        border: Border.all(color: base.withValues(alpha: isDark ? 0.36 : 0.3)),
-        boxShadow: isDark
-            ? null
-            : [
-                BoxShadow(
-                  color: const Color(0xFF1A2340).withValues(alpha: 0.06),
-                  blurRadius: 12,
-                  offset: const Offset(0, 3),
-                  spreadRadius: -4,
-                ),
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.022),
-                  blurRadius: 5,
-                  offset: const Offset(0, 1),
-                  spreadRadius: -1,
-                ),
-              ],
-      ),
-      child: Stack(
-        children: [
-          // Heart anelado decorativo
-          Positioned(
-            right: -10,
-            bottom: -14,
-            child: IgnorePointer(
-              child: Icon(
-                Icons.favorite_rounded,
-                size: 96,
-                color: base.withValues(alpha: isDark ? 0.06 : 0.045),
-              ),
-            ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(9),
-                      gradient: LinearGradient(
-                        colors: [
-                          base.withValues(alpha: isDark ? 0.5 : 0.42),
-                          base.withValues(alpha: isDark ? 0.24 : 0.22),
-                        ],
-                      ),
-                    ),
-                    child: const Icon(
-                      Icons.favorite_rounded,
-                      size: 13,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'MATCHES ACEITOS',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: base.withValues(alpha: isDark ? 0.95 : 0.88),
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.85,
-                        fontSize: 9.5,
-                        height: 1.15,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              // Espelha a altura do gauge para alinhar com gauges (70px da painel + ~20 do label/dot)
-              SizedBox(
-                height: 70,
-                child: Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
-                        child: TweenAnimationBuilder<double>(
-                          tween: Tween(begin: 0, end: count.toDouble()),
-                          duration: const Duration(milliseconds: 750),
-                          curve: Curves.easeOutCubic,
-                          builder: (context, anim, _) => Text(
-                            _formatNumber(anim.round()),
-                            style: theme.textTheme.displaySmall?.copyWith(
-                              color: ThemeHelpers.textColor(context),
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -1.6,
-                              height: 1,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        count == 1
-                            ? '1 conexão confirmada'
-                            : '${_formatNumber(count)} conexões confirmadas',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.05,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
-              // Mini-barra de "intensidade" (visual sutil — saturada conforme cresce).
-              _buildMatchesIntensityBar(
-                context: context,
-                count: count,
-                base: base,
-                isDark: isDark,
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
   }
 
   /// Barrinha de intensidade — 0 a 5 segmentos com base no count.
@@ -5181,190 +4399,145 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildSummaryCard({
+  /// Card de destaque do dashboard — dois lado a lado.
+  ///
+  /// Fala a MESMA língua dos painéis da tela: superfície
+  /// [ShellVisualTokens.elevatedPanelDecoration] (raio 24, brilho de acento)
+  /// e [_buildIconBadge] (gradiente sólido, ícone branco). A versão anterior
+  /// inventava borda, sombra e placa tingida próprias — por isso destoava do
+  /// resto do dashboard.
+  ///
+  /// Cada card mantém a cor da sua categoria como acento, então a gramática
+  /// é comum sem os dois virarem clones.
+  ///
+  /// Sem barra de progresso: estas contagens não têm teto e a barra
+  /// insinuaria "quanto falta" de um total que não existe.
+  Widget _buildHeroStatCard({
     required BuildContext context,
     required ThemeData theme,
-    required String title,
-    required String caption,
+    required String eyebrow,
     required String value,
+    required String unit,
+    required String action,
     required IconData icon,
     required Color color,
     VoidCallback? onTap,
   }) {
-    // Altura fixa: filhos de `Wrap` têm altura máxima ilimitada — `Spacer`/`Expanded`
-    // no eixo vertical quebram o layout e podem deixar o dashboard em branco.
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final figureStyle = theme.textTheme.headlineSmall?.copyWith(
-      fontWeight: FontWeight.w900,
-      color: ThemeHelpers.textColor(context),
-      letterSpacing: -0.85,
-      height: 1.0,
-      fontFeatures: const [FontFeature.tabularFigures()],
-    );
+    final isDark = theme.brightness == Brightness.dark;
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+
     final card = Container(
-      height: 126,
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        color: ThemeHelpers.cardBackgroundColor(
-          context,
-        ).withValues(alpha: isDark ? 0.5 : 1),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(
-            context,
-          ).withValues(alpha: isDark ? 0.6 : 0.7),
-        ),
-        boxShadow: isDark
-            ? null
-            : [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.04),
-                  blurRadius: 14,
-                  offset: const Offset(0, 5),
-                  spreadRadius: -8,
-                ),
-              ],
-      ),
-      child: Stack(
+      padding: const EdgeInsets.all(14),
+      decoration: ShellVisualTokens.elevatedPanelDecoration(context, color),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Brilho de cor no canto superior direito: dá vida sem faixa lateral
-          // (mantém o padrão flush) e amarra o card à sua cor de categoria.
-          Positioned(
-            top: -34,
-            right: -26,
-            child: Container(
-              width: 108,
-              height: 108,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    color.withValues(alpha: isDark ? 0.20 : 0.12),
-                    color.withValues(alpha: 0.0),
-                  ],
+          Row(
+            children: [
+              _buildIconBadge(context, icon, color, size: 40, iconSize: 20),
+              const Spacer(),
+              if (onTap != null)
+                Icon(
+                  Icons.arrow_outward_rounded,
+                  size: 16,
+                  color: secondary.withValues(alpha: 0.7),
                 ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          // Eyebrow na régua do painel: labelSmall w900, ls 1.4, secundário.
+          Text(
+            eyebrow.toUpperCase(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: secondary,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.4,
+            ),
+          ),
+          const SizedBox(height: 6),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              style: theme.textTheme.headlineMedium?.copyWith(
+                fontWeight: FontWeight.w900,
+                color: textColor,
+                letterSpacing: -1,
+                height: 1,
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    // Plate com gradiente da cor da categoria: mais refinado
-                    // que o tile chapado.
-                    Container(
-                      width: 40,
-                      height: 40,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(13),
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [
-                            color.withValues(alpha: isDark ? 0.34 : 0.20),
-                            color.withValues(alpha: isDark ? 0.18 : 0.10),
-                          ],
-                        ),
-                        border: Border.all(
-                          color: color.withValues(alpha: isDark ? 0.34 : 0.22),
-                        ),
-                      ),
-                      child: Icon(icon, size: 20, color: color),
-                    ),
-                    const Spacer(),
-                    if (onTap != null)
-                      Container(
-                        width: 26,
-                        height: 26,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: color.withValues(alpha: isDark ? 0.16 : 0.10),
-                        ),
-                        child: Icon(
-                          Icons.arrow_outward_rounded,
-                          size: 14,
-                          color: color,
-                        ),
-                      ),
-                  ],
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(value, style: figureStyle),
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Text(
-                          title.toUpperCase(),
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: ThemeHelpers.textColor(context),
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.6,
-                            fontSize: 10.5,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(width: 6),
-                        Container(
-                          width: 3,
-                          height: 3,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: color.withValues(alpha: 0.7),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            caption,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: ThemeHelpers.textSecondaryColor(context),
-                              fontWeight: FontWeight.w600,
-                              fontSize: 10.5,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ],
+          const SizedBox(height: 5),
+          Text(
+            unit,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: secondary,
+              letterSpacing: -0.1,
             ),
+          ),
+          const SizedBox(height: 12),
+          // Régua gradiente horizontal — a mesma assinatura que o painel usa
+          // sob o cabeçalho. É o que amarra o card ao resto da tela.
+          Container(
+            height: 3,
+            width: 44,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(3),
+              gradient: LinearGradient(
+                colors: isDark
+                    ? [color, color.withValues(alpha: 0.15)]
+                    : [
+                        ThemeHelpers.borderColor(
+                          context,
+                        ).withValues(alpha: 0.35),
+                        color.withValues(alpha: 0.7),
+                      ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 11),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  action,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.2,
+                    color: secondary,
+                  ),
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 15,
+                color: secondary.withValues(alpha: 0.6),
+              ),
+            ],
           ),
         ],
       ),
     );
 
     if (onTap == null) return card;
-
-    // Quando há `onTap`, envolvemos em Material+InkWell pra ganhar ripple
-    // e indicar visualmente que o card é interativo. ClipRRect respeita o
-    // borderRadius original do Container.
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          splashColor: color.withValues(alpha: 0.18),
-          highlightColor: color.withValues(alpha: 0.08),
-          child: card,
-        ),
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(24),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(24),
+        child: card,
       ),
     );
   }
@@ -5492,79 +4665,6 @@ class _ConversionGaugeData {
     required this.icon,
     required this.baseColor,
   });
-}
-
-/// Pintor do gauge semi-circular usado em "Métricas de conversão".
-///
-/// - Track sutil (mesma curvatura) com strokeCap arredondado.
-/// - Arco de progresso com gradiente sweep da cor "tonal".
-/// - Pontos de referência nas extremidades (0% e 100%) para reforçar leitura.
-class _ConversionGaugePainter extends CustomPainter {
-  final double progress; // 0..1
-  final Color color;
-  final Color trackColor;
-  final Color tickColor;
-
-  _ConversionGaugePainter({
-    required this.progress,
-    required this.color,
-    required this.trackColor,
-    required this.tickColor,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    const strokeWidth = 9.0;
-    final cx = size.width / 2;
-    final cy = size.height - 6;
-    final radius = min(size.width / 2, size.height) - strokeWidth / 2 - 2;
-    final rect = Rect.fromCircle(center: Offset(cx, cy), radius: radius);
-
-    // Track (semi-círculo de pi até 2*pi)
-    final trackPaint = Paint()
-      ..color = trackColor
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeWidth
-      ..strokeCap = StrokeCap.round;
-    canvas.drawArc(rect, pi, pi, false, trackPaint);
-
-    // Arco de progresso com SweepGradient da cor (com ponta arredondada)
-    if (progress > 0.001) {
-      final progressPaint = Paint()
-        ..shader = SweepGradient(
-          startAngle: pi,
-          endAngle: pi * 2,
-          colors: [color.withValues(alpha: 0.55), color],
-        ).createShader(rect)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = strokeWidth
-        ..strokeCap = StrokeCap.round;
-      canvas.drawArc(rect, pi, pi * progress, false, progressPaint);
-
-      // Ponteiro discreto na extremidade do progresso (efeito "led" final).
-      final endAngle = pi + pi * progress;
-      final endX = cx + radius * cos(endAngle);
-      final endY = cy + radius * sin(endAngle);
-      final knobOuter = Paint()..color = color.withValues(alpha: 0.18);
-      canvas.drawCircle(Offset(endX, endY), strokeWidth * 0.95, knobOuter);
-      final knobInner = Paint()..color = color;
-      canvas.drawCircle(Offset(endX, endY), strokeWidth * 0.32, knobInner);
-    }
-
-    // Ticks nas extremidades (0% à esquerda, 100% à direita)
-    final tickPaint = Paint()
-      ..color = tickColor.withValues(alpha: 0.5)
-      ..style = PaintingStyle.fill;
-    canvas.drawCircle(Offset(cx - radius, cy), 1.6, tickPaint);
-    canvas.drawCircle(Offset(cx + radius, cy), 1.6, tickPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _ConversionGaugePainter old) =>
-      old.progress != progress ||
-      old.color != color ||
-      old.trackColor != trackColor ||
-      old.tickColor != tickColor;
 }
 
 // ═══════════════════════════════════════════════════════════════════

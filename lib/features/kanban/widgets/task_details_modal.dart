@@ -1739,56 +1739,8 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // A seção "Briefing" saiu daqui: era o bloco mais alto da aba e
-          // empurrava a ficha para baixo sem ser o que o corretor abre o
-          // card para ver. A descrição continua no card do board.
-          //
-          // 1. RAIO-X — ficha técnica flush (valor, resultado, prazo, cadência…)
-          //
-          // A etapa NÃO mora mais aqui: virou o trilho do funil no hero, onde
-          // ela é desenho (percurso do lead) e não "mais uma linha de opção"
-          // no meio da ficha. O sheet de lista continua vivo como atalho para
-          // funis longos — chamado pelo toque no nome da etapa no trilho.
-          _TaskDossier(
-            task: task,
-            state: state,
-            canEdit: _canEdit,
-            savingField: _savingField,
-            onEditValue: _editValue,
-            onEditDeadline: _editDeadline,
-            onEditPriority: _editPriority,
-          ),
-          const SizedBox(height: 26),
-
-          // 2.2 VÍNCULOS — cliente e imóvel da negociação. Trocar sim,
-          // desvincular não: o backend valida UUID e recusa null, então a UI
-          // não oferece o que a API não aceita.
-          _SectionHeader(
-            overline: 'Vínculos',
-            title: 'Cliente e imóvel',
-            accent: _kLinksTone,
-          ),
-          const SizedBox(height: 10),
-          _LinkRow(
-            icon: Icons.badge_outlined,
-            label: 'Cliente',
-            value: task.client?.name.trim(),
-            canEdit: _canEdit,
-            saving: _savingField == 'client',
-            onTap: _editClientLink,
-          ),
-          _LinkRow(
-            icon: Icons.home_work_outlined,
-            label: 'Imóvel',
-            value: _propertyLabel,
-            canEdit: _canEdit,
-            saving: _savingField == 'property',
-            onTap: _editPropertyLink,
-            isLast: true,
-          ),
-          const SizedBox(height: 26),
-
-          // 2.5 LEAD / CONTATO — número do lead estilizado (paridade com o
+          // 1. LEAD / CONTATO — PRIMEIRA seção: é para isso que o corretor
+          // abre o card. Número do lead estilizado (paridade com o
           // web) + as duas ações que o corretor mais repete no dia.
           // Sem contagem no cabeçalho: quem conta os contatos é o botão
           // "Contatos (n)" logo abaixo — dois números para a mesma coisa
@@ -1824,8 +1776,57 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
             onManageContacts: _manageContacts,
           ),
           const SizedBox(height: 26),
+          // A seção "Briefing" saiu daqui: era o bloco mais alto da aba e
+          // empurrava a ficha para baixo sem ser o que o corretor abre o
+          // card para ver. A descrição continua no card do board.
+          //
+          // 2. RAIO-X — ficha técnica flush (valor, resultado, prazo, cadência…)
+          //
+          // A etapa NÃO mora mais aqui: virou o trilho do funil no hero, onde
+          // ela é desenho (percurso do lead) e não "mais uma linha de opção"
+          // no meio da ficha. O sheet de lista continua vivo como atalho para
+          // funis longos — chamado pelo toque no nome da etapa no trilho.
+          _TaskDossier(
+            task: task,
+            state: state,
+            canEdit: _canEdit,
+            savingField: _savingField,
+            onEditValue: _editValue,
+            onEditDeadline: _editDeadline,
+            onEditPriority: _editPriority,
+          ),
+          const SizedBox(height: 26),
 
-          // 2.8 INTERNO — o que o time anota e o cliente nunca vê.
+          // 3. VÍNCULOS — cliente e imóvel da negociação. Trocar sim,
+          // desvincular não: o backend valida UUID e recusa null, então a UI
+          // não oferece o que a API não aceita.
+          _SectionHeader(
+            overline: 'Vínculos',
+            title: 'Cliente e imóvel',
+            accent: _kLinksTone,
+          ),
+          const SizedBox(height: 10),
+          _LinkRow(
+            icon: Icons.badge_outlined,
+            label: 'Cliente',
+            value: task.client?.name.trim(),
+            canEdit: _canEdit,
+            saving: _savingField == 'client',
+            onTap: _editClientLink,
+          ),
+          _LinkRow(
+            icon: Icons.home_work_outlined,
+            label: 'Imóvel',
+            value: _propertyLabel,
+            canEdit: _canEdit,
+            saving: _savingField == 'property',
+            onTap: _editPropertyLink,
+            isLast: true,
+          ),
+          const SizedBox(height: 26),
+
+
+          // 4. INTERNO — o que o time anota e o cliente nunca vê.
           _InternalNotesSection(
             notes: _internalNotes,
             canEdit: _canEdit,
@@ -1841,7 +1842,7 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
           ),
           const SizedBox(height: 26),
 
-          // 3. EQUIPE — autoria do card (quem criou, quem responde).
+          // 5. EQUIPE — autoria do card (quem criou, quem responde).
           _SectionHeader(
             overline: 'Equipe',
             title: 'Responsável e autoria',
