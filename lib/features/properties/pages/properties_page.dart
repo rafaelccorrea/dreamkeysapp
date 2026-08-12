@@ -83,6 +83,12 @@ class PropertiesPage extends StatefulWidget {
 class _PropertiesPageState extends State<PropertiesPage> {
   static const double _kHeaderPadH = 20;
   static const double _kHeaderPadVTop = 10;
+
+  /// Margens que ficam entre a borda da tela e o cartão do estado vazio:
+  /// o padding lateral do sliver (14 de cada lado) mais o do próprio cartão
+  /// (20 de cada lado). Usado para descontar da largura da tela sem precisar
+  /// de um `LayoutBuilder` — que não pode ser filho de `SliverFillRemaining`.
+  static const double _kEmptyStateInsets = 68;
   static const double _kStatCarouselHeight = 118;
   static const double _kStatTileWidth = 140;
 
@@ -2765,16 +2771,24 @@ class _PropertiesPageState extends State<PropertiesPage> {
       );
     }
 
+    // Sem `LayoutBuilder` aqui: este widget é filho de um
+    // `SliverFillRemaining(hasScrollBody: false)`, que mede a ALTURA
+    // INTRÍNSECA do filho para decidir se ele cabe na viewport — e
+    // `LayoutBuilder` não sabe responder intrínseco, então lançava
+    // "LayoutBuilder does not support returning intrinsic dimensions".
+    // O sliver ficava com `geometry: null` e o viewport estourava logo depois
+    // em `geometry!`, derrubando a tela inteira (nem o hero aparecia) para
+    // qualquer imobiliária com a carteira vazia.
+    // `MediaQuery` entrega a mesma medida sem entrar no cálculo de intrínseco.
+    final larguraUtil = MediaQuery.sizeOf(context).width - _kEmptyStateInsets;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 36, 20, 32),
-      child: LayoutBuilder(
-        builder: (_, c) => Center(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth: c.maxWidth > 440 ? 380 : double.infinity,
-            ),
-            child: content(),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: larguraUtil > 440 ? 380 : double.infinity,
           ),
+          child: content(),
         ),
       ),
     );
