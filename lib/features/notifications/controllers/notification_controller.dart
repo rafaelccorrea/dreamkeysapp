@@ -56,20 +56,50 @@ class NotificationController extends ChangeNotifier {
   bool get hasMore => _hasMore;
   bool get wsConnected => _wsConnected;
 
+  /// Empresa em que o usuário está operando — recorta os badges por rota.
+  ///
+  /// A lista de notificações vem de `/notifications/all-companies` (traz
+  /// todas as empresas de propósito), então sem este recorte a navbar
+  /// mostrava pendência de OUTRA imobiliária. Preenchido no [initialize] e
+  /// ao trocar de empresa.
+  String? _activeCompanyId;
+
   /// Obtém contador de notificações para uma rota específica
   int getCountForRoute(String route) {
-    return _countsService.getCountForRoute(route, _notifications);
+    return _countsService.getCountForRoute(
+      route,
+      _notifications,
+      activeCompanyId: _filterCompanyId ?? _activeCompanyId,
+    );
   }
 
   /// Obtém contadores por rota
   Map<String, int> get countsByRoute {
-    return _countsService.calculateCountsByRoute(_notifications);
+    return _countsService.calculateCountsByRoute(
+      _notifications,
+      activeCompanyId: _filterCompanyId ?? _activeCompanyId,
+    );
+  }
+
+  /// Relê a empresa ativa do armazenamento seguro e repinta os badges.
+  Future<void> refreshActiveCompany() async {
+    try {
+      final id = await SecureStorageService.instance.getCompanyId();
+      if (id == _activeCompanyId) return;
+      _activeCompanyId = id;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('⚠️ [NOTIFICATION_CTRL] Erro ao ler empresa ativa: $e');
+    }
   }
 
   /// Inicializa o controller
   Future<void> initialize() async {
     // Configurar callbacks do WebSocket
     _setupWebSocketCallbacks();
+
+    // Empresa ativa ANTES dos contadores: é ela que recorta os badges.
+    await refreshActiveCompany();
 
     // Carregar contador inicial
     await refreshUnreadCount();
@@ -553,6 +583,9 @@ class NotificationController extends ChangeNotifier {
     _currentPage = 1;
     _hasMore = true;
     notifyListeners();
+    // Trocou de empresa? Relê o escopo dos badges. Sem isto a navbar
+    // continuaria recortando pela empresa ANTERIOR até o próximo boot.
+    unawaited(refreshActiveCompany());
   }
 
   /// Adiciona notificações de teste (apenas para desenvolvimento)

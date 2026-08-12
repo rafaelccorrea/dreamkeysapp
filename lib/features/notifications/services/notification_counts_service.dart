@@ -28,11 +28,26 @@ class NotificationCountsService {
 
   static NotificationCountsService get instance => _instance;
 
-  /// Calcula contadores de notificações por rota
+  /// Calcula contadores de notificações por rota.
+  ///
+  /// [activeCompanyId] restringe a contagem à empresa em que o usuário está
+  /// operando. É ESSENCIAL: a lista que alimenta este cálculo vem de
+  /// `/notifications/all-companies` (traz todas as empresas de propósito),
+  /// então sem o recorte o badge da navbar mostrava notificação de OUTRA
+  /// imobiliária — o caso da Village, sem nenhum imóvel, exibindo "2" sobre
+  /// o ícone de Imóveis por causa de pendências da "Imobiliária de Teste".
+  ///
+  /// Notificações pessoais (`companyId == null`) valem em qualquer contexto
+  /// e seguem contando. Sem [activeCompanyId] o comportamento antigo é
+  /// mantido (conta tudo) — evita zerar badges antes da sessão resolver a
+  /// empresa.
   Map<String, int> calculateCountsByRoute(
-    List<NotificationModel> notifications,
-  ) {
+    List<NotificationModel> notifications, {
+    String? activeCompanyId,
+  }) {
     final counts = <String, int>{};
+    final escopo = (activeCompanyId ?? '').trim();
+    final filtrarPorEmpresa = escopo.isNotEmpty;
 
     // Inicializar contadores para todas as rotas
     for (final route in routeToNotificationTypes.keys) {
@@ -42,6 +57,12 @@ class NotificationCountsService {
     // Contar notificações não lidas por rota
     for (final notification in notifications) {
       if (notification.read) continue;
+
+      // Fora da empresa ativa não conta (pessoal, sem empresa, sempre conta).
+      if (filtrarPorEmpresa) {
+        final dona = (notification.companyId ?? '').trim();
+        if (dona.isNotEmpty && dona != escopo) continue;
+      }
 
       // Verificar cada rota
       for (final entry in routeToNotificationTypes.entries) {
@@ -63,15 +84,28 @@ class NotificationCountsService {
   /// Obtém contador para uma rota específica
   int getCountForRoute(
     String route,
-    List<NotificationModel> notifications,
-  ) {
-    final counts = calculateCountsByRoute(notifications);
+    List<NotificationModel> notifications, {
+    String? activeCompanyId,
+  }) {
+    final counts = calculateCountsByRoute(
+      notifications,
+      activeCompanyId: activeCompanyId,
+    );
     return counts[route] ?? 0;
   }
 
   /// Obtém contador total de não lidas
-  int getTotalCount(List<NotificationModel> notifications) {
-    return notifications.where((n) => !n.read).length;
+  int getTotalCount(
+    List<NotificationModel> notifications, {
+    String? activeCompanyId,
+  }) {
+    final escopo = (activeCompanyId ?? '').trim();
+    return notifications.where((n) {
+      if (n.read) return false;
+      if (escopo.isEmpty) return true;
+      final dona = (n.companyId ?? '').trim();
+      return dona.isEmpty || dona == escopo;
+    }).length;
   }
 
   /// Verifica se uma notificação corresponde a uma rota
