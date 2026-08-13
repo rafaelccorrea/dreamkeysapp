@@ -178,7 +178,14 @@ class _LoginPageState extends State<LoginPage> {
         // imediatamente após login, antes de qualquer outro popup nosso,
         // pra não sobrepor o popup nativo do SO.
         try {
-          await AppPushService.instance.syncWithBackendIfAuthenticated();
+          // Teto de 5s: o que precisa acontecer ANTES da oferta de
+          // biometria é o popup nativo de permissão, que é rápido. O resto
+          // (espera do token APNs no iOS, registro no backend) segue em
+          // background — segurar a tela por isso fazia o app parecer
+          // travado e, no iOS, arriscava o watchdog.
+          await AppPushService.instance
+              .syncWithBackendIfAuthenticated()
+              .timeout(const Duration(seconds: 5));
         } catch (e) {
           debugPrint('⚠️ [LOGIN] Falha ao sincronizar permissões push: $e');
         }

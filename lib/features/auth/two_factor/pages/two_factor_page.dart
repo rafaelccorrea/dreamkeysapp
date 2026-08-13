@@ -122,7 +122,11 @@ class _TwoFactorPageState extends State<TwoFactorPage> {
         // não sobrepor o popup nativo de biometria que dispararemos a
         // seguir caso o usuário aceite a oferta de enrollment.
         try {
-          await AppPushService.instance.syncWithBackendIfAuthenticated();
+          // Mesmo teto do login: o popup nativo é rápido, a espera do
+          // token APNs não — e ela não precisa segurar a tela.
+          await AppPushService.instance
+              .syncWithBackendIfAuthenticated()
+              .timeout(const Duration(seconds: 5));
         } catch (e) {
           debugPrint('⚠️ [2FA] Falha ao sincronizar permissões push: $e');
         }

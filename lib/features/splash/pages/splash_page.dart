@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/routes/app_routes.dart';
@@ -58,8 +59,12 @@ class _SplashPageState extends State<SplashPage> {
         // resolvida e gravada. Todo o resto do bootstrap (módulos,
         // permissões, chat, notificações) bate em rotas protegidas que
         // exigem `X-Company-ID` — rodar antes disso era pedir corrida.
+        // Teto CURTO: no iOS o app é morto pelo watchdog se ficar preso
+        // demais antes de responder. Se a empresa não resolver em 6s, o
+        // `ApiService` ainda espera o mesmo gate na primeira requisição —
+        // ninguém fica sem empresa por causa deste teto.
         final sessionReady = await SessionBootstrap.instance.ensureReady(
-          timeout: const Duration(seconds: 10),
+          timeout: const Duration(seconds: 6),
         );
         debugPrint('✅ [SPLASH] Sessão pronta: $sessionReady');
 
@@ -78,24 +83,38 @@ class _SplashPageState extends State<SplashPage> {
         // cai no que o `initialize` já carregou (cache) e o drawer refresca
         // depois. `onTimeout` retorna void, então nunca joga o usuário no login.
         await ModuleAccessService.instance.refreshPermissions().timeout(
-          const Duration(seconds: 6),
+          const Duration(seconds: 4),
           onTimeout: () {},
         );
         debugPrint('✅ [SPLASH] Permissões autoritativas carregadas');
 
-        debugPrint('🔄 [SPLASH] Inicializando ChatUnreadController...');
-        await ChatUnreadController.instance.initialize();
-        debugPrint('✅ [SPLASH] ChatUnreadController inicializado');
+        // ── DAQUI PRA BAIXO, NADA BLOQUEIA A NAVEGAÇÃO ────────────────────
+        // Chat, notificações e registro de push não são necessários para o
+        // PRIMEIRO FRAME da home — e cada um faz rede (o push, no iOS,
+        // espera o token APNs por até 16s). Somados ao resto, o splash
+        // passava de 30s e o watchdog do iOS derrubava o app: foi o que
+        // reprovou a build 2.8.0+69 na App Store ("app crashed after the
+        // initial launch"). O Android não tem watchdog — por isso passava
+        // no aparelho e só quebrava no review.
+        //
+        // Disparados sem `await`: continuam rodando enquanto a home monta.
+        unawaited(
+          ChatUnreadController.instance.initialize().catchError(
+            (e) => debugPrint('⚠️ [SPLASH] Chat/unread: $e'),
+          ),
+        );
+        unawaited(
+          NotificationController.instance.initialize().catchError(
+            (e) => debugPrint('⚠️ [SPLASH] NotificationController: $e'),
+          ),
+        );
+        unawaited(
+          AppPushService.instance.syncWithBackendIfAuthenticated().catchError(
+            (e) => debugPrint('⚠️ [SPLASH] Push/sync: $e'),
+          ),
+        );
 
-        debugPrint('🔄 [SPLASH] Inicializando NotificationController...');
-        await NotificationController.instance.initialize().catchError((e) {
-          debugPrint('⚠️ [SPLASH] Erro ao iniciar NotificationController: $e');
-        });
-        await AppPushService.instance
-            .syncWithBackendIfAuthenticated()
-            .catchError((e) => debugPrint('⚠️ [SPLASH] Push/sync: $e'));
-
-        debugPrint('✅ [SPLASH] Bootstrap completo — indo pra home');
+        debugPrint('✅ [SPLASH] Bootstrap essencial pronto — indo pra home');
         if (mounted) {
           Navigator.of(context).pushReplacementNamed(AppRoutes.home);
         }

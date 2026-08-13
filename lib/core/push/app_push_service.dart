@@ -382,7 +382,11 @@ class AppPushService {
   Future<String?> _getFcmTokenSafely(FirebaseMessaging messaging) async {
     if (!kIsWeb && Platform.isIOS) {
       String? apns;
-      for (var attempt = 0; attempt < 10; attempt++) {
+      // 6 tentativas (~8s) em vez de 10 (~16s). Quando a permissão de push
+      // é negada — o caso do revisor da App Store — o token NUNCA chega, e
+      // a espera inteira era gasta à toa. Quem registra depois é o
+      // `onTokenRefresh`, então encurtar aqui não perde push de ninguém.
+      for (var attempt = 0; attempt < 6; attempt++) {
         try {
           apns = await messaging.getAPNSToken();
         } catch (e) {
@@ -390,7 +394,7 @@ class AppPushService {
         }
         if (apns != null && apns.isNotEmpty) break;
         await Future.delayed(
-          Duration(seconds: attempt < 4 ? 1 : 2),
+          Duration(seconds: attempt < 3 ? 1 : 2),
         );
       }
       if (apns == null || apns.isEmpty) {
