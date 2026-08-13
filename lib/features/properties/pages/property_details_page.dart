@@ -1793,6 +1793,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     // dentro de card" que era o layout antigo.
     return CustomScrollView(
       controller: _detailsScrollController,
+      // Rolar a página fecha o teclado — é o primeiro gesto que a pessoa
+      // tenta quando o campo é multilinha e não há tecla de "concluir".
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       physics: const BouncingScrollPhysics(
         parent: AlwaysScrollableScrollPhysics(),
       ),
@@ -3329,10 +3332,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       // layout flush (não jogada).
       if (_showApprovalSection(property))
         _buildApprovalSection(context, theme, property),
-      // Conversa de aprovação — logo junto da seção de aprovação. Visível
-      // para quem participa da thread (403 no GET esconde tudo, como no web).
-      if (!_threadForbidden)
-        _buildApprovalThreadSection(context, theme, property),
       if (property.description.trim().isNotEmpty)
         _buildFlushSection(
           theme: theme,
@@ -3439,14 +3438,22 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         theme: theme,
         title: 'Ações rápidas',
         icon: Icons.bolt_rounded,
-        // Última seção — "Compartilhar" saiu do rodapé (já vive na AppBar e
-        // no sheet dos 3 pontinhos; aqui era conteúdo dobrado).
-        isLast: true,
+        // "Compartilhar" saiu do rodapé (já vive na AppBar e no sheet dos 3
+        // pontinhos; aqui era conteúdo dobrado).
+        // `isLast` saiu daqui: a última agora é a comunicação de aprovações,
+        // e quem carrega a flag tem de ser a que fecha a página — senão
+        // sobra divisor no fim.
+        isLast: _threadForbidden,
         // Âmbar = energia/ação imediata; cada linha tem a cor do próprio
         // significado.
         tone: const Color(0xFFE6B84C),
         child: _buildQuickActionsSection(context, theme, property),
       ),
+      // ÚLTIMA seção: a conversa de aprovação é acompanhamento, não a
+      // ficha do imóvel. No topo ela empurrava descrição, características e
+      // mapa para baixo — o que se abre o imóvel para ver.
+      if (!_threadForbidden)
+        _buildApprovalThreadSection(context, theme, property),
     ];
 
     return Column(
@@ -3708,6 +3715,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       title: 'Comunicação de aprovações',
       icon: Icons.forum_outlined,
       tone: accent,
+      // Fecha a página: sem isto sobraria um divisor solto no rodapé.
+      isLast: true,
       headerTrailing: _threadMessages.isEmpty
           ? null
           : Container(
@@ -3869,6 +3878,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           Expanded(
             child: TextField(
               controller: _threadComposer,
+              // Campo MULTILINHA: o teclado mostra "nova linha", nunca
+              // "concluir". Sem tratar o toque fora, o único jeito de
+              // fechar era sair da tela e voltar.
+              onTapOutside: (_) => FocusScope.of(context).unfocus(),
               minLines: 1,
               maxLines: 4,
               maxLength: 4000,
@@ -4190,6 +4203,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         children: [
           TextField(
             controller: _updateComposer,
+            onTapOutside: (_) => FocusScope.of(context).unfocus(),
             maxLines: 3,
             minLines: 1,
             maxLength: 2000,
@@ -4519,6 +4533,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         children: [
           TextField(
             controller: _notesController,
+            onTapOutside: (_) => FocusScope.of(context).unfocus(),
             maxLines: 6,
             minLines: 3,
             maxLength: 10000,

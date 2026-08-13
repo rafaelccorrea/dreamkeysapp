@@ -96,12 +96,18 @@ class PublicPropertyLink {
     return null;
   }
 
-  /// Mensagem pronta de divulgação (título, código, endereço, preço + link).
+  /// Mensagem pronta de divulgação (título, código, localização, preço + link).
   /// Ponto único — sheet, rodapé do detalhe e listagem enviam o MESMO texto.
+  ///
+  /// A localização vai só até BAIRRO · CIDADE. Rua e número **nunca** entram:
+  /// a mensagem é encaminhada de cliente para cliente e o endereço exato
+  /// permite chegar ao proprietário por fora da imobiliária. Quem tem interesse
+  /// real recebe o endereço na visita — no anúncio público (o link no fim da
+  /// mensagem) ele também não aparece.
   static String shareMessage(Property property, String? url) {
     final base = BrokerMessageTemplates.propertyShare(
       propertyTitle: property.title,
-      address: [property.address, property.city]
+      address: [property.neighborhood, property.city]
           .where((s) => s.trim().isNotEmpty)
           .join(', '),
       code: property.code,
