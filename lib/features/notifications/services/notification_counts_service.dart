@@ -1,5 +1,21 @@
 import '../models/notification_model.dart';
 
+/// Rotas cujo badge é decidido pelo TIPO da notificação, antes de cair no
+/// mapeamento por `entityType`.
+///
+/// Existe porque toda notificação de imóvel — inclusive as da fila de
+/// aprovação — chega com `entityType: 'property'`. Sem esta lista, milhares
+/// de pendências de aprovação (publicação, disponibilidade, chat do
+/// aprovador) apareciam como badge em **Imóveis**, uma tela que não resolve
+/// nenhuma delas. Cada uma vai para onde se resolve: Aprovações.
+const Map<String, List<String>> routeToNotificationTypePrefixes = {
+  '/properties/pending-approvals': [
+    'property_approval_',
+    'property_owner_physical_',
+    'property_responsible_',
+  ],
+};
+
 /// Mapeamento de rotas para tipos de notificação
 const Map<String, List<String>> routeToNotificationTypes = {
   '/inspections': ['inspection', 'inspection_approval'],
@@ -49,9 +65,12 @@ class NotificationCountsService {
     final escopo = (activeCompanyId ?? '').trim();
     final filtrarPorEmpresa = escopo.isNotEmpty;
 
-    // Inicializar contadores para todas as rotas
+    // Inicializar contadores para todas as rotas (as dois mapeamentos).
     for (final route in routeToNotificationTypes.keys) {
       counts[route] = 0;
+    }
+    for (final route in routeToNotificationTypePrefixes.keys) {
+      counts[route] ??= 0;
     }
 
     // Contar notificações não lidas por rota
@@ -64,7 +83,22 @@ class NotificationCountsService {
         if (dona.isNotEmpty && dona != escopo) continue;
       }
 
-      // Verificar cada rota
+      // 1) Rota por PREFIXO do tipo — tem prioridade e é EXCLUSIVA. Uma
+      //    pendência de aprovação pertence a Aprovações e a mais nenhum
+      //    lugar; sem o `continue` ela contaria duas vezes (aqui e em
+      //    Imóveis, via `entityType: 'property'`).
+      final tipo = notification.type;
+      var casouPorPrefixo = false;
+      for (final entry in routeToNotificationTypePrefixes.entries) {
+        if (entry.value.any(tipo.startsWith)) {
+          counts[entry.key] = (counts[entry.key] ?? 0) + 1;
+          casouPorPrefixo = true;
+          break;
+        }
+      }
+      if (casouPorPrefixo) continue;
+
+      // 2) Mapeamento por tipo/entityType.
       for (final entry in routeToNotificationTypes.entries) {
         final route = entry.key;
         final types = entry.value;

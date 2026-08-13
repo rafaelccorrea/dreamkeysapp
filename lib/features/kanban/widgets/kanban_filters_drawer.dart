@@ -334,7 +334,7 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
                   ],
                 ),
               ),
-              _buildFooter(context, accent, activeCount, mq),
+              _buildFooter(context, activeCount, mq),
             ],
           ),
         );
@@ -473,115 +473,262 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
     );
   }
 
-  /// Lista de ordenação — sempre visível, sem abrir/fechar.
+  /// Campo de ordenação — ocupa UMA linha no modal.
   ///
-  /// A versão anterior escondia as opções atrás de um dropdown: custava um
-  /// toque a mais e escondia justamente o que o corretor precisa comparar.
-  /// Aqui as sete ficam à vista, cada uma com ícone, rótulo e explicação —
-  /// o rótulo sozinho é ambíguo ("Mais antigos" por criação ou comentário?).
+  /// Mostra só a opção ativa; a escolha acontece num sheet à parte. A lista
+  /// inteira dentro do modal deixava a tela longa e monótona, e o dropdown
+  /// inline escondia as opções atrás de um toque sem ganhar nada.
   Widget _sortSelect(BuildContext context, Color accent) {
     final atual = _sortBy ?? KanbanSortBy.semFeedback;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: _fieldFill(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: ThemeHelpers.borderLightColor(context)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+    return _filterControl(
+      context,
+      icon: atual.icon,
+      accent: accent,
+      onTap: () => _openSortSheet(context, accent),
+      child: Row(
         children: [
-          for (var i = 0; i < KanbanSortBy.values.length; i++)
-            _sortOption(
-              context,
-              accent,
-              KanbanSortBy.values[i],
-              atual,
-              isLast: i == KanbanSortBy.values.length - 1,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  atual.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: ThemeHelpers.textColor(context),
+                        letterSpacing: -0.1,
+                      ),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  atual.hint,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: secondary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+              ],
             ),
+          ),
+          const SizedBox(width: 6),
+          Icon(Icons.chevron_right_rounded, size: 19, color: accent),
         ],
       ),
     );
   }
 
-  Widget _sortOption(
-    BuildContext context,
-    Color accent,
-    KanbanSortBy option,
-    KanbanSortBy atual, {
-    required bool isLast,
-  }) {
-    final selected = option == atual;
-    final textColor = ThemeHelpers.textColor(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return InkWell(
-      onTap: () => setState(() => _sortBy = option),
-      borderRadius: BorderRadius.vertical(
-        top: Radius.circular(option == KanbanSortBy.values.first ? 11 : 0),
-        bottom: Radius.circular(isLast ? 11 : 0),
-      ),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
-        decoration: BoxDecoration(
-          color: selected
-              ? accent.withValues(alpha: isDark ? 0.13 : 0.08)
-              : Colors.transparent,
-          border: isLast
-              ? null
-              : Border(
-                  bottom: BorderSide(
-                    color: ThemeHelpers.borderLightColor(
-                      context,
-                    ).withValues(alpha: 0.7),
-                  ),
-                ),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              option.icon,
-              size: 17,
-              color: selected ? accent : secondary,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    option.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          fontWeight: selected
-                              ? FontWeight.w800
-                              : FontWeight.w600,
-                          color: selected ? accent : textColor,
-                          letterSpacing: -0.1,
-                        ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    option.hint,
-                    maxLines: 2,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: secondary,
-                          height: 1.25,
-                          fontWeight: FontWeight.w500,
-                        ),
-                  ),
-                ],
+  /// Sheet de escolha da ordenação — anatomia da casa (grabber, eyebrow +
+  /// título, divisor). Fecha ao escolher.
+  Future<void> _openSortSheet(BuildContext context, Color accent) async {
+    final atual = _sortBy ?? KanbanSortBy.semFeedback;
+    final escolha = await showModalBottomSheet<KanbanSortBy>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final media = MediaQuery.of(ctx);
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: media.size.height * 0.8),
+          child: Container(
+            decoration: BoxDecoration(
+              color: ThemeHelpers.backgroundColor(ctx),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(20),
               ),
             ),
-            const SizedBox(width: 8),
-            // Marca de seleção só quando ativo — evita coluna de círculos
-            // vazios, que suja a lista.
-            if (selected)
-              Icon(Icons.check_circle_rounded, size: 18, color: accent),
-          ],
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 10, bottom: 4),
+                  child: Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: ThemeHelpers.borderColor(
+                          ctx,
+                        ).withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 12, 12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'ORDENAR',
+                              style: Theme.of(ctx)
+                                  .textTheme
+                                  .labelSmall
+                                  ?.copyWith(
+                                    color: accent,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 1.4,
+                                  ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Ordem dos leads na coluna',
+                              style: Theme.of(ctx)
+                                  .textTheme
+                                  .titleSmall
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w900,
+                                    color: ThemeHelpers.textColor(ctx),
+                                  ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        icon: Icon(
+                          Icons.close_rounded,
+                          size: 19,
+                          color: ThemeHelpers.textSecondaryColor(ctx),
+                        ),
+                        visualDensity: VisualDensity.compact,
+                        tooltip: 'Fechar',
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  height: 1,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        accent.withValues(alpha: 0.30),
+                        ThemeHelpers.borderLightColor(
+                          ctx,
+                        ).withValues(alpha: 0.25),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                ),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    padding: EdgeInsets.fromLTRB(
+                      12,
+                      8,
+                      12,
+                      16 + media.padding.bottom,
+                    ),
+                    children: [
+                      for (final o in KanbanSortBy.values)
+                        _sortSheetOption(ctx, accent, o, atual),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (escolha != null && mounted) {
+      setState(() => _sortBy = escolha);
+    }
+  }
+
+  /// Linha do sheet: ícone tonal + rótulo + explicação, com check no ativo.
+  Widget _sortSheetOption(
+    BuildContext ctx,
+    Color accent,
+    KanbanSortBy option,
+    KanbanSortBy atual,
+  ) {
+    final selected = option == atual;
+    final isDark = Theme.of(ctx).brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(ctx);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Material(
+        color: selected
+            ? accent.withValues(alpha: isDark ? 0.14 : 0.08)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: () => Navigator.of(ctx).pop(option),
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 11, 10, 11),
+            child: Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(11),
+                    color: accent.withValues(
+                      alpha: selected ? (isDark ? 0.26 : 0.16) : 0.10,
+                    ),
+                  ),
+                  child: Icon(
+                    option.icon,
+                    size: 17,
+                    color: selected ? accent : secondary,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        option.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(ctx).textTheme.labelLarge?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              color: selected
+                                  ? accent
+                                  : ThemeHelpers.textColor(ctx),
+                              letterSpacing: -0.1,
+                            ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        option.hint,
+                        maxLines: 2,
+                        style: Theme.of(ctx).textTheme.labelSmall?.copyWith(
+                              color: secondary,
+                              height: 1.25,
+                              fontWeight: FontWeight.w500,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (selected) ...[
+                  const SizedBox(width: 8),
+                  Icon(Icons.check_circle_rounded, size: 19, color: accent),
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -728,7 +875,6 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
 
   Widget _buildFooter(
     BuildContext context,
-    Color accent,
     int activeCount,
     MediaQueryData mq,
   ) {
@@ -746,45 +892,56 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
         children: [
           if (activeCount > 0) ...[
             Expanded(
-              flex: 3,
-              child: OutlinedButton.icon(
+              child: TextButton(
                 onPressed: _clear,
-                icon: const Icon(Icons.filter_alt_off_outlined, size: 18),
-                label: const Text(
-                  'Limpar',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                style: OutlinedButton.styleFrom(
+                style: TextButton.styleFrom(
+                  // "Limpar" NUNCA em vermelho: o tema global pinta
+                  // TextButton de vermelho, então forçamos o cinza — não é
+                  // ação destrutiva, só volta ao estado inicial.
                   foregroundColor: ThemeHelpers.textSecondaryColor(context),
-                  side: BorderSide(color: ThemeHelpers.borderColor(context)),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(13),
                   ),
+                  textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+                child: const FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text('Limpar filtros'),
                 ),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 10),
           ],
           Expanded(
-            flex: activeCount > 0 ? 4 : 1,
+            flex: activeCount > 0 ? 2 : 1,
             child: FilledButton.icon(
               onPressed: _apply,
               icon: const Icon(Icons.check_rounded, size: 18),
-              label: Text(
-                activeCount == 0 ? 'Aplicar' : 'Aplicar ($activeCount)',
-                style: const TextStyle(fontWeight: FontWeight.w800),
+              // FittedBox: com "Limpar filtros" ao lado, "Aplicar (3)" não
+              // pode quebrar nem cortar em 320dp.
+              label: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  activeCount == 0 ? 'Aplicar' : 'Aplicar ($activeCount)',
+                ),
               ),
               style: FilledButton.styleFrom(
-                backgroundColor: accent,
+                // VERDE de confirmação (0xFF059669), como em todo sheet do
+                // app. Estava no vermelho da marca — que aqui só cabe em
+                // erro ou ação destrutiva, nunca em "confirmar".
+                backgroundColor: const Color(0xFF059669),
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(13),
                 ),
                 elevation: 0,
+                textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
               ),
             ),
           ),

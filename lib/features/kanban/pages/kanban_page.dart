@@ -1521,15 +1521,45 @@ class _KanbanPageState extends State<KanbanPage> {
                             ),
                           );
                         },
-                        icon: const Icon(Icons.add_rounded, size: 18),
-                        label: const Text('Nova tarefa'),
+                        icon: Icon(
+                          Icons.add_rounded,
+                          size: 17,
+                          color: columnColor,
+                        ),
+                        // "Lead", não "tarefa": é o vocabulário do funil em
+                        // todo o resto do app.
+                        label: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            'Novo lead',
+                            style: TextStyle(
+                              color: columnColor,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.1,
+                            ),
+                          ),
+                        ),
                         style: OutlinedButton.styleFrom(
+                          // Sem cor explícita ele herdava o vermelho do tema
+                          // global — destoava da coluna e competia com as
+                          // ações destrutivas. Agora veste a cor da PRÓPRIA
+                          // coluna, com preenchimento tênue: lê como "somar
+                          // aqui", não como botão de alerta.
+                          foregroundColor: columnColor,
+                          backgroundColor: columnColor.withValues(
+                            alpha: theme.brightness == Brightness.dark
+                                ? 0.10
+                                : 0.06,
+                          ),
+                          side: BorderSide(
+                            color: columnColor.withValues(alpha: 0.34),
+                          ),
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 12,
+                            horizontal: 10,
+                            vertical: 11,
                           ),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(13),
                           ),
                         ),
                       ),
