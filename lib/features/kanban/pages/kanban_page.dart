@@ -1456,8 +1456,15 @@ class _KanbanPageState extends State<KanbanPage> {
                                           'kanban-col-${column.id}',
                                         ),
                                         shrinkWrap: false,
-                                        physics:
-                                            const AlwaysScrollableScrollPhysics(),
+                                        // NÃO usar `AlwaysScrollable` aqui: ela
+                                        // faz a coluna aceitar o gesto MESMO
+                                        // sem ter o que rolar, então uma coluna
+                                        // com 3 leads engolia o dedo e a tela
+                                        // (hero + resto) ficava travada.
+                                        // `Clamping` só aceita quando há
+                                        // conteúdo excedente — caso contrário
+                                        // o gesto sobe para a página.
+                                        physics: const ClampingScrollPhysics(),
                                         padding: const EdgeInsets.fromLTRB(
                                           6,
                                           8,

@@ -1,6 +1,8 @@
 /// Modelos de dados do sistema Kanban
 library;
 
+import 'package:flutter/material.dart' show IconData, Icons;
+
 import '../../../shared/utils/avatar_url_resolver.dart';
 
 /// Prioridade da tarefa
@@ -353,6 +355,92 @@ enum KanbanResultFilter {
   final String label;
 }
 
+/// Ordenação dos cards dentro de cada coluna do funil.
+///
+/// Espelha exatamente o `sortBy` aceito por `GET /kanban/board/:teamId` —
+/// nada aqui é ordenado no cliente, senão a paginação ("carregar mais")
+/// traria itens fora de ordem.
+enum KanbanSortBy {
+  /// PADRÃO: parado há mais tempo primeiro. Lead SEM nenhum comentário vem
+  /// à frente (está mais abandonado que um comentado há um ano) — é o hábito
+  /// de trabalho de quem trata primeiro quem está sem feedback.
+  semFeedback(
+    'last_comment_asc',
+    'Parados há mais tempo',
+    'Sem comentário primeiro, depois o feedback mais antigo',
+  ),
+
+  /// Movimentação mais recente primeiro.
+  feedbackRecente(
+    'last_comment_desc',
+    'Feedback mais recente',
+    'Quem recebeu contato agora aparece no topo',
+  ),
+
+  /// Mais conversado primeiro.
+  maisComentados(
+    'comments_count_desc',
+    'Mais comentados',
+    'Leads com mais conversas registradas',
+  ),
+
+  /// Menos conversado primeiro.
+  menosComentados(
+    'comments_count_asc',
+    'Menos comentados',
+    'Leads com menos conversas registradas',
+  ),
+
+  /// Maior negociação primeiro.
+  maiorValor('value_desc', 'Maior valor', 'Maior negociação no topo'),
+
+  /// Menor negociação primeiro.
+  menorValor('value_asc', 'Menor valor', 'Menor negociação no topo'),
+
+  /// Cards mais antigos primeiro (data de criação).
+  maisAntigos('oldest', 'Mais antigos', 'Pela data de criação do card');
+
+  const KanbanSortBy(this.apiValue, this.label, this.hint);
+
+  /// Valor enviado no query `sortBy`.
+  final String apiValue;
+
+  /// Rótulo exibido no modal de filtros.
+  final String label;
+
+  /// Explicação curta — o rótulo sozinho é ambíguo ("Mais antigos" por
+  /// criação ou por comentário?).
+  final String hint;
+
+  /// Ícone do item na lista de ordenação.
+  IconData get icon {
+    switch (this) {
+      case KanbanSortBy.semFeedback:
+        return Icons.hourglass_bottom_rounded;
+      case KanbanSortBy.feedbackRecente:
+        return Icons.forum_rounded;
+      case KanbanSortBy.maisComentados:
+        return Icons.chat_bubble_rounded;
+      case KanbanSortBy.menosComentados:
+        return Icons.chat_bubble_outline_rounded;
+      case KanbanSortBy.maiorValor:
+        return Icons.trending_up_rounded;
+      case KanbanSortBy.menorValor:
+        return Icons.trending_down_rounded;
+      case KanbanSortBy.maisAntigos:
+        return Icons.schedule_rounded;
+    }
+  }
+
+  static KanbanSortBy? fromApi(String? value) {
+    if (value == null || value.isEmpty) return null;
+    for (final s in KanbanSortBy.values) {
+      if (s.apiValue == value) return s;
+    }
+    return null;
+  }
+}
+
 /// Conjunto de filtros do board do Kanban (espelha `KanbanBoardFiltersDto` do
 /// backend). Imutável; gera os query params exatos que o board aceita.
 class KanbanBoardFilters {
@@ -375,6 +463,11 @@ class KanbanBoardFilters {
   final DateTime? createdAfter;
   final DateTime? createdBefore;
 
+  /// Ordenação dos cards na coluna. `null` = padrão do app
+  /// ([KanbanSortBy.semFeedback]) — nunca cai no default do backend, que é
+  /// o oposto (feedback mais recente primeiro).
+  final KanbanSortBy? sortBy;
+
   const KanbanBoardFilters({
     this.assignedToIds = const {},
     this.unassigned = false,
@@ -383,6 +476,7 @@ class KanbanBoardFilters {
     this.search,
     this.createdAfter,
     this.createdBefore,
+    this.sortBy,
   });
 
   static const empty = KanbanBoardFilters();
@@ -423,6 +517,7 @@ class KanbanBoardFilters {
     bool clearCreatedAfter = false,
     DateTime? createdBefore,
     bool clearCreatedBefore = false,
+    KanbanSortBy? sortBy,
   }) {
     return KanbanBoardFilters(
       assignedToIds: assignedToIds ?? this.assignedToIds,
@@ -433,6 +528,7 @@ class KanbanBoardFilters {
       createdAfter: clearCreatedAfter ? null : (createdAfter ?? this.createdAfter),
       createdBefore:
           clearCreatedBefore ? null : (createdBefore ?? this.createdBefore),
+      sortBy: sortBy ?? this.sortBy,
     );
   }
 
@@ -449,6 +545,10 @@ class KanbanBoardFilters {
     if (s != null && s.isNotEmpty) p['search'] = s;
     if (createdAfter != null) p['createdAtAfter'] = _ymd(createdAfter!);
     if (createdBefore != null) p['createdAtBefore'] = _ymd(createdBefore!);
+    // SEMPRE enviado: sem isto o backend aplicaria o default DELE
+    // (`last_comment_desc` — feedback mais recente primeiro), que é o
+    // inverso do padrão do app (parado há mais tempo primeiro).
+    p['sortBy'] = (sortBy ?? KanbanSortBy.semFeedback).apiValue;
     return p;
   }
 

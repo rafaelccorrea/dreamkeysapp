@@ -19,9 +19,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
-    }
 
     defaultConfig {
         applicationId = "com.dreamkeys.corretor"
@@ -99,6 +96,15 @@ android {
                 "proguard-rules.pro"
             )
         }
+    }
+}
+
+// `kotlinOptions` (dentro de `android { }`) foi REMOVIDO no Kotlin 2.2 e
+// virou erro de compilação do script. A DSL atual é `compilerOptions`, e
+// vive no bloco `kotlin { }` de nível superior — não dentro de `android`.
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 

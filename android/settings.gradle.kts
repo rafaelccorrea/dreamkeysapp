@@ -19,8 +19,11 @@ pluginManagement {
 
 plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
-    id("com.android.application") version "8.9.1" apply false
-    id("org.jetbrains.kotlin.android") version "2.1.0" apply false
+    // Versões alinhadas ao mínimo que o Flutter passou a exigir (o build
+    // avisava que 8.9.1 / 2.1.0 seriam descontinuados). AGP 8.11 exige
+    // Gradle 8.13+ — por isso o wrapper subiu junto, para 8.14.3.
+    id("com.android.application") version "8.11.1" apply false
+    id("org.jetbrains.kotlin.android") version "2.2.20" apply false
     id("com.google.gms.google-services") version "4.4.2" apply false
 }
 

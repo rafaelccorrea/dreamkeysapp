@@ -237,9 +237,10 @@ class KanbanService {
       // Filtros do board (responsável, tags, resultado, período, busca).
       // Mesclados por último para que sejam a fonte de verdade quando
       // presentes (ex.: search do filtro sobrescreve o legado).
-      if (filters != null) {
-        params.addAll(filters.toQueryParams());
-      }
+      // `?? empty` garante a ORDENAÇÃO PADRÃO mesmo sem filtro algum: sem
+      // isto o board caía no default do backend (feedback mais recente
+      // primeiro), que é o oposto do padrão do app.
+      params.addAll((filters ?? KanbanBoardFilters.empty).toQueryParams());
 
       final url = ApiConstants.kanbanBoard(teamId);
       final fullUrl = params.isEmpty
@@ -326,9 +327,10 @@ class KanbanService {
         params['search'] = search.trim();
       }
       // Mesmos filtros do board, para o "Carregar mais" não furar o filtro.
-      if (filters != null) {
-        params.addAll(filters.toQueryParams());
-      }
+      // `?? empty` garante a ORDENAÇÃO PADRÃO mesmo sem filtro algum: sem
+      // isto o board caía no default do backend (feedback mais recente
+      // primeiro), que é o oposto do padrão do app.
+      params.addAll((filters ?? KanbanBoardFilters.empty).toQueryParams());
 
       final response = await _apiService.get<Map<String, dynamic>>(
         ApiConstants.kanbanColumnTasks(columnId),

@@ -44,6 +44,9 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
   DateTime? _createdAfter;
   DateTime? _createdBefore;
 
+  /// Ordenação escolhida. `null` = padrão do app (parado há mais tempo).
+  KanbanSortBy? _sortBy;
+
   @override
   void initState() {
     super.initState();
@@ -54,6 +57,7 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
     _result = f.result;
     _createdAfter = f.createdAfter;
     _createdBefore = f.createdBefore;
+    _sortBy = f.sortBy;
     _searchController.text = f.search ?? '';
     if (_createdAfter != null) {
       _createdFromController.text = _fmt(_createdAfter!);
@@ -88,6 +92,7 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
       search: s.isEmpty ? null : s,
       createdAfter: _createdAfter,
       createdBefore: _createdBefore,
+      sortBy: _sortBy,
     );
   }
 
@@ -143,6 +148,8 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
         isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
     final cPeriodo =
         isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
+    final cOrdem =
+        isDark ? AppColors.status.infoDarkMode : AppColors.status.info;
     final mq = MediaQuery.of(context);
     final activeCount = _activeCount;
 
@@ -189,6 +196,16 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
                       hint: 'Nome, telefone, cliente ou título do lead.',
                       first: true,
                       child: _searchControl(context, cBusca),
+                    ),
+                    // ORDENAÇÃO vem primeiro: ela muda a leitura da coluna
+                    // inteira, enquanto os filtros abaixo apenas recortam a
+                    // lista.
+                    _section(
+                      context,
+                      accent: cOrdem,
+                      label: 'Ordenar por',
+                      hint: 'Ordem dos leads dentro de cada coluna.',
+                      child: _sortSelect(context, cOrdem),
                     ),
                     _section(
                       context,
@@ -456,8 +473,120 @@ class _KanbanFiltersDrawerState extends State<KanbanFiltersDrawer> {
     );
   }
 
-  /// Shell de campo no padrão da web (FilterControl): pill com chip de ícone
-  /// discreto + conteúdo bare.
+  /// Lista de ordenação — sempre visível, sem abrir/fechar.
+  ///
+  /// A versão anterior escondia as opções atrás de um dropdown: custava um
+  /// toque a mais e escondia justamente o que o corretor precisa comparar.
+  /// Aqui as sete ficam à vista, cada uma com ícone, rótulo e explicação —
+  /// o rótulo sozinho é ambíguo ("Mais antigos" por criação ou comentário?).
+  Widget _sortSelect(BuildContext context, Color accent) {
+    final atual = _sortBy ?? KanbanSortBy.semFeedback;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: _fieldFill(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: ThemeHelpers.borderLightColor(context)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < KanbanSortBy.values.length; i++)
+            _sortOption(
+              context,
+              accent,
+              KanbanSortBy.values[i],
+              atual,
+              isLast: i == KanbanSortBy.values.length - 1,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sortOption(
+    BuildContext context,
+    Color accent,
+    KanbanSortBy option,
+    KanbanSortBy atual, {
+    required bool isLast,
+  }) {
+    final selected = option == atual;
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return InkWell(
+      onTap: () => setState(() => _sortBy = option),
+      borderRadius: BorderRadius.vertical(
+        top: Radius.circular(option == KanbanSortBy.values.first ? 11 : 0),
+        bottom: Radius.circular(isLast ? 11 : 0),
+      ),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+        decoration: BoxDecoration(
+          color: selected
+              ? accent.withValues(alpha: isDark ? 0.13 : 0.08)
+              : Colors.transparent,
+          border: isLast
+              ? null
+              : Border(
+                  bottom: BorderSide(
+                    color: ThemeHelpers.borderLightColor(
+                      context,
+                    ).withValues(alpha: 0.7),
+                  ),
+                ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              option.icon,
+              size: 17,
+              color: selected ? accent : secondary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    option.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          fontWeight: selected
+                              ? FontWeight.w800
+                              : FontWeight.w600,
+                          color: selected ? accent : textColor,
+                          letterSpacing: -0.1,
+                        ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    option.hint,
+                    maxLines: 2,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: secondary,
+                          height: 1.25,
+                          fontWeight: FontWeight.w500,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Marca de seleção só quando ativo — evita coluna de círculos
+            // vazios, que suja a lista.
+            if (selected)
+              Icon(Icons.check_circle_rounded, size: 18, color: accent),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _filterControl(
     BuildContext context, {
     required IconData icon,

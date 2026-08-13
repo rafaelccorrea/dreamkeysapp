@@ -35,9 +35,11 @@ subprojects {
                 }
             }
         }
+        // Kotlin 2.2 REMOVEU o `kotlinOptions` (virou erro de compilação do
+        // script). A DSL atual é `compilerOptions`, com enum em vez de string.
         tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-            kotlinOptions {
-                jvmTarget = "17"
+            compilerOptions {
+                jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
             }
         }
     }
