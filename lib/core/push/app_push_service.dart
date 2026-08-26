@@ -466,6 +466,20 @@ class AppPushService {
 
     unawaited(NotificationController.instance.refreshUnreadCount());
 
+    // No iOS o banner em primeiro plano JÁ é exibido pelo próprio sistema:
+    // `setForegroundNotificationPresentationOptions(alert: true)` (linha ~214)
+    // apresenta a mensagem quando ela traz o bloco `notification` do FCM — e o
+    // backend sempre envia title/body. Mostrar a notificação local aqui
+    // resultava em DOIS banners para o mesmo push. Isso só não aparecia antes
+    // porque o backend suprimia o push quando havia socket conectado (app
+    // aberto = sem push); agora que o push sempre sai, a duplicata ficaria
+    // visível. No Android o sistema NÃO exibe nada em primeiro plano, então lá
+    // a notificação local continua sendo a única.
+    final systemJaExibiu = Platform.isIOS && n != null;
+    if (systemJaExibiu) {
+      return;
+    }
+
     unawaited(
       _showLocalNotification(
         title: title,

@@ -5,14 +5,15 @@ import '../../../core/navigation/adaptive_page_route.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../shared/utils/broker_contact_actions.dart';
-import '../../../shared/utils/broker_message_templates.dart';
 import '../../../shared/utils/kanban_task_contact_helper.dart';
 import '../../appointments/models/appointment_model.dart';
 import '../../appointments/pages/create_appointment_page.dart';
 import '../controllers/kanban_controller.dart';
 import '../models/kanban_models.dart';
 import '../services/kanban_service.dart';
+import '../utils/kanban_message_vars.dart';
 import 'edit_task_modal.dart';
+import 'whatsapp_message_sheet.dart';
 import 'task_details_modal.dart';
 import 'transfer_task_sheet.dart';
 
@@ -36,7 +37,11 @@ Future<void> showKanbanTaskQuickActions(
 
   final name = KanbanTaskContactHelper.leadDisplayName(enriched);
   final phone = KanbanTaskContactHelper.leadPhone(enriched);
-  final propertyHint = KanbanTaskContactHelper.propertyHint(enriched);
+
+  // Nome para a SAUDAÇÃO: só serve o que veio de um contato de verdade
+  // (`leadDisplayName` cai no título do card, que em lead de campanha viraria
+  // um "Olá Lead," na cara do cliente).
+  final contactRealName = KanbanTaskContactHelper.leadRealName(enriched);
 
   if (!pageContext.mounted) return;
 
@@ -71,17 +76,31 @@ Future<void> showKanbanTaskQuickActions(
           ListTile(
             leading: Icon(Icons.chat_rounded, color: AppColors.status.success),
             title: const Text('WhatsApp'),
-            subtitle: const Text('Abrir conversa com template'),
-            onTap: () async {
+            subtitle: const Text('Escolher a mensagem e abrir a conversa'),
+            onTap: () {
               Navigator.pop(sheetContext);
-              final msg = BrokerMessageTemplates.leadFollowUp(
-                leadName: name,
-                propertyTitle: propertyHint,
-              );
-              await BrokerContactActions.openWhatsApp(
+              // Mesmo compositor do card aberto e do ícone do board: era o
+              // ÚNICO caminho que disparava um texto fixo sem ninguém ler.
+              //
+              // Sem `propertyLabel` de propósito: o único "imóvel" que este
+              // sheet conhecia era o `propertyHint` (nome de projeto ou
+              // etiqueta do card), que viraria "no imóvel Campanha
+              // Instagram" dentro da mensagem.
+              if (phone == null) {
+                // Sem número: mantém o aviso de sempre.
+                BrokerContactActions.openWhatsApp(pageContext, phone);
+                return;
+              }
+              showWhatsAppMessageSheet(
                 pageContext,
-                phone,
-                message: msg,
+                phone: phone,
+                columnId: enriched.columnId,
+                vars: KanbanMessageVars(
+                  task: enriched,
+                  contactName: contactRealName,
+                  contactPhone: phone,
+                  brokerName: enriched.assignedTo?.name,
+                ),
               );
             },
           ),

@@ -21,6 +21,7 @@ import '../models/whatsapp_models.dart';
 ///   GET   /whatsapp/templates                      (whatsapp:manage_config)
 ///   POST  /whatsapp/unofficial/messages/send       (whatsapp:send)
 ///   GET   /whatsapp/unofficial/config/status       (whatsapp:view)
+///   GET   /whatsapp/unofficial/quick-messages      (whatsapp:view)
 class WhatsAppService {
   WhatsAppService._();
 
@@ -40,6 +41,7 @@ class WhatsAppService {
   static const String _kUnofficialSend = '/whatsapp/unofficial/messages/send';
   static const String _kIntegrationStatus =
       '/whatsapp/unofficial/config/status';
+  static const String _kQuickMessages = '/whatsapp/unofficial/quick-messages';
 
   /// Monta os parâmetros comuns da listagem/contagem — aba de atendimento +
   /// busca + filtros do painel. Paridade com `effectiveFilters` do
@@ -416,6 +418,52 @@ class WhatsAppService {
         message: 'Erro de conexão: ${e.toString()}',
         statusCode: 0,
       );
+    }
+  }
+
+  /// `GET /whatsapp/unofficial/quick-messages` — biblioteca "mensagem pronta"
+  /// da empresa (compartilhadas + pessoais do usuário). Exige `whatsapp:view`.
+  ///
+  /// Devolve LISTA VAZIA em qualquer tropeço (403 sem permissão, módulo
+  /// desligado, empresa que nunca foi semeada). Quem chama sempre tem os
+  /// modelos locais — a biblioteca é um acréscimo, nunca o piso.
+  Future<List<WhatsAppQuickMessage>> getQuickMessages({
+    String? search,
+    String? category,
+  }) async {
+    try {
+      final params = <String, String>{};
+      final s = (search ?? '').trim();
+      if (s.isNotEmpty) params['search'] = s;
+      final c = (category ?? '').trim();
+      if (c.isNotEmpty) params['category'] = c;
+
+      final response = await _api.get<dynamic>(
+        _kQuickMessages,
+        queryParameters: params.isEmpty ? null : params,
+      );
+      if (!response.success || response.data == null) return const [];
+
+      // O controller devolve o array cru; toleramos `{ data: [...] }`.
+      final raw = response.data;
+      final list = raw is List
+          ? raw
+          : (raw is Map && raw['data'] is List
+              ? raw['data'] as List
+              : const []);
+
+      return list
+          .whereType<Map>()
+          .map(
+            (e) => WhatsAppQuickMessage.fromJson(
+              Map<String, dynamic>.from(e),
+            ),
+          )
+          .where((m) => m.isActive && m.message.trim().isNotEmpty)
+          .toList();
+    } catch (e) {
+      debugPrint('❌ [WHATSAPP] getQuickMessages: $e');
+      return const [];
     }
   }
 

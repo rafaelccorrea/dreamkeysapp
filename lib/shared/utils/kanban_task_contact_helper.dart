@@ -12,6 +12,20 @@ class KanbanTaskContactHelper {
     return task.title.trim().isNotEmpty ? task.title.trim() : 'Lead';
   }
 
+  /// Nome do lead SÓ quando ele veio de um contato de verdade — sem o
+  /// fallback para o título do card que o [leadDisplayName] faz.
+  ///
+  /// É o nome que pode virar SAUDAÇÃO de mensagem: em lead de campanha o
+  /// título é "Lead Campanha Idealle 31626", e cumprimentar com ele mandaria
+  /// um "Olá Lead," para o cliente.
+  static String? leadRealName(KanbanTask task) {
+    for (final c in task.contacts ?? const <KanbanTaskContactInput>[]) {
+      final n = c.name?.trim();
+      if (n != null && n.isNotEmpty) return n;
+    }
+    return null;
+  }
+
   static String? leadPhone(KanbanTask task) {
     for (final c in task.contacts ?? const <KanbanTaskContactInput>[]) {
       final p = _digits(c.phone);

@@ -13,10 +13,13 @@ import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/utils/broker_contact_actions.dart';
+import '../../../shared/utils/kanban_task_contact_helper.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../models/kanban_models.dart';
 import '../controllers/kanban_controller.dart';
+import '../utils/kanban_message_vars.dart';
+import '../widgets/whatsapp_message_sheet.dart';
 import '../widgets/create_task_modal.dart';
 import '../widgets/edit_task_modal.dart';
 import '../widgets/cadence_config_modal.dart';
@@ -206,8 +209,6 @@ class _KanbanPageState extends State<KanbanPage> {
   Widget build(BuildContext context) {
     return Consumer<KanbanController>(
       builder: (context, controller, _) {
-        final theme = Theme.of(context);
-
         return AppScaffold(
           title: 'Funís • CRM',
           body: controller.shouldShowKanbanSkeleton
@@ -2448,10 +2449,27 @@ class _KanbanPageState extends State<KanbanPage> {
           icon: Icons.chat_rounded,
           color: whatsappColor,
           tooltip: 'WhatsApp',
-          onTap: () => BrokerContactActions.openWhatsApp(
-            context,
-            task.contactWhatsapp ?? phone,
-          ),
+          // Mesmo gesto do card aberto: escolher a mensagem vem ANTES de
+          // abrir o app. Sem isso o MESMO ícone abriria conversa muda aqui
+          // e conversa pronta lá dentro.
+          //
+          // A listagem do board não traz imóvel — o compositor trabalha com
+          // o que o card tem: nome do contato (quando existe um de verdade),
+          // etapa e corretor. O texto continua editável antes de enviar.
+          onTap: () {
+            final destino = task.contactWhatsapp ?? phone;
+            showWhatsAppMessageSheet(
+              context,
+              phone: destino,
+              columnId: task.columnId,
+              vars: KanbanMessageVars(
+                task: task,
+                contactName: KanbanTaskContactHelper.leadRealName(task),
+                contactPhone: destino,
+                brokerName: task.assignedTo?.name,
+              ),
+            );
+          },
         ),
       ],
     );

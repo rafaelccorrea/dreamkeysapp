@@ -54,6 +54,48 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- App Links (https). O domínio é o do SPA do sistema
+                 (FRONTEND_URL/APP_URL do backend = https://intellisysbr.com/sistema).
+                 autoVerify exige https://intellisysbr.com/.well-known/assetlinks.json
+                 no ar NO MOMENTO DA INSTALAÇÃO (ver deploy/well-known/README.md).
+
+                 Os pathPrefix são a WHITELIST: só entram caminhos que o
+                 AppDeepLink sabe traduzir. Android não tem exclusão, então
+                 /sistema INTEIRO nunca é declarado — senão sequestraríamos
+                 /sistema/reset-password/{token} e /sistema/verify-email, que
+                 PRECISAM abrir no navegador. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https" android:host="intellisysbr.com"/>
+                <data android:pathPrefix="/sistema/kanban"/>
+                <data android:pathPrefix="/sistema/tasks/"/>
+                <data android:pathPrefix="/sistema/calendar"/>
+                <data android:pathPrefix="/sistema/appointments"/>
+                <data android:pathPrefix="/sistema/properties"/>
+                <data android:pathPrefix="/sistema/clients"/>
+                <data android:pathPrefix="/sistema/proposals"/>
+                <data android:pathPrefix="/sistema/fichas-proposta"/>
+                <data android:pathPrefix="/sistema/fichas-venda"/>
+                <data android:pathPrefix="/sistema/inspection"/>
+                <data android:pathPrefix="/sistema/documents"/>
+                <data android:pathPrefix="/sistema/checklists"/>
+                <data android:pathPrefix="/sistema/check-in"/>
+                <data android:pathPrefix="/sistema/dashboard"/>
+                <data android:pathPrefix="/sistema/chat"/>
+                <data android:pathPrefix="/sistema/integrations"/>
+            </intent-filter>
+            <!-- Esquema próprio dreamkeys:// (Ilha Dinâmica do check-in). No
+                 iOS já era capturado pelo AppDelegate; no Android faltava este
+                 filtro — sem ele o intent nunca chegava na MainActivity.
+                 Sem autoVerify: scheme custom não passa por verificação. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="dreamkeys"/>
+            </intent-filter>
         </activity>
         <!-- Activity do image_cropper -->
         <activity

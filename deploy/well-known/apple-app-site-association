@@ -1,0 +1,102 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["TEAMID.com.dreamkeys.corretor"],
+        "appID": "TEAMID.com.dreamkeys.corretor",
+        "components": [
+          {
+            "/": "/sistema/reset-password/*",
+            "exclude": true,
+            "comment": "Redefinicao de senha PRECISA abrir no navegador."
+          },
+          {
+            "/": "/sistema/verify-email*",
+            "exclude": true,
+            "comment": "Verificacao de e-mail PRECISA abrir no navegador."
+          },
+          {
+            "/": "/sistema/login*",
+            "exclude": true,
+            "comment": "Login web nao tem destino no app."
+          },
+          {
+            "/": "/sistema/unsubscribe*",
+            "exclude": true,
+            "comment": "Descadastro de e-mail e' fluxo web."
+          },
+          {
+            "/": "/sistema/email-preferences*",
+            "exclude": true,
+            "comment": "Preferencias de e-mail sao fluxo web."
+          },
+          { "/": "/sistema/kanban", "comment": "Funil e /kanban?taskId={id}" },
+          { "/": "/sistema/kanban/*", "comment": "/kanban/task/{id}, /kanban/subtasks/{id}, /kanban/tarefas" },
+          { "/": "/sistema/tasks/*", "comment": "Formato legado /tasks/{id}" },
+          { "/": "/sistema/calendar" },
+          { "/": "/sistema/calendar/*" },
+          { "/": "/sistema/appointments" },
+          { "/": "/sistema/appointments/*" },
+          { "/": "/sistema/properties" },
+          { "/": "/sistema/properties/*" },
+          { "/": "/sistema/clients" },
+          { "/": "/sistema/clients/*" },
+          { "/": "/sistema/proposals" },
+          { "/": "/sistema/proposals/*" },
+          { "/": "/sistema/fichas-proposta*" },
+          { "/": "/sistema/fichas-venda" },
+          { "/": "/sistema/fichas-venda/*" },
+          { "/": "/sistema/inspection/*" },
+          { "/": "/sistema/inspections" },
+          { "/": "/sistema/inspections/*" },
+          { "/": "/sistema/documents" },
+          { "/": "/sistema/documents/*" },
+          { "/": "/sistema/checklists" },
+          { "/": "/sistema/checklists/*" },
+          { "/": "/sistema/check-in*" },
+          { "/": "/sistema/dashboard" },
+          { "/": "/sistema/chat" },
+          { "/": "/sistema/chat/*" },
+          { "/": "/sistema/integrations" },
+          { "/": "/sistema/integrations/*" }
+        ],
+        "paths": [
+          "NOT /sistema/reset-password/*",
+          "NOT /sistema/verify-email*",
+          "NOT /sistema/login*",
+          "NOT /sistema/unsubscribe*",
+          "NOT /sistema/email-preferences*",
+          "/sistema/kanban",
+          "/sistema/kanban/*",
+          "/sistema/tasks/*",
+          "/sistema/calendar",
+          "/sistema/calendar/*",
+          "/sistema/appointments",
+          "/sistema/appointments/*",
+          "/sistema/properties",
+          "/sistema/properties/*",
+          "/sistema/clients",
+          "/sistema/clients/*",
+          "/sistema/proposals",
+          "/sistema/proposals/*",
+          "/sistema/fichas-proposta*",
+          "/sistema/fichas-venda",
+          "/sistema/fichas-venda/*",
+          "/sistema/inspection/*",
+          "/sistema/inspections",
+          "/sistema/inspections/*",
+          "/sistema/documents",
+          "/sistema/documents/*",
+          "/sistema/checklists",
+          "/sistema/checklists/*",
+          "/sistema/check-in*",
+          "/sistema/dashboard",
+          "/sistema/chat",
+          "/sistema/chat/*",
+          "/sistema/integrations",
+          "/sistema/integrations/*"
+        ]
+      }
+    ]
+  }
+}

@@ -44,12 +44,25 @@ class BrokerContactActions {
     return true;
   }
 
+  /// Número no formato que o `wa.me` espera: DDI + DDD + número.
+  ///
+  /// Lead salvo como `(31) 99999-9999` (sem o 55) abria conversa inválida.
+  /// O 55 só é assumido quando o tamanho é o de um número BR local (10 ou 11
+  /// dígitos) — NUNCA por "começa com 55", que é a armadilha do
+  /// `normalizePhoneNumber` da web: 55 também é DDD (Santa Maria/RS).
+  static String whatsappDigits(String? raw) {
+    var d = digitsOnly(raw);
+    d = d.replaceFirst(RegExp(r'^0+'), '');
+    if (d.length == 10 || d.length == 11) return '55$d';
+    return d;
+  }
+
   static Future<bool> openWhatsApp(
     BuildContext context,
     String? phone, {
     String? message,
   }) async {
-    final d = digitsOnly(phone);
+    final d = whatsappDigits(phone);
     if (d.length < 10) {
       _snack(context, 'WhatsApp indisponível — telefone não informado.');
       return false;

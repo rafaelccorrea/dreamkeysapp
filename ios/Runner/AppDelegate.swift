@@ -17,7 +17,8 @@ import FirebaseCore
 ///      `Info.plist` por defeito) repassa o APNs token para o `Messaging`.
 @main
 @objc class AppDelegate: FlutterAppDelegate {
-  /// Canal por onde os deep links `dreamkeys://` chegam ao Flutter.
+  /// Canal por onde os deep links chegam ao Flutter: esquema `dreamkeys://` e
+  /// Universal Links `https://intellisysbr.com/sistema/...`.
   /// O roteamento default do engine (`FlutterDeepLinkingEnabled`) foi
   /// DESLIGADO no Info.plist: ele empurrava o path cru pro Navigator e caía
   /// em "Página não encontrada". Aqui o link vai inteiro pro Dart, que decide
@@ -65,6 +66,30 @@ import FirebaseCore
       return true
     }
     return super.application(app, open: url, options: options)
+  }
+
+  /// Universal Links (https://intellisysbr.com/sistema/...). O iOS NÃO chama
+  /// `application(_:open:)` para eles — chega tudo por aqui, tanto no cold
+  /// start (logo após o `didFinishLaunching`, que já registrou o canal) quanto
+  /// no warm start. Alimenta o MESMO `pendingDeepLink` + canal do esquema
+  /// `dreamkeys://`: no cold start o handler Dart ainda não existe e o link é
+  /// resgatado pelo `getInitialLink`; o dedupe do Dart cobre a dupla entrega.
+  override func application(
+    _ application: UIApplication,
+    continue userActivity: NSUserActivity,
+    restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void
+  ) -> Bool {
+    if userActivity.activityType == NSUserActivityTypeBrowsingWeb,
+       let url = userActivity.webpageURL {
+      pendingDeepLink = url.absoluteString
+      deepLinkChannel?.invokeMethod("onLink", arguments: url.absoluteString)
+      return true
+    }
+    return super.application(
+      application,
+      continue: userActivity,
+      restorationHandler: restorationHandler
+    )
   }
 
   private func registerDeepLinkChannel() {

@@ -480,6 +480,52 @@ class WhatsAppTemplate {
   }
 }
 
+// ─── Mensagem pronta (quick reply) ───────────────────────────────────────────
+
+/// Espelha a entidade `whatsapp_quick_messages` do backend (a mesma
+/// biblioteca que o "/" do inbox web consome). Por empresa, com mensagens
+/// compartilhadas (`userId` null) e pessoais.
+///
+/// O backend NÃO interpola nada aqui: `message` vem cru, com os `{{token}}`
+/// exatamente como foram digitados. Quem substitui é quem vai enviar.
+class WhatsAppQuickMessage {
+  final String id;
+  final String shortcut;
+  final String title;
+  final String message;
+  final String? category;
+  final int position;
+  final bool isActive;
+
+  /// `null` = mensagem compartilhada da empresa; preenchido = pessoal.
+  final String? userId;
+
+  const WhatsAppQuickMessage({
+    required this.id,
+    required this.shortcut,
+    required this.title,
+    required this.message,
+    this.category,
+    this.position = 0,
+    this.isActive = true,
+    this.userId,
+  });
+
+  factory WhatsAppQuickMessage.fromJson(Map<String, dynamic> json) {
+    return WhatsAppQuickMessage(
+      id: _toStringOrNull(json['id']) ?? '',
+      shortcut: _toStringOrNull(json['shortcut']) ?? '',
+      title: _toStringOrNull(json['title']) ?? '',
+      message: json['message']?.toString() ?? '',
+      category: _toStringOrNull(json['category']),
+      position: _toInt(json['position']),
+      // Ausente na resposta = ativa (o GET já filtra `isActive = true`).
+      isActive: json['isActive'] == null ? true : _toBool(json['isActive']),
+      userId: _toStringOrNull(json['userId']),
+    );
+  }
+}
+
 // ─── Status das integrações (oficial × QR Code) ──────────────────────────────
 
 /// Espelha `WhatsAppIntegrationStatus` de `types/whatsapp-unofficial.ts`.

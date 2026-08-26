@@ -24,6 +24,8 @@ import '../../appointments/services/appointment_service.dart';
 import '../models/kanban_models.dart';
 import '../services/kanban_service.dart';
 import '../controllers/kanban_controller.dart';
+import '../utils/kanban_message_vars.dart';
+import 'whatsapp_message_sheet.dart';
 import 'subtask_manager.dart';
 import 'mark_task_result_sheet.dart';
 import 'task_edit_sheets.dart';
@@ -779,6 +781,35 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
       barrierColor: Colors.black54,
       builder: (ctx) =>
           MarkTaskResultSheet(task: task, quickEntry: quickEntry),
+    );
+  }
+
+  /// WhatsApp do card: NUNCA abre a conversa muda. Primeiro o compositor de
+  /// mensagem pronta (modelos locais + cadência da etapa + biblioteca da
+  /// empresa), com o texto editável; o app externo só abre depois, já com o
+  /// `?text=` montado.
+  ///
+  /// Quem sabe do imóvel vinculado (`_propertyLabel` sai do payload cru), da
+  /// etapa (`columnId`) e do corretor dono do card é a TELA — por isso a ação
+  /// sobe até aqui em vez de morar dentro do card de contato.
+  Future<void> _openWhatsAppComposer(
+    String rawPhone, {
+    String? contactName,
+    String? contactEmail,
+  }) async {
+    final task = _taskNow;
+    await showWhatsAppMessageSheet(
+      context,
+      phone: rawPhone,
+      columnId: task.columnId,
+      vars: KanbanMessageVars(
+        task: task,
+        contactName: contactName,
+        contactPhone: rawPhone,
+        contactEmail: contactEmail,
+        propertyLabel: _propertyLabel,
+        brokerName: task.assignedTo?.name,
+      ),
     );
   }
 
@@ -1733,6 +1764,22 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
             (primaryContact?.name?.trim().isNotEmpty ?? false) ||
             (primaryContact?.email?.trim().isNotEmpty ?? false));
 
+    // E-mail da LINHA tocada. O e-mail do contato principal só vale para o
+    // número do lead: numa linha de "outros contatos" (esposa, sócio…) ele
+    // colocaria o endereço da pessoa ERRADA dentro de um `{{clientEmail}}`
+    // vindo da biblioteca da empresa.
+    final leadPhoneKey = leadPhone?.trim();
+    String? emailForPhone(String raw) {
+      final r = raw.trim();
+      if (leadPhoneKey != null && r == leadPhoneKey) {
+        return primaryContact?.email;
+      }
+      for (final c in extraContacts) {
+        if ((c.phone ?? '').trim() == r) return c.email;
+      }
+      return null;
+    }
+
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 32),
       physics: const BouncingScrollPhysics(),
@@ -1752,7 +1799,11 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
           ),
           const SizedBox(height: 10),
           if (task.client != null)
-            _LeadContactCard(client: task.client!)
+            _LeadContactCard(
+              client: task.client!,
+              onWhatsApp: (raw, {String? contactName}) =>
+                  _openWhatsAppComposer(raw, contactName: contactName),
+            )
           else if (hasLooseContact)
             _LeadContactCard(
               contactName: primaryContact?.name,
@@ -1760,6 +1811,19 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
               contactEmail: primaryContact?.email,
               contactJobTitle: primaryContact?.jobTitle,
               extraContacts: extraContacts,
+              // Sem cliente vinculado, quem dá nome/e-mail à mensagem é o
+              // contato avulso do card — MAS só na linha dele: a linha de
+              // outro contato saúda (e leva o e-mail de) quem vai receber.
+              onWhatsApp: (raw, {String? contactName}) {
+                final isLead =
+                    leadPhoneKey != null && raw.trim() == leadPhoneKey;
+                _openWhatsAppComposer(
+                  raw,
+                  contactName: contactName ??
+                      (isLead ? primaryContact?.name : null),
+                  contactEmail: emailForPhone(raw),
+                );
+              },
             )
           else
             const _MutedHint(
@@ -4164,6 +4228,11 @@ class _LeadContactCard extends StatelessWidget {
   /// Demais contatos do card com telefone — viram linhas extras no fim.
   final List<KanbanTaskContactInput> extraContacts;
 
+  /// Toque no WhatsApp. A tela é quem sabe do card (imóvel, etapa, corretor),
+  /// então ela abre o compositor de mensagem pronta; o card só avisa QUAL
+  /// número foi tocado — e, nas linhas de outros contatos, de quem ele é.
+  final void Function(String rawPhone, {String? contactName})? onWhatsApp;
+
   const _LeadContactCard({
     this.client,
     this.contactName,
@@ -4171,6 +4240,7 @@ class _LeadContactCard extends StatelessWidget {
     this.contactEmail,
     this.contactJobTitle,
     this.extraContacts = const [],
+    this.onWhatsApp,
   });
 
   static const Map<String, Color> _typeColors = {
@@ -4235,7 +4305,16 @@ class _LeadContactCard extends StatelessWidget {
 
   /// Trio de ações do número: copiar (slate), ligar (azul), WhatsApp (verde).
   /// Mesma tripla para o cliente vinculado e para o contato avulso.
-  List<Widget> _phoneActions(BuildContext context, String raw) => [
+  ///
+  /// [rowContactName] só é preenchido nas linhas de OUTROS contatos do card
+  /// (esposa, sócio…): a mensagem pronta precisa saudar quem vai receber,
+  /// não o lead titular.
+  List<Widget> _phoneActions(
+    BuildContext context,
+    String raw, {
+    String? rowContactName,
+  }) =>
+      [
         _LeadContactAction(
           icon: Icons.copy_rounded,
           tooltip: 'Copiar número',
@@ -4253,7 +4332,17 @@ class _LeadContactCard extends StatelessWidget {
           icon: Icons.chat_rounded,
           tooltip: 'WhatsApp',
           color: const Color(0xFF25D366),
-          onTap: () => _launch('https://wa.me/${_waDigits(raw)}'),
+          // Antes abria a conversa MUDA. Agora passa pelo compositor de
+          // mensagem pronta (o mesmo caminho do sheet de ações rápidas do
+          // board, que já mandava texto — a incoerência era daqui).
+          onTap: () {
+            final open = onWhatsApp;
+            if (open != null) {
+              open(raw, contactName: rowContactName);
+            } else {
+              _launch('https://wa.me/${_waDigits(raw)}');
+            }
+          },
         ),
       ];
 
@@ -4271,7 +4360,7 @@ class _LeadContactCard extends StatelessWidget {
           value: _maskPhone(raw),
           onCopy: () =>
               _copyToClipboard(context, _maskPhone(raw), 'Número copiado'),
-          actions: _phoneActions(context, raw),
+          actions: _phoneActions(context, raw, rowContactName: name),
         ),
       );
     }
@@ -4395,7 +4484,16 @@ class _LeadContactCard extends StatelessWidget {
                   icon: Icons.chat_rounded,
                   tooltip: 'Abrir WhatsApp',
                   color: const Color(0xFF25D366),
-                  onTap: () => _launch('https://wa.me/${_waDigits(whatsapp)}'),
+                  // Idem à linha do telefone: escolher a mensagem vem ANTES
+                  // de abrir o app.
+                  onTap: () {
+                    final open = onWhatsApp;
+                    if (open != null) {
+                      open(whatsapp);
+                    } else {
+                      _launch('https://wa.me/${_waDigits(whatsapp)}');
+                    }
+                  },
                 ),
               ],
             ),

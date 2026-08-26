@@ -8,5 +8,15 @@
 	<array>
 		<string>group.com.dreamkeys.corretor</string>
 	</array>
+	<!-- Universal Links: o domínio é o do SPA do sistema (FRONTEND_URL/APP_URL
+	     do backend = https://intellisysbr.com/sistema). O entitlement só aceita
+	     o HOST — o recorte de paths vive no apple-app-site-association servido
+	     em https://intellisysbr.com/.well-known/ (ver deploy/well-known/).
+	     Sem "Associated Domains" habilitado no App ID do portal Apple o perfil
+	     de provisionamento não assina. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:intellisysbr.com</string>
+	</array>
 </dict>
 </plist>
