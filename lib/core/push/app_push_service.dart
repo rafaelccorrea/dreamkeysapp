@@ -417,21 +417,68 @@ class AppPushService {
     }
   }
 
+  /// Desfaz o registro de push no logout.
+  ///
+  /// Duas camadas, porque uma só não segurava:
+  ///
+  /// 1. AVISA O BACKEND (apaga a linha em `user_push_tokens`). Antes usava
+  ///    `retryOn401: false` e engolia a falha, mas SEMPRE limpava o marcador
+  ///    local — se o access token já tivesse vencido (15 min), o DELETE dava
+  ///    401, ninguém renovava, e o aparelho ficava como TOKEN ÓRFÃO no
+  ///    servidor: deslogado e recebendo push para sempre. Agora o refresh é
+  ///    permitido e o marcador só é limpo quando o servidor confirma.
+  ///
+  /// 2. INVALIDA O TOKEN NO PRÓPRIO FCM (`deleteToken`). É a rede de
+  ///    segurança que funciona mesmo sem internet ou com o backend fora:
+  ///    morto o token na origem, nenhum envio chega — mesmo que a linha
+  ///    tenha sobrado no banco. No próximo login o FCM emite um token novo,
+  ///    que é registrado normalmente.
   Future<void> unregisterFromBackendIfNeeded() async {
     final saved = await SecureStorageService.instance.getFcmTokenRegistered();
-    if (saved == null || saved.isEmpty) {
-      return;
+
+    if (saved != null && saved.isNotEmpty) {
+      var confirmado = false;
+      try {
+        // `retryOn401: true`: o logout costuma acontecer com o access token
+        // vencido, e é justamente aí que o unregister não pode ser pulado.
+        final res = await ApiService.instance.delete<void>(
+          ApiConstants.notificationsMobileDevices,
+          body: {'token': saved},
+        );
+        confirmado = res.success;
+        if (!confirmado) {
+          debugPrint(
+            '📱 [PUSH] unregister recusado pelo servidor '
+            '(HTTP ${res.statusCode}) — marcador local preservado',
+          );
+        }
+      } catch (e) {
+        debugPrint('📱 [PUSH] unregister API: $e');
+      }
+
+      // Só esquece o registro quando o servidor confirmou. Mantendo o
+      // marcador, a próxima tentativa (novo login/logout) ainda sabe qual
+      // token precisa ser removido lá.
+      if (confirmado) {
+        await SecureStorageService.instance.clearFcmTokenRegistered();
+      }
     }
+
+    // Camada 2 — independe do backend e do estado do marcador.
+    await _deleteFcmTokenFromDevice();
+  }
+
+  /// Mata o token no FCM. Sem token, o Firebase não tem para onde entregar,
+  /// mesmo que o servidor ainda ache que o aparelho está registrado.
+  Future<void> _deleteFcmTokenFromDevice() async {
+    if (!_firebaseCoreReady) return;
     try {
-      await ApiService.instance.delete<void>(
-        ApiConstants.notificationsMobileDevices,
-        body: {'token': saved},
-        retryOn401: false,
-      );
+      await FirebaseMessaging.instance.deleteToken();
+      debugPrint('📱 [PUSH] Token FCM do aparelho invalidado no logout');
     } catch (e) {
-      debugPrint('📱 [PUSH] unregister API: $e');
+      // Sem rede o FCM pode recusar; não é motivo para travar o logout.
+      debugPrint('📱 [PUSH] deleteToken falhou: $e');
     }
-    await SecureStorageService.instance.clearFcmTokenRegistered();
   }
 
   Future<void> _registerTokenOnBackend(String token) async {
