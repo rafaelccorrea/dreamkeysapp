@@ -1753,6 +1753,18 @@ class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
+  /// Tipo do funil do card quando ele não traz `project` (board enxuto).
+  String? _funnelTypeOf(String? projectId) {
+    if (projectId == null) return null;
+    try {
+      final controller = context.read<KanbanController>();
+      for (final p in controller.projects) {
+        if (p.id == projectId) return p.type;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   Widget _taskResultChip(KanbanTask task) {
     final r = task.normalizedResult;
     if (r == 'open') return const SizedBox.shrink();
@@ -1760,7 +1772,9 @@ class _KanbanPageState extends State<KanbanPage> {
     late final Color color;
     switch (r) {
       case 'won':
-        label = 'Vendido';
+        label = wonLabelForFunnelType(
+          task.project?.type ?? _funnelTypeOf(task.projectId),
+        );
         color = const Color(0xFF16A34A);
         break;
       case 'lost':

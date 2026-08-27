@@ -97,7 +97,13 @@ enum KanbanLossReason {
     'sem_interesse_imovel_em_marilia',
     'Sem interesse imóvel em Marília',
   ),
-  semInteresse('sem_interesse', 'Sem interesse');
+  semInteresse('sem_interesse', 'Sem interesse'),
+  /// Locação (União, 27/08/2026): sem garantia / perfil abaixo do portfólio.
+  clienteSemGarantia('cliente_sem_garantia', 'Cliente sem garantia'),
+  perfilAbaixoDoPortfolio(
+    'perfil_abaixo_do_portfolio',
+    'Perfil abaixo do portfólio da imobiliária',
+  );
 
   const KanbanLossReason(this.apiValue, this.label);
 
@@ -1198,6 +1204,10 @@ class KanbanProject {
   /// Equipes extras do funil (multi-equipe), quando a API envia `teamIds` — mesmo critério do web.
   final List<String>? teamIds;
 
+  /// Tipo do funil: `negociacao` | `marketing` | `locacao` | `tecnologia`.
+  /// Decide o rótulo do resultado positivo (Vendido × Concluído).
+  final String? type;
+
   KanbanProject({
     required this.id,
     required this.name,
@@ -1218,6 +1228,7 @@ class KanbanProject {
     this.createdBy,
     this.completedBy,
     this.teamIds,
+    this.type,
   });
 
   factory KanbanProject.fromJson(Map<String, dynamic> json) {
@@ -1250,6 +1261,7 @@ class KanbanProject {
       completedBy: json['completedBy'] != null
           ? KanbanUser.fromJson(json['completedBy'] as Map<String, dynamic>)
           : null,
+      type: json['type']?.toString(),
       teamIds: json['teamIds'] != null
           ? List<String>.from(
               (json['teamIds'] as List).map((e) => e.toString()),
@@ -2525,3 +2537,8 @@ class UpdateKanbanProjectDto {
   }
 }
 
+/// Rótulo do resultado positivo por tipo de funil — igual ao web
+/// (`funnelTypeConfig.wonLabel`): negociação vende; locação (e demais) conclui.
+String wonLabelForFunnelType(String? funnelType) {
+  return (funnelType ?? 'negociacao') == 'negociacao' ? 'Vendido' : 'Concluído';
+}

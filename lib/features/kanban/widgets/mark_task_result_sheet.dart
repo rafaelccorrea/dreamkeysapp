@@ -50,10 +50,27 @@ class _MarkTaskResultSheetState extends State<MarkTaskResultSheet> {
     super.dispose();
   }
 
+  String get _wonLabel {
+    String? type = task.project?.type;
+    if (type == null && task.projectId != null) {
+      try {
+        for (final p in context.read<KanbanController>().projects) {
+          if (p.id == task.projectId) {
+            type = p.type;
+            break;
+          }
+        }
+      } catch (_) {}
+    }
+    return wonLabelForFunnelType(type);
+  }
+
+  bool get _isLocacao => _wonLabel != 'Vendido';
+
   String _resultLabel() {
     switch (task.normalizedResult) {
       case 'won':
-        return 'Vendido';
+        return _wonLabel;
       case 'lost':
         return 'Perdido';
       case 'cancelled':
@@ -210,7 +227,9 @@ class _MarkTaskResultSheetState extends State<MarkTaskResultSheet> {
                           const SizedBox(height: 18),
                           _OutcomePathCard(
                             title: 'Vitória',
-                            subtitle: 'Marcar como vendido',
+                            subtitle: _isLocacao
+                                ? 'Marcar como concluída'
+                                : 'Marcar como vendido',
                             icon: Icons.emoji_events_outlined,
                             accent: _inkWin,
                             isDark: isDark,
@@ -259,8 +278,9 @@ class _MarkTaskResultSheetState extends State<MarkTaskResultSheet> {
                               borderColor: border,
                               accent: _inkWin,
                               child: Text(
-                                'Confirme a venda. As observações alimentam o histórico '
-                                'e relatórios — seja objetivo.',
+                                _isLocacao
+                                    ? 'Confirme a conclusão da locação. As observações alimentam o histórico e relatórios — seja objetivo.'
+                                    : 'Confirme a venda. As observações alimentam o histórico e relatórios — seja objetivo.',
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   color: muted,
                                   height: 1.5,
@@ -323,7 +343,9 @@ class _MarkTaskResultSheetState extends State<MarkTaskResultSheet> {
                             enabled: !_submitting,
                             label: 'Observações',
                             hint: _mode == 'won'
-                                ? 'Forma de pagamento, permuta, próximos passos…'
+                                ? (_isLocacao
+                                    ? 'Contrato, garantia, entrega de chaves…'
+                                    : 'Forma de pagamento, permuta, próximos passos…')
                                 : 'Contexto adicional para o time (opcional)',
                           ),
                           if (_localError != null) ...[
@@ -353,7 +375,7 @@ class _MarkTaskResultSheetState extends State<MarkTaskResultSheet> {
                                 ? Icons.verified_rounded
                                 : Icons.gavel_rounded,
                             label: _mode == 'won'
-                                ? 'Confirmar venda'
+                                ? (_isLocacao ? 'Confirmar conclusão' : 'Confirmar venda')
                                 : 'Confirmar perda',
                             foreground: Colors.white,
                             background:

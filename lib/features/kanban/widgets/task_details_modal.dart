@@ -6614,7 +6614,7 @@ class _HorizontalTimeline extends StatelessWidget {
     if (task.hasClosedResult) {
       final (resultLabel, resultColor, resultIcon) =
           switch (task.normalizedResult) {
-        'won' => ('Ganho', const Color(0xFF10B981), LucideIcons.trophy),
+        'won' => (wonLabelForFunnelType(task.project?.type), const Color(0xFF10B981), LucideIcons.trophy),
         'lost' => ('Perdido', const Color(0xFFEF4444), LucideIcons.trendingDown),
         _ => ('Cancelado', const Color(0xFF64748B), LucideIcons.x),
       };
