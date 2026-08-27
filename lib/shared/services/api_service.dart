@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../../core/constants/api_constants.dart';
+import '../../core/navigation/app_navigator.dart';
+import '../../core/routes/app_routes.dart';
 import '../../core/session/session_bootstrap.dart';
 import '../../core/utils/api_connection_message.dart';
 import 'secure_storage_service.dart';
@@ -362,8 +364,10 @@ class ApiService {
     try {
       // Refresh proativo: verificar se token expira em menos de 2 minutos
       if (_token != null && endpoint != null && retryOn401) {
-        // Não fazer refresh proativo em rotas de autenticação
-        if (!endpoint.startsWith('/auth/')) {
+        // Mesma correção do retry reativo abaixo: só as rotas SEM token
+        // (login/refresh/logout/2FA) ficam de fora. `/auth/profile` e demais
+        // rotas autenticadas precisam do refresh como qualquer outra.
+        if (!_isAuthRouteWithoutToken(endpoint)) {
           final timeUntilExpiry = JwtUtils.getTimeUntilExpiry(_token!);
 
           if (timeUntilExpiry != null &&
@@ -378,6 +382,9 @@ class ApiService {
 
             if (!refreshSuccess) {
               debugPrint('❌ [API_SERVICE] Refresh proativo falhou');
+              // Sessão acabou de verdade: manda pro login em vez de deixar a
+              // tela pintar erro.
+              _handleSessionExpired();
               return ApiResponse.error(
                 message: 'Sessão expirada. Faça login novamente.',
                 statusCode: 401,
@@ -450,11 +457,22 @@ class ApiService {
 
       // Se recebeu 401 e pode tentar refresh
       // IMPORTANTE: Não tentar refresh em rotas de autenticação (login, logout, etc)
+      // BUG CORRIGIDO: a condição era `!endpoint.startsWith('/auth/')`, o que
+      // excluía do refresh TODA rota autenticada sob `/auth/` — inclusive
+      // `/auth/profile`, que é a tela "Meu Perfil". Com o access token de 15
+      // min vencido, o Perfil recebia 401 e mostrava "Sessão expirada" sem
+      // nem TENTAR renovar, obrigando login manual — mesmo com refresh token
+      // válido por 7 dias.
+      //
+      // O que de fato não pode retentar são as rotas que não levam token
+      // (login/refresh/logout/2FA) — sem isso o refresh entraria em laço.
+      // `_isAuthRouteWithoutToken` já é essa lista, e é a mesma usada para
+      // decidir o header `Authorization`.
       if (response.statusCode == 401 &&
           retryOn401 &&
           !_isRefreshing &&
           endpoint != null &&
-          !endpoint.startsWith('/auth/')) {
+          !_isAuthRouteWithoutToken(endpoint)) {
         debugPrint('🔄 [API_SERVICE] Token expirado, tentando refresh...');
 
         // Tentar refresh token
@@ -467,8 +485,10 @@ class ApiService {
           );
           return await request();
         } else {
-          // Refresh falhou, retornar erro
+          // Refresh falhou de verdade (refresh token vencido ou revogado):
+          // limpa e devolve a pessoa ao login, sem tela de erro no meio.
           debugPrint('❌ [API_SERVICE] Falha ao renovar token');
+          _handleSessionExpired();
           return ApiResponse.error(
             message: 'Sessão expirada. Faça login novamente.',
             statusCode: 401,
@@ -499,6 +519,68 @@ class ApiService {
   }
 
   /// Tenta renovar o token se necessário
+  /// Já existe um redirecionamento de sessão vencida em curso.
+  ///
+  /// Sem esta trava, uma tela que dispara 5 requisições em paralelo geraria 5
+  /// navegações para o login (e 5 limpezas de sessão concorrentes).
+  static bool _redirecionandoParaLogin = false;
+
+  /// Sessão realmente vencida (refresh falhou): limpa e MANDA PRO LOGIN.
+  ///
+  /// App grande não mostra "sessão expirada" no meio da tela — ele devolve a
+  /// pessoa para o login. A tela de erro continua existindo para falha REAL
+  /// (sem rede, 403, 500); expiração de sessão não é erro, é fim de sessão.
+  ///
+  /// As credenciais salvas são preservadas: quem tem Face ID/digital ativo
+  /// volta com um toque, sem digitar nada.
+  void _handleSessionExpired() {
+    if (_redirecionandoParaLogin) return;
+    _redirecionandoParaLogin = true;
+
+    // Fora do ciclo da requisição: navegar durante o `await` da resposta
+    // deixaria telas construindo em cima de um Navigator que está trocando.
+    Future<void>.microtask(() async {
+      try {
+        _token = null;
+        SessionBootstrap.instance.reset();
+        await SecureStorageService.instance.clearAuthSessionKeepCredentials();
+      } catch (e) {
+        debugPrint('⚠️ [API_SERVICE] Limpeza de sessão: $e');
+      }
+
+      final nav = appNavigatorKey.currentState;
+      if (nav == null) {
+        debugPrint('⚠️ [API_SERVICE] Sem Navigator para redirecionar ao login');
+        _redirecionandoParaLogin = false;
+        return;
+      }
+
+      // Já está no login? Não reempilha — isso limparia o formulário que a
+      // pessoa pode estar preenchendo (uma requisição de fundo pode dar 401
+      // depois de a sessão já ter caído).
+      var jaNoLogin = false;
+      nav.popUntil((route) {
+        jaNoLogin = route.settings.name == AppRoutes.login;
+        return true; // inspeciona a rota do topo sem desempilhar nada
+      });
+      if (jaNoLogin) {
+        debugPrint('🔐 [API_SERVICE] Sessão vencida — já estava no login');
+        _redirecionandoParaLogin = false;
+        return;
+      }
+
+      // `removeUntil` zera a pilha: sem isso o "voltar" devolveria a pessoa
+      // para uma tela autenticada que já não tem sessão.
+      nav.pushNamedAndRemoveUntil(AppRoutes.login, (route) => false);
+      debugPrint('🔐 [API_SERVICE] Sessão vencida — redirecionado ao login');
+
+      // Solta a trava depois da troca de rota, para um 401 tardio de outra
+      // requisição não disparar uma segunda navegação em cima desta.
+      await Future<void>.delayed(const Duration(seconds: 2));
+      _redirecionandoParaLogin = false;
+    });
+  }
+
   Future<bool> _refreshTokenIfNeeded() async {
     if (_isRefreshing) {
       // Se já está renovando, aguardar
