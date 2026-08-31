@@ -2,8 +2,8 @@
   "applinks": {
     "details": [
       {
-        "appIDs": ["TEAMID.com.dreamkeys.corretor"],
-        "appID": "TEAMID.com.dreamkeys.corretor",
+        "appIDs": ["Z6CR6MJV22.com.dreamkeys.corretor"],
+        "appID": "Z6CR6MJV22.com.dreamkeys.corretor",
         "components": [
           {
             "/": "/sistema/reset-password/*",

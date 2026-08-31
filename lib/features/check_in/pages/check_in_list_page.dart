@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/constants/app_permissions.dart';
+import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/check_in_service.dart';
@@ -33,17 +34,43 @@ class _CheckInListPageState extends State<CheckInListPage> {
   String _scope = 'mine';
   DateTime? _fromDate;
   DateTime? _toDate;
+
+  /// `active` / `closed` — paridade com o filtro de situação do web.
+  String? _statusFilter;
+
+  /// `self` / `manager` / `system` — quem encerrou a sessão.
+  String? _closedByFilter;
+
+  /// Pessoa específica dentro do escopo visível.
+  CheckInUser? _userFilter;
+
+  /// Recorte devolvido por `/check-in/visible-users`. Quem decide quem o
+  /// usuário enxerga é o servidor — o app não adivinha por papel.
+  CheckInVisibleUsers? _visible;
+
   CheckInListResponse _response = CheckInListResponse.empty;
   final ScrollController _scrollController = ScrollController();
   int _pagingGen = 0;
   Timer? _ticker;
 
-  bool get _canSeeAll {
+  /// Pode AGIR sobre o check-in de outra pessoa (desfazer, liberar, bloquear).
+  bool get _canManage {
     final access = ModuleAccessService.instance;
     final role = access.userRole?.toLowerCase().trim() ?? '';
     if (role == 'master' || role == 'admin' || role == 'manager') return true;
     return access.hasPermission(AppPermissions.checkInManageSettings);
   }
+
+  /// Enxerga mais gente do que só a si. Enquanto o escopo do servidor não
+  /// chega, cai na permissão local para a tela não piscar sem o seletor.
+  bool get _canSeeAll => _visible?.isManagerScope ?? _canManage;
+
+  bool get _hasAnyFilter =>
+      _fromDate != null ||
+      _toDate != null ||
+      _statusFilter != null ||
+      _closedByFilter != null ||
+      _userFilter != null;
 
   @override
   void initState() {
@@ -79,10 +106,23 @@ class _CheckInListPageState extends State<CheckInListPage> {
       _error = null;
       _errorStatus = 0;
     });
+    // O escopo visível não muda entre filtros — busca uma vez só.
+    if (_visible == null) {
+      unawaited(
+        CheckInService.instance.getVisibleUsers().then((res) {
+          if (!mounted || !res.success || res.data == null) return;
+          setState(() => _visible = res.data);
+        }),
+      );
+    }
+
     final res = await CheckInService.instance.listCheckIns(
       scope: _scope,
       fromDate: _fromDate?.toIso8601String(),
       toDate: _toDate?.toIso8601String(),
+      userId: _userFilter?.id,
+      status: _statusFilter,
+      closedBy: _closedByFilter,
       page: 1,
       limit: 20,
     );
@@ -109,6 +149,9 @@ class _CheckInListPageState extends State<CheckInListPage> {
       scope: _scope,
       fromDate: _fromDate?.toIso8601String(),
       toDate: _toDate?.toIso8601String(),
+      userId: _userFilter?.id,
+      status: _statusFilter,
+      closedBy: _closedByFilter,
       page: _response.page + 1,
       limit: _response.limit > 0 ? _response.limit : 20,
     );
@@ -116,10 +159,7 @@ class _CheckInListPageState extends State<CheckInListPage> {
     setState(() {
       _loadingMore = false;
       if (res.success && res.data != null) {
-        final merged = <CheckIn>[
-          ..._response.data,
-          ...res.data!.data,
-        ];
+        final merged = <CheckIn>[..._response.data, ...res.data!.data];
         _response = CheckInListResponse(
           data: merged,
           total: res.data!.total,
@@ -178,12 +218,131 @@ class _CheckInListPageState extends State<CheckInListPage> {
   }
 
   void _clearFilters() {
-    if (_fromDate == null && _toDate == null) return;
+    if (!_hasAnyFilter) return;
     setState(() {
       _fromDate = null;
       _toDate = null;
+      _statusFilter = null;
+      _closedByFilter = null;
+      _userFilter = null;
     });
     _bootstrap();
+  }
+
+  /// Abre a folha de seleção de um filtro. `null` no valor = "Todos".
+  Future<void> _pickOption({
+    required String eyebrow,
+    required String title,
+    required IconData icon,
+    required List<_SelectOption> options,
+    required String? current,
+    required ValueChanged<String?> onPick,
+  }) async {
+    final picked = await showModalBottomSheet<_SelectResult>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _SelectSheet(
+        eyebrow: eyebrow,
+        title: title,
+        icon: icon,
+        options: options,
+        current: current,
+      ),
+    );
+    if (picked == null || !mounted) return;
+    onPick(picked.value);
+    _bootstrap();
+  }
+
+  Future<void> _pickStatus() => _pickOption(
+    eyebrow: 'FILTRAR',
+    title: 'Situação',
+    icon: LucideIcons.activity,
+    current: _statusFilter,
+    options: const [
+      _SelectOption(value: null, label: 'Todas', icon: LucideIcons.list),
+      _SelectOption(
+        value: 'active',
+        label: 'Em andamento',
+        hint: 'Presença ainda vigente',
+        icon: LucideIcons.radio,
+      ),
+      _SelectOption(
+        value: 'closed',
+        label: 'Encerradas',
+        hint: 'Já saiu ou expirou',
+        icon: LucideIcons.check,
+      ),
+    ],
+    onPick: (v) => setState(() => _statusFilter = v),
+  );
+
+  Future<void> _pickClosedBy() => _pickOption(
+    eyebrow: 'FILTRAR',
+    title: 'Quem encerrou',
+    icon: LucideIcons.logOut,
+    current: _closedByFilter,
+    options: const [
+      _SelectOption(value: null, label: 'Qualquer um', icon: LucideIcons.list),
+      _SelectOption(
+        value: 'self',
+        label: 'O próprio usuário',
+        hint: 'Fez o check-out na mão',
+        icon: LucideIcons.user,
+      ),
+      _SelectOption(
+        value: 'manager',
+        label: 'O gestor',
+        hint: 'Check-in desfeito por quem gerencia',
+        icon: LucideIcons.userCog,
+      ),
+      _SelectOption(
+        value: 'system',
+        label: 'O sistema',
+        hint: 'Expirou sozinho no fim da duração',
+        icon: LucideIcons.timer,
+      ),
+    ],
+    onPick: (v) => setState(() => _closedByFilter = v),
+  );
+
+  Future<void> _pickUser() {
+    final users = _visible?.users ?? const <CheckInUser>[];
+    return _pickOption(
+      eyebrow: 'FILTRAR',
+      title: 'Pessoa',
+      icon: LucideIcons.users,
+      current: _userFilter?.id,
+      options: [
+        const _SelectOption(
+          value: null,
+          label: 'Todo mundo',
+          icon: LucideIcons.list,
+        ),
+        ...users.map(
+          (u) => _SelectOption(
+            value: u.id,
+            label: u.name?.trim().isNotEmpty == true
+                ? u.name!.trim()
+                : (u.email ?? 'Sem nome'),
+            icon: LucideIcons.user,
+          ),
+        ),
+      ],
+      onPick: (v) {
+        CheckInUser? achado;
+        if (v != null) {
+          for (final u in users) {
+            if (u.id == v) {
+              achado = u;
+              break;
+            }
+          }
+        }
+        setState(() => _userFilter = achado);
+      },
+    );
   }
 
   Future<void> _undoCheckIn(CheckIn checkIn) async {
@@ -220,10 +379,13 @@ class _CheckInListPageState extends State<CheckInListPage> {
           backgroundColor: AppColors.status.error,
           behavior: SnackBarBehavior.floating,
           margin: const EdgeInsets.all(16),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          content: Text(res.message ?? 'Erro ao desfazer check-in',
-              style: const TextStyle(color: Colors.white)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          content: Text(
+            res.message ?? 'Erro ao desfazer check-in',
+            style: const TextStyle(color: Colors.white),
+          ),
         ),
       );
       return;
@@ -241,14 +403,16 @@ class _CheckInListPageState extends State<CheckInListPage> {
     });
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        backgroundColor:
-            isDark ? AppColors.status.greenDarkMode : AppColors.status.green,
+        backgroundColor: isDark
+            ? AppColors.status.greenDarkMode
+            : AppColors.status.green,
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.all(16),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        content: const Text('Check-in desfeito',
-            style:
-                TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+        content: const Text(
+          'Check-in desfeito',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+        ),
       ),
     );
   }
@@ -258,6 +422,17 @@ class _CheckInListPageState extends State<CheckInListPage> {
     return AppScaffold(
       title: 'Histórico de check-ins',
       showBottomNavigation: false,
+      actions: [
+        if (_canManage)
+          IconButton(
+            tooltip: 'Gestão do check-in',
+            icon: const Icon(LucideIcons.shieldCheck),
+            onPressed: () async {
+              await Navigator.of(context).pushNamed(AppRoutes.checkInManage);
+              if (mounted) _bootstrap();
+            },
+          ),
+      ],
       body: RefreshIndicator(
         onRefresh: _refresh,
         child: CustomScrollView(
@@ -278,18 +453,41 @@ class _CheckInListPageState extends State<CheckInListPage> {
                     ),
                     const SizedBox(height: 14),
                     if (_canSeeAll) ...[
-                      _ScopeSwitcher(
-                        scope: _scope,
-                        onChanged: _selectScope,
-                      ),
+                      _ScopeSwitcher(scope: _scope, onChanged: _selectScope),
                       const SizedBox(height: 10),
                     ],
                     _FilterRow(
                       fromDate: _fromDate,
                       toDate: _toDate,
+                      hasAnyFilter: _hasAnyFilter,
                       onPickFrom: _pickFromDate,
                       onPickTo: _pickToDate,
                       onClear: _clearFilters,
+                    ),
+                    const SizedBox(height: 10),
+                    _RefineRow(
+                      statusLabel: switch (_statusFilter) {
+                        'active' => 'Em andamento',
+                        'closed' => 'Encerradas',
+                        _ => 'Situação',
+                      },
+                      statusActive: _statusFilter != null,
+                      closedByLabel: switch (_closedByFilter) {
+                        'self' => 'Encerrou: usuário',
+                        'manager' => 'Encerrou: gestor',
+                        'system' => 'Encerrou: sistema',
+                        _ => 'Quem encerrou',
+                      },
+                      closedByActive: _closedByFilter != null,
+                      userLabel: _userFilter?.name?.trim().isNotEmpty == true
+                          ? _userFilter!.name!.trim()
+                          : 'Pessoa',
+                      userActive: _userFilter != null,
+                      showUser:
+                          _canSeeAll && (_visible?.users.isNotEmpty ?? false),
+                      onPickStatus: _pickStatus,
+                      onPickClosedBy: _pickClosedBy,
+                      onPickUser: _pickUser,
                     ),
                     const SizedBox(height: 18),
                     _ListSectionLabel(scope: _scope),
@@ -329,36 +527,32 @@ class _CheckInListPageState extends State<CheckInListPage> {
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
                 sliver: SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (_, i) {
-                      if (i >= _response.data.length) {
-                        return _loadingMore
-                            ? const Padding(
-                                padding:
-                                    EdgeInsets.symmetric(vertical: 18),
-                                child: Center(
-                                  child: SizedBox(
-                                    width: 22,
-                                    height: 22,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2.2,
-                                    ),
+                  delegate: SliverChildBuilderDelegate((_, i) {
+                    if (i >= _response.data.length) {
+                      return _loadingMore
+                          ? const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 18),
+                              child: Center(
+                                child: SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.2,
                                   ),
                                 ),
-                              )
-                            : const SizedBox.shrink();
-                      }
-                      final item = _response.data[i];
-                      return _CheckInRow(
-                        checkIn: item,
-                        scope: _scope,
-                        canUndo: _canSeeAll && item.isActive,
-                        onUndo: () => _undoCheckIn(item),
-                        isLast: i == _response.data.length - 1,
-                      );
-                    },
-                    childCount: _response.data.length + 1,
-                  ),
+                              ),
+                            )
+                          : const SizedBox.shrink();
+                    }
+                    final item = _response.data[i];
+                    return _CheckInRow(
+                      checkIn: item,
+                      scope: _scope,
+                      canUndo: _canManage && item.isActive,
+                      onUndo: () => _undoCheckIn(item),
+                      isLast: i == _response.data.length - 1,
+                    );
+                  }, childCount: _response.data.length + 1),
                 ),
               ),
           ],
@@ -387,8 +581,7 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final emerald =
-        isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
+    final emerald = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
     final muted = ThemeHelpers.textSecondaryColor(context);
     final periodLabel = _formatPeriod(fromDate, toDate);
 
@@ -487,8 +680,7 @@ class _ScopeSwitcher extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final emerald =
-        isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
+    final emerald = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
     final track = isDark
         ? Colors.white.withValues(alpha: 0.06)
         : Colors.black.withValues(alpha: 0.04);
@@ -599,6 +791,9 @@ class _ScopeSegment extends StatelessWidget {
 class _FilterRow extends StatelessWidget {
   final DateTime? fromDate;
   final DateTime? toDate;
+
+  /// Inclui os filtros da fileira de baixo — o "x" limpa tudo de uma vez.
+  final bool hasAnyFilter;
   final VoidCallback onPickFrom;
   final VoidCallback onPickTo;
   final VoidCallback onClear;
@@ -606,6 +801,7 @@ class _FilterRow extends StatelessWidget {
   const _FilterRow({
     required this.fromDate,
     required this.toDate,
+    required this.hasAnyFilter,
     required this.onPickFrom,
     required this.onPickTo,
     required this.onClear,
@@ -613,7 +809,7 @@ class _FilterRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasFilter = fromDate != null || toDate != null;
+    final hasFilter = hasAnyFilter;
     return Row(
       children: [
         Expanded(
@@ -655,9 +851,11 @@ class _FilterRow extends StatelessWidget {
                         : Colors.black.withValues(alpha: 0.06),
                   ),
                 ),
-                child: Icon(LucideIcons.x,
-                    size: 14,
-                    color: ThemeHelpers.textSecondaryColor(context)),
+                child: Icon(
+                  LucideIcons.x,
+                  size: 14,
+                  color: ThemeHelpers.textSecondaryColor(context),
+                ),
               ),
             ),
           ),
@@ -694,8 +892,7 @@ class _DateChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: Container(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: border),
@@ -718,6 +915,327 @@ class _DateChip extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Fileira de refino (situação / quem encerrou / pessoa) ───────────────────
+
+/// Segunda fileira de filtros. Rola na horizontal para caber em tela estreita
+/// sem espremer rótulo nenhum.
+class _RefineRow extends StatelessWidget {
+  final String statusLabel;
+  final bool statusActive;
+  final String closedByLabel;
+  final bool closedByActive;
+  final String userLabel;
+  final bool userActive;
+  final bool showUser;
+  final VoidCallback onPickStatus;
+  final VoidCallback onPickClosedBy;
+  final VoidCallback onPickUser;
+
+  const _RefineRow({
+    required this.statusLabel,
+    required this.statusActive,
+    required this.closedByLabel,
+    required this.closedByActive,
+    required this.userLabel,
+    required this.userActive,
+    required this.showUser,
+    required this.onPickStatus,
+    required this.onPickClosedBy,
+    required this.onPickUser,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 38,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        physics: const ClampingScrollPhysics(),
+        children: [
+          _SelectChip(
+            icon: LucideIcons.activity,
+            label: statusLabel,
+            active: statusActive,
+            onTap: onPickStatus,
+          ),
+          const SizedBox(width: 8),
+          _SelectChip(
+            icon: LucideIcons.logOut,
+            label: closedByLabel,
+            active: closedByActive,
+            onTap: onPickClosedBy,
+          ),
+          if (showUser) ...[
+            const SizedBox(width: 8),
+            _SelectChip(
+              icon: LucideIcons.users,
+              label: userLabel,
+              active: userActive,
+              onTap: onPickUser,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Pastilha de seleção: apagada quando é "todos", acesa no acento quando o
+/// filtro está valendo — o usuário vê de relance o que está estreitando.
+class _SelectChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _SelectChip({
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final indigo = isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final fg = active ? indigo : muted;
+    final border = active
+        ? indigo.withValues(alpha: isDark ? 0.42 : 0.32)
+        : (isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.06));
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: BoxDecoration(
+            color: active
+                ? indigo.withValues(alpha: isDark ? 0.14 : 0.07)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: border),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 13, color: fg),
+              const SizedBox(width: 7),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: active ? ThemeHelpers.textColor(context) : muted,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.1,
+                ),
+              ),
+              const SizedBox(width: 5),
+              Icon(LucideIcons.chevronDown, size: 13, color: fg),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Folha de seleção de filtro ──────────────────────────────────────────────
+
+class _SelectOption {
+  /// `null` = a opção "todos" (remove o filtro).
+  final String? value;
+  final String label;
+  final String? hint;
+  final IconData icon;
+
+  const _SelectOption({
+    required this.value,
+    required this.label,
+    required this.icon,
+    this.hint,
+  });
+}
+
+/// Embrulha o valor escolhido porque `null` é uma escolha válida ("todos") e
+/// se confundiria com o `null` de folha fechada sem escolher.
+class _SelectResult {
+  final String? value;
+  const _SelectResult(this.value);
+}
+
+class _SelectSheet extends StatelessWidget {
+  final String eyebrow;
+  final String title;
+  final IconData icon;
+  final List<_SelectOption> options;
+  final String? current;
+
+  const _SelectSheet({
+    required this.eyebrow,
+    required this.title,
+    required this.icon,
+    required this.options,
+    required this.current,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final indigo = isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.85,
+      ),
+      decoration: BoxDecoration(
+        color: ThemeHelpers.cardBackgroundColor(context),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 10),
+            Center(
+              child: Container(
+                width: 42,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: muted.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
+                children: [
+                  Icon(icon, size: 14, color: indigo),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          eyebrow,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: muted,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1.8,
+                            fontSize: 10,
+                          ),
+                        ),
+                        Text(
+                          title,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: ThemeHelpers.textColor(context),
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              height: 1,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    indigo.withValues(alpha: 0.35),
+                    indigo.withValues(alpha: 0.0),
+                  ],
+                ),
+              ),
+            ),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                padding: const EdgeInsets.fromLTRB(12, 6, 12, 18),
+                itemCount: options.length,
+                itemBuilder: (_, i) {
+                  final o = options[i];
+                  final selected = o.value == current;
+                  return Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () =>
+                          Navigator.pop(context, _SelectResult(o.value)),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 11,
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              o.icon,
+                              size: 15,
+                              color: selected ? indigo : muted,
+                            ),
+                            const SizedBox(width: 11),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    o.label,
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      color: ThemeHelpers.textColor(context),
+                                      fontWeight: selected
+                                          ? FontWeight.w900
+                                          : FontWeight.w700,
+                                      letterSpacing: -0.1,
+                                    ),
+                                  ),
+                                  if (o.hint != null)
+                                    Text(
+                                      o.hint!,
+                                      style: theme.textTheme.labelSmall
+                                          ?.copyWith(
+                                            color: muted,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            if (selected)
+                              Icon(LucideIcons.check, size: 16, color: indigo),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -749,10 +1267,7 @@ class _ListSectionLabel extends StatelessWidget {
         ),
         const SizedBox(width: 10),
         Expanded(
-          child: Container(
-            height: 1,
-            color: muted.withValues(alpha: 0.18),
-          ),
+          child: Container(height: 1, color: muted.withValues(alpha: 0.18)),
         ),
       ],
     );
@@ -780,27 +1295,21 @@ class _CheckInRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final emerald =
-        isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
-    final slate = isDark
-        ? const Color(0xFF94A3B8)
-        : const Color(0xFF64748B);
+    final emerald = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
+    final slate = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
     final muted = ThemeHelpers.textSecondaryColor(context);
     final active = checkIn.isActive;
     final accent = active ? emerald : slate;
 
-    final entryTime =
-        DateFormat('HH:mm').format(checkIn.checkedInAt.toLocal());
-    final entryDate =
-        DateFormat('dd/MM').format(checkIn.checkedInAt.toLocal());
+    final entryTime = DateFormat('HH:mm').format(checkIn.checkedInAt.toLocal());
+    final entryDate = DateFormat('dd/MM').format(checkIn.checkedInAt.toLocal());
 
     final exitLabel = checkIn.checkedOutAt != null
         ? DateFormat('HH:mm').format(checkIn.checkedOutAt!.toLocal())
         : DateFormat('HH:mm').format(checkIn.expiresAt.toLocal());
     final exitPrefix = checkIn.checkedOutAt != null ? 'Saída' : 'Expira';
 
-    final duration =
-        (checkIn.checkedOutAt ?? checkIn.expiresAt).difference(
+    final duration = (checkIn.checkedOutAt ?? checkIn.expiresAt).difference(
       checkIn.checkedInAt,
     );
 
@@ -990,8 +1499,7 @@ class _EmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final emerald =
-        isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
+    final emerald = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
     final muted = ThemeHelpers.textSecondaryColor(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 40, 24, 40),

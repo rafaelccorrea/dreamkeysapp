@@ -8,7 +8,9 @@ import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/property_service.dart';
 import '../../../shared/utils/error_cause.dart';
+import '../../../shared/utils/property_finalidade.dart';
 import '../../../shared/widgets/app_error_state.dart';
+import 'finalidade_picker.dart';
 
 /// Modos de origem de endereço — espelho do web `PropertyCreationAddressMode`.
 enum PropertyCreationAddressMode {
@@ -44,6 +46,9 @@ extension PropertyCreationAddressModeX on PropertyCreationAddressMode {
 /// Resultado retornado por `Navigator.pop` ao confirmar o setup.
 /// Espelho de `PropertyCreationSetupPayload` do web.
 class PropertyCreationSetupResult {
+  /// Venda, locação ou as duas pontas. É a decisão que molda o formulário
+  /// inteiro — por isso vem daqui, antes do wizard abrir.
+  final PropertyFinalidade finalidade;
   final PropertyType type;
   final String teamId;
   final PropertyCreationAddressMode addressMode;
@@ -53,6 +58,7 @@ class PropertyCreationSetupResult {
   final String? empreendimentoName;
 
   const PropertyCreationSetupResult({
+    required this.finalidade,
     required this.type,
     required this.teamId,
     required this.addressMode,
@@ -84,6 +90,7 @@ class PropertyCreationSetupResult {
 ///    voltar para a lista de imóveis (igual `navigate('/properties')` do web).
 ///  - `initialTeamId` se válido → seleciona; caso contrário, primeira equipe.
 class PropertyCreationSetupPage extends StatefulWidget {
+  final PropertyFinalidade? initialFinalidade;
   final PropertyType? initialType;
   final PropertyCreationAddressMode initialAddressMode;
   final String? initialCondominiumId;
@@ -92,6 +99,7 @@ class PropertyCreationSetupPage extends StatefulWidget {
 
   const PropertyCreationSetupPage({
     super.key,
+    this.initialFinalidade,
     this.initialType,
     this.initialAddressMode = PropertyCreationAddressMode.standalone,
     this.initialCondominiumId,
@@ -106,6 +114,10 @@ class PropertyCreationSetupPage extends StatefulWidget {
 
 class _PropertyCreationSetupPageState extends State<PropertyCreationSetupPage> {
   final PropertyService _propertyService = PropertyService.instance;
+
+  /// Primeira pergunta do cadastro: ela decide quais preços vão existir e
+  /// quais serão exigidos. Nada mais é liberado antes dela.
+  PropertyFinalidade? _finalidade;
 
   PropertyType? _type;
   PropertyCreationAddressMode _addressMode =
@@ -144,6 +156,7 @@ class _PropertyCreationSetupPageState extends State<PropertyCreationSetupPage> {
     _canPickCondo = access.hasPermission('condominium:view');
     _canPickEmp = true;
 
+    _finalidade = widget.initialFinalidade;
     _type = widget.initialType;
     _addressMode = widget.initialAddressMode;
     if (_addressMode == PropertyCreationAddressMode.condominium &&
@@ -275,6 +288,8 @@ class _PropertyCreationSetupPageState extends State<PropertyCreationSetupPage> {
   }
 
   bool get _confirmEnabled {
+    // A finalidade vem antes de tudo: sem ela o resto do setup nem conta.
+    if (_finalidade == null) return false;
     if (_type == null) return false;
     if ((_teamId ?? '').isEmpty) return false;
     if (_teamsLoading || _teams.isEmpty) return false;
@@ -319,6 +334,7 @@ class _PropertyCreationSetupPageState extends State<PropertyCreationSetupPage> {
     }
     Navigator.of(context).pop(
       PropertyCreationSetupResult(
+        finalidade: _finalidade!,
         type: _type!,
         teamId: _teamId!.trim(),
         addressMode: _addressMode,
@@ -398,6 +414,77 @@ class _PropertyCreationSetupPageState extends State<PropertyCreationSetupPage> {
       color: isDark
           ? Colors.white.withValues(alpha: 0.06)
           : ThemeHelpers.borderColor(context).withValues(alpha: 0.40),
+    );
+  }
+
+  /// Segura o resto do setup até a finalidade ser respondida.
+  ///
+  /// TRAVA em vez de esconder: os blocos continuam legíveis, o corretor vê o
+  /// que vem pela frente — só não pode agir. A trava cai no primeiro toque e
+  /// não volta, e a linha do cadeado diz o porquê em uma frase (botão apagado
+  /// sem explicação é o que faz o app parecer quebrado).
+  Widget _gatedRest(BuildContext context, {required List<Widget> children}) {
+    final travado = _finalidade == null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AnimatedSize(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          // O filho fica MONTADO nos dois estados; se ele virasse SizedBox no
+          // mesmo frame, a opacidade não teria o que desvanecer e a saída
+          // ficaria seca — só a altura animaria.
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 180),
+            opacity: travado ? 1 : 0,
+            child: travado
+                ? _lockLine(context)
+                : const SizedBox(width: double.infinity),
+          ),
+        ),
+        AnimatedOpacity(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          opacity: travado ? 0.38 : 1.0,
+          child: ExcludeSemantics(
+            // Apagado a 38% e sem toque: para o leitor de tela isso não existe
+            // ainda — anunciar campos que não podem ser usados é pior do que
+            // não anunciar.
+            excluding: travado,
+            child: IgnorePointer(
+              ignoring: travado,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: children,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _lockLine(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 18),
+      child: Row(
+        children: [
+          Icon(Icons.lock_outline_rounded, size: 14, color: muted),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Escolha a finalidade para liberar o resto do cadastro.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: muted,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1202,24 +1289,41 @@ class _PropertyCreationSetupPageState extends State<PropertyCreationSetupPage> {
                     children: [
                       _heroHeader(theme, accent, isDark),
                       const SizedBox(height: 22),
-                      _eyebrow(context, 'Tipo do imóvel'),
-                      _hairline(context),
-                      const SizedBox(height: 14),
-                      _typeGrid(context),
-                      const SizedBox(height: 26),
                       _eyebrow(
                         context,
-                        'Equipe',
+                        'Finalidade',
                         trailing: _requiredTag(context),
                       ),
                       _hairline(context),
                       const SizedBox(height: 14),
-                      _teamPicker(context),
+                      FinalidadePicker(
+                        value: _finalidade,
+                        onChanged: (f) => setState(() => _finalidade = f),
+                      ),
                       const SizedBox(height: 26),
-                      _eyebrow(context, 'Endereço'),
-                      _hairline(context),
-                      const SizedBox(height: 14),
-                      _addressModeBlock(context),
+                      _gatedRest(
+                        context,
+                        children: [
+                          _eyebrow(context, 'Tipo do imóvel'),
+                          _hairline(context),
+                          const SizedBox(height: 14),
+                          _typeGrid(context),
+                          const SizedBox(height: 26),
+                          _eyebrow(
+                            context,
+                            'Equipe',
+                            trailing: _requiredTag(context),
+                          ),
+                          _hairline(context),
+                          const SizedBox(height: 14),
+                          _teamPicker(context),
+                          const SizedBox(height: 26),
+                          _eyebrow(context, 'Endereço'),
+                          _hairline(context),
+                          const SizedBox(height: 14),
+                          _addressModeBlock(context),
+                        ],
+                      ),
                       const SizedBox(height: 28),
                     ],
                   ),
@@ -1297,9 +1401,9 @@ class _PropertyCreationSetupPageState extends State<PropertyCreationSetupPage> {
               ),
               const SizedBox(height: 4),
               Text(
-                'Escolha o tipo, a equipe responsável e a origem do endereço. '
-                'Se for condomínio ou empreendimento, selecione o cadastro. O '
-                'CEP será preenchido na etapa Localização.',
+                'Comece pela finalidade: ela define quais valores o cadastro '
+                'vai exigir. Depois escolha o tipo, a equipe responsável e a '
+                'origem do endereço. O CEP entra na etapa Localização.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: ThemeHelpers.textSecondaryColor(context),
                   height: 1.38,
@@ -1338,6 +1442,10 @@ class _PropertyCreationSetupPageState extends State<PropertyCreationSetupPage> {
               child: TextButton(
                 onPressed: () => Navigator.of(context).pop(),
                 style: TextButton.styleFrom(
+                  // O tema global pinta TextButton com o vermelho da marca —
+                  // o texto já vinha cinza, mas o ripple e o estado pressionado
+                  // saíam vermelhos. "Cancelar" não é destrutivo.
+                  foregroundColor: ThemeHelpers.textSecondaryColor(context),
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -1364,16 +1472,29 @@ class _PropertyCreationSetupPageState extends State<PropertyCreationSetupPage> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
+                // O rótulo explica por que o botão está apagado, em vez de só
+                // estar apagado.
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.arrow_forward_rounded, size: 18),
+                    Icon(
+                      _finalidade == null
+                          ? Icons.lock_outline_rounded
+                          : Icons.arrow_forward_rounded,
+                      size: 18,
+                    ),
                     const SizedBox(width: 8),
-                    Text(
-                      'Continuar',
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        color: Colors.white,
+                    Flexible(
+                      child: Text(
+                        _finalidade == null
+                            ? 'Escolha a finalidade'
+                            : 'Continuar',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
                   ],

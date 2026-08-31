@@ -441,6 +441,11 @@ class Property {
   final int? parkingSpaces;
   final double? salePrice;
   final double? rentPrice;
+
+  /// `'venda'`, `'locacao'` ou `'ambos'` — o recorte declarado do anúncio.
+  /// `null` em cadastro anterior à finalidade; nesse caso a regra deriva
+  /// dos preços (ver `shared/utils/property_finalidade.dart`).
+  final String? finalidade;
   final double? condominiumFee;
   final double? iptu;
   final List<String> features;
@@ -549,6 +554,7 @@ class Property {
     this.bathrooms,
     this.parkingSpaces,
     this.salePrice,
+    this.finalidade,
     this.rentPrice,
     this.condominiumFee,
     this.iptu,
@@ -669,6 +675,7 @@ class Property {
       bathrooms: parseInt(json['bathrooms']),
       parkingSpaces: parseInt(json['parkingSpaces'] ?? json['parking_spaces']),
       salePrice: parseDouble(json['salePrice'] ?? json['sale_price']),
+      finalidade: json['finalidade']?.toString(),
       rentPrice: parseDouble(json['rentPrice'] ?? json['rent_price']),
       condominiumFee: parseDouble(json['condominiumFee'] ?? json['condominium_fee']),
       iptu: parseDouble(json['iptu']),

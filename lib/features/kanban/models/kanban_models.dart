@@ -2542,3 +2542,78 @@ class UpdateKanbanProjectDto {
 String wonLabelForFunnelType(String? funnelType) {
   return (funnelType ?? 'negociacao') == 'negociacao' ? 'Vendido' : 'Concluído';
 }
+
+/// Uma frase de atualização rápida do card: um toque registra o comentário,
+/// sem digitação. Ticket af1775c0 (União) — vale para TODOS os funis.
+class QuickUpdateOption {
+  final String id;
+  final String label;
+
+  const QuickUpdateOption({required this.id, required this.label});
+
+  factory QuickUpdateOption.fromJson(Map<String, dynamic> json) {
+    return QuickUpdateOption(
+      id: json['id']?.toString() ?? '',
+      label: json['label']?.toString() ?? '',
+    );
+  }
+}
+
+/// `GET /kanban/projects/:id/quick-updates` — a lista do funil (própria do
+/// gestor ou o padrão da casa) mais o que este usuário pode fazer com ela.
+class QuickUpdatesConfig {
+  final String projectId;
+  final String? funnelType;
+
+  /// O funil usa atualizações rápidas.
+  final bool enabled;
+
+  /// A lista foi personalizada pelo gestor (`false` = padrão da casa).
+  final bool isCustom;
+
+  /// Este usuário pode editar a lista (gestor/líder/admin/master).
+  final bool canEdit;
+
+  final List<QuickUpdateOption> options;
+  final List<QuickUpdateOption> defaults;
+
+  const QuickUpdatesConfig({
+    required this.projectId,
+    this.funnelType,
+    required this.enabled,
+    required this.isCustom,
+    required this.canEdit,
+    required this.options,
+    required this.defaults,
+  });
+
+  static const empty = QuickUpdatesConfig(
+    projectId: '',
+    enabled: false,
+    isCustom: false,
+    canEdit: false,
+    options: [],
+    defaults: [],
+  );
+
+  static List<QuickUpdateOption> _list(dynamic raw) {
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((e) => QuickUpdateOption.fromJson(Map<String, dynamic>.from(e)))
+        .where((o) => o.id.isNotEmpty && o.label.isNotEmpty)
+        .toList();
+  }
+
+  factory QuickUpdatesConfig.fromJson(Map<String, dynamic> json) {
+    return QuickUpdatesConfig(
+      projectId: json['projectId']?.toString() ?? '',
+      funnelType: json['funnelType']?.toString(),
+      enabled: json['enabled'] as bool? ?? false,
+      isCustom: json['isCustom'] as bool? ?? false,
+      canEdit: json['canEdit'] as bool? ?? false,
+      options: _list(json['options']),
+      defaults: _list(json['defaults']),
+    );
+  }
+}

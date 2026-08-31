@@ -60,6 +60,7 @@ import '../../features/workspace/pages/teams_page.dart';
 import '../../features/workspace/pages/team_form_page.dart';
 import '../../features/check_in/pages/check_in_page.dart';
 import '../../features/check_in/pages/check_in_list_page.dart';
+import '../../features/check_in/pages/check_in_manage_page.dart';
 import '../../features/visit_reports/pages/visits_page.dart';
 import '../../features/visit_reports/pages/visit_report_form_page.dart';
 import '../../features/visit_reports/pages/visit_report_detail_page.dart';
@@ -237,6 +238,9 @@ class AppRoutes {
   static const String checkInCheckout = '/check-in/checkout';
   /// Histórico de check-ins (lista paginada com filtros).
   static const String checkInList = '/check-in/list';
+  /// Gestão do check-in (gestor): registrar por alguém, liberar fora do
+  /// horário, soltar bloqueio semanal e ler a auditoria.
+  static const String checkInManage = '/check-in/manage';
 
   // Comissões
   static const String commissions = '/commissions';
@@ -684,6 +688,8 @@ class AppRoutes {
       return _buildRoute(const CheckInPage(startCheckout: true), settings);
     } else if (routeName == AppRoutes.checkInList) {
       return _buildRoute(const CheckInListPage(), settings);
+    } else if (routeName == AppRoutes.checkInManage) {
+      return _buildRoute(const CheckInManagePage(), settings);
     } else if (routeName == AppRoutes.visits) {
       return _buildRoute(const VisitsPage(), settings);
     } else if (routeName == AppRoutes.visitCreate) {

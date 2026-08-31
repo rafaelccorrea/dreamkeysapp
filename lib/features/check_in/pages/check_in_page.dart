@@ -5,11 +5,13 @@ import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../../core/constants/app_permissions.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/api_service.dart';
 import '../../../shared/services/check_in_service.dart';
+import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/live_activity_service.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
@@ -41,7 +43,14 @@ class _CheckInPageState extends State<CheckInPage> {
 
   CheckIn? _active;
   CheckInSettings? _settings;
+
+  /// Estado vindo de `GET /check-in/status`: janela de horário, bloqueio
+  /// semanal e liberação do gestor. É o que decide se o botão abre ou trava —
+  /// sem ele a tela só descobre o problema depois do 400.
+  CheckInStatus? _status;
+
   Timer? _ticker;
+  int _tick = 0;
 
   @override
   void initState() {
@@ -50,6 +59,10 @@ class _CheckInPageState extends State<CheckInPage> {
     _ticker = Timer.periodic(const Duration(seconds: 15), (_) {
       if (!mounted) return;
       setState(() {});
+      // A janela vira pelo relógio do SERVIDOR, não do aparelho: a cada minuto
+      // reconsulta o status para o botão destravar/travar sozinho.
+      _tick++;
+      if (_tick % 4 == 0) unawaited(_refreshStatus());
       if (_active != null && _active!.isActive) {
         LiveActivityService.instance.syncCheckIn(
           _active,
@@ -71,19 +84,34 @@ class _CheckInPageState extends State<CheckInPage> {
       _error = null;
     });
     final results = await Future.wait([
-      CheckInService.instance.getActiveCheckIn(),
+      CheckInService.instance.getStatus(),
       CheckInService.instance.getSettings(),
     ]);
     if (!mounted) return;
-    final activeRes = results[0] as ApiResponse<CheckIn?>;
+    final statusRes = results[0] as ApiResponse<CheckInStatus>;
     final settingsRes = results[1] as ApiResponse<CheckInSettings>;
+
+    // O status já devolve o check-in ativo. Se ele falhar, cai no /active para
+    // a tela não ficar sem o essencial (só perde a leitura das janelas).
+    CheckIn? active;
+    bool loaded;
+    if (statusRes.success && statusRes.data != null) {
+      active = statusRes.data!.activeCheckIn;
+      loaded = true;
+    } else {
+      final activeRes = await CheckInService.instance.getActiveCheckIn();
+      if (!mounted) return;
+      loaded = activeRes.success;
+      active = activeRes.data;
+    }
+
     setState(() {
       _bootLoading = false;
-      if (activeRes.success) {
-        _active = activeRes.data;
-      } else {
-        _error = activeRes.message ?? 'Erro ao carregar check-in ativo';
-      }
+      _status = statusRes.success ? statusRes.data : null;
+      _active = active;
+      _error = loaded
+          ? null
+          : (statusRes.message ?? 'Erro ao carregar o estado do check-in');
       if (settingsRes.success) {
         _settings = settingsRes.data;
       }
@@ -110,14 +138,13 @@ class _CheckInPageState extends State<CheckInPage> {
       return;
     }
 
-    final expiresText =
-        DateFormat('HH:mm').format(_active!.expiresAt.toLocal());
+    final expiresText = DateFormat(
+      'HH:mm',
+    ).format(_active!.expiresAt.toLocal());
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text(
           'Encerrar check-in?',
           style: TextStyle(fontWeight: FontWeight.w900),
@@ -144,6 +171,18 @@ class _CheckInPageState extends State<CheckInPage> {
   }
 
   Future<void> _refresh() async => _bootstrap();
+
+  /// Recarrega só o status, sem piscar a tela. Usado no tique de 1 minuto e
+  /// depois de cada ação — é assim que a liberação consumida e a virada de
+  /// janela aparecem sem o usuário precisar puxar para atualizar.
+  Future<void> _refreshStatus() async {
+    final res = await CheckInService.instance.getStatus();
+    if (!mounted || !res.success || res.data == null) return;
+    setState(() {
+      _status = res.data;
+      _active = res.data!.activeCheckIn;
+    });
+  }
 
   Future<void> _doCheckIn() async {
     if (_actionLoading) return;
@@ -196,11 +235,13 @@ class _CheckInPageState extends State<CheckInPage> {
       if (!mounted) return;
       setState(() => _actionLoading = false);
       if (!res.success) {
-        _snack(res.message ?? 'Não foi possível fazer check-in.',
-            error: true);
+        _snack(res.message ?? 'Não foi possível fazer check-in.', error: true);
         return;
       }
       setState(() => _active = res.data);
+      // A liberação do gestor é consumida no check-in e a janela pode ter
+      // virado: relê o status para a tela contar a verdade nova.
+      unawaited(_refreshStatus());
       await LiveActivityService.instance.syncCheckIn(
         res.data,
         companyName: _settings?.company?.name,
@@ -235,6 +276,7 @@ class _CheckInPageState extends State<CheckInPage> {
       return;
     }
     setState(() => _active = null);
+    unawaited(_refreshStatus());
     LiveActivityService.instance.endCheckIn();
     _snack('Check-out registrado');
   }
@@ -249,9 +291,7 @@ class _CheckInPageState extends State<CheckInPage> {
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.all(16),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         content: Row(
           children: [
             Icon(
@@ -282,6 +322,13 @@ class _CheckInPageState extends State<CheckInPage> {
       title: 'Check-in',
       showBottomNavigation: false,
       actions: [
+        if (_canManage)
+          IconButton(
+            tooltip: 'Gestão do check-in',
+            icon: const Icon(LucideIcons.shieldCheck),
+            onPressed: () =>
+                Navigator.of(context).pushNamed(AppRoutes.checkInManage),
+          ),
         IconButton(
           tooltip: 'Histórico',
           icon: const Icon(LucideIcons.history),
@@ -303,15 +350,30 @@ class _CheckInPageState extends State<CheckInPage> {
                       _ErrorLine(message: _error!),
                       const SizedBox(height: 14),
                     ],
-                    _StatusBlock(active: _active != null),
+                    _StatusBlock(active: _active != null, status: _status),
+                    if (_notice != null) ...[
+                      const SizedBox(height: 18),
+                      _NoticeBlock(notice: _notice!),
+                    ],
                     const SizedBox(height: 20),
                     _PrimaryCta(
                       isActive: _active != null,
                       loading: _actionLoading,
+                      locked: _checkInLocked,
                       step: _actionStep,
                       onCheckIn: _doCheckIn,
                       onCheckOut: _doCheckOut,
                     ),
+                    if (_status?.windowsRestricted == true) ...[
+                      const SizedBox(height: 26),
+                      _SectionLabel(
+                        icon: LucideIcons.clock,
+                        label: 'HORÁRIO DE CHECK-IN',
+                        accent: _accent(context),
+                      ),
+                      const SizedBox(height: 10),
+                      _WindowsStrip(status: _status!),
+                    ],
                     if (_active != null) ...[
                       const SizedBox(height: 24),
                       _SectionLabel(
@@ -334,9 +396,9 @@ class _CheckInPageState extends State<CheckInPage> {
                     ],
                     const SizedBox(height: 26),
                     _HistoryLink(
-                      onTap: () => Navigator.of(context).pushNamed(
-                        AppRoutes.checkInList,
-                      ),
+                      onTap: () => Navigator.of(
+                        context,
+                      ).pushNamed(AppRoutes.checkInList),
                     ),
                   ],
                 ),
@@ -345,13 +407,81 @@ class _CheckInPageState extends State<CheckInPage> {
     );
   }
 
-  Color _accent(BuildContext context) => Theme.of(context).brightness ==
-          Brightness.dark
+  /// Pode agir sobre o check-in de outras pessoas — abre a tela de gestão.
+  bool get _canManage {
+    final access = ModuleAccessService.instance;
+    final role = access.userRole?.toLowerCase().trim() ?? '';
+    if (role == 'master' || role == 'admin' || role == 'manager') return true;
+    return access.hasPermission(AppPermissions.checkInManageSettings);
+  }
+
+  /// O botão de check-in está travado — bloqueio semanal, fora da janela ou
+  /// check-in desligado na empresa. Quem já está presente nunca fica travado
+  /// (o botão vira check-out).
+  bool get _checkInLocked => _active == null && _status?.lockedReason != null;
+
+  /// UM aviso de topo, na ordem em que importa para quem está olhando.
+  _CheckInNotice? get _notice {
+    final s = _status;
+    if (s == null) return null;
+    final raio = _settings?.radiusMeters;
+    final sufixoRaio = raio != null && raio > 0 ? ' (raio de $raio m)' : '';
+
+    if (!s.enabled) {
+      return const _CheckInNotice(
+        tone: _NoticeTone.neutral,
+        icon: LucideIcons.power,
+        title: 'Check-in desativado',
+        body:
+            'A empresa não usa check-in por localização. '
+            'Sua presença aqui não influencia a distribuição de leads.',
+      );
+    }
+    if (s.reasonCannot == CheckInBlockedReason.blocked) {
+      final dia = s.block?.weekdayLabel;
+      return _CheckInNotice(
+        tone: _NoticeTone.danger,
+        icon: LucideIcons.lock,
+        title: 'Bloqueado nesta semana',
+        body: dia == null
+            ? 'Você ficou sem check-in no dia obrigatório e está bloqueado '
+                  'até domingo. Só o gestor pode liberar.'
+            : 'Você não fez check-in na $dia e está bloqueado até domingo. '
+                  'Só o gestor pode liberar.',
+      );
+    }
+    if (s.reasonCannot == CheckInBlockedReason.outsideWindow) {
+      final proximo = s.nextWindowText?.trim();
+      return _CheckInNotice(
+        tone: _NoticeTone.warning,
+        icon: LucideIcons.clock,
+        title: 'Fora do horário de check-in',
+        body:
+            'Agora são ${s.localTime} no horário da empresa.'
+            '${proximo != null && proximo.isNotEmpty ? ' $proximo' : ''}',
+      );
+    }
+    if (s.hasUsableException && _active == null) {
+      final ate = s.exception!.validUntil!;
+      return _CheckInNotice(
+        tone: _NoticeTone.info,
+        icon: LucideIcons.unlock,
+        title: 'Liberação do gestor',
+        body:
+            'Vale até ${DateFormat('HH:mm').format(ate.toLocal())}. '
+            'Você ainda precisa estar na imobiliária$sufixoRaio.',
+      );
+    }
+    return null;
+  }
+
+  Color _accent(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
       ? const Color(0xFF6366F1) // indigo-500
       : const Color(0xFF4F46E5); // indigo-600
 
-  Color _emerald(BuildContext context) => Theme.of(context).brightness ==
-          Brightness.dark
+  Color _emerald(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
       ? const Color(0xFF34D399) // emerald-400
       : const Color(0xFF059669); // emerald-600
 
@@ -382,7 +512,61 @@ class _CheckInPageState extends State<CheckInPage> {
 
 class _StatusBlock extends StatelessWidget {
   final bool active;
-  const _StatusBlock({required this.active});
+  final CheckInStatus? status;
+  const _StatusBlock({required this.active, this.status});
+
+  /// Rótulo do olho-mágico — muda com o motivo, não só com "presente/ausente".
+  String get _eyebrow {
+    if (active) return 'VOCÊ ESTÁ NA IMOBILIÁRIA';
+    switch (status?.reasonCannot) {
+      case CheckInBlockedReason.blocked:
+        return 'BLOQUEADO NESTA SEMANA';
+      case CheckInBlockedReason.outsideWindow:
+        return 'FORA DO HORÁRIO';
+      case CheckInBlockedReason.disabled:
+        return 'CHECK-IN DESATIVADO';
+      default:
+        return 'FORA DA IMOBILIÁRIA';
+    }
+  }
+
+  String get _title {
+    if (active) return 'Presença registrada';
+    switch (status?.reasonCannot) {
+      case CheckInBlockedReason.blocked:
+        return 'Check-in bloqueado';
+      case CheckInBlockedReason.outsideWindow:
+        return 'Ainda não é a hora';
+      case CheckInBlockedReason.disabled:
+        return 'Check-in desativado';
+      default:
+        return 'Pronto para começar?';
+    }
+  }
+
+  String get _subtitle {
+    if (active) {
+      return 'Você está marcado como presente até o horário de expiração abaixo.';
+    }
+    switch (status?.reasonCannot) {
+      case CheckInBlockedReason.blocked:
+        return 'Enquanto o bloqueio valer você não consegue registrar presença — '
+            'a liberação é feita pelo gestor.';
+      case CheckInBlockedReason.outsideWindow:
+        return 'O check-in só é aceito dentro das janelas de horário definidas '
+            'pela empresa.';
+      case CheckInBlockedReason.disabled:
+        return 'A empresa não exige registro de presença por localização.';
+      default:
+        final atual = status?.currentWindow;
+        if (atual != null) {
+          return 'Você está dentro da janela das ${atual.label}. '
+              'Aproxime-se da imobiliária e registre sua presença.';
+        }
+        return 'Aproxime-se da imobiliária e toque em fazer check-in para '
+            'registrar sua presença.';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -390,7 +574,23 @@ class _StatusBlock extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     final emerald = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
     final slate = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
-    final eyebrowColor = active ? emerald : slate;
+    final rose = isDark ? const Color(0xFFFB7185) : const Color(0xFFE11D48);
+    final amber = isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
+    // Cor por significado: presente é verde, bloqueio é vermelho, espera é
+    // âmbar. Nada de vermelho decorativo — ele só aparece quando trava mesmo.
+    final Color eyebrowColor;
+    if (active) {
+      eyebrowColor = emerald;
+    } else {
+      switch (status?.reasonCannot) {
+        case CheckInBlockedReason.blocked:
+          eyebrowColor = rose;
+        case CheckInBlockedReason.outsideWindow:
+          eyebrowColor = amber;
+        default:
+          eyebrowColor = slate;
+      }
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -418,9 +618,7 @@ class _StatusBlock extends StatelessWidget {
             const SizedBox(width: 9),
             Flexible(
               child: Text(
-                active
-                    ? 'VOCÊ ESTÁ NA IMOBILIÁRIA'
-                    : 'FORA DA IMOBILIÁRIA',
+                _eyebrow,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.labelSmall?.copyWith(
@@ -435,7 +633,7 @@ class _StatusBlock extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         Text(
-          active ? 'Presença registrada' : 'Pronto para começar?',
+          _title,
           style: theme.textTheme.headlineSmall?.copyWith(
             fontWeight: FontWeight.w900,
             color: ThemeHelpers.textColor(context),
@@ -445,9 +643,7 @@ class _StatusBlock extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          active
-              ? 'Você está marcado como presente até o horário de expiração abaixo.'
-              : 'Aproxime-se da imobiliária e toque em fazer check-in para registrar sua presença.',
+          _subtitle,
           style: theme.textTheme.bodyMedium?.copyWith(
             color: ThemeHelpers.textSecondaryColor(context),
             height: 1.45,
@@ -463,6 +659,9 @@ class _StatusBlock extends StatelessWidget {
 class _PrimaryCta extends StatelessWidget {
   final bool isActive;
   final bool loading;
+
+  /// Regra do servidor impede o check-in agora (bloqueio, janela, desligado).
+  final bool locked;
   final String step;
   final VoidCallback onCheckIn;
   final VoidCallback onCheckOut;
@@ -470,6 +669,7 @@ class _PrimaryCta extends StatelessWidget {
   const _PrimaryCta({
     required this.isActive,
     required this.loading,
+    required this.locked,
     required this.step,
     required this.onCheckIn,
     required this.onCheckOut,
@@ -477,7 +677,8 @@ class _PrimaryCta extends StatelessWidget {
 
   String _label() {
     if (!loading) {
-      return isActive ? 'Fazer check-out' : 'Fazer check-in';
+      if (isActive) return 'Fazer check-out';
+      return locked ? 'Check-in indisponível' : 'Fazer check-in';
     }
     switch (step) {
       case 'location':
@@ -494,17 +695,33 @@ class _PrimaryCta extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final emeraldFrom =
-        isDark ? const Color(0xFF34D399) : const Color(0xFF10B981);
-    final emeraldTo =
-        isDark ? const Color(0xFF059669) : const Color(0xFF047857);
-    final indigoTo =
-        isDark ? const Color(0xFF6366F1) : const Color(0xFF4F46E5);
-    // Verde quando vai criar check-in; "neutro escuro" quando o ato é
-    // encerrar (não quero verde lá pra não passar mensagem ambígua).
-    final from = isActive ? const Color(0xFF1F2937) : emeraldFrom;
-    final to = isActive ? const Color(0xFF0F172A) : emeraldTo;
+    final emeraldFrom = isDark
+        ? const Color(0xFF34D399)
+        : const Color(0xFF10B981);
+    final emeraldTo = isDark
+        ? const Color(0xFF059669)
+        : const Color(0xFF047857);
+    final indigoTo = isDark ? const Color(0xFF6366F1) : const Color(0xFF4F46E5);
+    // Travado: some o gradiente vivo e o brilho. O botão continua legível,
+    // mas para de convidar — quem explica o porquê é o aviso logo acima.
+    final blocked = locked && !isActive;
+    final Color from;
+    final Color to;
+    if (blocked) {
+      from = isDark ? const Color(0xFF2A2A32) : const Color(0xFFE2E8F0);
+      to = isDark ? const Color(0xFF1E1E25) : const Color(0xFFCBD5E1);
+    } else if (isActive) {
+      // Neutro escuro para encerrar: verde ali passaria mensagem ambígua.
+      from = const Color(0xFF1F2937);
+      to = const Color(0xFF0F172A);
+    } else {
+      from = emeraldFrom;
+      to = emeraldTo;
+    }
     final glow = isActive ? indigoTo : emeraldTo;
+    final fg = blocked
+        ? (isDark ? const Color(0xFF8A8A96) : const Color(0xFF64748B))
+        : Colors.white;
 
     return SizedBox(
       width: double.infinity,
@@ -513,7 +730,9 @@ class _PrimaryCta extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: loading ? null : (isActive ? onCheckOut : onCheckIn),
+          onTap: loading || blocked
+              ? null
+              : (isActive ? onCheckOut : onCheckIn),
           child: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
@@ -522,35 +741,38 @@ class _PrimaryCta extends StatelessWidget {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: glow.withValues(alpha: isDark ? 0.45 : 0.35),
-                  blurRadius: 22,
-                  offset: const Offset(0, 10),
-                  spreadRadius: -6,
-                ),
-              ],
+              boxShadow: blocked
+                  ? null
+                  : [
+                      BoxShadow(
+                        color: glow.withValues(alpha: isDark ? 0.45 : 0.35),
+                        blurRadius: 22,
+                        offset: const Offset(0, 10),
+                        spreadRadius: -6,
+                      ),
+                    ],
             ),
             alignment: Alignment.center,
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (loading) ...[
-                  const SizedBox(
+                  SizedBox(
                     width: 18,
                     height: 18,
                     child: CircularProgressIndicator(
                       strokeWidth: 2.4,
-                      valueColor:
-                          AlwaysStoppedAnimation<Color>(Colors.white),
+                      valueColor: AlwaysStoppedAnimation<Color>(fg),
                     ),
                   ),
                   const SizedBox(width: 10),
                 ] else ...[
                   Icon(
-                    isActive ? LucideIcons.logOut : LucideIcons.mapPin,
+                    blocked
+                        ? LucideIcons.lock
+                        : (isActive ? LucideIcons.logOut : LucideIcons.mapPin),
                     size: 19,
-                    color: Colors.white,
+                    color: fg,
                   ),
                   const SizedBox(width: 10),
                 ],
@@ -559,22 +781,20 @@ class _PrimaryCta extends StatelessWidget {
                     _label(),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: fg,
                       fontWeight: FontWeight.w900,
                       letterSpacing: 0.25,
                       fontSize: 15.5,
                     ),
                   ),
                 ),
-                if (!loading) ...[
+                if (!loading && !blocked) ...[
                   const SizedBox(width: 8),
                   Icon(
-                    isActive
-                        ? LucideIcons.arrowRight
-                        : LucideIcons.arrowRight,
+                    LucideIcons.arrowRight,
                     size: 16,
-                    color: Colors.white.withValues(alpha: 0.85),
+                    color: fg.withValues(alpha: 0.85),
                   ),
                 ],
               ],
@@ -582,6 +802,181 @@ class _PrimaryCta extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ─── Aviso de topo (bloqueio / janela / liberação) ───────────────────────────
+
+enum _NoticeTone { danger, warning, info, neutral }
+
+/// O que impede — ou libera — o check-in agora. Um por vez.
+class _CheckInNotice {
+  final _NoticeTone tone;
+  final IconData icon;
+  final String title;
+  final String body;
+
+  const _CheckInNotice({
+    required this.tone,
+    required this.icon,
+    required this.title,
+    required this.body,
+  });
+}
+
+class _NoticeBlock extends StatelessWidget {
+  final _CheckInNotice notice;
+  const _NoticeBlock({required this.notice});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final Color accent;
+    switch (notice.tone) {
+      case _NoticeTone.danger:
+        accent = isDark ? const Color(0xFFFB7185) : const Color(0xFFE11D48);
+      case _NoticeTone.warning:
+        accent = isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
+      case _NoticeTone.info:
+        accent = isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7);
+      case _NoticeTone.neutral:
+        accent = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(13, 12, 14, 13),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: isDark ? 0.13 : 0.07),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: accent.withValues(alpha: isDark ? 0.32 : 0.22),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: isDark ? 0.22 : 0.14),
+              borderRadius: BorderRadius.circular(9),
+            ),
+            alignment: Alignment.center,
+            child: Icon(notice.icon, size: 15, color: accent),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  notice.title,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: accent,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.1,
+                    height: 1.25,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  notice.body,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    height: 1.4,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Janelas de horário do dia ───────────────────────────────────────────────
+
+/// As janelas de hoje, com a vigente destacada e as já vencidas apagadas.
+/// Quando o dia não tem janela nenhuma, diz isso em vez de mostrar vazio.
+class _WindowsStrip extends StatelessWidget {
+  final CheckInStatus status;
+  const _WindowsStrip({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final emerald = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
+    final indigo = isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
+    final slate = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final janelas = status.todayWindows;
+    final proximo = status.nextWindowText?.trim();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (janelas.isEmpty)
+          Text(
+            '${status.weekdayLabel} não tem janela de check-in.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: ThemeHelpers.textColor(context),
+              fontWeight: FontWeight.w700,
+              height: 1.4,
+            ),
+          )
+        else
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: janelas.map((w) {
+              final atual = status.currentWindow;
+              final isCurrent =
+                  atual != null && atual.start == w.start && atual.end == w.end;
+              // `localTime` é HH:mm no fuso da empresa — comparação de texto
+              // basta e evita reconstruir a data do servidor no aparelho.
+              final isPast =
+                  !isCurrent && status.localTime.compareTo(w.end) > 0;
+              return _InfoChip(
+                icon: isCurrent
+                    ? LucideIcons.radio
+                    : (isPast ? LucideIcons.check : LucideIcons.clock),
+                label: isCurrent
+                    ? 'Agora'
+                    : (isPast ? 'Encerrada' : 'Mais tarde'),
+                value: w.label,
+                color: isCurrent ? emerald : (isPast ? slate : indigo),
+                emphasize: isCurrent,
+              );
+            }).toList(),
+          ),
+        if (proximo != null && proximo.isNotEmpty && !status.insideWindow) ...[
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(LucideIcons.arrowRight, size: 13, color: muted),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  proximo,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: muted,
+                    fontWeight: FontWeight.w700,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
     );
   }
 }
@@ -617,10 +1012,7 @@ class _SectionLabel extends StatelessWidget {
         ),
         const SizedBox(width: 10),
         Expanded(
-          child: Container(
-            height: 1,
-            color: muted.withValues(alpha: 0.22),
-          ),
+          child: Container(height: 1, color: muted.withValues(alpha: 0.22)),
         ),
       ],
     );
@@ -636,19 +1028,14 @@ class _ActiveStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final emerald =
-        isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
-    final amber =
-        isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
-    final slate =
-        isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    final emerald = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
+    final amber = isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
+    final slate = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
 
     final remaining = checkIn.expiresAt.difference(DateTime.now());
     final entryText = DateFormat('HH:mm').format(checkIn.checkedInAt.toLocal());
-    final entryDate =
-        DateFormat('dd/MM').format(checkIn.checkedInAt.toLocal());
-    final expiresText =
-        DateFormat('HH:mm').format(checkIn.expiresAt.toLocal());
+    final entryDate = DateFormat('dd/MM').format(checkIn.checkedInAt.toLocal());
+    final expiresText = DateFormat('HH:mm').format(checkIn.expiresAt.toLocal());
 
     return Wrap(
       spacing: 10,
@@ -708,12 +1095,9 @@ class _SettingsRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final indigo =
-        isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
-    final teal =
-        isDark ? const Color(0xFF2DD4BF) : const Color(0xFF0D9488);
-    final slate =
-        isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    final indigo = isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
+    final teal = isDark ? const Color(0xFF2DD4BF) : const Color(0xFF0D9488);
+    final slate = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
     final hasAddress = (settings.company?.address ?? '').trim().isNotEmpty;
 
     return Wrap(
@@ -735,9 +1119,7 @@ class _SettingsRow extends StatelessWidget {
           emphasize: true,
         ),
         _InfoChip(
-          icon: settings.enabled
-              ? LucideIcons.checkCircle2
-              : LucideIcons.power,
+          icon: settings.enabled ? LucideIcons.checkCircle2 : LucideIcons.power,
           label: 'Status',
           value: settings.enabled ? 'Habilitado' : 'Desabilitado',
           color: settings.enabled
@@ -745,6 +1127,43 @@ class _SettingsRow extends StatelessWidget {
               : (isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706)),
           emphasize: true,
         ),
+        if (settings.hasWindows)
+          _InfoChip(
+            icon: LucideIcons.calendarClock,
+            label: 'Horário',
+            value: 'Só dentro das janelas',
+            color: indigo,
+          ),
+        // Por que o check-in importa: é isto que muda na entrada de leads.
+        if (settings.enabled && settings.leadPriorityEnabled)
+          _InfoChip(
+            icon: LucideIcons.userCheck,
+            label: 'Leads',
+            value: settings.leadPriorityMode == 'exclusive'
+                ? 'Só para quem está presente'
+                : 'Presentes primeiro',
+            color: settings.leadPriorityMode == 'exclusive'
+                ? (isDark ? const Color(0xFFFB7185) : const Color(0xFFE11D48))
+                : teal,
+            emphasize: true,
+          ),
+        if (settings.enabled && settings.autoDistributeOnWindowEnd)
+          _InfoChip(
+            icon: LucideIcons.share2,
+            label: 'Fila',
+            value: settings.maxAutoPerUserPerRun != null
+                ? 'Distribui ao fim da janela · até '
+                      '${settings.maxAutoPerUserPerRun} por rodada'
+                : 'Distribui ao fim da janela',
+            color: teal,
+          ),
+        if (settings.enabled && settings.weekendUsesSaturdayCheckIn)
+          _InfoChip(
+            icon: LucideIcons.calendarDays,
+            label: 'Fim de semana',
+            value: 'Sábado vale até domingo',
+            color: slate,
+          ),
         if (hasAddress)
           _InfoChip(
             icon: LucideIcons.building,
@@ -785,8 +1204,8 @@ class _InfoChip extends StatelessWidget {
     final border = emphasize
         ? color.withValues(alpha: isDark ? 0.34 : 0.22)
         : (isDark
-            ? Colors.white.withValues(alpha: 0.08)
-            : Colors.black.withValues(alpha: 0.06));
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.06));
     return Container(
       padding: const EdgeInsets.fromLTRB(11, 8, 13, 8),
       constraints: const BoxConstraints(maxWidth: 320),
@@ -844,8 +1263,7 @@ class _HistoryLink extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final emerald =
-        isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
+    final emerald = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
     final muted = ThemeHelpers.textSecondaryColor(context);
     return InkWell(
       onTap: onTap,

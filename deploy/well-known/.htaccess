@@ -1,0 +1,33 @@
+# Coloque este arquivo DENTRO de public_html/.well-known/ na Hostinger.
+#
+# POR QUE ELE EXISTE
+# O `apple-app-site-association` não tem extensão (exigência da Apple), então o
+# Apache não descobre o tipo sozinho e serve como texto puro ou octet-stream.
+# O iOS recusa a associação em silêncio quando o Content-Type não é JSON — o
+# link continua abrindo no Safari sem erro nenhum em lugar algum.
+#
+# A segunda regra impede que qualquer fallback de SPA na raiz do domínio engula
+# /.well-known/ e devolva um index.html com status 200 (o mesmo acidente que
+# causou o incidente de MIME no /sistema em 27-28/08/2026).
+
+<Files "apple-app-site-association">
+  ForceType application/json
+</Files>
+
+<Files "assetlinks.json">
+  ForceType application/json
+</Files>
+
+# Arquivo real existe? Serve como está, sem passar por rewrite nenhum.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{REQUEST_FILENAME} -f
+  RewriteRule ^ - [L]
+</IfModule>
+
+# Sem cache longo: se um dia o conteúdo mudar (novo Team ID, nova chave de
+# assinatura, host novo), a correção precisa valer no mesmo dia.
+<IfModule mod_headers.c>
+  Header set Cache-Control "public, max-age=3600"
+  Header unset ETag
+</IfModule>

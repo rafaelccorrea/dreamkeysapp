@@ -28,6 +28,8 @@ import '../models/property_local_draft.dart';
 import '../models/property_wizard_pop_result.dart';
 import '../services/property_local_draft_storage.dart';
 import '../widgets/property_creation_setup_modal.dart';
+import '../widgets/finalidade_picker.dart';
+import '../../../shared/utils/property_finalidade.dart';
 import 'package:intl/intl.dart';
 import '../../../../shared/utils/property_form_config.dart';
 
@@ -121,6 +123,43 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   final List<String> _selectedFeatures = [];
 
   // Etapa 4: Valores
+  /// Finalidade declarada do imóvel. Vem do modal de pré-criação (criação)
+  /// ou do cadastro (edição). `null` só em cadastro legado — e aí a regra
+  /// canônica deriva dos preços, igual ao web e ao backend.
+  PropertyFinalidade? _finalidade;
+
+  /// A finalidade foi DEDUZIDA dos preços de um cadastro antigo, não
+  /// escolhida por ninguém. Muda só a marcação visual do cartão.
+  bool _finalidadeInferida = false;
+
+  /// Finalidade como o registro veio do servidor. Só mandamos os papéis de
+  /// captador quando ela REALMENTE muda — em empresa com campos protegidos
+  /// ligados, mandar `captorAssignments` em toda edição transformaria um
+  /// ajuste de texto em solicitação de alteração.
+  PropertyFinalidade? _finalidadeCarregada;
+
+  /// Este imóvel anuncia venda? Sem finalidade gravada, cai no fallback
+  /// derivado dos preços — nunca reprova o lado que a finalidade desligou.
+  bool get _anunciaVenda => anunciaVenda(
+        finalidade: _finalidade,
+        salePrice: _salePriceController.text.trim().isEmpty
+            ? null
+            : Masks.unmaskMoney(_salePriceController.text) / 100.0,
+        rentPrice: _rentPriceController.text.trim().isEmpty
+            ? null
+            : Masks.unmaskMoney(_rentPriceController.text) / 100.0,
+      );
+
+  bool get _anunciaLocacao => anunciaLocacao(
+        finalidade: _finalidade,
+        salePrice: _salePriceController.text.trim().isEmpty
+            ? null
+            : Masks.unmaskMoney(_salePriceController.text) / 100.0,
+        rentPrice: _rentPriceController.text.trim().isEmpty
+            ? null
+            : Masks.unmaskMoney(_rentPriceController.text) / 100.0,
+      );
+
   final _salePriceController = TextEditingController();
   final _rentPriceController = TextEditingController();
   final _condominiumFeeController = TextEditingController();
@@ -278,6 +317,13 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     _sectorController.addListener(_onFieldChanged);
     _internalNotesController.addListener(_onFieldChanged);
     _suitesController.addListener(_onFieldChanged);
+    // Os preços faltavam aqui: sem listener o aviso âmbar "fora da
+    // finalidade" não acompanha o que está sendo digitado e o valor não
+    // entra no auto-save do rascunho.
+    _salePriceController.addListener(_onFieldChanged);
+    _rentPriceController.addListener(_onFieldChanged);
+    _minSalePriceController.addListener(_onFieldChanged);
+    _minRentPriceController.addListener(_onFieldChanged);
   }
 
   Future<void> _loadCurrentUserId() async {
@@ -589,6 +635,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       adaptivePageRoute<PropertyCreationSetupResult>(
         fullscreenDialog: true,
         builder: (_) => PropertyCreationSetupPage(
+          initialFinalidade: isInitial ? null : _finalidade,
           initialType: isInitial ? null : _selectedType,
           initialAddressMode: _addressMode,
           initialCondominiumId: _selectedCondominiumId,
@@ -614,6 +661,9 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     final shouldResetGeo = wasExternal && goingStandalone;
 
     setState(() {
+      _finalidade = r.finalidade;
+      // Veio de escolha explícita: deixa de ser dedução.
+      _finalidadeInferida = false;
       _selectedType = r.type;
       _selectedTeamId = r.teamId;
       _addressMode = r.addressMode;
@@ -806,6 +856,10 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     _sectorController.removeListener(_onFieldChanged);
     _internalNotesController.removeListener(_onFieldChanged);
     _suitesController.removeListener(_onFieldChanged);
+    _salePriceController.removeListener(_onFieldChanged);
+    _rentPriceController.removeListener(_onFieldChanged);
+    _minSalePriceController.removeListener(_onFieldChanged);
+    _minRentPriceController.removeListener(_onFieldChanged);
 
     _pageController.dispose();
     _titleController.dispose();
@@ -941,6 +995,23 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     _rentPriceController.text = property.rentPrice != null
         ? Masks.money((property.rentPrice! * 100).toStringAsFixed(0))
         : '';
+
+    // Cadastro anterior à finalidade não tem o campo gravado. Em vez de deixar
+    // vazio (o que faria a tela cobrar uma escolha do nada), DEDUZ dos preços
+    // pela mesma regra do web e do backend — e marca como inferida, para o
+    // cartão pedir confirmação em vez de fingir que alguém escolheu.
+    final gravada = PropertyFinalidade.tryParse(property.finalidade);
+    _finalidadeCarregada = gravada;
+    if (gravada != null) {
+      _finalidade = gravada;
+      _finalidadeInferida = false;
+    } else {
+      _finalidade = finalidadeEfetiva(
+        salePrice: property.salePrice,
+        rentPrice: property.rentPrice,
+      );
+      _finalidadeInferida = _finalidade != null;
+    }
     _condominiumFeeController.text = property.condominiumFee != null
         ? Masks.money((property.condominiumFee! * 100).toStringAsFixed(0))
         : '';
@@ -1255,6 +1326,19 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   bool _validateCurrentStep() {
     switch (_currentStep) {
       case 0: // Etapa 1: Informações Básicas
+        // Na edição a finalidade é perguntada AQUI (não houve modal de
+        // pré-criação). Sem ela a etapa de valores não sabe o que exigir.
+        if (_finalidade == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                'Escolha a finalidade do imóvel: venda, locação ou as duas.',
+              ),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+          return false;
+        }
         // Título e descrição só são obrigatórios se a IA estiver desativada
         if (!_autoGenerateOnReview) {
           if (_titleController.text.trim().isEmpty) {
@@ -1553,8 +1637,13 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       case 3: // Etapa 4: Valores
         // Se aceita negociação, deve ter preço mínimo de venda OU aluguel
         if (_acceptsNegotiation) {
-          final hasSalePrice = _salePriceController.text.trim().isNotEmpty;
-          final hasRentPrice = _rentPriceController.text.trim().isNotEmpty;
+          // Só cobra o mínimo do lado que a finalidade anuncia. Sem isso,
+          // um valor residual de venda num imóvel que virou locação exige
+          // um campo que nem está na tela — erro invisível.
+          final hasSalePrice =
+              _anunciaVenda && _salePriceController.text.trim().isNotEmpty;
+          final hasRentPrice = _anunciaLocacao &&
+              _rentPriceController.text.trim().isNotEmpty;
           final hasMinSalePrice = _minSalePriceController.text
               .trim()
               .isNotEmpty;
@@ -1844,6 +1933,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       'selectedTeamId': _selectedTeamId,
       'selectedCondominiumId': _selectedCondominiumId,
       'selectedEmpreendimentoId': _selectedEmpreendimentoId,
+      'finalidade': _finalidade?.value,
       'salePrice': _salePriceController.text,
       'rentPrice': _rentPriceController.text,
       'condominiumFee': _condominiumFeeController.text,
@@ -1906,6 +1996,22 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     setIfPresent(_parkingSpacesController, 'parkingSpaces');
     setIfPresent(_suitesController, 'suites');
     setIfPresent(_salePriceController, 'salePrice');
+    // Rascunho gravado antes da finalidade existir volta DEDUZINDO dos
+    // preços — reentra como inferido, pedindo confirmação, em vez de
+    // assumir em silêncio uma finalidade que ninguém escolheu.
+    final finalidadeSalva = PropertyFinalidade.tryParse(raw['finalidade']);
+    if (finalidadeSalva != null) {
+      _finalidade = finalidadeSalva;
+      _finalidadeInferida = false;
+    } else {
+      final venda = (raw['salePrice'] ?? '').toString().trim();
+      final aluguel = (raw['rentPrice'] ?? '').toString().trim();
+      _finalidade = finalidadeEfetiva(
+        salePrice: venda.isEmpty ? null : Masks.unmaskMoney(venda),
+        rentPrice: aluguel.isEmpty ? null : Masks.unmaskMoney(aluguel),
+      );
+      _finalidadeInferida = _finalidade != null;
+    }
     setIfPresent(_rentPriceController, 'rentPrice');
     setIfPresent(_condominiumFeeController, 'condominiumFee');
     setIfPresent(_iptuController, 'iptu');
@@ -2622,8 +2728,41 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     }
 
     // ============================ Step 3 ============================
+    // A finalidade manda: locação cobra aluguel, venda cobra venda, ambos
+    // cobra os dois. Mesmas mensagens do backend
+    // (`properties.service.ts` — assertPrecoCoerenteComFinalidade).
     final saleText = _salePriceController.text.trim();
-    if (saleText.isNotEmpty) {
+    final rentTextAtual = _rentPriceController.text.trim();
+    // Isenta rascunho pelo MESMO critério do backend: `statusEfetivo ==
+    // DRAFT` (properties.service.ts). Olhar só o botão "salvar rascunho"
+    // deixava o app mais rígido que o servidor — quem escolhia "Rascunho"
+    // na etapa de publicação e tocava em Salvar era cobrado à toa.
+    if (_resolvedApiStatus(saveAsDraft) != 'draft') {
+      final vendaOk =
+          saleText.isNotEmpty && Masks.unmaskMoney(saleText) / 100.0 > 0;
+      final aluguelOk = rentTextAtual.isNotEmpty &&
+          Masks.unmaskMoney(rentTextAtual) / 100.0 > 0;
+      if (_finalidade != null) {
+        if (_finalidade!.anunciaLocacao && !aluguelOk) {
+          return const _StepValidationFailure(
+            step: 3,
+            message: 'O imóvel está marcado para locação: informe o valor '
+                'do aluguel (ou mude a finalidade).',
+          );
+        }
+        if (_finalidade!.anunciaVenda && !vendaOk) {
+          return const _StepValidationFailure(
+            step: 3,
+            message: 'O imóvel está marcado para venda: informe o valor de '
+                'venda (ou mude a finalidade).',
+          );
+        }
+      }
+    }
+    // 'Deve ser positivo' SÓ vale para o lado que a finalidade anuncia.
+    // Um 'R$ 0,00' residual do lado desligado não pode reprovar um campo
+    // que nem está mais na tela — era exatamente esse o bug original.
+    if (saleText.isNotEmpty && _anunciaVenda) {
       final p = Masks.unmaskMoney(saleText) / 100.0;
       if (p <= 0) {
         return const _StepValidationFailure(
@@ -2639,7 +2778,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       }
     }
     final rentText = _rentPriceController.text.trim();
-    if (rentText.isNotEmpty) {
+    if (rentText.isNotEmpty && _anunciaLocacao) {
       final p = Masks.unmaskMoney(rentText) / 100.0;
       if (p <= 0) {
         return const _StepValidationFailure(
@@ -2687,7 +2826,9 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       }
     }
     if (_acceptsNegotiation) {
-      if (saleText.isNotEmpty) {
+      // O lado desligado pela finalidade não cobra mínimo: o campo nem
+      // está na tela, e reprovar por ele trava o formulário sem explicação.
+      if (saleText.isNotEmpty && _anunciaVenda) {
         final minS = _minSalePriceController.text.trim();
         if (minS.isEmpty) {
           return const _StepValidationFailure(
@@ -2711,7 +2852,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           );
         }
       }
-      if (rentText.isNotEmpty) {
+      if (rentText.isNotEmpty && _anunciaLocacao) {
         final minR = _minRentPriceController.text.trim();
         if (minR.isEmpty) {
           return const _StepValidationFailure(
@@ -2790,6 +2931,25 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   /// vermelho com o motivo. No próximo frame, dispara
   /// `_formKey.currentState.validate()` para que os campos correspondentes
   /// fiquem em vermelho e visíveis para o usuário.
+  /// Salta para uma etapa sem que haja erro — o chip de eco da finalidade usa
+  /// isso para levar de volta à escolha em vez de repetir o seletor aqui.
+  void _goToStep(int step) {
+    final target = step.clamp(0, _totalSteps - 1);
+    if (target == _currentStep) return;
+    try {
+      _pageController.animateToPage(
+        target,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeInOut,
+      );
+    } catch (_) {
+      try {
+        _pageController.jumpToPage(target);
+      } catch (_) {/* ignore */}
+    }
+    _setStateAndPersist(() => _currentStep = target);
+  }
+
   void _navigateToStepWithError(_StepValidationFailure err) {
     final target = err.step.clamp(0, _totalSteps - 1);
     if (target != _currentStep) {
@@ -3001,6 +3161,11 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         'suites': suitesParsed ?? 0,
         'bathrooms': baths ?? 0,
         'parkingSpaces': park ?? 0,
+        // A finalidade declarada é o que o backend usa para decidir QUAL
+        // preço exigir (properties.service.ts). Sem ela o app cai no
+        // fallback derivado dos preços e o imóvel entra no acervo sem o
+        // recorte que a listagem pública e a desativação parcial usam.
+        if (_finalidade != null) 'finalidade': _finalidade!.value,
         'salePrice': _salePriceController.text.trim().isNotEmpty
             ? Masks.unmaskMoney(_salePriceController.text) / 100.0
             : 0.0,
@@ -3067,6 +3232,23 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         if (cap != null && cap.isNotEmpty) {
           data['capturedById'] = cap;
           data['capturedByIds'] = [cap];
+          // TROCAR a finalidade exige papel de captador compatível: o
+          // backend recusa 'ambos' sem captador de locação
+          // (assertCaptorsMatchFinalidade). O papel JÁ GRAVADO vence o
+          // fallback da finalidade em buildCaptorRows, então sem mandar o
+          // assignment o corretor levava um 400 sobre captador que ele não
+          // tem onde consertar — não existe UI de papel no app.
+          //
+          // Só o captador PRINCIPAL entra no array: buildCaptorRows resolve
+          // por usuário, então quem não vier aqui mantém o papel que já
+          // tinha (não apaga a divisão de papéis feita no CRM web).
+          final f = _finalidade;
+          if (f != null && f != _finalidadeCarregada) {
+            data['captorAssignments'] = [
+              if (f.anunciaVenda) {'userId': cap, 'role': 'venda'},
+              if (f.anunciaLocacao) {'userId': cap, 'role': 'locacao'},
+            ];
+          }
         }
       }
 
@@ -3090,6 +3272,20 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       // contam quando o usuário optou pelo modo correspondente. Para
       // `standalone` esses keys são removidos da checagem.
       final effectiveRequired = _formRequiredKeys.where((k) {
+        // A finalidade manda no preço: uma empresa que exige 'salePrice'
+        // não pode travar o cadastro de um imóvel de locação. Sem
+        // finalidade declarada (legado), vale o PAR do web: basta um dos
+        // dois preços (`CreatePropertyPage.tsx` linhas 3566-3577).
+        if (k == 'salePrice' || k == 'rentPrice') {
+          if (_finalidade == null) {
+            final temVenda = _salePriceController.text.trim().isNotEmpty &&
+                Masks.unmaskMoney(_salePriceController.text) > 0;
+            final temAluguel = _rentPriceController.text.trim().isNotEmpty &&
+                Masks.unmaskMoney(_rentPriceController.text) > 0;
+            return !(temVenda || temAluguel);
+          }
+          return k == 'salePrice' ? _anunciaVenda : _anunciaLocacao;
+        }
         if (k == 'condominiumId') {
           return _addressMode == PropertyCreationAddressMode.condominium;
         }
@@ -4165,18 +4361,31 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
               children: [
                 Text(
                   _selectedType.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     fontWeight: FontWeight.w900,
                     height: 1.2,
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  modeLabel,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    height: 1.3,
-                  ),
+                const SizedBox(height: 4),
+                // Wrap: em tela estreita a pastilha da finalidade cai para a
+                // linha de baixo em vez de espremer o texto do endereço.
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    if (_finalidade != null)
+                      _pastilhaFinalidade(theme, _finalidade!),
+                    Text(
+                      modeLabel,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: ThemeHelpers.textSecondaryColor(context),
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -4445,6 +4654,35 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
               ],
             ),
           ),
+          // O seletor aparece aqui em três situações: na EDIÇÃO (não houve
+          // modal de pré-criação), quando a finalidade ficou vazia (rascunho
+          // restaurado pula o modal — sem isto não existiria onde respondê-la)
+          // e quando ela foi DEDUZIDA de um cadastro antigo, para o corretor
+          // confirmar. Na criação normal ela já veio do passo zero e o que
+          // aparece é só o eco na pastilha de resumo, com um único "Alterar".
+          if (widget.propertyId != null ||
+              _finalidade == null ||
+              _finalidadeInferida) ...[
+            SizedBox(height: _wizGapBetweenSections),
+            _wizardSection(
+              theme,
+              icon: Icons.flag_rounded,
+              title: 'Finalidade *',
+              subtitle: _finalidadeInferida
+                  ? 'Cadastro anterior à finalidade. Deduzimos pelos valores '
+                        'atuais — confirme ou corrija; a escolha é gravada ao salvar.'
+                  : 'Ela decide quais valores o cadastro exige e como o imóvel '
+                        'é anunciado.',
+              child: FinalidadePicker(
+                value: _finalidade,
+                inferido: _finalidadeInferida,
+                onChanged: (f) => _setStateAndPersist(() {
+                  _finalidade = f;
+                  _finalidadeInferida = false;
+                }),
+              ),
+            ),
+          ],
           SizedBox(height: _wizGapBetweenSections),
           _wizardSection(
             theme,
@@ -5246,6 +5484,372 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     );
   }
 
+  /// Pastilha da finalidade dentro do resumo do que foi decidido antes.
+  ///
+  /// Ela mantém a tinta própria (azul/âmbar) enquanto o resto da pastilha usa
+  /// o índigo da etapa: são dois papéis diferentes — índigo é "onde estou",
+  /// azul/âmbar é "o que este imóvel é".
+  Widget _pastilhaFinalidade(ThemeData theme, PropertyFinalidade f) {
+    final isDark = theme.brightness == Brightness.dark;
+    final tint = FinalidadeTint.of(f, isDark);
+    // Teto para o Flexible ter o que limitar: 'VENDA E LOCAÇÃO' com fonte
+    // ampliada estouraria o Wrap.
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 168),
+      child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(6),
+        color: tint.withValues(alpha: isDark ? 0.16 : 0.10),
+        border: Border.all(color: tint.withValues(alpha: 0.30)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(finalidadeIcon(f), size: 11, color: tint),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              f.shortLabel,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.3,
+                color: tint,
+              ),
+            ),
+          ),
+        ],
+      ),
+      ),
+    );
+  }
+
+  /// O subtítulo da etapa fala a língua da finalidade — o corretor lê o que
+  /// vai ser cobrado antes de tentar e errar.
+  String get _subtituloAnuncio {
+    switch (_finalidade) {
+      case PropertyFinalidade.venda:
+        return 'Este imóvel é de venda: o valor de venda é obrigatório.';
+      case PropertyFinalidade.locacao:
+        return 'Este imóvel é de locação: o valor do aluguel é obrigatório.';
+      case PropertyFinalidade.ambos:
+        return 'Anunciado nas duas pontas: os dois valores são obrigatórios.';
+      case null:
+        return 'Sem finalidade gravada: informe pelo menos um dos dois valores.';
+    }
+  }
+
+  /// Eco da finalidade no cabeçalho da etapa de valores: lembra a escolha e
+  /// leva de volta para trocá-la — paridade com a faixa de leitura do web.
+  Widget? _chipEcoFinalidade(ThemeData theme) {
+    final f = _finalidade;
+    if (f == null) return null;
+    final isDark = theme.brightness == Brightness.dark;
+    final tint = FinalidadeTint.of(f, isDark);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        // Na criação a finalidade mora no modal de pré-criação; na edição
+        // (e no rascunho restaurado) ela está no seletor da etapa 1. O chip
+        // leva ao lugar onde ela REALMENTE pode ser trocada.
+        onTap: () {
+          if (widget.propertyId == null &&
+              !_finalidadeInferida &&
+              _finalidade != null) {
+            _openPropertyCreationSetup(isInitial: false);
+          } else {
+            _goToStep(0);
+          }
+        },
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 210),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              color: tint.withValues(alpha: isDark ? 0.16 : 0.10),
+              border: Border.all(color: tint.withValues(alpha: 0.32)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.flag_rounded, size: 12, color: tint),
+                const SizedBox(width: 5),
+                Flexible(
+                  child: Text(
+                    f.shortLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.2,
+                      color: tint,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 3),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 13,
+                  color: tint.withValues(alpha: 0.75),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Os campos de preço se reorganizam conforme a finalidade: sobrando um
+  /// lado, ele ocupa a largura cheia (o `SizedBox` do meio sai junto, senão
+  /// fica um vão órfão). O lado descartado que já tinha valor NÃO some — vira
+  /// o aviso "fora da finalidade", porque apagar dinheiro do usuário em
+  /// silêncio é pior que explicar.
+  Widget _buildPriceFields(ThemeData theme) {
+    final mostraVenda = _finalidade == null || _finalidade!.anunciaVenda;
+    final mostraAluguel = _finalidade == null || _finalidade!.anunciaLocacao;
+    final fora = valorForaDaFinalidade(
+      finalidade: _finalidade,
+      salePrice: _salePriceController.text.trim().isEmpty
+          ? null
+          : Masks.unmaskMoney(_salePriceController.text) / 100.0,
+      rentPrice: _rentPriceController.text.trim().isEmpty
+          ? null
+          : Masks.unmaskMoney(_rentPriceController.text) / 100.0,
+    );
+
+    final campoVenda = _buildFormField(
+      theme,
+      controller: _salePriceController,
+      label: mostraVenda && _finalidade != null ? 'Venda *' : 'Venda',
+      hint: 'R\$ 0,00',
+      keyboardType: TextInputType.number,
+      inputFormatters: [MoneyInputFormatter()],
+      validator: (value) {
+        // O lado que a finalidade desligou nunca reprova.
+        if (_finalidade != null && !_finalidade!.anunciaVenda) return null;
+        final text = (value ?? '').trim();
+        if (text.isEmpty) {
+          return _finalidade == null ? null : 'Informe o valor de venda';
+        }
+        final price = Masks.unmaskMoney(text) / 100.0;
+        if (price <= 0) return 'Preço de venda deve ser positivo';
+        if (price >= 1000000000) {
+          return 'Preço de venda deve ser menor que R\$ 1 bilhão';
+        }
+        return null;
+      },
+    );
+
+    final campoAluguel = _buildFormField(
+      theme,
+      controller: _rentPriceController,
+      label: mostraAluguel && _finalidade != null ? 'Aluguel *' : 'Aluguel',
+      hint: 'R\$ 0,00',
+      keyboardType: TextInputType.number,
+      inputFormatters: [MoneyInputFormatter()],
+      validator: (value) {
+        if (_finalidade != null && !_finalidade!.anunciaLocacao) return null;
+        final text = (value ?? '').trim();
+        if (text.isEmpty) {
+          return _finalidade == null ? null : 'Informe o valor do aluguel';
+        }
+        final price = Masks.unmaskMoney(text) / 100.0;
+        if (price <= 0) return 'Preço de aluguel deve ser positivo';
+        if (price >= 1000000) {
+          return 'Preço de aluguel deve ser menor que R\$ 999.999,99';
+        }
+        return null;
+      },
+    );
+
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topCenter,
+      child: Column(
+        key: ValueKey(_finalidade),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (mostraVenda && mostraAluguel)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: campoVenda),
+                const SizedBox(width: 12),
+                Expanded(child: campoAluguel),
+              ],
+            )
+          else if (mostraVenda)
+            campoVenda
+          else
+            campoAluguel,
+          if (_finalidade == null) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Informe ao menos um dos dois.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: ThemeHelpers.textSecondaryColor(context),
+              ),
+            ),
+          ],
+          if (fora.venda) ...[
+            const SizedBox(height: 14),
+            campoVenda,
+            _linhaForaDaFinalidade(
+              theme,
+              texto: 'Não será anunciado enquanto a finalidade for '
+                  '${_finalidade!.label}.',
+              onLimpar: () =>
+                  _setStateAndPersist(() => _salePriceController.clear()),
+            ),
+          ],
+          if (fora.locacao) ...[
+            const SizedBox(height: 14),
+            campoAluguel,
+            _linhaForaDaFinalidade(
+              theme,
+              texto: 'Não será anunciado enquanto a finalidade for '
+                  '${_finalidade!.label}.',
+              onLimpar: () =>
+                  _setStateAndPersist(() => _rentPriceController.clear()),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Os mínimos de negociação seguem a finalidade pelo mesmo motivo dos
+  /// preços: um mínimo de venda exigido num imóvel de locação é um campo fora
+  /// da tela reprovando o formulário — erro invisível, o pior tipo.
+  Widget _buildMinPriceFields(ThemeData theme) {
+    final mostraVenda = _finalidade == null || _finalidade!.anunciaVenda;
+    final mostraAluguel = _finalidade == null || _finalidade!.anunciaLocacao;
+
+    final minVenda = _buildFormField(
+      theme,
+      controller: _minSalePriceController,
+      label: 'Mínimo (venda)',
+      hint: 'R\$ 0,00',
+      keyboardType: TextInputType.number,
+      inputFormatters: [MoneyInputFormatter()],
+      validator: (value) {
+        if (!_anunciaVenda) return null;
+        final salePriceText = _salePriceController.text.trim();
+        final texto = (value ?? '').trim();
+        if (salePriceText.isNotEmpty) {
+          if (texto.isEmpty) return 'Obrigatório com valor de venda';
+          final minPrice = Masks.unmaskMoney(texto) / 100.0;
+          if (minPrice <= 0) return 'Preço mínimo deve ser positivo';
+          final salePrice = Masks.unmaskMoney(salePriceText) / 100.0;
+          if (minPrice >= salePrice) return 'Menor que o preço anunciado';
+        }
+        if (texto.isNotEmpty && Masks.unmaskMoney(texto) / 100.0 <= 0) {
+          return 'Preço mínimo deve ser positivo';
+        }
+        return null;
+      },
+    );
+
+    final minAluguel = _buildFormField(
+      theme,
+      controller: _minRentPriceController,
+      label: 'Mínimo (aluguel)',
+      hint: 'R\$ 0,00',
+      keyboardType: TextInputType.number,
+      inputFormatters: [MoneyInputFormatter()],
+      validator: (value) {
+        if (!_anunciaLocacao) return null;
+        final rentPriceText = _rentPriceController.text.trim();
+        final texto = (value ?? '').trim();
+        if (rentPriceText.isNotEmpty) {
+          if (texto.isEmpty) return 'Obrigatório com valor de aluguel';
+          final minPrice = Masks.unmaskMoney(texto) / 100.0;
+          if (minPrice <= 0) return 'Preço mínimo deve ser positivo';
+          final rentPrice = Masks.unmaskMoney(rentPriceText) / 100.0;
+          if (minPrice >= rentPrice) return 'Menor que o valor anunciado';
+        }
+        if (texto.isNotEmpty && Masks.unmaskMoney(texto) / 100.0 <= 0) {
+          return 'Preço mínimo deve ser positivo';
+        }
+        return null;
+      },
+    );
+
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topCenter,
+      child: mostraVenda && mostraAluguel
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: minVenda),
+                const SizedBox(width: 12),
+                Expanded(child: minAluguel),
+              ],
+            )
+          : (mostraVenda ? minVenda : minAluguel),
+    );
+  }
+
+  /// Divergência, não erro: ÂMBAR. O valor existe, só não é anunciado — e o
+  /// corretor decide se limpa ou deixa guardado.
+  Widget _linhaForaDaFinalidade(
+    ThemeData theme, {
+    required String texto,
+    required VoidCallback onLimpar,
+  }) {
+    const ambar = Color(0xFFD97706);
+    final isDark = theme.brightness == Brightness.dark;
+    final cor = isDark ? const Color(0xFFFBBF24) : ambar;
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Icon(Icons.warning_amber_rounded, size: 15, color: cor),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              texto,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: ThemeHelpers.textSecondaryColor(context),
+                height: 1.35,
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          TextButton(
+            onPressed: onLimpar,
+            style: TextButton.styleFrom(
+              // O tema global pinta TextButton de vermelho — aqui é âmbar,
+              // porque limpar um valor divergente não é ação destrutiva.
+              foregroundColor: cor,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              minimumSize: const Size(0, 34),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text(
+              'Limpar',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildStep4Values(ThemeData theme) {
     return SingleChildScrollView(
       padding: _wizScrollPadding,
@@ -5258,60 +5862,12 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             theme,
             icon: Icons.payments_rounded,
             title: 'Anúncio',
-            subtitle: 'Informe apenas o que o imóvel oferece hoje.',
+            subtitle: _subtituloAnuncio,
+            trailing: _chipEcoFinalidade(theme),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: _buildFormField(
-                        theme,
-                        controller: _salePriceController,
-                        label: 'Venda',
-                        hint: 'R\$ 0,00',
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [MoneyInputFormatter()],
-                        validator: (value) {
-                          if (value != null && value.trim().isNotEmpty) {
-                            final price = Masks.unmaskMoney(value) / 100.0;
-                            if (price <= 0) {
-                              return 'Preço de venda deve ser positivo';
-                            }
-                            if (price >= 1000000000) {
-                              return 'Preço de venda deve ser menor que R\$ 1 bilhão';
-                            }
-                          }
-                          return null;
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _buildFormField(
-                        theme,
-                        controller: _rentPriceController,
-                        label: 'Aluguel',
-                        hint: 'R\$ 0,00',
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [MoneyInputFormatter()],
-                        validator: (value) {
-                          if (value != null && value.trim().isNotEmpty) {
-                            final price = Masks.unmaskMoney(value) / 100.0;
-                            if (price <= 0) {
-                              return 'Preço de aluguel deve ser positivo';
-                            }
-                            if (price >= 1000000) {
-                              return 'Preço de aluguel deve ser menor que R\$ 999.999,99';
-                            }
-                          }
-                          return null;
-                        },
-                      ),
-                    ),
-                  ],
-                ),
+                _buildPriceFields(theme),
                 const SizedBox(height: 16),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -5387,82 +5943,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                 ),
                 if (_acceptsNegotiation) ...[
                   const SizedBox(height: 18),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: _buildFormField(
-                          theme,
-                          controller: _minSalePriceController,
-                          label: 'Mínimo (venda)',
-                          hint: 'R\$ 0,00',
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [MoneyInputFormatter()],
-                          validator: (value) {
-                            final salePriceText =
-                                _salePriceController.text.trim();
-                            if (salePriceText.isNotEmpty) {
-                              if (value == null || value.trim().isEmpty) {
-                                return 'Obrigatório com valor de venda';
-                              }
-                              final minPrice =
-                                  Masks.unmaskMoney(value) / 100.0;
-                              if (minPrice <= 0) {
-                                return 'Preço mínimo deve ser positivo';
-                              }
-                              final salePrice =
-                                  Masks.unmaskMoney(salePriceText) / 100.0;
-                              if (minPrice >= salePrice) {
-                                return 'Menor que o preço anunciado';
-                              }
-                            }
-                            if (value != null &&
-                                value.trim().isNotEmpty &&
-                                Masks.unmaskMoney(value) / 100.0 <= 0) {
-                              return 'Preço mínimo deve ser positivo';
-                            }
-                            return null;
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _buildFormField(
-                          theme,
-                          controller: _minRentPriceController,
-                          label: 'Mínimo (aluguel)',
-                          hint: 'R\$ 0,00',
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [MoneyInputFormatter()],
-                          validator: (value) {
-                            final rentPriceText =
-                                _rentPriceController.text.trim();
-                            if (rentPriceText.isNotEmpty) {
-                              if (value == null || value.trim().isEmpty) {
-                                return 'Obrigatório com valor de aluguel';
-                              }
-                              final minPrice =
-                                  Masks.unmaskMoney(value) / 100.0;
-                              if (minPrice <= 0) {
-                                return 'Preço mínimo deve ser positivo';
-                              }
-                              final rentPrice =
-                                  Masks.unmaskMoney(rentPriceText) / 100.0;
-                              if (minPrice >= rentPrice) {
-                                return 'Menor que o valor anunciado';
-                              }
-                            }
-                            if (value != null &&
-                                value.trim().isNotEmpty &&
-                                Masks.unmaskMoney(value) / 100.0 <= 0) {
-                              return 'Preço mínimo deve ser positivo';
-                            }
-                            return null;
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
+                  _buildMinPriceFields(theme),
                   const SizedBox(height: 14),
                   Text(
                     'SE RECEBER OFERTA ABAIXO DO MÍNIMO',
@@ -6355,19 +6836,36 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           label: 'Vagas',
           value: parking,
         ),
+      // `Masks.money` já devolve o texto com "R$" — prefixar de novo imprimia
+      // "R$ R$ 350.000,00". E o lado que a finalidade descartou não pode
+      // aparecer aqui como se fosse anunciado: entra marcado, em âmbar.
       if (salePrice.isNotEmpty)
         _ReviewTileData(
           icon: Icons.local_offer_rounded,
-          label: 'Venda',
-          value: 'R\$ $salePrice',
-          accent: const Color(0xFF10B981),
+          label: _anunciaVenda ? 'Venda' : 'Venda — fora da finalidade',
+          value: salePrice,
+          accent: _anunciaVenda
+              ? const Color(0xFF10B981)
+              : const Color(0xFFD97706),
         ),
       if (rentPrice.isNotEmpty)
         _ReviewTileData(
           icon: Icons.event_repeat_rounded,
-          label: 'Aluguel',
-          value: 'R\$ $rentPrice',
-          accent: const Color(0xFF0EA5E9),
+          label: _anunciaLocacao ? 'Aluguel' : 'Aluguel — fora da finalidade',
+          value: rentPrice,
+          accent: _anunciaLocacao
+              ? const Color(0xFF0EA5E9)
+              : const Color(0xFFD97706),
+        ),
+      if (_finalidade != null)
+        _ReviewTileData(
+          icon: Icons.flag_rounded,
+          label: 'Finalidade',
+          value: _finalidade!.label,
+          accent: FinalidadeTint.of(
+            _finalidade!,
+            Theme.of(context).brightness == Brightness.dark,
+          ),
         ),
       _ReviewTileData(
         icon: Icons.collections_rounded,

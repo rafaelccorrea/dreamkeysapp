@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -128,6 +129,13 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
   List<KanbanTaskComment> _comments = [];
   bool _loadingComments = false;
   String? _commentsError;
+
+  /// Frases de atualização rápida do funil (`null` = ainda não carregou ou o
+  /// funil não tem). Um toque registra a frase como comentário.
+  QuickUpdatesConfig? _quickUpdates;
+
+  /// Frase sendo registrada — trava só a pastilha tocada.
+  String? _applyingQuickId;
   int _commentsErrorStatus = 0;
   final TextEditingController _commentController = TextEditingController();
   final FocusNode _commentFocus = FocusNode();
@@ -501,11 +509,47 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
     }
   }
 
+  /// Frases de atualização rápida do funil. Falha em silêncio: sem elas a
+  /// conversa continua funcionando normalmente, só sem o atalho.
+  Future<void> _loadQuickUpdates() async {
+    final projectId = _pickerProjectId;
+    if (projectId == null || _quickUpdates != null) return;
+    final res = await _kanbanService.getQuickUpdates(projectId);
+    if (!mounted || !res.success || res.data == null) return;
+    setState(() => _quickUpdates = res.data);
+  }
+
+  /// Um toque = a frase vira comentário do card (histórico + baseline de
+  /// ociosidade). O comentário criado entra direto na conversa.
+  Future<void> _applyQuickUpdate(QuickUpdateOption option) async {
+    if (_applyingQuickId != null) return;
+    setState(() => _applyingQuickId = option.id);
+    final res =
+        await _kanbanService.applyQuickUpdate(widget.task.id, option.id);
+    if (!mounted) return;
+    setState(() => _applyingQuickId = null);
+    if (!res.success || res.data == null) {
+      _snack(
+        res.message ?? 'Não foi possível registrar a atualização.',
+        erro: true,
+      );
+      return;
+    }
+    final novo = res.data!;
+    setState(() {
+      if (!_comments.any((c) => c.id == novo.id)) {
+        _comments = [..._comments, novo];
+      }
+    });
+    _snack(option.label, ok: true);
+  }
+
   Future<void> _loadComments() async {
     setState(() {
       _loadingComments = true;
       _commentsError = null;
     });
+    unawaited(_loadQuickUpdates());
     try {
       final response = await _kanbanService.listComments(widget.task.id);
       if (!mounted) return;
@@ -1992,8 +2036,15 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
     // Anatomia de conversa: lista em Expanded, composer fixo no rodapé. Como
     // isto virou TELA, o Scaffold encolhe o corpo com o teclado — não existe
     // mais o failsafe de capar/rolar o composer que o sheet exigia.
+    final rapidas = _quickUpdates;
     return Column(
       children: [
+        if (rapidas != null && rapidas.enabled && rapidas.options.isNotEmpty)
+          _QuickUpdateStrip(
+            options: rapidas.options,
+            applyingId: _applyingQuickId,
+            onApply: _applyQuickUpdate,
+          ),
         Expanded(
           child: _loadingComments
               ? const _LoadingView()
@@ -9076,4 +9127,168 @@ String _relativeTime(DateTime date, {String prefix = ''}) {
     value = DateFormat('d MMM', 'pt_BR').format(date.toLocal());
   }
   return prefix.isEmpty ? value : '$prefix $value';
+}
+
+// ─── Atualização rápida do card ──────────────────────────────────────────────
+
+/// Frases pré-definidas que viram comentário com um toque — ticket af1775c0
+/// (União): "botões rápidos para serem ticados e atualizar automaticamente".
+///
+/// Veste ESMERALDA, nunca o vermelho da marca: aqui o vermelho leria como
+/// erro. Fica fixo no topo da conversa (não rola com a lista) porque o valor
+/// da coisa é ser um toque, não uma caça ao botão.
+class _QuickUpdateStrip extends StatelessWidget {
+  final List<QuickUpdateOption> options;
+  final String? applyingId;
+  final ValueChanged<QuickUpdateOption> onApply;
+
+  const _QuickUpdateStrip({
+    required this.options,
+    required this.applyingId,
+    required this.onApply,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final tone = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final aplicando = applyingId != null;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 12, 0, 12),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: ThemeHelpers.borderColor(context)),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(right: 18),
+            child: Row(
+              children: [
+                Icon(LucideIcons.zap, size: 12, color: tone),
+                const SizedBox(width: 6),
+                Text(
+                  'ATUALIZAÇÃO RÁPIDA',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: muted,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.8,
+                    fontSize: 10,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Container(
+                    height: 1,
+                    color: muted.withValues(alpha: 0.18),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 9),
+          SizedBox(
+            height: 34,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              physics: const ClampingScrollPhysics(),
+              padding: const EdgeInsets.only(right: 18),
+              itemCount: options.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, i) {
+                final o = options[i];
+                final estaAplicando = applyingId == o.id;
+                return _QuickUpdatePill(
+                  label: o.label,
+                  tone: tone,
+                  loading: estaAplicando,
+                  // Enquanto uma registra, as outras apagam em vez de sumir:
+                  // a fileira não pode dançar embaixo do dedo.
+                  enabled: !aplicando,
+                  onTap: () => onApply(o),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _QuickUpdatePill extends StatelessWidget {
+  final String label;
+  final Color tone;
+  final bool loading;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _QuickUpdatePill({
+    required this.label,
+    required this.tone,
+    required this.loading,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final opacidade = enabled || loading ? 1.0 : 0.45;
+
+    return Opacity(
+      opacity: opacidade,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: enabled ? onTap : null,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: tone.withValues(alpha: isDark ? 0.14 : 0.08),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: tone.withValues(alpha: isDark ? 0.36 : 0.26),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (loading)
+                  SizedBox(
+                    width: 13,
+                    height: 13,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(tone),
+                    ),
+                  )
+                else
+                  Icon(LucideIcons.checkCircle2, size: 13, color: tone),
+                const SizedBox(width: 7),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: ThemeHelpers.textColor(context),
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

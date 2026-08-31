@@ -43,14 +43,12 @@ Requisitos (todos obrigatórios, o iOS é rígido):
   URL do AASA invalida a associação.
 - Sem autenticação, resposta `200`.
 
-### TEAM_ID — PENDÊNCIA REAL
+### TEAM_ID — PREENCHIDO (31/08/2026)
 
-O arquivo está com o placeholder **`TEAMID`** em `TEAMID.com.dreamkeys.corretor`.
-**O Team ID não existe em nenhum dos repositórios**: o `project.pbxproj` não tem
-`DEVELOPMENT_TEAM` (a assinatura é automática, feita pelo Codemagic). Ele precisa
-vir da conta Apple — Apple Developer → Membership → *Team ID* (10 caracteres,
-ex.: `A1B2C3D4E5`). **Substitua antes de publicar**; com o placeholder o link
-simplesmente não abre o app, sem mensagem de erro.
+`Z6CR6MJV22.com.dreamkeys.corretor`. O Team ID veio da conta Apple Developer
+(cabeçalho da conta: "RAFAEL CORREA - Z6CR6MJV22"). Não existe em nenhum dos
+repositórios: o `project.pbxproj` não tem `DEVELOPMENT_TEAM` porque a assinatura
+é automática, feita pelo Codemagic.
 
 O bundle id (`com.dreamkeys.corretor`) esse sim está no projeto
 (`PRODUCT_BUNDLE_IDENTIFIER` no pbxproj e `applicationId` no `build.gradle.kts`).
@@ -76,22 +74,26 @@ https://intellisysbr.com/.well-known/assetlinks.json
 
 Mesmas regras: `Content-Type: application/json`, HTTPS, **sem redirect**, `200`.
 
-### SHA-256 — PENDÊNCIA REAL
+### SHA-256 — PREENCHIDO (31/08/2026)
 
-O arquivo está com o placeholder
-`SUBSTITUA_PELO_SHA256_DA_CHAVE_DE_ASSINATURA_DO_APP_NO_PLAY_CONSOLE`.
+`3E:4F:EA:54:...:CB:BA` — o fingerprint da **chave de assinatura do app** (a que
+o Google Play usa para re-assinar), **não** o da `upload-keystore.jks`, cujo
+SHA-1 é `87:81:13:A0:...`.
 
-O fingerprint correto é o da **chave de assinatura do app** (o Google Play re-assina
-o APK com ela), **não** o da `upload-keystore.jks`. Pegue em:
+Onde ele fica no Play Console (o menu mudou de lugar em 2026 — "Integridade do
+app" agora só redireciona para "Protegido com o Google Play"; a chave continua
+na rota antiga):
 
-**Play Console → o app → Test and release → App integrity → App signing key
-certificate → SHA-256 certificate fingerprint.**
+```
+https://play.google.com/console/u/0/developers/6173870229946082471/app/4973079925022951476/keymanagement
+```
 
-Formato: hex em maiúsculas separado por dois-pontos
-(`AB:CD:EF:...`, 32 pares).
+Bloco **"Chave de assinatura do app" (Em uso)** → botão *Impressão digital para
+certificação SHA-256*. O bloco de baixo, "Certificado da chave de upload", é o
+errado.
 
-Se você também for testar builds locais assinados com a chave de upload, pode
-colocar **os dois** fingerprints no array `sha256_cert_fingerprints`.
+Se um dia for testar um build local assinado com a chave de upload, dá para pôr
+**os dois** fingerprints no array `sha256_cert_fingerprints`.
 
 ### Verificação
 
@@ -107,6 +109,39 @@ adb shell pm get-app-links com.dreamkeys.corretor
 ```
 
 Deve aparecer `intellisysbr.com: verified`.
+
+## Como publicar na Hostinger (passo a passo)
+
+O site está na Hostinger atrás da Cloudflare, e o CRM é servido em
+`/sistema` (ver `imobx-front/public/.htaccess`). Os arquivos de deep link vão na
+**raiz**, não sob `/sistema`.
+
+1. hPanel → **Gerenciador de Arquivos** → abrir `public_html/`.
+2. Criar a pasta `.well-known`.
+3. Subir os TRÊS arquivos desta pasta para dentro dela:
+   - `apple-app-site-association` (sem extensão — se o gerenciador acrescentar
+     `.json`, renomear tirando)
+   - `assetlinks.json`
+   - `.htaccess`
+4. Cloudflare → **Caching → Purge** (as duas URLs, ou tudo).
+5. Conferir:
+
+```bash
+curl -sI https://intellisysbr.com/.well-known/apple-app-site-association
+curl -sI https://intellisysbr.com/.well-known/assetlinks.json
+```
+
+Os dois precisam responder `200` com `content-type: application/json`.
+`301`/`302` (redirect apex→www, por exemplo) **invalida a associação no iOS**.
+
+### Por que o `.htaccess` é obrigatório
+
+O `apple-app-site-association` não tem extensão, então o Apache não descobre o
+tipo e serve como texto puro — e o iOS recusa a associação **em silêncio**. O
+`ForceType application/json` resolve. A segunda regra do arquivo impede que um
+fallback de SPA na raiz devolva `index.html` com status 200 no lugar do JSON —
+foi exatamente esse acidente que causou o incidente de MIME em `/sistema` nos
+dias 27 e 28/08/2026.
 
 ## Recorte de paths — por que não é `/sistema/*`
 

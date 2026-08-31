@@ -2478,5 +2478,57 @@ class KanbanService {
       );
     }
   }
-}
 
+  /// `GET /kanban/projects/:id/quick-updates` — frases de atualização rápida
+  /// do funil. Sem projeto identificado não há o que buscar.
+  Future<ApiResponse<QuickUpdatesConfig>> getQuickUpdates(
+    String projectId,
+  ) async {
+    try {
+      final response = await _apiService.get<Map<String, dynamic>>(
+        ApiConstants.kanbanProjectQuickUpdates(projectId),
+      );
+      if (response.success && response.data != null) {
+        return ApiResponse.success(
+          data: QuickUpdatesConfig.fromJson(response.data!),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message:
+            response.message ?? 'Erro ao carregar as atualizações rápidas.',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      return ApiResponse.error(message: 'Erro de conexão: $e', statusCode: 0);
+    }
+  }
+
+  /// `POST /kanban/tasks/:id/quick-update` — registra a frase escolhida como
+  /// comentário do card. Devolve o comentário criado para entrar na conversa
+  /// sem recarregar a lista.
+  Future<ApiResponse<KanbanTaskComment>> applyQuickUpdate(
+    String taskId,
+    String optionId,
+  ) async {
+    try {
+      final response = await _apiService.post<Map<String, dynamic>>(
+        ApiConstants.kanbanTaskQuickUpdate(taskId),
+        body: {'optionId': optionId},
+      );
+      if (response.success && response.data != null) {
+        return ApiResponse.success(
+          data: KanbanTaskComment.fromJson(response.data!),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message:
+            response.message ?? 'Não foi possível registrar a atualização.',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      return ApiResponse.error(message: 'Erro de conexão: $e', statusCode: 0);
+    }
+  }
+}

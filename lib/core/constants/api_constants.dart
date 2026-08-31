@@ -398,6 +398,11 @@ class ApiConstants {
 
   // Endpoints de Projetos Kanban
   static const String kanbanProjects = '/kanban/projects';
+  /// Frases de atualização rápida do funil (um toque vira comentário).
+  static String kanbanProjectQuickUpdates(String projectId) =>
+      '/kanban/projects/$projectId/quick-updates';
+  static String kanbanTaskQuickUpdate(String taskId) =>
+      '/kanban/tasks/$taskId/quick-update';
   static String kanbanProjectById(String id) => '/kanban/projects/$id';
   /// Equipes do seletor de funis (`ProjectSelect` / `GET /kanban/teams`).
   static const String kanbanTeams = '/kanban/teams';
