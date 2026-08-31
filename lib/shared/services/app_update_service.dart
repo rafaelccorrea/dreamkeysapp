@@ -14,11 +14,25 @@ class MobileLatestVersion {
   final int build;
   final String updateUrl;
 
+  /// O que mudou, quando a fonte informa. Vazio = a tela não promete nada.
+  final List<String> notes;
+
   const MobileLatestVersion({
     required this.version,
     required this.build,
     required this.updateUrl,
+    this.notes = const [],
   });
+}
+
+/// A loja de onde a atualização vem. O texto e o ícone da tela mudam com
+/// isto — dizer "App Store" para quem está no Android é mentira visível.
+enum AppStoreKind {
+  appStore('App Store'),
+  playStore('Play Store');
+
+  const AppStoreKind(this.label);
+  final String label;
 }
 
 /// Resultado da checagem de atualização.
@@ -29,12 +43,20 @@ class AppUpdateInfo {
   final int latestBuild;
   final String updateUrl;
 
+  /// De qual loja a atualização vem (decide texto e ícone da tela).
+  final AppStoreKind store;
+
+  /// O que mudou, quando a fonte informa.
+  final List<String> notes;
+
   const AppUpdateInfo({
     required this.currentVersion,
     required this.currentBuild,
     required this.latestVersion,
     required this.latestBuild,
     required this.updateUrl,
+    required this.store,
+    this.notes = const [],
   });
 
   String get currentLabel =>
@@ -42,6 +64,30 @@ class AppUpdateInfo {
 
   String get latestLabel =>
       latestBuild > 0 ? '$latestVersion ($latestBuild)' : latestVersion;
+
+  /// Quantas versões MENORES o usuário está atrás, dentro do mesmo major.
+  /// 0 = só a build mudou. Não inventa número quando o major pula: para
+  /// isso existe [saltoDeMajor] — dizer "10 versões atrás" seria mentira.
+  int get versionsBehind {
+    final atual = _partes(currentVersion);
+    final nova = _partes(latestVersion);
+    if (_at(nova, 0) != _at(atual, 0)) return 0;
+    final minors = _at(nova, 1) - _at(atual, 1);
+    return minors > 0 ? minors : 0;
+  }
+
+  /// A versão publicada mudou de major — salto grande, tom próprio na tela.
+  bool get saltoDeMajor =>
+      _at(_partes(latestVersion), 0) > _at(_partes(currentVersion), 0);
+
+  static List<int> _partes(String v) => v
+      .split('+')
+      .first
+      .split('.')
+      .map((p) => int.tryParse(p.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0)
+      .toList();
+
+  static int _at(List<int> l, int i) => i < l.length ? l[i] : 0;
 }
 
 /// Verifica se há versão mais nova em PRODUÇÃO.
@@ -62,16 +108,19 @@ class AppUpdateService {
   /// Retorna info de atualização se houver versão mais nova; senão `null`.
   Future<AppUpdateInfo?> checkForUpdate({bool force = false}) async {
     if (_checkedThisSession && !force) return null;
-    // Android fica de fora por ora: a Play não expõe lookup público e o
-    // update lá já é empurrado pela própria loja.
-    if (!Platform.isIOS) return null;
+    // Android entrou: a Play não tem lookup público, então a fonte é o
+    // backend (`/app/mobile-version`) e a URL da loja é derivada do pacote.
+    // Antes o método abortava aqui e METADE da base nunca era avisada.
+    if (!Platform.isIOS && !Platform.isAndroid) return null;
 
     try {
       final info = await PackageInfo.fromPlatform();
       final currentVersion = info.version.trim();
       final currentBuild = int.tryParse(info.buildNumber.trim()) ?? 0;
 
-      final latest = await _resolveLatestIos(info.packageName);
+      final latest = Platform.isIOS
+          ? await _resolveLatestIos(info.packageName)
+          : await _resolveLatestAndroid(info.packageName);
       if (latest == null) {
         if (!force) _checkedThisSession = true;
         return null;
@@ -94,6 +143,10 @@ class AppUpdateService {
         latestVersion: latest.version,
         latestBuild: latest.build,
         updateUrl: latest.updateUrl,
+        store: Platform.isIOS
+            ? AppStoreKind.appStore
+            : AppStoreKind.playStore,
+        notes: latest.notes,
       );
     } catch (e) {
       debugPrint('[AppUpdate] checagem falhou: $e');
@@ -148,7 +201,26 @@ class AppUpdateService {
     }
   }
 
-  Future<MobileLatestVersion?> _fetchFromApi() async {
+  /// Android: a Play Store não tem lookup público como o iTunes, então a
+  /// versão vem do backend. A URL da loja é DERIVADA do pacote — é
+  /// determinística, não precisa ser configurada e nunca fica velha.
+  Future<MobileLatestVersion?> _resolveLatestAndroid(String pkg) async {
+    final remote = await _fetchFromApi(plataforma: 'android');
+    if (remote == null) return null;
+    final url = remote.updateUrl.isNotEmpty
+        ? remote.updateUrl
+        : 'https://play.google.com/store/apps/details?id=$pkg';
+    return MobileLatestVersion(
+      version: remote.version,
+      build: remote.build,
+      updateUrl: url,
+      notes: remote.notes,
+    );
+  }
+
+  Future<MobileLatestVersion?> _fetchFromApi({
+    String plataforma = 'ios',
+  }) async {
     try {
       final base = ApiConstants.baseUrl;
       final uri = Uri.parse('$base/app/mobile-version');
@@ -156,22 +228,34 @@ class AppUpdateService {
       if (res.statusCode != 200) return null;
       final body = jsonDecode(res.body);
       if (body is! Map) return null;
-      final ios = body['ios'];
-      if (ios is! Map) return null;
-      final version = ios['version']?.toString().trim();
-      final buildRaw = ios['build'];
+      final node = body[plataforma];
+      if (node is! Map) return null;
+      final version = node['version']?.toString().trim();
+      final buildRaw = node['build'];
       final build = buildRaw is int
           ? buildRaw
           : int.tryParse(buildRaw?.toString() ?? '') ?? 0;
       if (version == null || version.isEmpty) return null;
-      final url = (ios['appStoreUrl'] ?? ios['updateUrl'])
-          ?.toString()
-          .trim();
-      if (url == null || url.isEmpty) return null;
+      // No Android a URL é opcional (derivada do pacote); no iOS ela é
+      // obrigatória, porque não dá para montar o link da App Store sem o id.
+      final url =
+          (node['appStoreUrl'] ?? node['playStoreUrl'] ?? node['updateUrl'])
+              ?.toString()
+              .trim() ??
+          '';
+      if (url.isEmpty && plataforma != 'android') return null;
+      final notasRaw = node['notes'];
+      final notas = notasRaw is List
+          ? notasRaw
+              .map((e) => e?.toString().trim() ?? '')
+              .where((e) => e.isNotEmpty)
+              .toList()
+          : const <String>[];
       return MobileLatestVersion(
         version: version,
         build: build,
         updateUrl: url,
+        notes: notas,
       );
     } catch (e) {
       debugPrint('[AppUpdate] API indisponível: $e');
