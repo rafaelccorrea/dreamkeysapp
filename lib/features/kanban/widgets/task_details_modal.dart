@@ -430,12 +430,19 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
     if (_linkedPropertyLabel != null) return _linkedPropertyLabel;
     final raw = _rawFields?['property'];
     if (raw is Map) {
-      final title = raw['title']?.toString().trim();
-      if (title != null && title.isNotEmpty) return title;
-      final name = raw['name']?.toString().trim();
-      if (name != null && name.isNotEmpty) return name;
+      // O CÓDIGO é o que o corretor usa para identificar o imóvel do lead que
+      // entrou para ele. Antes o título vencia e o código nunca aparecia
+      // (reclamação União/Ana Laura, 08/09/2026): a linha do título dava
+      // `return` e as duas linhas do código abaixo eram inalcançáveis. Agora o
+      // código sempre aparece quando existe — com o título ao lado, se houver.
       final code = raw['code']?.toString().trim();
-      if (code != null && code.isNotEmpty) return 'Imóvel $code';
+      final title = (raw['title']?.toString().trim().isNotEmpty ?? false)
+          ? raw['title'].toString().trim()
+          : (raw['name']?.toString().trim() ?? '');
+      final temCode = code != null && code.isNotEmpty;
+      if (temCode && title.isNotEmpty) return 'Cód. $code · $title';
+      if (temCode) return 'Cód. $code';
+      if (title.isNotEmpty) return title;
     }
     final id = _rawFields?['propertyId']?.toString().trim();
     if (id != null && id.isNotEmpty) return 'Imóvel vinculado';
@@ -450,6 +457,50 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
     }
     final id = _rawFields?['propertyId']?.toString().trim();
     return (id == null || id.isEmpty) ? null : id;
+  }
+
+  // Dados granulares do imóvel vinculado, do payload cru (`/fields`). O cartão
+  // de vínculo mostra cada um no seu lugar em vez de um rótulo achatado — e o
+  // código é o herói, que é como o corretor identifica o imóvel do lead.
+  Map<String, dynamic>? get _propertyRaw {
+    final raw = _rawFields?['property'];
+    return raw is Map ? Map<String, dynamic>.from(raw) : null;
+  }
+
+  String? _trimmed(Object? v) {
+    final s = v?.toString().trim();
+    return (s == null || s.isEmpty) ? null : s;
+  }
+
+  String? get _propertyCode => _trimmed(_propertyRaw?['code']);
+
+  String? get _propertyTitle =>
+      _trimmed(_propertyRaw?['title']) ?? _trimmed(_propertyRaw?['name']);
+
+  String? get _propertyAddress => _trimmed(_propertyRaw?['address']);
+
+  String? get _propertyEmpreendimento {
+    final e = _propertyRaw?['empreendimento'];
+    return e is Map ? _trimmed(e['name']) : null;
+  }
+
+  /// Dados do cliente vêm do payload cru quando há (email/telefone/cidade);
+  /// fallback no `task.client`, que sempre tem ao menos o nome.
+  Map<String, dynamic>? get _clientRaw {
+    final raw = _rawFields?['client'];
+    return raw is Map ? Map<String, dynamic>.from(raw) : null;
+  }
+
+  /// Segunda linha do cartão do cliente — o contato mais útil que houver,
+  /// nesta ordem: telefone/WhatsApp, e-mail, cidade. Dá corpo ao cartão sem
+  /// competir com o nome.
+  String? get _clientSubtitle {
+    final c = _clientRaw;
+    if (c == null) return _trimmed(_taskNow.client?.email);
+    return _trimmed(c['phone']) ??
+        _trimmed(c['whatsapp']) ??
+        _trimmed(c['email']) ??
+        _trimmed(c['city']);
   }
 
   void _onTabChanged() {
@@ -1273,6 +1324,9 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
     if (ok) {
       HapticFeedback.selectionClick();
       _snack('Imóvel vinculado: ${escolha.label}', ok: true);
+      // Relê os campos crus para o cartão do imóvel refletir código, endereço
+      // e empreendimento reais — não só o rótulo escolhido no seletor.
+      await _loadTaskFields();
     }
   }
 
@@ -1914,22 +1968,23 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
             accent: _kLinksTone,
           ),
           const SizedBox(height: 10),
-          _LinkRow(
-            icon: Icons.badge_outlined,
-            label: 'Cliente',
-            value: task.client?.name.trim(),
+          _ClientLinkCard(
+            name: task.client?.name.trim(),
+            subtitle: _clientSubtitle,
             canEdit: _canEdit,
             saving: _savingField == 'client',
             onTap: _editClientLink,
           ),
-          _LinkRow(
-            icon: Icons.home_work_outlined,
-            label: 'Imóvel',
-            value: _propertyLabel,
+          const SizedBox(height: 10),
+          _PropertyLinkCard(
+            code: _propertyCode,
+            title: _propertyTitle,
+            address: _propertyAddress,
+            empreendimento: _propertyEmpreendimento,
+            fallbackLabel: _linkedPropertyLabel,
             canEdit: _canEdit,
             saving: _savingField == 'property',
             onTap: _editPropertyLink,
-            isLast: true,
           ),
           const SizedBox(height: 26),
 
@@ -5985,42 +6040,68 @@ class _MutedHint extends StatelessWidget {
   }
 }
 
-/// Linha de vínculo (cliente / imóvel): hairline em cima, dado à esquerda,
-/// affordance de edição à direita. Mesma gramática das células do RAIO-X.
-class _LinkRow extends StatelessWidget {
-  const _LinkRow({
+/// Casca comum dos cartões de vínculo (cliente / imóvel).
+///
+/// Flush: sem card-dentro-de-card. Quando vinculado, veste a família sky em
+/// fundo lavado + hairline tonal + medalhão; vazio, fica neutro e convida. O
+/// corpo (`child`) é livre — cada cartão preenche com a sua densidade, e é daí
+/// que vem a coerência sem uniformidade: mesma casca, conteúdo proporcional ao
+/// que cada vínculo tem para contar.
+class _LinkCardShell extends StatelessWidget {
+  const _LinkCardShell({
     required this.icon,
-    required this.label,
-    required this.value,
+    required this.overline,
+    required this.filled,
     required this.canEdit,
     required this.saving,
     required this.onTap,
-    this.isLast = false,
+    this.child,
+    this.emptyLabel = 'Não vinculado',
   });
 
   final IconData icon;
-  final String label;
-  final String? value;
+  final String overline;
+  final bool filled;
   final bool canEdit;
   final bool saving;
   final VoidCallback onTap;
-  final bool isLast;
+  final Widget? child;
+  final String emptyLabel;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final hairline = ThemeHelpers.borderColor(context).withValues(alpha: 0.35);
-    final vinculado = value != null && value!.trim().isNotEmpty;
+    const tone = _kLinksTone;
 
-    final linha = Padding(
-      padding: const EdgeInsets.symmetric(vertical: 13),
+    final fundo = filled
+        ? tone.withValues(alpha: isDark ? 0.06 : 0.04)
+        : (isDark
+              ? Colors.white.withValues(alpha: 0.02)
+              : Colors.white.withValues(alpha: 0.5));
+    final borda = filled
+        ? tone.withValues(alpha: isDark ? 0.30 : 0.20)
+        : ThemeHelpers.borderColor(context).withValues(alpha: 0.4);
+
+    final conteudo = Padding(
+      padding: const EdgeInsets.fromLTRB(13, 12, 12, 12),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            icon,
-            size: 16,
-            color: vinculado ? _kLinksTone : secondary,
+          Container(
+            width: 38,
+            height: 38,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(11),
+              color: filled
+                  ? tone.withValues(alpha: isDark ? 0.20 : 0.12)
+                  : (isDark
+                        ? Colors.white.withValues(alpha: 0.05)
+                        : Colors.black.withValues(alpha: 0.04)),
+            ),
+            child: Icon(icon, size: 18, color: filled ? tone : secondary),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -6029,73 +6110,327 @@ class _LinkRow extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  label.toUpperCase(),
+                  overline.toUpperCase(),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.labelSmall?.copyWith(
                     letterSpacing: 1.4,
                     fontWeight: FontWeight.w800,
-                    color: secondary,
+                    color: filled ? tone : secondary,
                     fontSize: 9.5,
                     height: 1,
                   ),
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  vinculado ? value!.trim() : 'Não vinculado',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: vinculado ? FontWeight.w800 : FontWeight.w600,
-                    fontSize: 14.5,
-                    letterSpacing: -0.2,
-                    height: 1.2,
-                    fontStyle:
-                        vinculado ? FontStyle.normal : FontStyle.italic,
-                    color: vinculado
-                        ? ThemeHelpers.textColor(context)
-                        : secondary,
+                const SizedBox(height: 7),
+                if (filled && child != null)
+                  child!
+                else
+                  Text(
+                    emptyLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14.5,
+                      letterSpacing: -0.2,
+                      height: 1.2,
+                      fontStyle: FontStyle.italic,
+                      color: secondary,
+                    ),
                   ),
-                ),
               ],
             ),
           ),
           const SizedBox(width: 10),
-          if (saving)
-            const SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(
-                strokeWidth: 1.8,
-                color: _kLinksTone,
-              ),
-            )
-          else if (canEdit)
-            Icon(
-              vinculado ? Icons.edit_rounded : Icons.add_link_rounded,
-              size: 15,
-              color: secondary.withValues(alpha: 0.7),
-            ),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: saving
+                ? const SizedBox(
+                    width: 15,
+                    height: 15,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.8,
+                      color: tone,
+                    ),
+                  )
+                : canEdit
+                ? Icon(
+                    filled ? Icons.edit_rounded : Icons.add_link_rounded,
+                    size: 16,
+                    color: secondary.withValues(alpha: 0.7),
+                  )
+                : const SizedBox(width: 16),
+          ),
         ],
       ),
     );
 
     return Container(
       decoration: BoxDecoration(
-        border: Border(
-          top: BorderSide(color: hairline),
-          bottom: isLast ? BorderSide(color: hairline) : BorderSide.none,
-        ),
+        color: fundo,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: borda),
       ),
+      clipBehavior: Clip.antiAlias,
       child: canEdit
           ? Material(
               color: Colors.transparent,
-              child: InkWell(
-                onTap: saving ? null : onTap,
-                child: linha,
-              ),
+              child: InkWell(onTap: saving ? null : onTap, child: conteudo),
             )
-          : linha,
+          : conteudo,
+    );
+  }
+}
+
+/// Cartão do cliente vinculado: nome em destaque + o contato mais útil embaixo.
+class _ClientLinkCard extends StatelessWidget {
+  const _ClientLinkCard({
+    required this.name,
+    required this.subtitle,
+    required this.canEdit,
+    required this.saving,
+    required this.onTap,
+  });
+
+  final String? name;
+  final String? subtitle;
+  final bool canEdit;
+  final bool saving;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final vinculado = (name ?? '').trim().isNotEmpty;
+
+    return _LinkCardShell(
+      icon: Icons.badge_outlined,
+      overline: 'Cliente',
+      filled: vinculado,
+      canEdit: canEdit,
+      saving: saving,
+      onTap: onTap,
+      emptyLabel: 'Vincular cliente',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            name?.trim() ?? '',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              fontSize: 14.5,
+              letterSpacing: -0.2,
+              height: 1.2,
+              color: ThemeHelpers.textColor(context),
+            ),
+          ),
+          if ((subtitle ?? '').trim().isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              subtitle!.trim(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: secondary,
+                fontSize: 12.5,
+                height: 1.25,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Cartão do imóvel vinculado.
+///
+/// O CÓDIGO é o herói — pastilha sólida sky, dígitos tabulares — porque é por
+/// ele que o corretor reconhece o imóvel do lead que entrou para ele (era o
+/// que sumia: reclamação União/Ana Laura, 08/09/2026). Título, endereço e
+/// empreendimento descem em hierarquia clara embaixo.
+class _PropertyLinkCard extends StatelessWidget {
+  const _PropertyLinkCard({
+    required this.code,
+    required this.title,
+    required this.address,
+    required this.empreendimento,
+    required this.fallbackLabel,
+    required this.canEdit,
+    required this.saving,
+    required this.onTap,
+  });
+
+  final String? code;
+  final String? title;
+  final String? address;
+  final String? empreendimento;
+
+  /// Rótulo do seletor, ponte para o instante entre vincular e o payload cru
+  /// recarregar. Quase sempre `null`.
+  final String? fallbackLabel;
+  final bool canEdit;
+  final bool saving;
+  final VoidCallback onTap;
+
+  bool get _vinculado =>
+      (code ?? '').trim().isNotEmpty ||
+      (title ?? '').trim().isNotEmpty ||
+      (fallbackLabel ?? '').trim().isNotEmpty;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final temCode = (code ?? '').trim().isNotEmpty;
+    final tituloEfetivo = (title ?? '').trim().isNotEmpty
+        ? title!.trim()
+        : (fallbackLabel ?? '').trim();
+
+    return _LinkCardShell(
+      icon: Icons.home_work_outlined,
+      overline: 'Imóvel',
+      filled: _vinculado,
+      canEdit: canEdit,
+      saving: saving,
+      onTap: onTap,
+      emptyLabel: 'Vincular imóvel',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Linha herói: código sólido + título ao lado.
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              if (temCode) ...[
+                _CodePill(code: code!.trim()),
+                if (tituloEfetivo.isNotEmpty) const SizedBox(width: 9),
+              ],
+              if (tituloEfetivo.isNotEmpty)
+                Expanded(
+                  child: Text(
+                    tituloEfetivo,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: temCode ? FontWeight.w700 : FontWeight.w800,
+                      fontSize: temCode ? 13.5 : 14.5,
+                      letterSpacing: -0.2,
+                      height: 1.2,
+                      color: ThemeHelpers.textColor(context),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          if ((address ?? '').trim().isNotEmpty)
+            _PropertyMetaLine(
+              icon: Icons.location_on_outlined,
+              text: address!.trim(),
+            ),
+          if ((empreendimento ?? '').trim().isNotEmpty)
+            _PropertyMetaLine(
+              icon: Icons.apartment_rounded,
+              text: empreendimento!.trim(),
+            ),
+          // Sem código nenhum: um lembrete discreto de que o imóvel não tem
+          // código cadastrado, para o corretor não achar que o app escondeu.
+          if (!temCode && _vinculado)
+            Padding(
+              padding: const EdgeInsets.only(top: 5),
+              child: Text(
+                'Sem código cadastrado',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: secondary.withValues(alpha: 0.8),
+                  fontStyle: FontStyle.italic,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Pastilha do código do imóvel — o elemento sólido da seção, e o único.
+/// Sólido de propósito: é o dado que o corretor procura primeiro.
+class _CodePill extends StatelessWidget {
+  const _CodePill({required this.code});
+
+  final String code;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 3, 9, 3),
+      decoration: BoxDecoration(
+        color: _kLinksTone,
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.tag_rounded, size: 12, color: Colors.white),
+          const SizedBox(width: 3),
+          Text(
+            code,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w900,
+              fontSize: 12,
+              letterSpacing: 0.2,
+              height: 1.1,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Linha de apoio do cartão de imóvel (endereço, empreendimento): ícone
+/// discreto + texto que trunca sem estourar.
+class _PropertyMetaLine extends StatelessWidget {
+  const _PropertyMetaLine({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1.5),
+            child: Icon(icon, size: 13, color: secondary),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              text,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: secondary,
+                fontSize: 12.5,
+                height: 1.3,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

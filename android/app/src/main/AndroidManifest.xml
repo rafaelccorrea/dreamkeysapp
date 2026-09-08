@@ -8,11 +8,25 @@
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.USE_FINGERPRINT" />
     
-    <!-- Permissões para câmera e galeria -->
+    <!--
+      Permissões de câmera e galeria.
+
+      NÃO declarar READ_MEDIA_IMAGES nem READ_MEDIA_VIDEO. A política do Google
+      Play (Photo and Video Permissions) só aceita essas permissões amplas se o
+      seletor do sistema for tecnicamente insuficiente — e aqui ele não é: o
+      `image_picker_android` já usa o Android Photo Picker (`PickVisualMedia`),
+      que o próprio plugin documenta como "not optional on Android 13+". O
+      seletor devolve a foto por URI, sem acesso ao acervo.
+
+      A versão 76 foi RECUSADA em 01/09/2026 exatamente por isto. Reintroduzir
+      qualquer uma das duas derruba a publicação de novo.
+
+      READ_EXTERNAL_STORAGE fica capada em 32: da API 33 em diante o sistema a
+      ignora, e deixá-la sem teto é o mesmo pedido amplo por outro nome.
+    -->
     <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
 
     <!-- Permissões de localização (check-in por geolocalização) -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />

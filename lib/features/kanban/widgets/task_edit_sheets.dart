@@ -1305,8 +1305,17 @@ class _TaskLinkPickerSheetState extends State<TaskLinkPickerSheet> {
       _loading = false;
       if (r.success && r.data != null) {
         _items = [
+          // O código entra na label (não só no helper): é ele que vira o
+          // rótulo do imóvel no detalhe do card depois de vincular. Sem isso, o
+          // imóvel recém-vinculado apareceria só pelo título, e o corretor
+          // perde de novo o código que usa para identificá-lo.
           for (final p in r.data!)
-            TaskLinkSelection(id: p.id, label: p.title),
+            TaskLinkSelection(
+              id: p.id,
+              label: (p.code ?? '').trim().isNotEmpty
+                  ? 'Cód. ${p.code!.trim()} · ${p.title}'
+                  : p.title,
+            ),
         ];
         _helpers = [
           for (final p in r.data!)
