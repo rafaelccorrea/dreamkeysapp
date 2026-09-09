@@ -253,9 +253,17 @@ class AppBottomNavigation extends StatelessWidget {
 
     if (routeName == AppRoutes.home) return 0;
 
+    // O slot 3 é DINÂMICO: mostra "Aprovações" (se o usuário aprova imóveis) ou
+    // "Agenda". O tab só pode acender na rota que ELE representa — senão, quem
+    // tem "Aprovações" no slot via o botão aceso ao abrir o Calendário (que nem
+    // está na barra dele; chegou pelo drawer). Relato do Edson, 09/09/2026.
+    final slot3Route = _resolveSlot3().route;
+
     // IMPORTANTE: Aprovações precisa ser detectada ANTES de /properties porque
     // a rota é '/properties/pending-approvals'.
-    if (routeName == AppRoutes.propertyApprovals) return 3;
+    if (routeName == AppRoutes.propertyApprovals) {
+      return slot3Route == AppRoutes.propertyApprovals ? 3 : -1;
+    }
 
     // Tarefas (/kanban/tarefas) não é mais slot da bottom nav — é subtela do
     // CRM. Cai no `startsWith('/kanban')` abaixo e destaca o tab CRM (2).
@@ -268,7 +276,9 @@ class AppBottomNavigation extends StatelessWidget {
       return 2;
     }
     if (routeName == AppRoutes.calendar || routeName.startsWith('/calendar')) {
-      return 3;
+      // Só acende se o slot 3 for realmente a Agenda; para o aprovador (slot =
+      // Aprovações) o Calendário não tem tab e nenhum deve ficar destacado.
+      return slot3Route == AppRoutes.calendar ? 3 : -1;
     }
     if (routeName == AppRoutes.profile ||
         routeName == AppRoutes.profileEdit ||

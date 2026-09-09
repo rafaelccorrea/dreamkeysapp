@@ -26,6 +26,7 @@ import '../models/kanban_models.dart';
 import '../services/kanban_service.dart';
 import '../controllers/kanban_controller.dart';
 import '../utils/kanban_message_vars.dart';
+import '../utils/kanban_source_options.dart';
 import 'whatsapp_message_sheet.dart';
 import 'subtask_manager.dart';
 import 'mark_task_result_sheet.dart';
@@ -44,6 +45,7 @@ const Color _kAuditTone = Color(0xFF64748B); // slate — auditoria/tempo
 const Color _kChatTone = Color(0xFF3B82F6); // blue — comunicação
 const Color _kInternalTone = Color(0xFFE6B84C); // âmbar queimado — nota interna
 const Color _kLinksTone = Color(0xFF0EA5E9); // sky — vínculos (cliente/imóvel)
+const Color _kOriginTone = Color(0xFFEA580C); // coral — origem do lead (mídia)
 
 /// Cyan — mesma família do RAIO-X: dado e documento são a mesma natureza
 /// (o que está registrado sobre a negociação).
@@ -354,6 +356,22 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
       debugPrint('⚠️ [TASK_DETAILS] Erro ao carregar campos do card: $e');
     }
   }
+
+  /// Origem do lead. O `GET /fields` é a fonte depois de carregado (é ele
+  /// que recarrega após cada gravação e é o único que reflete um "limpar");
+  /// antes disso vale o que o board trouxe no card.
+  String? get _originSource => _rawFields != null
+      ? _trimmed(_rawFields!['source'])
+      : _trimmed(_taskNow.source);
+  String? get _originMedia => _rawFields != null
+      ? _trimmed(_rawFields!['mediaSource'] ?? _rawFields!['media_source'])
+      : _trimmed(_taskNow.mediaSource);
+  String? get _originCampaign => _rawFields != null
+      ? _trimmed(_rawFields!['campaign'])
+      : _trimmed(_taskNow.campaign);
+  String? get _originMetaCampaignId => _rawFields != null
+      ? _trimmed(_rawFields!['metaCampaignId'] ?? _rawFields!['meta_campaign_id'])
+      : _trimmed(_taskNow.metaCampaignId);
 
   /// Pessoas envolvidas vindas do payload cru — o `KanbanTask` não carrega
   /// `involvedUsers`, mas o `GET /kanban/tasks/:id/fields` (que é o
@@ -1254,6 +1272,57 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
 
   // ─── 6. VÍNCULOS (cliente / imóvel) ──────────────────────────────────────
 
+  // ─── 5b. MÍDIA DE ORIGEM ─────────────────────────────────────────────────
+
+  /// Troca a fonte do lead pelo catálogo oficial. Grava `source` E
+  /// `mediaSource` com o mesmo valor (paridade com o web); ao sair do Meta,
+  /// solta a campanha e o ID Meta, que só fazem sentido lá. O back só deixa
+  /// gestor/líder/admin mudar (403 para os demais) — a UI já corta antes com
+  /// [_canManageTags], a mesma régua.
+  Future<void> _editOrigin() async {
+    final atual = resolveKanbanSourceToOptionValue(_originSource, _originMedia);
+    final bruto = getKanbanSourceStoredDisplay(_originSource, _originMedia);
+    final escolha = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54,
+      builder: (_) => _OriginPickerSheet(
+        currentValue: atual,
+        storedDisplay: bruto,
+      ),
+    );
+    if (escolha == null || !mounted) return;
+    if (escolha.isNotEmpty && escolha == atual) return;
+    if (escolha.isEmpty && bruto.isEmpty) return;
+
+    final saindoDoMeta = escolha != 'Meta' &&
+        ((_originMetaCampaignId ?? '').isNotEmpty ||
+            (_originCampaign ?? '').isNotEmpty);
+    setState(() => _savingField = 'origin');
+    final ok = await _patchFields(
+      UpdateTaskFieldsDto(
+        source: escolha,
+        mediaSource: escolha,
+        // '' limpa de verdade (o back grava null no metaCampaignId).
+        metaCampaignId: saindoDoMeta ? '' : null,
+        campaign: saindoDoMeta ? '' : null,
+      ),
+      reloadBoard: true,
+    );
+    if (!mounted) return;
+    setState(() => _savingField = null);
+    if (ok) {
+      HapticFeedback.selectionClick();
+      _snack(
+        escolha.isEmpty
+            ? 'Mídia de origem removida'
+            : 'Mídia de origem: ${getKanbanSourceLabel(escolha, escolha)}',
+        ok: true,
+      );
+    }
+  }
+
   /// Sem opção de DESVINCULAR: o backend valida UUID e recusa null nesses
   /// campos, então a UI só oferece o que a API aceita — trocar.
   Future<void> _editClientLink() async {
@@ -1985,6 +2054,26 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
             canEdit: _canEdit,
             saving: _savingField == 'property',
             onTap: _editPropertyLink,
+          ),
+          const SizedBox(height: 26),
+
+          // 3c. ORIGEM — de onde o lead veio. Todo mundo vê; só gestão troca
+          // (regra do back para media_source, a mesma das tags).
+          _SectionHeader(
+            overline: 'Origem',
+            title: 'Mídia de origem',
+            accent: _kOriginTone,
+          ),
+          const SizedBox(height: 10),
+          _OriginCard(
+            option: kanbanSourceOptionFor(_originSource, _originMedia),
+            storedDisplay:
+                getKanbanSourceStoredDisplay(_originSource, _originMedia),
+            campaign: _originCampaign,
+            metaCampaignId: _originMetaCampaignId,
+            canEdit: _canManageTags,
+            saving: _savingField == 'origin',
+            onTap: _editOrigin,
           ),
           const SizedBox(height: 26),
 
@@ -6178,6 +6267,469 @@ class _LinkCardShell extends StatelessWidget {
               child: InkWell(onTap: saving ? null : onTap, child: conteudo),
             )
           : conteudo,
+    );
+  }
+}
+
+// =============================================================================
+// ORIGEM — mídia de origem do lead (catálogo oficial + sheet de escolha)
+// =============================================================================
+
+/// Cartão da mídia de origem: ícone e nome do item do catálogo na cor dele;
+/// quando o gravado não casa com o catálogo (rótulo de integração), mostra o
+/// texto bruto; vazio = "Não informada". Campanha/ID Meta em linha de apoio.
+class _OriginCard extends StatelessWidget {
+  final KanbanSourceOption? option;
+  final String storedDisplay;
+  final String? campaign;
+  final String? metaCampaignId;
+  final bool canEdit;
+  final bool saving;
+  final VoidCallback onTap;
+
+  const _OriginCard({
+    required this.option,
+    required this.storedDisplay,
+    required this.campaign,
+    required this.metaCampaignId,
+    required this.canEdit,
+    required this.saving,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final filled = option != null || storedDisplay.isNotEmpty;
+    // A cor é a do item do catálogo; bruto sem catálogo fala em cinza-azulado
+    // (o mesmo "Outro" do web); vazio fala no tom da seção.
+    final tone = option?.color ??
+        (storedDisplay.isNotEmpty ? const Color(0xFF78909C) : _kOriginTone);
+    final ink = isDark
+        ? tone
+        : Color.alphaBlend(Colors.black.withValues(alpha: 0.18), tone);
+
+    final apoio = <String>[
+      if ((campaign ?? '').isNotEmpty) 'Campanha: ${campaign!.trim()}',
+      if ((metaCampaignId ?? '').isNotEmpty) 'Meta · ID ${metaCampaignId!.trim()}',
+      if (option == null && storedDisplay.isNotEmpty) 'registrado pela integração',
+    ];
+
+    final fundo = filled
+        ? tone.withValues(alpha: isDark ? 0.06 : 0.04)
+        : (isDark
+              ? Colors.white.withValues(alpha: 0.02)
+              : Colors.white.withValues(alpha: 0.5));
+    final borda = filled
+        ? tone.withValues(alpha: isDark ? 0.30 : 0.20)
+        : ThemeHelpers.borderColor(context).withValues(alpha: 0.4);
+
+    final conteudo = Padding(
+      padding: const EdgeInsets.fromLTRB(13, 12, 12, 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(11),
+              color: filled
+                  ? tone.withValues(alpha: isDark ? 0.20 : 0.12)
+                  : (isDark
+                        ? Colors.white.withValues(alpha: 0.05)
+                        : Colors.black.withValues(alpha: 0.04)),
+            ),
+            child: Icon(
+              option?.icon ??
+                  (filled ? Icons.hub_rounded : Icons.explore_off_rounded),
+              size: 18,
+              color: filled ? ink : secondary,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'MÍDIA DE ORIGEM',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    letterSpacing: 1.4,
+                    fontWeight: FontWeight.w800,
+                    color: filled ? ink : secondary,
+                    fontSize: 9.5,
+                    height: 1,
+                  ),
+                ),
+                const SizedBox(height: 7),
+                if (filled)
+                  Text(
+                    option?.label ?? storedDisplay,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15,
+                      letterSpacing: -0.2,
+                      height: 1.2,
+                      color: ThemeHelpers.textColor(context),
+                    ),
+                  )
+                else
+                  Text(
+                    'Não informada',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14.5,
+                      letterSpacing: -0.2,
+                      height: 1.2,
+                      fontStyle: FontStyle.italic,
+                      color: secondary,
+                    ),
+                  ),
+                if (apoio.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    apoio.join(' · '),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: secondary,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: saving
+                ? SizedBox(
+                    width: 15,
+                    height: 15,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.8,
+                      color: tone,
+                    ),
+                  )
+                : canEdit
+                ? Icon(
+                    filled ? Icons.edit_rounded : Icons.add_rounded,
+                    size: 16,
+                    color: secondary.withValues(alpha: 0.7),
+                  )
+                : const SizedBox(width: 16),
+          ),
+        ],
+      ),
+    );
+
+    return Container(
+      decoration: BoxDecoration(
+        color: fundo,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: borda),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: canEdit
+          ? Material(
+              color: Colors.transparent,
+              child: InkWell(onTap: saving ? null : onTap, child: conteudo),
+            )
+          : conteudo,
+    );
+  }
+}
+
+/// Seletor de mídia de origem — mesma anatomia do seletor de etapa (grabber,
+/// eyebrow, título, fechar, divisor gradient, lista). Devolve via
+/// `Navigator.pop`: o `value` do item, `''` para limpar, null se fechou.
+class _OriginPickerSheet extends StatelessWidget {
+  final String? currentValue;
+  final String storedDisplay;
+
+  const _OriginPickerSheet({
+    required this.currentValue,
+    required this.storedDisplay,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final mq = MediaQuery.of(context);
+    final border = ThemeHelpers.borderColor(context);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    const tone = _kOriginTone;
+
+    final temAlgo = (currentValue ?? '').isNotEmpty || storedDisplay.isNotEmpty;
+    // Valor gravado fora do catálogo (integração/legado) aparece como o atual,
+    // para a pessoa saber o que está trocando.
+    final brutoForaDoCatalogo = currentValue == null && storedDisplay.isNotEmpty;
+
+    final linhas = <Widget>[
+      if (temAlgo)
+        _OriginOptionRow(
+          icon: Icons.remove_circle_outline_rounded,
+          label: 'Sem origem',
+          helper: 'Limpar a mídia deste card',
+          tone: muted,
+          isCurrent: false,
+          onTap: () => Navigator.of(context).pop(''),
+        ),
+      if (brutoForaDoCatalogo)
+        _OriginOptionRow(
+          icon: Icons.hub_rounded,
+          label: storedDisplay,
+          helper: 'Registrado pela integração · atual',
+          tone: const Color(0xFF78909C),
+          isCurrent: true,
+          onTap: null,
+        ),
+      for (final o in kKanbanSourceOptions)
+        _OriginOptionRow(
+          icon: o.icon,
+          label: o.label,
+          helper: o.value == currentValue ? 'Mídia atual do card' : null,
+          tone: o.color,
+          isCurrent: o.value == currentValue,
+          onTap: o.value == currentValue
+              ? null
+              : () => Navigator.of(context).pop(o.value),
+        ),
+    ];
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: mq.size.height * 0.82),
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            decoration: BoxDecoration(
+              color: ThemeHelpers.cardBackgroundColor(context),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(26)),
+              border: Border.all(color: border.withValues(alpha: 0.45)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.5 : 0.14),
+                  blurRadius: 44,
+                  offset: const Offset(0, -8),
+                ),
+              ],
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 10, bottom: 4),
+                  child: Center(
+                    child: Container(
+                      width: 42,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: border.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(22, 4, 10, 0),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text(
+                              'MÍDIA DE ORIGEM',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 1.35,
+                                color: tone,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'De onde veio o lead?',
+                              style: theme.textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.65,
+                                height: 1.02,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: Icon(Icons.close_rounded, color: muted),
+                        tooltip: 'Fechar',
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  height: 1,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        tone.withValues(alpha: 0.55),
+                        tone.withValues(alpha: 0.08),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                ),
+                Flexible(
+                  child: ListView.separated(
+                    padding: EdgeInsets.fromLTRB(
+                        14, 12, 14, 16 + mq.padding.bottom),
+                    physics: const BouncingScrollPhysics(),
+                    shrinkWrap: true,
+                    itemCount: linhas.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 6),
+                    itemBuilder: (context, i) => linhas[i],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Linha de uma mídia: ícone em pastilha na cor do item, nome, texto de apoio
+/// e marca de "atual" (check) — a atual não é tocável.
+class _OriginOptionRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String? helper;
+  final Color tone;
+  final bool isCurrent;
+  final VoidCallback? onTap;
+
+  const _OriginOptionRow({
+    required this.icon,
+    required this.label,
+    required this.helper,
+    required this.tone,
+    required this.isCurrent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final ink = isDark
+        ? tone
+        : Color.alphaBlend(Colors.black.withValues(alpha: 0.18), tone);
+
+    final row = Container(
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: isCurrent
+            ? tone.withValues(alpha: isDark ? 0.14 : 0.08)
+            : Colors.transparent,
+        border: Border.all(
+          color: isCurrent
+              ? tone.withValues(alpha: 0.4)
+              : ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              color: tone.withValues(alpha: isDark ? 0.20 : 0.12),
+            ),
+            child: Icon(icon, size: 16, color: ink),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                    letterSpacing: -0.2,
+                    height: 1.2,
+                    color: isCurrent ? ink : ThemeHelpers.textColor(context),
+                  ),
+                ),
+                if (helper != null) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    helper!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: secondary,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Icon(
+            isCurrent
+                ? Icons.check_circle_rounded
+                : Icons.arrow_forward_rounded,
+            size: isCurrent ? 20 : 18,
+            color: isCurrent ? tone : secondary,
+          ),
+        ],
+      ),
+    );
+
+    if (onTap == null) return row;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: row,
+      ),
     );
   }
 }

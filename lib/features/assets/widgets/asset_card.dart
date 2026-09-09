@@ -82,7 +82,7 @@ class AssetCard extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final neutral = ThemeHelpers.textSecondaryColor(context);
-    final tone = assetStatusColor(context, asset.status);
+    final tone = assetStatusColor(context, asset.situacao);
 
     final subtitleBits = <Widget>[];
     if (asset.brandModelLabel != null) {
@@ -129,7 +129,6 @@ class AssetCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(13),
                   color: tone.withValues(alpha: isDark ? 0.16 : 0.1),
-                  border: Border.all(color: tone.withValues(alpha: 0.28)),
                 ),
                 child: Icon(assetCategoryIcon(asset.category),
                     color: tone, size: 21),
@@ -143,7 +142,7 @@ class AssetCard extends StatelessWidget {
                       children: [
                         Flexible(
                           child: _StatusPill(
-                            label: asset.status.label,
+                            label: asset.situacao.label,
                             color: tone,
                           ),
                         ),
@@ -174,47 +173,29 @@ class AssetCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    if ((asset.assignedToUserName ?? '').trim().isNotEmpty) ...[
-                      const SizedBox(height: 3),
-                      Row(
-                        children: [
-                          Icon(LucideIcons.userCheck, size: 12, color: neutral),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              'Com ${asset.assignedToUserName!.trim()}',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: neutral,
-                                fontWeight: FontWeight.w600,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ] else if ((asset.propertyTitle ?? '')
-                        .trim()
-                        .isNotEmpty) ...[
-                      const SizedBox(height: 3),
-                      Row(
-                        children: [
-                          Icon(LucideIcons.building2, size: 12, color: neutral),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              asset.propertyTitle!.trim(),
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: neutral,
-                                fontWeight: FontWeight.w600,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
+                    if ((asset.description ?? '').trim().isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        asset.description!.trim(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: neutral,
+                          height: 1.3,
+                        ),
                       ),
                     ],
+                    const SizedBox(height: 7),
+                    // Quem está com o item — a informação que a pessoa procura
+                    // primeiro. Avatar de iniciais na cor da situação; sem
+                    // ninguém, dito com todas as letras (não some).
+                    _HolderLine(
+                      holder: (asset.assignedToUserName ?? '').trim(),
+                      foto: asset.assignedToUserAvatar,
+                      propertyTitle: (asset.propertyTitle ?? '').trim(),
+                      tone: tone,
+                      neutral: neutral,
+                    ),
                     if (subtitleBits.isNotEmpty) ...[
                       const SizedBox(height: 6),
                       Wrap(
@@ -222,6 +203,10 @@ class AssetCard extends StatelessWidget {
                         runSpacing: 3,
                         children: subtitleBits,
                       ),
+                    ],
+                    if (asset.createdAt != null) ...[
+                      const SizedBox(height: 7),
+                      _CadastroLine(asset: asset, neutral: neutral),
                     ],
                   ],
                 ),
@@ -240,7 +225,7 @@ class AssetCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  if (asset.acquisitionDate != null)
+                  if (asset.acquisitionDate != null) ...[
                     Text(
                       DateFormat('dd/MM/yy', 'pt_BR')
                           .format(asset.acquisitionDate!.toLocal()),
@@ -250,6 +235,16 @@ class AssetCard extends StatelessWidget {
                         fontSize: 10.5,
                       ),
                     ),
+                    // Idade do bem: o que a data sozinha não conta de bate-pronto.
+                    Text(
+                      _idadeDoBem(asset.acquisitionDate!),
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: neutral.withValues(alpha: 0.85),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ],
@@ -257,6 +252,187 @@ class AssetCard extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Responsável pelo item: avatar de iniciais + nome; ou o imóvel; ou "sem
+/// responsável" — a linha existe sempre, para o card não mudar de altura.
+class _HolderLine extends StatelessWidget {
+  final String holder;
+  /// Foto do responsável (URL resolvida); sem foto = iniciais.
+  final String? foto;
+  final String propertyTitle;
+  final Color tone;
+  final Color neutral;
+
+  const _HolderLine({
+    required this.holder,
+    this.foto,
+    required this.propertyTitle,
+    required this.tone,
+    required this.neutral,
+  });
+
+  String get _iniciais {
+    final partes = holder.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (partes.isEmpty) return '';
+    final a = partes.first[0];
+    final b = partes.length > 1 ? partes.last[0] : '';
+    return (a + b).toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final textColor = ThemeHelpers.textColor(context);
+
+    if (holder.isNotEmpty) {
+      final iniciais = Container(
+        width: 22,
+        height: 22,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: tone.withValues(alpha: isDark ? 0.22 : 0.14),
+        ),
+        child: Text(
+          _iniciais,
+          style: TextStyle(
+            color: tone,
+            fontWeight: FontWeight.w900,
+            fontSize: 9,
+            letterSpacing: 0.3,
+            height: 1.0,
+          ),
+        ),
+      );
+      final temFoto = (foto ?? '').trim().isNotEmpty;
+      return Row(
+        children: [
+          // A foto real quando existe; iniciais enquanto carrega ou se falhar.
+          if (temFoto)
+            SizedBox(
+              width: 22,
+              height: 22,
+              child: ClipOval(
+                child: Image.network(
+                  foto!.trim(),
+                  width: 22,
+                  height: 22,
+                  fit: BoxFit.cover,
+                  frameBuilder: (context, child, frame, wasSync) =>
+                      frame == null && !wasSync ? iniciais : child,
+                  errorBuilder: (_, _, _) => iniciais,
+                ),
+              ),
+            )
+          else
+            iniciais,
+          const SizedBox(width: 7),
+          Text(
+            'Com ',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: neutral,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          Expanded(
+            child: Text(
+              holder,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: textColor,
+                fontWeight: FontWeight.w800,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (propertyTitle.isNotEmpty) {
+      return Row(
+        children: [
+          Icon(LucideIcons.building2, size: 13, color: neutral),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              propertyTitle,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: textColor,
+                fontWeight: FontWeight.w700,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Row(
+      children: [
+        Icon(LucideIcons.userX, size: 13, color: neutral),
+        const SizedBox(width: 6),
+        Text(
+          'Sem responsável',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: neutral,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Cadastro: quando entrou no acervo, por quem, e há quanto tempo — dado que
+/// todo item tem, então a linha nunca fica vazia.
+class _CadastroLine extends StatelessWidget {
+  final Asset asset;
+  final Color neutral;
+
+  const _CadastroLine({required this.asset, required this.neutral});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final criado = asset.createdAt!.toLocal();
+    final por = (asset.createdByName ?? '').trim();
+    final partes = <String>[
+      'No acervo desde ${DateFormat('dd/MM/yy', 'pt_BR').format(criado)}',
+      if (por.isNotEmpty) 'por $por',
+      _tempoNoAcervo(criado),
+    ];
+    return Row(
+      children: [
+        Icon(LucideIcons.archive, size: 12, color: neutral),
+        const SizedBox(width: 5),
+        Expanded(
+          child: Text(
+            partes.join(' · '),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: neutral,
+              fontWeight: FontWeight.w600,
+              fontSize: 10.5,
+              height: 1.2,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _tempoNoAcervo(DateTime desde) {
+    final dias = DateTime.now().difference(desde).inDays;
+    if (dias <= 0) return 'hoje';
+    if (dias == 1) return 'há 1 dia';
+    if (dias < 30) return 'há $dias dias';
+    return _idadeDoBem(desde);
   }
 }
 
@@ -299,25 +475,45 @@ class _StatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: isDark ? 0.16 : 0.1),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: isDark ? 0.4 : 0.3)),
-      ),
-      child: Text(
-        label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: color,
-          fontWeight: FontWeight.w800,
-          fontSize: 11,
-          letterSpacing: -0.1,
+    // Carimbo: ponto + palavra em caixa alta na cor do significado. Sem pílula
+    // tingida (a casa não usa pills; a cor fica na tinta do glifo e da palavra).
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
-      ),
+        const SizedBox(width: 5),
+        Flexible(
+          child: Text(
+            label.toUpperCase(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w800,
+              fontSize: 10,
+              letterSpacing: 0.9,
+              height: 1.0,
+            ),
+          ),
+        ),
+      ],
     );
   }
+}
+
+/// "há 2 a 3 m" / "há 8 m" / "este mês" — idade do bem desde a aquisição.
+String _idadeDoBem(DateTime aquisicao) {
+  final agora = DateTime.now();
+  var meses = (agora.year - aquisicao.year) * 12 + (agora.month - aquisicao.month);
+  if (agora.day < aquisicao.day) meses -= 1;
+  if (meses <= 0) return 'este mês';
+  final anos = meses ~/ 12;
+  final resto = meses % 12;
+  if (anos == 0) return 'há $meses m';
+  if (resto == 0) return 'há $anos a';
+  return 'há $anos a $resto m';
 }

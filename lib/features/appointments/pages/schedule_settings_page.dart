@@ -305,9 +305,9 @@ class _ScheduleSettingsPageState extends State<ScheduleSettingsPage> {
                             overline: 'REGRAS DA AGENDA',
                             title: 'Como aceitar novos compromissos',
                           ),
-                          const SizedBox(height: 6),
-                          _switchRow(
-                            accent: _kIndigo,
+                          const SizedBox(height: 4),
+                          _ruleTile(
+                            icon: Icons.shield_outlined,
                             title:
                                 'Só aceitar agendamentos dentro da minha grade',
                             helper:
@@ -319,8 +319,8 @@ class _ScheduleSettingsPageState extends State<ScheduleSettingsPage> {
                           _hairline(),
                           _buildGapPicker(),
                           _hairline(),
-                          _switchRow(
-                            accent: _kIndigo,
+                          _ruleTile(
+                            icon: Icons.how_to_reg_rounded,
                             title:
                                 'Quero confirmar os compromissos marcados na minha agenda',
                             helper:
@@ -448,19 +448,27 @@ class _ScheduleSettingsPageState extends State<ScheduleSettingsPage> {
   // ---------------------------------------------------------------------------
   // Seção 1 — regras
   // ---------------------------------------------------------------------------
-  Widget _switchRow({
-    required Color accent,
+  /// Uma regra da agenda — FLUSH: sem card, sem fundo, sem borda. Ícone-glifo
+  /// tonal (não medalhão em caixa) + texto nas margens + switch; a separação
+  /// entre regras é o hairline do build. Encapsular isto num card quebraria a
+  /// regra dura de design da casa (flush sempre).
+  Widget _ruleTile({
+    required IconData icon,
     required String title,
     required String helper,
     required bool value,
     required ValueChanged<bool> onChanged,
   }) {
+    final glifo = value ? _kIndigo : ThemeHelpers.textSecondaryColor(context);
     return InkWell(
       onTap: () => onChanged(!value),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        padding: const EdgeInsets.symmetric(vertical: 16),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
+            Icon(icon, size: 20, color: glifo),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -469,8 +477,9 @@ class _ScheduleSettingsPageState extends State<ScheduleSettingsPage> {
                     title,
                     style: TextStyle(
                       fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w800,
                       height: 1.25,
+                      letterSpacing: -0.1,
                       color: ThemeHelpers.textColor(context),
                     ),
                   ),
@@ -487,10 +496,10 @@ class _ScheduleSettingsPageState extends State<ScheduleSettingsPage> {
                 ],
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Switch.adaptive(
               value: value,
-              activeColor: accent,
+              activeColor: _kIndigo,
               onChanged: onChanged,
             ),
           ],
@@ -499,27 +508,107 @@ class _ScheduleSettingsPageState extends State<ScheduleSettingsPage> {
     );
   }
 
+  /// Intervalo mínimo — também FLUSH (sem card). Cabeçalho glifo + texto nas
+  /// margens; os chips vêm logo abaixo em largura total, com tamanho natural do
+  /// rótulo, preenchendo a linha sem vão.
   Widget _buildGapPicker() {
+    final active = _gapMinutes > 0;
+    final glifo = active ? _kIndigo : ThemeHelpers.textSecondaryColor(context);
+    var idx = kGapOptions.indexOf(_gapMinutes);
+    if (idx < 0) idx = 0;
+    final canPrev = idx > 0;
+    final canNext = idx < kGapOptions.length - 1;
+
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 14),
+      padding: const EdgeInsets.symmetric(vertical: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'INTERVALO MÍNIMO ENTRE COMPROMISSOS',
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.2,
-              color: ThemeHelpers.textSecondaryColor(context),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+          Row(
             children: [
-              for (final option in kGapOptions) _gapChip(option),
+              Icon(Icons.timelapse_rounded, size: 20, color: glifo),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Intervalo mínimo entre compromissos',
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.1,
+                        height: 1.2,
+                        color: ThemeHelpers.textColor(context),
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Um respiro entre um atendimento e o próximo.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        height: 1.35,
+                        color: ThemeHelpers.textSecondaryColor(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              _gapArrow(
+                icon: Icons.chevron_left_rounded,
+                enabled: canPrev,
+                onTap: () => _stepGap(-1),
+              ),
+              Expanded(
+                child: Center(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeIn,
+                    transitionBuilder: (child, anim) => FadeTransition(
+                      opacity: anim,
+                      child: SlideTransition(
+                        position: Tween<Offset>(
+                          begin: const Offset(0, 0.2),
+                          end: Offset.zero,
+                        ).animate(anim),
+                        child: child,
+                      ),
+                    ),
+                    child: Text(
+                      formatGapLabel(_gapMinutes),
+                      key: ValueKey<int>(_gapMinutes),
+                      style: TextStyle(
+                        fontSize: 23,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.4,
+                        height: 1.1,
+                        color: active
+                            ? _kIndigo
+                            : ThemeHelpers.textColor(context),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              _gapArrow(
+                icon: Icons.chevron_right_rounded,
+                enabled: canNext,
+                onTap: () => _stepGap(1),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              for (var i = 0; i < kGapOptions.length; i++) _gapDot(i, i == idx),
             ],
           ),
         ],
@@ -527,36 +616,53 @@ class _ScheduleSettingsPageState extends State<ScheduleSettingsPage> {
     );
   }
 
-  Widget _gapChip(int option) {
-    final selected = _gapMinutes == option;
-    return InkWell(
-      borderRadius: BorderRadius.circular(999),
+  void _stepGap(int delta) {
+    var idx = kGapOptions.indexOf(_gapMinutes);
+    if (idx < 0) idx = 0;
+    final next = idx + delta;
+    if (next < 0 || next >= kGapOptions.length) return;
+    HapticFeedback.selectionClick();
+    setState(() => _gapMinutes = kGapOptions[next]);
+  }
+
+  Widget _gapArrow({
+    required IconData icon,
+    required bool enabled,
+    required VoidCallback onTap,
+  }) {
+    return InkResponse(
+      onTap: enabled ? onTap : null,
+      radius: 26,
+      containedInkWell: false,
+      child: Padding(
+        padding: const EdgeInsets.all(6),
+        child: Icon(
+          icon,
+          size: 30,
+          color: enabled ? _kIndigo : ThemeHelpers.borderColor(context),
+        ),
+      ),
+    );
+  }
+
+  Widget _gapDot(int index, bool selected) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: () {
         if (selected) return;
         HapticFeedback.selectionClick();
-        setState(() => _gapMinutes = option);
+        setState(() => _gapMinutes = kGapOptions[index]);
       },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        curve: Curves.easeOut,
-        height: 34,
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: selected ? _kIndigo : Colors.transparent,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+          width: selected ? 20 : 6,
+          height: 6,
+          decoration: BoxDecoration(
             color: selected ? _kIndigo : ThemeHelpers.borderColor(context),
-          ),
-        ),
-        child: Text(
-          formatGapLabel(option),
-          style: TextStyle(
-            fontSize: 12.5,
-            fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-            color: selected
-                ? Colors.white
-                : ThemeHelpers.textSecondaryColor(context),
+            borderRadius: BorderRadius.circular(999),
           ),
         ),
       ),

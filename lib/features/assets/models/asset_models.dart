@@ -1,6 +1,8 @@
 // Modelos do módulo de Patrimônio — espelham `asset.entity.ts` /
 // `asset-response.dto.ts` do backend e `asset.ts` do imobx-front.
 
+import '../../../shared/utils/avatar_url_resolver.dart';
+
 /// Categoria do patrimônio (1:1 com `AssetCategory` do backend).
 enum AssetCategory {
   electronics,
@@ -218,10 +220,23 @@ class Asset {
   // Relations desnormalizadas.
   final String? assignedToUserId;
   final String? assignedToUserName;
+  /// Foto do responsável (URL já resolvida pelo CDN); null = sem foto.
+  final String? assignedToUserAvatar;
+
+  /// Situação EXIBIDA: item que está com alguém nunca é "Disponível" — está em
+  /// uso, mesmo que o registro ainda diga `available` (dado antigo, antes de o
+  /// back passar a amarrar status ao vínculo). Manutenção/baixado/perdido
+  /// prevalecem: são estados mais fortes que o vínculo.
+  AssetStatus get situacao {
+    final comAlguem = (assignedToUserId ?? '').trim().isNotEmpty;
+    if (comAlguem && status == AssetStatus.available) return AssetStatus.inUse;
+    return status;
+  }
   final String? propertyId;
   final String? propertyTitle;
   final String? propertyCode;
   final String? createdByName;
+  final String? createdByAvatar;
 
   const Asset({
     required this.id,
@@ -239,10 +254,12 @@ class Asset {
     this.createdAt,
     this.assignedToUserId,
     this.assignedToUserName,
+    this.assignedToUserAvatar,
     this.propertyId,
     this.propertyTitle,
     this.propertyCode,
     this.createdByName,
+    this.createdByAvatar,
   });
 
   /// Rótulo composto "marca · modelo" (o que existir).
@@ -279,11 +296,15 @@ class Asset {
           (json['assignedToUserId'] ?? json['assigned_to_user_id'])
               ?.toString(),
       assignedToUserName: assigned?['name']?.toString(),
+      assignedToUserAvatar:
+          AvatarUrlResolver.resolve(assigned?['avatar']?.toString()),
       propertyId: property?['id']?.toString() ??
           (json['propertyId'] ?? json['property_id'])?.toString(),
       propertyTitle: property?['title']?.toString(),
       propertyCode: property?['code']?.toString(),
       createdByName: createdBy?['name']?.toString(),
+      createdByAvatar:
+          AvatarUrlResolver.resolve(createdBy?['avatar']?.toString()),
     );
   }
 }
@@ -296,12 +317,15 @@ class AssetMovement {
   final String reason;
   final String? fromUserName;
   final String? toUserName;
+  final String? fromUserAvatar;
+  final String? toUserAvatar;
   final String? fromPropertyTitle;
   final String? toPropertyTitle;
   final AssetStatus? previousStatus;
   final AssetStatus? newStatus;
   final String? notes;
   final String? recordedByName;
+  final String? recordedByAvatar;
   final DateTime? createdAt;
 
   const AssetMovement({
@@ -311,12 +335,15 @@ class AssetMovement {
     required this.reason,
     this.fromUserName,
     this.toUserName,
+    this.fromUserAvatar,
+    this.toUserAvatar,
     this.fromPropertyTitle,
     this.toPropertyTitle,
     this.previousStatus,
     this.newStatus,
     this.notes,
     this.recordedByName,
+    this.recordedByAvatar,
     this.createdAt,
   });
 
@@ -337,6 +364,9 @@ class AssetMovement {
       reason: json['reason']?.toString() ?? '',
       fromUserName: fromUser?['name']?.toString(),
       toUserName: toUser?['name']?.toString(),
+      fromUserAvatar:
+          AvatarUrlResolver.resolve(fromUser?['avatar']?.toString()),
+      toUserAvatar: AvatarUrlResolver.resolve(toUser?['avatar']?.toString()),
       fromPropertyTitle: fromProperty?['title']?.toString(),
       toPropertyTitle: toProperty?['title']?.toString(),
       previousStatus:
@@ -345,6 +375,8 @@ class AssetMovement {
           next == null || next.isEmpty ? null : AssetStatus.fromRaw(next),
       notes: json['notes']?.toString(),
       recordedByName: recordedBy?['name']?.toString(),
+      recordedByAvatar:
+          AvatarUrlResolver.resolve(recordedBy?['avatar']?.toString()),
       createdAt: _toDate(json['createdAt'] ?? json['created_at']),
     );
   }

@@ -824,6 +824,14 @@ class KanbanTask {
   final String? preService;
   final DateTime? transferDate;
 
+  /// Fonte / mídia de origem do lead (texto livre no back; o catálogo
+  /// oficial vive em `utils/kanban_source_options.dart`). Integrações gravam
+  /// rótulos próprios aqui — resolva com `resolveKanbanSourceToOptionValue`.
+  final String? source;
+  final String? mediaSource;
+  final String? campaign;
+  final String? metaCampaignId;
+
   // Relacionamentos populados
   final KanbanUser? assignedTo;
   final KanbanUser? createdBy;
@@ -867,6 +875,10 @@ class KanbanTask {
     this.resultNotes,
     this.preService,
     this.transferDate,
+    this.source,
+    this.mediaSource,
+    this.campaign,
+    this.metaCampaignId,
     this.assignedTo,
     this.createdBy,
     this.project,
@@ -980,6 +992,11 @@ class KanbanTask {
       transferDate: json['transferDate'] != null
           ? DateTime.tryParse(json['transferDate'].toString())
           : null,
+      source: json['source']?.toString(),
+      mediaSource: (json['mediaSource'] ?? json['media_source'])?.toString(),
+      campaign: json['campaign']?.toString(),
+      metaCampaignId:
+          (json['metaCampaignId'] ?? json['meta_campaign_id'])?.toString(),
       assignedTo: json['assignedTo'] != null
           ? KanbanUser.fromJson(json['assignedTo'] as Map<String, dynamic>)
           : null,
@@ -1030,6 +1047,10 @@ class KanbanTask {
       if (resultNotes != null) 'resultNotes': resultNotes,
       if (preService != null) 'preService': preService,
       if (transferDate != null) 'transferDate': transferDate!.toIso8601String(),
+      if (source != null) 'source': source,
+      if (mediaSource != null) 'mediaSource': mediaSource,
+      if (campaign != null) 'campaign': campaign,
+      if (metaCampaignId != null) 'metaCampaignId': metaCampaignId,
     };
   }
 
@@ -1063,6 +1084,10 @@ class KanbanTask {
     String? resultNotes,
     String? preService,
     DateTime? transferDate,
+    String? source,
+    String? mediaSource,
+    String? campaign,
+    String? metaCampaignId,
     KanbanUser? assignedTo,
     KanbanUser? createdBy,
     KanbanProject? project,
@@ -1101,6 +1126,10 @@ class KanbanTask {
       resultNotes: resultNotes ?? this.resultNotes,
       preService: preService ?? this.preService,
       transferDate: transferDate ?? this.transferDate,
+      source: source ?? this.source,
+      mediaSource: mediaSource ?? this.mediaSource,
+      campaign: campaign ?? this.campaign,
+      metaCampaignId: metaCampaignId ?? this.metaCampaignId,
       assignedTo: assignedTo ?? this.assignedTo,
       createdBy: createdBy ?? this.createdBy,
       project: project ?? this.project,

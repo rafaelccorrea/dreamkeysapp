@@ -10,6 +10,7 @@ import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
+import '../../../shared/widgets/minimal_body_chrome.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../models/asset_models.dart';
 import '../services/asset_service.dart';
@@ -101,7 +102,9 @@ class _AssetsPageState extends State<AssetsPage> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     switch (tab) {
       case _AssetTab.all:
-        return _accentColor(context);
+        // Neutro: "Todos" não tem significado de cor. A marca fica só na ação
+        // primária (Novo item) e nos controles (busca/filtros), nunca em texto.
+        return ThemeHelpers.textColor(context);
       case _AssetTab.available:
         return isDark
             ? AppColors.status.greenDarkMode
@@ -270,73 +273,60 @@ class _AssetsPageState extends State<AssetsPage> {
     return AppScaffold(
       title: 'Patrimônio',
       showBottomNavigation: false,
-      body: Stack(
-        children: [
-          RefreshIndicator(
-            color: accent,
-            onRefresh: _refreshAll,
-            child: LayoutBuilder(
-              builder: (context, constraints) => SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                child: ConstrainedBox(
-                  constraints:
-                      BoxConstraints(minHeight: constraints.maxHeight),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                            _kPagePadH, _kPagePadTop, _kPagePadH, 0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildHero(context),
-                            const SizedBox(height: _kSectionGap),
-                            _buildSearchRow(context),
-                            const SizedBox(height: _kSectionGap),
-                          ],
-                        ),
-                      ),
-                      _buildTabsRail(context),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(_kPagePadH,
-                            _kSectionGap, _kPagePadH, _kPagePadBottom),
-                        child: _buildActivePanel(context),
-                      ),
-                    ],
+      actions: _canCreate
+          ? [
+              ChromeToolbarIconButton(
+                icon: LucideIcons.plus,
+                tooltip: 'Novo item',
+                onPressed: _openCreate,
+              ),
+            ]
+          : null,
+      body: RefreshIndicator(
+        color: accent,
+        onRefresh: _refreshAll,
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                        _kPagePadH, _kPagePadTop, _kPagePadH, 0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildHero(context),
+                        const SizedBox(height: _kSectionGap),
+                        _buildSearchRow(context),
+                        const SizedBox(height: _kSectionGap),
+                      ],
+                    ),
                   ),
-                ),
+                  _buildTabsRail(context),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(_kPagePadH, _kSectionGap,
+                        _kPagePadH, _kPagePadBottom),
+                    child: _buildActivePanel(context),
+                  ),
+                ],
               ),
             ),
           ),
-          if (_canCreate)
-            Positioned(
-              right: 16,
-              bottom: 24,
-              child: FloatingActionButton.extended(
-                heroTag: 'assets-fab',
-                onPressed: _openCreate,
-                backgroundColor: accent,
-                foregroundColor: Colors.white,
-                elevation: 3,
-                icon: const Icon(LucideIcons.plus, size: 19),
-                label: const Text(
-                  'Novo item',
-                  style: TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
-            ),
-        ],
+        ),
       ),
     );
   }
+
 
   // ─── Hero editorial ──────────────────────────────────────────────────────
 
   Widget _buildHero(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final accent = _accentColor(context);
     final textColor = ThemeHelpers.textColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final emerald =
@@ -350,43 +340,41 @@ class _AssetsPageState extends State<AssetsPage> {
     final lost = _stats.countFor(AssetStatus.lost);
     final attention = maintenance + lost;
     final dot = attention > 0 ? amber : emerald;
+    final statusLabel = total == 0
+        ? 'INVENTÁRIO VAZIO'
+        : attention > 0
+            ? '$attention ${attention == 1 ? "ITEM EXIGE" : "ITENS EXIGEM"} ATENÇÃO'
+            : 'TUDO EM ORDEM';
     final subtitle = total == 0
         ? 'Cadastre os bens da empresa para controlar o inventário.'
-        : attention > 0
-            ? '${_compact.format(_stats.totalValue)} em bens · '
-                '$attention ite${attention == 1 ? 'm exige' : 'ns exigem'} atenção'
-            : '${_compact.format(_stats.totalValue)} em bens — tudo em ordem.';
+        : '${_compact.format(_stats.totalValue)} em bens no inventário.';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(0, 4, 0, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Eyebrow = pulso de ESTADO (não repete o título "Patrimônio" da
+          // barra); a "atenção" mora aqui, então some do subtítulo.
           Row(
             children: [
               Container(
                 width: 9,
                 height: 9,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: dot,
-                  boxShadow: [
-                    BoxShadow(
-                      color: dot.withValues(alpha: 0.55),
-                      blurRadius: 8,
-                      spreadRadius: 1,
-                    ),
-                  ],
-                ),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: dot),
               ),
               const SizedBox(width: 9),
-              Text(
-                'PATRIMÔNIO',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: accent,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2.2,
-                  fontSize: 11,
+              Flexible(
+                child: Text(
+                  statusLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: attention > 0 ? amber : secondary,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 2.0,
+                    fontSize: 11,
+                  ),
                 ),
               ),
             ],
@@ -430,6 +418,90 @@ class _AssetsPageState extends State<AssetsPage> {
           ),
           const SizedBox(height: 18),
           _buildKpiStrip(context, emerald, blue, amber),
+          if (!_statsLoading && _stats.byCategory.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            _buildCategoryLine(context),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Leitura por categoria: as três maiores, em uma linha, mais o que está fora
+  /// de operação (baixado/perdido). É o detalhe que o hero devia dar em vez do
+  /// cabeçalho de painel que foi retirado abaixo das abas.
+  Widget _buildCategoryLine(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final textColor = ThemeHelpers.textColor(context);
+    final red = isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+
+    final ordenadas = _stats.byCategory.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final top = ordenadas.take(3).toList();
+    final resto = ordenadas.length > 3
+        ? ordenadas.skip(3).fold<int>(0, (acc, e) => acc + e.value)
+        : 0;
+    final foraDeOperacao =
+        _stats.countFor(AssetStatus.disposed) + _stats.countFor(AssetStatus.lost);
+
+    Widget pedaco(String rotulo, int n, {Color? cor}) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$n',
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: cor ?? textColor,
+              fontWeight: FontWeight.w900,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            rotulo,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: cor ?? secondary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(0, 12, 0, 0),
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
+          ),
+        ),
+      ),
+      child: Wrap(
+        spacing: 14,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text(
+            'POR CATEGORIA',
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.2,
+              color: secondary,
+            ),
+          ),
+          for (final e in top)
+            pedaco(AssetCategory.fromRaw(e.key).label.toLowerCase(), e.value),
+          if (resto > 0) pedaco('outras', resto),
+          if (foraDeOperacao > 0)
+            pedaco(
+              foraDeOperacao == 1 ? 'fora de operação' : 'fora de operação',
+              foraDeOperacao,
+              cor: red,
+            ),
         ],
       ),
     );
@@ -488,7 +560,7 @@ class _AssetsPageState extends State<AssetsPage> {
                   style: TextStyle(
                     fontSize: 9,
                     fontWeight: FontWeight.w900,
-                    color: tone,
+                    color: secondary,
                     letterSpacing: 1.2,
                     height: 1.0,
                   ),
@@ -506,7 +578,7 @@ class _AssetsPageState extends State<AssetsPage> {
               _statsLoading ? '—' : value,
               style: theme.textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.w900,
-                color: tone,
+                color: ThemeHelpers.textColor(context),
                 letterSpacing: -0.6,
                 height: 1.0,
                 fontSize: 22,
@@ -761,41 +833,6 @@ class _AssetsPageState extends State<AssetsPage> {
 
   // ─── Painel ativo ────────────────────────────────────────────────────────
 
-  ({IconData icon, String eyebrow, String title, String hint}) _panelMeta() {
-    if (_drawerFilters.status != null) {
-      final s = _drawerFilters.status!;
-      return (
-        icon: LucideIcons.listFilter,
-        eyebrow: s.label.toUpperCase(),
-        title: 'Itens com situação "${s.label}"',
-        hint: 'Filtro de situação aplicado pelo modal de filtros.',
-      );
-    }
-    switch (_activeTab) {
-      case _AssetTab.all:
-        return (
-          icon: LucideIcons.package,
-          eyebrow: 'INVENTÁRIO',
-          title: 'Todos os itens',
-          hint: 'O acervo completo da empresa, do mais recente ao mais antigo.',
-        );
-      case _AssetTab.available:
-        return (
-          icon: LucideIcons.circleCheckBig,
-          eyebrow: 'DISPONÍVEIS',
-          title: 'Prontos para uso',
-          hint: 'Itens livres, sem vínculo com colaboradores.',
-        );
-      case _AssetTab.inUse:
-        return (
-          icon: LucideIcons.userCheck,
-          eyebrow: 'EM USO',
-          title: 'Com colaboradores',
-          hint: 'Itens atualmente vinculados a alguém da equipe.',
-        );
-    }
-  }
-
   Widget _buildActivePanel(BuildContext context) {
     final tone = _drawerFilters.status != null
         ? _accentColor(context)
@@ -826,97 +863,19 @@ class _AssetsPageState extends State<AssetsPage> {
       );
     }
 
-    final meta = _panelMeta();
+    // Sem cabeçalho de painel: a aba ativa já diz onde a pessoa está, e o
+    // texto explicativo só empurrava a lista para baixo (Edson, 09/09/2026).
     final key = 'panel-${_activeTab.name}-${_drawerFilters.status?.name}';
     return Column(
       key: ValueKey(key),
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildPanelHeader(context, meta, tone),
-        const SizedBox(height: 14),
-        child,
-      ],
+      children: [child],
     ).animate(key: ValueKey(key)).fadeIn(duration: 240.ms);
   }
 
-  Widget _buildPanelHeader(
-      BuildContext context,
-      ({IconData icon, String eyebrow, String title, String hint}) meta,
-      Color tone) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            color: tone.withValues(alpha: isDark ? 0.2 : 0.12),
-          ),
-          child: Icon(meta.icon, color: tone, size: 20),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      color: tone,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: tone.withValues(alpha: 0.5),
-                          blurRadius: 6,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 7),
-                  Text(
-                    meta.eyebrow,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: tone,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 1.2,
-                      fontSize: 10.5,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 3),
-              Text(
-                meta.title,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: ThemeHelpers.textColor(context),
-                  letterSpacing: -0.2,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                meta.hint,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                  height: 1.32,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _buildLoadMore(BuildContext context) {
-    final accent = _accentColor(context);
+    // Ação secundária em ferragem neutra: a marca é da ação primária (Novo item).
+    final textColor = ThemeHelpers.textColor(context);
     return Padding(
       padding: const EdgeInsets.only(top: 16),
       child: Center(
@@ -924,14 +883,15 @@ class _AssetsPageState extends State<AssetsPage> {
             ? SizedBox(
                 width: 22,
                 height: 22,
-                child:
-                    CircularProgressIndicator(strokeWidth: 2.2, color: accent),
+                child: CircularProgressIndicator(
+                    strokeWidth: 2.2,
+                    color: ThemeHelpers.textSecondaryColor(context)),
               )
             : OutlinedButton.icon(
                 onPressed: _loadMore,
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: accent,
-                  side: BorderSide(color: accent.withValues(alpha: 0.45)),
+                  foregroundColor: textColor,
+                  side: BorderSide(color: ThemeHelpers.borderColor(context)),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -1006,11 +966,8 @@ class _AssetsPageState extends State<AssetsPage> {
             height: 64,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: LinearGradient(colors: [
-                tone.withValues(alpha: 0.18),
-                tone.withValues(alpha: 0.06),
-              ]),
-              border: Border.all(color: tone.withValues(alpha: 0.32)),
+              color: tone.withValues(alpha: 0.1),
+              border: Border.all(color: tone.withValues(alpha: 0.28)),
             ),
             child: Icon(icon, color: tone, size: 28),
           ),
@@ -1070,53 +1027,73 @@ class _FlushTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final fg = selected ? tone : ThemeHelpers.textSecondaryColor(context);
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    // Palavra + trilha: o rótulo escreve no tom do tema (legível em qualquer
+    // tinta); a cor da aba mora no glifo e no fio de 2px por baixo. Contagem em
+    // chapa discreta de canto 6, nunca pílula.
+    final labelColor = selected ? textColor : secondary;
+    final glyphColor = selected ? tone : secondary;
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        splashColor: tone.withValues(alpha: 0.12),
-        highlightColor: tone.withValues(alpha: 0.06),
+        splashColor: textColor.withValues(alpha: 0.06),
+        highlightColor: textColor.withValues(alpha: 0.04),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 13),
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 14),
               child: FittedBox(
                 fit: BoxFit.scaleDown,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(icon, size: 16, color: fg),
-                    const SizedBox(width: 6),
+                    Icon(icon, size: 16, color: glyphColor),
+                    const SizedBox(width: 7),
                     Text(
                       label,
                       maxLines: 1,
                       style: theme.textTheme.labelLarge?.copyWith(
-                        color: fg,
+                        color: labelColor,
                         fontWeight:
-                            selected ? FontWeight.w900 : FontWeight.w600,
-                        letterSpacing: 0.1,
+                            selected ? FontWeight.w800 : FontWeight.w600,
+                        letterSpacing: -0.1,
                       ),
                     ),
                     if (count > 0) ...[
-                      const SizedBox(width: 6),
+                      const SizedBox(width: 8),
+                      // Chapa sólida: cheia na cor da aba quando ativa (número
+                      // na cor de contraste), contorno fino quando inativa.
+                      // Canto de 5px e número tabular — nada de bolinha.
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 1.5),
+                        height: 18,
+                        constraints: const BoxConstraints(minWidth: 22),
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        alignment: Alignment.center,
                         decoration: BoxDecoration(
-                          color: tone.withValues(alpha: selected ? 0.18 : 0.12),
-                          borderRadius: BorderRadius.circular(999),
+                          color: selected ? tone : Colors.transparent,
+                          borderRadius: BorderRadius.circular(5),
+                          border: selected
+                              ? null
+                              : Border.all(
+                                  color: ThemeHelpers.borderColor(context)),
                         ),
                         child: Text(
                           count > 99 ? '99+' : '$count',
-                          style: theme.textTheme.labelSmall?.copyWith(
+                          style: TextStyle(
                             color: selected
-                                ? tone
-                                : ThemeHelpers.textSecondaryColor(context),
-                            fontWeight: FontWeight.w900,
+                                ? (ThemeData.estimateBrightnessForColor(tone) ==
+                                        Brightness.dark
+                                    ? Colors.white
+                                    : const Color(0xFF0C0C11))
+                                : secondary,
+                            fontWeight: FontWeight.w800,
                             fontSize: 11,
+                            height: 1.0,
+                            fontFeatures: const [FontFeature.tabularFigures()],
                           ),
                         ),
                       ),
@@ -1128,11 +1105,12 @@ class _FlushTab extends StatelessWidget {
             AnimatedContainer(
               duration: const Duration(milliseconds: 220),
               curve: Curves.easeOut,
-              height: 2.5,
+              height: 2,
+              margin: const EdgeInsets.symmetric(horizontal: 10),
               decoration: BoxDecoration(
                 color: selected ? tone : Colors.transparent,
                 borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(3)),
+                    const BorderRadius.vertical(top: Radius.circular(2)),
               ),
             ),
           ],

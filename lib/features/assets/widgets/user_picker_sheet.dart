@@ -243,6 +243,8 @@ class _UserPickerSheetState extends State<_UserPickerSheet> {
                                   context,
                                   name: u.name,
                                   email: u.email,
+                                  role: u.role,
+                                  avatarUrl: u.avatarUrl,
                                   selected: u.id == widget.selectedId,
                                   onTap: () => Navigator.of(context).pop(
                                       PickedUser(id: u.id, name: u.name)),
@@ -274,53 +276,65 @@ class _UserPickerSheetState extends State<_UserPickerSheet> {
     IconData? icon,
     required String name,
     required String email,
+    String? role,
+    String? avatarUrl,
     required bool selected,
     required VoidCallback onTap,
   }) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final accent =
-        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final initial = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : '?';
+    // "Sem responsável" (clear) usa cinza neutro; cada pessoa ganha um tom
+    // próprio (fim do vermelho único da marca em tudo).
+    final tone = icon != null ? secondary : _avatarColor(name);
+    final roleLabel = _formatRole(role);
 
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+      borderRadius: BorderRadius.circular(14),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        margin: const EdgeInsets.only(bottom: 4),
+        padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 8),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           color: selected
-              ? accent.withValues(alpha: isDark ? 0.14 : 0.08)
+              ? tone.withValues(alpha: isDark ? 0.16 : 0.10)
               : Colors.transparent,
+          border: Border.all(
+            color: selected
+                ? tone.withValues(alpha: isDark ? 0.5 : 0.38)
+                : ThemeHelpers.borderLightColor(context)
+                    .withValues(alpha: isDark ? 0.4 : 0.55),
+          ),
         ),
         child: Row(
           children: [
-            Container(
-              width: 38,
-              height: 38,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: accent.withValues(alpha: isDark ? 0.18 : 0.1),
-                border: Border.all(color: accent.withValues(alpha: 0.3)),
-              ),
-              child: icon != null
-                  ? Icon(icon, size: 17, color: accent)
-                  : Text(
-                      initial,
-                      style: TextStyle(
-                        color: accent,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 15,
+            icon != null
+                ? Container(
+                    width: 42,
+                    height: 42,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: secondary.withValues(alpha: isDark ? 0.16 : 0.1),
+                      border: Border.all(
+                        color: secondary.withValues(alpha: 0.3),
                       ),
                     ),
-            ),
-            const SizedBox(width: 11),
+                    child: Icon(icon, size: 18, color: secondary),
+                  )
+                : _UserAvatar(
+                    avatarUrl: avatarUrl,
+                    initials: _initials(name),
+                    color: tone,
+                    size: 42,
+                  ),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     name,
@@ -328,27 +342,100 @@ class _UserPickerSheetState extends State<_UserPickerSheet> {
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w800,
+                      letterSpacing: -0.2,
                       color: ThemeHelpers.textColor(context),
                     ),
                   ),
-                  if (email.isNotEmpty)
-                    Text(
-                      email,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: secondary,
-                      ),
-                    ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      if (roleLabel != null) ...[
+                        Flexible(
+                          child: Text(
+                            roleLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: tone,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                        ),
+                        if (email.isNotEmpty) ...[
+                          Text(
+                            '  ·  ',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: secondary.withValues(alpha: 0.5),
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ],
+                      ],
+                      if (email.isNotEmpty)
+                        Flexible(
+                          child: Text(
+                            email,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: secondary,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ],
               ),
             ),
+            const SizedBox(width: 8),
             if (selected)
-              Icon(LucideIcons.circleCheck, size: 18, color: accent),
+              Icon(LucideIcons.circleCheck, size: 20, color: tone)
+            else
+              Icon(
+                LucideIcons.chevronRight,
+                size: 18,
+                color: secondary.withValues(alpha: 0.5),
+              ),
           ],
         ),
       ),
     );
+  }
+
+  /// Paleta determinística por nome — tom único por pessoa.
+  Color _avatarColor(String seed) {
+    const palette = [
+      Color(0xFF6366F1), // indigo
+      Color(0xFF0EA5E9), // sky
+      Color(0xFF14B8A6), // teal
+      Color(0xFF22C55E), // green
+      Color(0xFFF59E0B), // amber
+      Color(0xFFEC4899), // pink
+      Color(0xFFA855F7), // purple
+      Color(0xFFEA580C), // orange
+    ];
+    final code = seed.codeUnits.fold<int>(0, (a, b) => a + b);
+    return palette[code % palette.length];
+  }
+
+  String _initials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty || parts.first.isEmpty) return '?';
+    if (parts.length == 1) return parts.first[0].toUpperCase();
+    return (parts.first[0] + parts.last[0]).toUpperCase();
+  }
+
+  String? _formatRole(String? raw) {
+    final r = raw?.trim();
+    if (r == null || r.isEmpty) return null;
+    return r
+        .replaceAll('_', ' ')
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty)
+        .map((w) => '${w[0].toUpperCase()}${w.substring(1).toLowerCase()}')
+        .join(' ');
   }
 
   Widget _buildError(BuildContext context) {
@@ -357,6 +444,58 @@ class _UserPickerSheetState extends State<_UserPickerSheet> {
       statusCode: _errorStatus,
       onRetry: _load,
       dense: true,
+    );
+  }
+}
+
+/// Avatar do colaborador: foto real (quando houver) sobre um anel na cor do
+/// usuário; enquanto carrega ou se falhar, cai para o monograma colorido.
+class _UserAvatar extends StatelessWidget {
+  const _UserAvatar({
+    required this.avatarUrl,
+    required this.initials,
+    required this.color,
+    required this.size,
+  });
+
+  final String? avatarUrl;
+  final String initials;
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasPhoto = avatarUrl != null && avatarUrl!.isNotEmpty;
+    final monogram = Container(
+      color: color,
+      alignment: Alignment.center,
+      child: Text(
+        initials,
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w900,
+          fontSize: size * 0.36,
+          letterSpacing: 0.2,
+        ),
+      ),
+    );
+    return Container(
+      width: size,
+      height: size,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: color.withValues(alpha: 0.45), width: 1.5),
+      ),
+      child: hasPhoto
+          ? Image.network(
+              avatarUrl!,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => monogram,
+              loadingBuilder: (_, child, prog) =>
+                  prog == null ? child : monogram,
+            )
+          : monogram,
     );
   }
 }

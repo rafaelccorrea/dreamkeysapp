@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../../core/constants/api_constants.dart';
+import '../utils/avatar_url_resolver.dart';
 import 'api_service.dart';
 import 'secure_storage_service.dart';
 
@@ -10,12 +11,32 @@ class Company {
   final bool isMatrix;
   final List<String> availableModules;
 
+  /// Logo da empresa já resolvida para URL absoluta (CDN). `null` quando a
+  /// empresa não tem logo cadastrada — a UI cai para o monograma.
+  final String? logoUrl;
+  final String? cnpj;
+  final String? corporateName;
+  final String? city;
+  final String? state;
+  final String? planType;
+
   Company({
     required this.id,
     required this.name,
     required this.isMatrix,
     required this.availableModules,
+    this.logoUrl,
+    this.cnpj,
+    this.corporateName,
+    this.city,
+    this.state,
+    this.planType,
   });
+
+  static String? _clean(dynamic v) {
+    final s = v?.toString().trim();
+    return (s == null || s.isEmpty) ? null : s;
+  }
 
   factory Company.fromJson(Map<String, dynamic> json) {
     return Company(
@@ -25,6 +46,12 @@ class Company {
       availableModules: json['availableModules'] != null
           ? List<String>.from((json['availableModules'] as List).map((e) => e.toString()))
           : [],
+      logoUrl: AvatarUrlResolver.resolve(json['logo']?.toString()),
+      cnpj: _clean(json['cnpj']),
+      corporateName: _clean(json['corporateName']),
+      city: _clean(json['city']),
+      state: _clean(json['state']),
+      planType: _clean(json['planType']),
     );
   }
 }

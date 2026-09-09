@@ -173,66 +173,47 @@ class _AssetDetailsPageState extends State<AssetDetailsPage> {
     if (_error != null && _asset == null) return _buildError(context);
     final a = _asset!;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    // Cor de cada capítulo vive só no glifo da plaqueta (a casa não pinta
+    // área): especificações em azul (dado), histórico em violeta (tempo).
     final cSpecs =
         isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
     final cHistory =
         isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
 
+    final movimentacoesResumo = _movementsLoading
+        ? 'carregando'
+        : _movements.isEmpty
+            ? 'sem registros'
+            : _movements.length == 1
+                ? '1 registro'
+                : '${_movements.length} registros';
+
     return SingleChildScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+      // Soma a barra de navegação do Android (gestos/3 botões), senão ela
+      // engole o fim da linha do tempo.
+      padding: EdgeInsets.fromLTRB(
+          16, 12, 16, 40 + MediaQuery.viewPaddingOf(context).bottom),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _buildHero(context, a),
-          const SizedBox(height: 18),
-          _buildValueBlock(context, a),
           const SizedBox(height: 16),
+          _buildLeitura(context, a),
+          const SizedBox(height: 14),
           _buildActions(context),
-          const SizedBox(height: 24),
+          const SizedBox(height: 26),
           _sectionHeader(
             context,
             icon: LucideIcons.scanBarcode,
+            numero: '01',
             eyebrow: 'ESPECIFICAÇÕES',
-            title: 'Detalhes do item',
-            hint: 'Dados técnicos, vínculos e localização.',
+            title: 'Ficha do item',
+            aside: a.category.label,
             tone: cSpecs,
           ),
-          const SizedBox(height: 6),
-          if (a.brandModelLabel != null)
-            _infoRow(context, LucideIcons.tag, 'Marca/Modelo',
-                a.brandModelLabel!),
-          if ((a.serialNumber ?? '').trim().isNotEmpty)
-            _infoRow(context, LucideIcons.scanBarcode, 'Nº de série',
-                a.serialNumber!.trim()),
-          _infoRow(context, LucideIcons.shapes, 'Categoria', a.category.label),
-          if (a.acquisitionDate != null)
-            _infoRow(
-                context,
-                LucideIcons.calendarDays,
-                'Aquisição',
-                DateFormat('dd/MM/yyyy', 'pt_BR')
-                    .format(a.acquisitionDate!.toLocal())),
-          if ((a.location ?? '').trim().isNotEmpty)
-            _infoRow(
-                context, LucideIcons.mapPin, 'Localização', a.location!.trim()),
-          if ((a.assignedToUserName ?? '').trim().isNotEmpty)
-            _infoRow(context, LucideIcons.userCheck, 'Responsável',
-                a.assignedToUserName!.trim()),
-          if ((a.propertyTitle ?? '').trim().isNotEmpty)
-            _infoRow(
-                context,
-                LucideIcons.building2,
-                'Imóvel',
-                (a.propertyCode ?? '').trim().isNotEmpty
-                    ? '${a.propertyTitle!.trim()} · CÓD ${a.propertyCode!.trim()}'
-                    : a.propertyTitle!.trim()),
-          if ((a.createdByName ?? '').trim().isNotEmpty)
-            _infoRow(context, LucideIcons.userRound, 'Cadastrado por',
-                a.createdByName!.trim()),
-          if (a.createdAt != null)
-            _infoRow(context, LucideIcons.clock3, 'Cadastrado em',
-                DateFormat('dd/MM/yyyy', 'pt_BR').format(a.createdAt!.toLocal())),
+          const SizedBox(height: 4),
+          _buildFicha(context, a),
           if ((a.description ?? '').trim().isNotEmpty) ...[
             const SizedBox(height: 16),
             _labelText(context, 'DESCRIÇÃO'),
@@ -257,19 +238,139 @@ class _AssetDetailsPageState extends State<AssetDetailsPage> {
                   ),
             ),
           ],
-          const SizedBox(height: 24),
+          const SizedBox(height: 26),
           _sectionHeader(
             context,
             icon: LucideIcons.history,
+            numero: '02',
             eyebrow: 'HISTÓRICO',
             title: 'Movimentações',
-            hint: 'Entradas, transferências e mudanças de status.',
+            aside: movimentacoesResumo,
             tone: cHistory,
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           _buildMovements(context, cHistory),
         ],
       ).animate().fadeIn(duration: 240.ms),
+    );
+  }
+
+  /// Iniciais de um nome ("Edson Silva" → "ES") para os avatares da página.
+  static String _iniciais(String nome) {
+    final partes =
+        nome.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (partes.isEmpty) return '';
+    final a = partes.first[0];
+    final b = partes.length > 1 ? partes.last[0] : '';
+    return (a + b).toUpperCase();
+  }
+
+  /// "há 2 a 3 m" / "há 8 m" / "este mês" — idade desde uma data.
+  static String _idade(DateTime desde) {
+    final agora = DateTime.now();
+    var meses =
+        (agora.year - desde.year) * 12 + (agora.month - desde.month);
+    if (agora.day < desde.day) meses -= 1;
+    if (meses <= 0) {
+      final dias = agora.difference(desde).inDays;
+      if (dias <= 0) return 'hoje';
+      if (dias == 1) return 'há 1 dia';
+      return 'há $dias dias';
+    }
+    final anos = meses ~/ 12;
+    final resto = meses % 12;
+    if (anos == 0) return 'há $meses m';
+    if (resto == 0) return 'há $anos a';
+    return 'há $anos a $resto m';
+  }
+
+  /// Plaqueta sólida: gradiente da cor de significado com glifo branco — a
+  /// mesma da lista e dos painéis do sino. É onde a cor mora nesta página.
+  Widget _plaqueta(Color tone, IconData icon,
+      {double size = 46, double radius = 14, double iconSize = 22}) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(radius),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color.lerp(tone, Colors.white, 0.12)!,
+            Color.lerp(tone, Colors.black, 0.18)!,
+          ],
+        ),
+      ),
+      child: Icon(icon, color: Colors.white, size: iconSize),
+    );
+  }
+
+  /// Carimbo de situação: ponto + palavra em caixa alta na cor do significado
+  /// (sem pílula — a cor fica na tinta, não na área).
+  Widget _carimbo(String label, Color color, {double size = 10}) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 5),
+        Flexible(
+          child: Text(
+            label.toUpperCase(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w800,
+              fontSize: size,
+              letterSpacing: 0.9,
+              height: 1.0,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Avatar da pessoa: a FOTO quando existe; senão (ou se a imagem falhar),
+  /// iniciais na cor de significado (tinta cheia, letra branca).
+  Widget _avatar(String nome, Color tone, {double size = 26, String? foto}) {
+    final iniciais = Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(shape: BoxShape.circle, color: tone),
+      child: Text(
+        _iniciais(nome),
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w900,
+          fontSize: size * 0.38,
+          letterSpacing: 0.3,
+          height: 1.0,
+        ),
+      ),
+    );
+    if ((foto ?? '').trim().isEmpty) return iniciais;
+    return SizedBox(
+      width: size,
+      height: size,
+      child: ClipOval(
+        child: Image.network(
+          foto!.trim(),
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          // Enquanto carrega e se falhar, as iniciais seguram o lugar.
+          frameBuilder: (context, child, frame, wasSync) =>
+              frame == null && !wasSync ? iniciais : child,
+          errorBuilder: (_, _, _) => iniciais,
+        ),
+      ),
     );
   }
 
@@ -289,57 +390,56 @@ class _AssetDetailsPageState extends State<AssetDetailsPage> {
 
   Widget _buildHero(BuildContext context, Asset a) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final tone = assetStatusColor(context, a.status);
-    final accent = _accent(context);
+    // Situação real (com alguém = em uso), não o status cru do banco.
+    final tone = assetStatusColor(context, a.situacao);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final textColor = ThemeHelpers.textColor(context);
+
+    final subBits = <Widget>[
+      _carimbo(a.situacao.label, tone),
+      if (a.brandModelLabel != null)
+        Text(
+          a.brandModelLabel!,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: textColor,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      if ((a.serialNumber ?? '').trim().isNotEmpty)
+        Text(
+          'Nº ${a.serialNumber!.trim()}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: secondary,
+            fontWeight: FontWeight.w600,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+    ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Container(
-              width: 9,
-              height: 9,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: tone,
-                boxShadow: [
-                  BoxShadow(
-                    color: tone.withValues(alpha: 0.55),
-                    blurRadius: 8,
-                    spreadRadius: 1,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 9),
-            Text(
-              'PATRIMÔNIO · ${a.category.label.toUpperCase()}',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: accent,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 2.0,
-                fontSize: 11,
-              ),
-            ),
-          ],
+        // Eyebrow neutro: a cor desta página é do significado (situação),
+        // não da marca — a marca fica só no botão primário.
+        Text(
+          'PATRIMÔNIO · ${a.category.label.toUpperCase()}',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: secondary,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.8,
+            fontSize: 10.5,
+          ),
         ),
         const SizedBox(height: 10),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                color: tone.withValues(alpha: isDark ? 0.18 : 0.1),
-                border: Border.all(color: tone.withValues(alpha: 0.3)),
-              ),
-              child: Icon(assetCategoryIcon(a.category), color: tone, size: 22),
-            ),
-            const SizedBox(width: 12),
+            _plaqueta(tone, assetCategoryIcon(a.category)),
+            const SizedBox(width: 13),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -348,25 +448,30 @@ class _AssetDetailsPageState extends State<AssetDetailsPage> {
                     a.name,
                     style: theme.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w900,
-                      color: ThemeHelpers.textColor(context),
+                      color: textColor,
                       letterSpacing: -0.4,
                       height: 1.12,
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 7),
                   Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      _pill(context, a.status.label, tone),
-                      if (a.brandModelLabel != null)
-                        _pill(
-                          context,
-                          a.brandModelLabel!,
-                          ThemeHelpers.textSecondaryColor(context),
-                        ),
-                    ],
+                    spacing: 10,
+                    runSpacing: 5,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: subBits,
                   ),
+                  if ((a.description ?? '').trim().isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      a.description!.trim(),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: secondary,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -376,37 +481,268 @@ class _AssetDetailsPageState extends State<AssetDetailsPage> {
     );
   }
 
-  Widget _buildValueBlock(BuildContext context, Asset a) {
+  /// Faixa de leitura, flush entre dois fios: o que a pessoa quer saber de
+  /// bate-pronto — valor, situação, com quem está e desde quando no acervo.
+  Widget _buildLeitura(BuildContext context, Asset a) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final tone = assetStatusColor(context, a.status);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        color: tone.withValues(alpha: isDark ? 0.12 : 0.07),
-        border: Border.all(color: tone.withValues(alpha: 0.25)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    final tone = assetStatusColor(context, a.situacao);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final textColor = ThemeHelpers.textColor(context);
+    final fio = ThemeHelpers.borderColor(context).withValues(alpha: 0.6);
+
+    Widget rotulo(String t) => Text(
+          t,
+          style: TextStyle(
+            fontSize: 9.5,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.2,
+            color: secondary,
+          ),
+        );
+
+    final holder = (a.assignedToUserName ?? '').trim();
+    final imovel = (a.propertyTitle ?? '').trim();
+    final criado = a.createdAt?.toLocal();
+    final por = (a.createdByName ?? '').trim();
+
+    Widget responsavel;
+    if (holder.isNotEmpty) {
+      responsavel = Row(
         children: [
-          Text(
-            'VALOR DO BEM',
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: tone,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 1.4,
-              fontSize: 10,
+          _avatar(holder, tone, foto: a.assignedToUserAvatar),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  holder,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: textColor,
+                    fontWeight: FontWeight.w800,
+                    height: 1.15,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'responsável atual',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: secondary,
+                    fontSize: 10.5,
+                    height: 1.1,
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            _money.format(a.value),
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w900,
-              color: ThemeHelpers.textColor(context),
-              letterSpacing: -0.6,
+        ],
+      );
+    } else if (imovel.isNotEmpty) {
+      responsavel = Row(
+        children: [
+          _plaqueta(tone, LucideIcons.building2,
+              size: 26, radius: 8, iconSize: 14),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  imovel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: textColor,
+                    fontWeight: FontWeight.w800,
+                    height: 1.15,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  (a.propertyCode ?? '').trim().isNotEmpty
+                      ? 'no imóvel · cód ${a.propertyCode!.trim()}'
+                      : 'no imóvel',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: secondary,
+                    fontSize: 10.5,
+                    height: 1.1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    } else {
+      responsavel = Row(
+        children: [
+          Container(
+            width: 26,
+            height: 26,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: secondary.withValues(alpha: 0.6)),
+            ),
+            child: Icon(LucideIcons.userX, size: 13, color: secondary),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Sem responsável',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: textColor,
+                    fontWeight: FontWeight.w800,
+                    height: 1.15,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'livre para atribuição',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: secondary,
+                    fontSize: 10.5,
+                    height: 1.1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: fio),
+          bottom: BorderSide(color: fio),
+        ),
+      ),
+      child: Column(
+        children: [
+          // Linha 1: valor grande à esquerda, situação carimbada à direita.
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      rotulo('VALOR DO BEM'),
+                      const SizedBox(height: 4),
+                      Text(
+                        _money.format(a.value),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          color: textColor,
+                          letterSpacing: -0.7,
+                          height: 1.05,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                      if (a.acquisitionDate != null) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          'adquirido ${_idade(a.acquisitionDate!.toLocal())} · '
+                          '${DateFormat('dd/MM/yy', 'pt_BR').format(a.acquisitionDate!.toLocal())}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: secondary,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 10.5,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    rotulo('SITUAÇÃO'),
+                    const SizedBox(height: 7),
+                    _carimbo(a.situacao.label, tone, size: 11),
+                    if (a.situacao != a.status) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'vinculado a alguém',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: secondary,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Container(height: 1, color: fio),
+          // Linha 2: com quem está | no acervo desde quando (e por quem).
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  flex: 11,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(0, 11, 10, 11),
+                    child: responsavel,
+                  ),
+                ),
+                Container(width: 1, color: fio),
+                Expanded(
+                  flex: 8,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 11, 0, 11),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        rotulo('NO ACERVO'),
+                        const SizedBox(height: 4),
+                        Text(
+                          criado != null ? _idade(criado) : '—',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: textColor,
+                            fontWeight: FontWeight.w800,
+                            height: 1.15,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          [
+                            if (criado != null)
+                              'desde ${DateFormat('dd/MM/yy', 'pt_BR').format(criado)}',
+                            if (por.isNotEmpty) 'por $por',
+                          ].join(' · '),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: secondary,
+                            fontSize: 10.5,
+                            height: 1.1,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -423,9 +759,17 @@ class _AssetDetailsPageState extends State<AssetDetailsPage> {
     final danger =
         isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
 
-    final actions = <Widget>[
-      if (_canUpdate)
-        _actionButton(context, LucideIcons.pencil, 'Editar', accent, _openEdit),
+    // Controle tem corpo: Editar sólido na marca (o primário da página);
+    // Transferir e Dar baixa com corpo neutro e SELO sólido na cor do
+    // significado (azul = movimento, vermelho = saída). Sem contorno-só,
+    // sem sombra.
+    // Hierarquia, não fileira: Editar é a ação da tela (sólido, largura
+    // cheia); Transferir e Dar baixa são ferramentas menores logo abaixo.
+    final primario = _canUpdate
+        ? _actionButton(context, LucideIcons.pencil, 'Editar', accent, _openEdit,
+            primary: true)
+        : null;
+    final ferramentas = <Widget>[
       if (_canTransfer)
         _actionButton(context, LucideIcons.arrowLeftRight, 'Transferir', blue,
             _openTransfer),
@@ -433,39 +777,219 @@ class _AssetDetailsPageState extends State<AssetDetailsPage> {
         _actionButton(
             context, LucideIcons.archive, 'Dar baixa', danger, _confirmDelete),
     ];
-    if (actions.isEmpty) return const SizedBox.shrink();
+    if (primario == null && ferramentas.isEmpty) return const SizedBox.shrink();
 
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (var i = 0; i < actions.length; i++) ...[
-          if (i > 0) const SizedBox(width: 10),
-          Expanded(child: actions[i]),
-        ],
+        ?primario,
+        if (primario != null && ferramentas.isNotEmpty)
+          const SizedBox(height: 8),
+        if (ferramentas.isNotEmpty)
+          Row(
+            children: [
+              for (var i = 0; i < ferramentas.length; i++) ...[
+                if (i > 0) const SizedBox(width: 8),
+                Expanded(child: ferramentas[i]),
+              ],
+            ],
+          ),
       ],
     );
   }
 
   Widget _actionButton(BuildContext context, IconData icon, String label,
-      Color tone, VoidCallback onTap) {
-    return OutlinedButton.icon(
-      onPressed: onTap,
-      icon: Icon(icon, size: 15),
-      label: FittedBox(
-        fit: BoxFit.scaleDown,
-        child: Text(
-          label,
-          maxLines: 1,
-          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
+      Color tone, VoidCallback onTap,
+      {bool primary = false}) {
+    final fio = ThemeHelpers.borderColor(context).withValues(alpha: 0.8);
+    final fg = primary ? Colors.white : ThemeHelpers.textColor(context);
+
+    // Primário: bloco sólido de 46px na cor da marca, glifo branco.
+    // Ferramenta: 38px, só contorno, selo pequeno na cor do significado —
+    // visivelmente uma ordem abaixo do primário.
+    return Material(
+      color: primary ? tone : Colors.transparent,
+      borderRadius: BorderRadius.circular(primary ? 12 : 10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(primary ? 12 : 10),
+        child: Container(
+          height: primary ? 46 : 38,
+          padding: EdgeInsets.symmetric(horizontal: primary ? 14 : 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(primary ? 12 : 10),
+            border: primary ? null : Border.all(color: fio),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (primary)
+                Icon(icon, size: 17, color: Colors.white)
+              else
+                Container(
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: tone,
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: Icon(icon, size: 12, color: Colors.white),
+                ),
+              SizedBox(width: primary ? 8 : 7),
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    style: TextStyle(
+                      color: fg,
+                      fontWeight: primary ? FontWeight.w800 : FontWeight.w700,
+                      fontSize: primary ? 13.5 : 12,
+                      letterSpacing: primary ? 0.1 : -0.1,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: tone,
-        side: BorderSide(color: tone.withValues(alpha: 0.45)),
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(13),
+    );
+  }
+
+  // ─── Ficha em grade ──────────────────────────────────────────────────────
+
+  /// Ficha do item em duas colunas separadas por fio (valor forte, rótulo
+  /// miúdo) — o que era uma lista de "ícone · rótulo · valor à direita".
+  Widget _buildFicha(BuildContext context, Asset a) {
+    final fmt = DateFormat('dd/MM/yyyy', 'pt_BR');
+    final celulas = <_Celula>[
+      _Celula('CATEGORIA', a.category.label),
+      if (a.brandModelLabel != null) _Celula('MARCA / MODELO', a.brandModelLabel!),
+      if ((a.serialNumber ?? '').trim().isNotEmpty)
+        _Celula('Nº DE SÉRIE', a.serialNumber!.trim(), mono: true),
+      if (a.acquisitionDate != null)
+        _Celula(
+          'AQUISIÇÃO',
+          fmt.format(a.acquisitionDate!.toLocal()),
+          sub: _idade(a.acquisitionDate!.toLocal()),
         ),
-      ),
+      if ((a.location ?? '').trim().isNotEmpty)
+        _Celula('LOCALIZAÇÃO', a.location!.trim()),
+      if ((a.assignedToUserName ?? '').trim().isNotEmpty)
+        _Celula('RESPONSÁVEL', a.assignedToUserName!.trim()),
+      if ((a.propertyTitle ?? '').trim().isNotEmpty)
+        _Celula(
+          'IMÓVEL',
+          a.propertyTitle!.trim(),
+          sub: (a.propertyCode ?? '').trim().isNotEmpty
+              ? 'cód ${a.propertyCode!.trim()}'
+              : null,
+          larga: true,
+        ),
+      if ((a.createdByName ?? '').trim().isNotEmpty)
+        _Celula('CADASTRADO POR', a.createdByName!.trim()),
+      if (a.createdAt != null)
+        _Celula('CADASTRADO EM', fmt.format(a.createdAt!.toLocal())),
+    ];
+
+    // Empacota: célula larga ocupa a linha; as outras vão de duas em duas.
+    final linhas = <List<_Celula>>[];
+    var i = 0;
+    while (i < celulas.length) {
+      final c = celulas[i];
+      if (c.larga) {
+        linhas.add([c]);
+        i += 1;
+        continue;
+      }
+      final prox = i + 1 < celulas.length ? celulas[i + 1] : null;
+      if (prox != null && !prox.larga) {
+        linhas.add([c, prox]);
+        i += 2;
+      } else {
+        linhas.add([c]);
+        i += 1;
+      }
+    }
+
+    final fio = ThemeHelpers.borderColor(context).withValues(alpha: 0.5);
+    return Column(
+      children: [
+        for (var l = 0; l < linhas.length; l++)
+          Container(
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: l == linhas.length - 1 ? Colors.transparent : fio,
+                ),
+              ),
+            ),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var k = 0; k < linhas[l].length; k++) ...[
+                    if (k > 0) Container(width: 1, color: fio),
+                    Expanded(
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(
+                            k == 0 ? 0 : 12, 10, k == 0 && linhas[l].length > 1 ? 12 : 0, 10),
+                        child: _celula(context, linhas[l][k]),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _celula(BuildContext context, _Celula c) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          c.rotulo,
+          style: TextStyle(
+            fontSize: 9.5,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.1,
+            color: secondary,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          c.valor,
+          maxLines: c.larga ? 2 : 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: ThemeHelpers.textColor(context),
+            fontWeight: FontWeight.w800,
+            height: 1.2,
+            fontFeatures: c.mono ? const [FontFeature.tabularFigures()] : null,
+          ),
+        ),
+        if (c.sub != null) ...[
+          const SizedBox(height: 2),
+          Text(
+            c.sub!,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: secondary,
+              fontSize: 10.5,
+              height: 1.1,
+            ),
+          ),
+        ],
+      ],
     );
   }
 
@@ -484,7 +1008,7 @@ class _AssetDetailsPageState extends State<AssetDetailsPage> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SkeletonBox(width: 34, height: 34, borderRadius: 999),
+                SkeletonBox(width: 32, height: 32, borderRadius: 10),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -524,7 +1048,7 @@ class _AssetDetailsPageState extends State<AssetDetailsPage> {
       );
     }
 
-    final fmt = DateFormat("dd/MM/yyyy 'às' HH:mm", 'pt_BR');
+    final fmt = DateFormat('dd/MM/yy', 'pt_BR');
     return Column(
       children: [
         for (var i = 0; i < _movements.length; i++)
@@ -534,51 +1058,113 @@ class _AssetDetailsPageState extends State<AssetDetailsPage> {
     );
   }
 
+  /// Cor de cada tipo de movimentação — por significado: entrada verde,
+  /// saída vermelha, transferência azul, status/manutenção âmbar.
+  Color _movementTone(BuildContext context, AssetMovementType type) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    switch (type) {
+      case AssetMovementType.entry:
+        return isDark
+            ? AppColors.status.successDarkMode
+            : AppColors.status.success;
+      case AssetMovementType.exit:
+        return isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+      case AssetMovementType.transfer:
+        return isDark ? AppColors.status.infoDarkMode : AppColors.status.info;
+      case AssetMovementType.statusChange:
+      case AssetMovementType.maintenance:
+        return isDark
+            ? AppColors.status.warningDarkMode
+            : AppColors.status.warning;
+      case AssetMovementType.unknown:
+        return ThemeHelpers.textSecondaryColor(context);
+    }
+  }
+
+  /// "de X para Y" com o destino forte — a rota da movimentação.
+  Widget _rota(BuildContext context, IconData icon, String? de, String? para) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final textColor = ThemeHelpers.textColor(context);
+    final fraco = theme.textTheme.labelSmall?.copyWith(
+      color: secondary,
+      fontWeight: FontWeight.w600,
+      fontSize: 11.5,
+      height: 1.2,
+    );
+    final forte = theme.textTheme.labelSmall?.copyWith(
+      color: textColor,
+      fontWeight: FontWeight.w800,
+      fontSize: 11.5,
+      height: 1.2,
+    );
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: Icon(icon, size: 12, color: secondary),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text.rich(
+            TextSpan(
+              children: [
+                if ((de ?? '').trim().isNotEmpty) ...[
+                  TextSpan(text: 'de ', style: fraco),
+                  TextSpan(text: de!.trim(), style: forte),
+                  TextSpan(text: '  ', style: fraco),
+                ],
+                TextSpan(text: 'para ', style: fraco),
+                TextSpan(
+                  text: (para ?? '').trim().isNotEmpty ? para!.trim() : '—',
+                  style: forte,
+                ),
+              ],
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _movementRow(BuildContext context, AssetMovement m, Color tone,
       DateFormat fmt,
       {required bool isLast}) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
+    final textColor = ThemeHelpers.textColor(context);
     final date = m.movementDate ?? m.createdAt;
+    // A cor da linha vem do TIPO de movimentação (verde entrou, vermelho
+    // saiu, azul mudou de mão, âmbar mudou de estado); o violeta do capítulo
+    // fica no trilho, discreto.
+    final tipoTone = _movementTone(context, m.type);
+    final trilho = ThemeHelpers.borderColor(context).withValues(alpha: 0.8);
+    final registrou = (m.recordedByName ?? '').trim();
 
-    final routeBits = <String>[];
-    if (m.fromUserName != null || m.toUserName != null) {
-      routeBits.add(
-          '${m.fromUserName ?? '—'} → ${m.toUserName ?? '—'}');
-    }
-    if (m.fromPropertyTitle != null || m.toPropertyTitle != null) {
-      routeBits.add(
-          '${m.fromPropertyTitle ?? '—'} → ${m.toPropertyTitle ?? '—'}');
-    }
-    if (m.previousStatus != null || m.newStatus != null) {
-      routeBits.add(
-          '${m.previousStatus?.label ?? '—'} → ${m.newStatus?.label ?? '—'}');
-    }
+    final temPessoas = (m.fromUserName ?? '').trim().isNotEmpty ||
+        (m.toUserName ?? '').trim().isNotEmpty;
+    final temImoveis = (m.fromPropertyTitle ?? '').trim().isNotEmpty ||
+        (m.toPropertyTitle ?? '').trim().isNotEmpty;
+    final temStatus = m.previousStatus != null || m.newStatus != null;
 
     return IntrinsicHeight(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Trilho da timeline: glyph + linha.
+          // Trilho: plaqueta sólida do tipo + fio neutro descendo.
           Column(
             children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: tone.withValues(alpha: isDark ? 0.18 : 0.1),
-                  border: Border.all(color: tone.withValues(alpha: 0.3)),
-                ),
-                child: Icon(assetMovementIcon(m.type), color: tone, size: 15),
-              ),
+              _plaqueta(tipoTone, assetMovementIcon(m.type),
+                  size: 32, radius: 10, iconSize: 15),
               if (!isLast)
                 Expanded(
                   child: Container(
-                    width: 1.5,
-                    margin: const EdgeInsets.symmetric(vertical: 3),
-                    color: tone.withValues(alpha: 0.22),
+                    width: 1,
+                    margin: const EdgeInsets.symmetric(vertical: 4),
+                    color: trilho,
                   ),
                 ),
             ],
@@ -591,65 +1177,133 @@ class _AssetDetailsPageState extends State<AssetDetailsPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
                         child: Text(
                           m.type.label,
                           style: theme.textTheme.titleSmall?.copyWith(
                             fontWeight: FontWeight.w800,
-                            color: ThemeHelpers.textColor(context),
+                            color: textColor,
                             letterSpacing: -0.2,
+                            height: 1.2,
                           ),
                         ),
                       ),
-                      if (date != null)
-                        Text(
-                          fmt.format(date.toLocal()),
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: secondary,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 10.5,
-                          ),
+                      if (date != null) ...[
+                        const SizedBox(width: 10),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              fmt.format(date.toLocal()),
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: textColor,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 11,
+                                height: 1.2,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures()
+                                ],
+                              ),
+                            ),
+                            Text(
+                              DateFormat('HH:mm', 'pt_BR')
+                                  .format(date.toLocal()),
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: secondary,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 10,
+                                height: 1.2,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures()
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
+                      ],
                     ],
                   ),
+                  // O motivo é o conteúdo da linha: cor de texto, não cinza.
                   if (m.reason.trim().isNotEmpty) ...[
                     const SizedBox(height: 3),
                     Text(
                       m.reason.trim(),
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: secondary,
+                        color: textColor,
                         height: 1.35,
                       ),
                     ),
                   ],
-                  for (final bit in routeBits) ...[
-                    const SizedBox(height: 4),
+                  if (temPessoas) ...[
+                    const SizedBox(height: 6),
+                    _rota(context, LucideIcons.userRound, m.fromUserName,
+                        m.toUserName),
+                  ],
+                  if (temImoveis) ...[
+                    const SizedBox(height: 5),
+                    _rota(context, LucideIcons.building2, m.fromPropertyTitle,
+                        m.toPropertyTitle),
+                  ],
+                  if (temStatus) ...[
+                    const SizedBox(height: 6),
+                    // Estado antes → depois, cada um no seu carimbo.
                     Row(
                       children: [
-                        Icon(LucideIcons.moveRight, size: 12, color: secondary),
-                        const SizedBox(width: 5),
+                        if (m.previousStatus != null) ...[
+                          _carimbo(
+                            m.previousStatus!.label,
+                            assetStatusColor(context, m.previousStatus!),
+                            size: 9.5,
+                          ),
+                          const SizedBox(width: 6),
+                          Icon(LucideIcons.arrowRight, size: 11,
+                              color: secondary),
+                          const SizedBox(width: 6),
+                        ],
+                        if (m.newStatus != null)
+                          Flexible(
+                            child: _carimbo(
+                              m.newStatus!.label,
+                              assetStatusColor(context, m.newStatus!),
+                              size: 9.5,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                  if ((m.notes ?? '').trim().isNotEmpty) ...[
+                    const SizedBox(height: 5),
+                    Text(
+                      m.notes!.trim(),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: secondary,
+                        height: 1.35,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                  if (registrou.isNotEmpty) ...[
+                    const SizedBox(height: 7),
+                    Row(
+                      children: [
+                        _avatar(registrou, secondary,
+                            size: 18, foto: m.recordedByAvatar),
+                        const SizedBox(width: 6),
                         Expanded(
                           child: Text(
-                            bit,
+                            'registrado por $registrou',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.labelSmall?.copyWith(
-                              color: ThemeHelpers.textColor(context),
-                              fontWeight: FontWeight.w700,
-                              fontSize: 11.5,
+                              color: secondary,
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                         ),
                       ],
-                    ),
-                  ],
-                  if ((m.recordedByName ?? '').trim().isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      'Registrado por ${m.recordedByName!.trim()}',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: secondary.withValues(alpha: 0.85),
-                        fontSize: 10.5,
-                      ),
                     ),
                   ],
                 ],
@@ -663,138 +1317,74 @@ class _AssetDetailsPageState extends State<AssetDetailsPage> {
 
   // ─── Helpers visuais ─────────────────────────────────────────────────────
 
-  Widget _infoRow(
-      BuildContext context, IconData icon, String label, String value) {
-    final theme = Theme.of(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 7),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 14, color: secondary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              label,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: secondary,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Flexible(
-            child: Text(
-              value,
-              textAlign: TextAlign.right,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _pill(BuildContext context, String label, Color color) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: isDark ? 0.16 : 0.1),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: isDark ? 0.4 : 0.3)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: color,
-          fontWeight: FontWeight.w800,
-          fontSize: 11,
-        ),
-      ),
-    );
-  }
-
+  /// Cabeçalho de capítulo: plaqueta sólida, "01 · EYEBROW" neutro, título e
+  /// um dado útil à direita (categoria, contagem) no lugar do texto
+  /// explicativo. Fio abaixo fecha o cabeçalho.
   Widget _sectionHeader(
     BuildContext context, {
     required IconData icon,
+    required String numero,
     required String eyebrow,
     required String title,
-    required String hint,
     required Color tone,
+    String? aside,
   }) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            color: tone.withValues(alpha: isDark ? 0.2 : 0.12),
-          ),
-          child: Icon(icon, color: tone, size: 20),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      color: tone,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: tone.withValues(alpha: 0.5),
-                          blurRadius: 6,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 7),
-                  Text(
-                    eyebrow,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: tone,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 1.2,
-                      fontSize: 10.5,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 3),
-              Text(
-                title,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: ThemeHelpers.textColor(context),
-                  letterSpacing: -0.2,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                hint,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                  height: 1.32,
-                ),
-              ),
-            ],
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Container(
+      padding: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.6),
           ),
         ),
-      ],
+      ),
+      child: Row(
+        children: [
+          _plaqueta(tone, icon, size: 36, radius: 11, iconSize: 18),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$numero · $eyebrow',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: secondary,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.2,
+                    fontSize: 10,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  title,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: ThemeHelpers.textColor(context),
+                    letterSpacing: -0.2,
+                    height: 1.15,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if ((aside ?? '').isNotEmpty) ...[
+            const SizedBox(width: 10),
+            Text(
+              aside!,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: secondary,
+                fontWeight: FontWeight.w700,
+                fontSize: 11,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -803,7 +1393,10 @@ class _AssetDetailsPageState extends State<AssetDetailsPage> {
   Widget _buildSkeleton(BuildContext context) {
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+      // Soma a barra de navegação do Android (gestos/3 botões), senão ela
+      // engole o fim da linha do tempo.
+      padding: EdgeInsets.fromLTRB(
+          16, 12, 16, 40 + MediaQuery.viewPaddingOf(context).bottom),
       children: [
         Row(
           children: [
@@ -821,33 +1414,90 @@ class _AssetDetailsPageState extends State<AssetDetailsPage> {
             ),
           ],
         ),
-        const SizedBox(height: 20),
-        SkeletonBox(width: double.infinity, height: 84, borderRadius: 16),
+        const SizedBox(height: 18),
+        // Faixa de leitura: duas linhas entre fios.
+        Row(
+          children: const [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SkeletonText(width: 80, height: 9),
+                  SizedBox(height: 8),
+                  SkeletonText(width: 150, height: 24),
+                ],
+              ),
+            ),
+            SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                SkeletonText(width: 56, height: 9),
+                SizedBox(height: 10),
+                SkeletonText(width: 64, height: 11),
+              ],
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: const [
+            SkeletonBox(width: 26, height: 26, borderRadius: 999),
+            SizedBox(width: 8),
+            Expanded(child: SkeletonText(width: double.infinity, height: 13)),
+            SizedBox(width: 24),
+            Expanded(child: SkeletonText(width: double.infinity, height: 13)),
+          ],
+        ),
         const SizedBox(height: 16),
+        SkeletonBox(width: double.infinity, height: 46, borderRadius: 12),
+        const SizedBox(height: 8),
         Row(
           children: [
             Expanded(
                 child: SkeletonBox(
-                    width: double.infinity, height: 44, borderRadius: 13)),
-            const SizedBox(width: 10),
+                    width: double.infinity, height: 38, borderRadius: 10)),
+            const SizedBox(width: 8),
             Expanded(
                 child: SkeletonBox(
-                    width: double.infinity, height: 44, borderRadius: 13)),
-            const SizedBox(width: 10),
-            Expanded(
-                child: SkeletonBox(
-                    width: double.infinity, height: 44, borderRadius: 13)),
+                    width: double.infinity, height: 38, borderRadius: 10)),
           ],
         ),
         const SizedBox(height: 28),
-        for (var i = 0; i < 6; i++)
+        Row(
+          children: const [
+            SkeletonBox(width: 36, height: 36, borderRadius: 11),
+            SizedBox(width: 11),
+            Expanded(child: SkeletonText(width: 140, height: 14)),
+          ],
+        ),
+        const SizedBox(height: 14),
+        for (var i = 0; i < 3; i++)
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: const EdgeInsets.symmetric(vertical: 9),
             child: Row(
               children: const [
-                SkeletonText(width: 110, height: 13),
-                Spacer(),
-                SkeletonText(width: 130, height: 13),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonText(width: 70, height: 9),
+                      SizedBox(height: 6),
+                      SkeletonText(width: 120, height: 13),
+                    ],
+                  ),
+                ),
+                SizedBox(width: 24),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonText(width: 70, height: 9),
+                      SizedBox(height: 6),
+                      SkeletonText(width: 100, height: 13),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -982,11 +1632,18 @@ class _TransferSheetState extends State<_TransferSheet> {
                       width: 40,
                       height: 40,
                       decoration: BoxDecoration(
-                        color: blue.withValues(alpha: isDark ? 0.2 : 0.12),
                         borderRadius: BorderRadius.circular(12),
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            Color.lerp(blue, Colors.white, 0.12)!,
+                            Color.lerp(blue, Colors.black, 0.18)!,
+                          ],
+                        ),
                       ),
-                      child: Icon(LucideIcons.arrowLeftRight,
-                          color: blue, size: 19),
+                      child: const Icon(LucideIcons.arrowLeftRight,
+                          color: Colors.white, size: 19),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -1189,4 +1846,22 @@ class _TransferSheetState extends State<_TransferSheet> {
       ),
     );
   }
+}
+
+/// Célula da ficha em grade: rótulo miúdo + valor forte (+ subtexto).
+/// larga = ocupa a linha inteira; mono = alinha dígitos (nº de série).
+class _Celula {
+  final String rotulo;
+  final String valor;
+  final String? sub;
+  final bool larga;
+  final bool mono;
+
+  const _Celula(
+    this.rotulo,
+    this.valor, {
+    this.sub,
+    this.larga = false,
+    this.mono = false,
+  });
 }

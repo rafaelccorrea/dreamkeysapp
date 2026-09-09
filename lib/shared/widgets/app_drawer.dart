@@ -994,6 +994,12 @@ class _AppDrawerState extends State<AppDrawer> {
     final canSeeNotes =
         ModuleAccessService.instance.hasCompanyModule('notes') &&
         ModuleAccessService.instance.hasPermission('note:view');
+    // Patrimônio (/assets): a tela dos itens que estão com cada colaborador.
+    // Ficou oculta na paridade inicial; volta ao menu por pedido do Edson
+    // (09/09/2026) com a cerca do web: módulo asset_management + asset:view.
+    final canSeeAssets =
+        ModuleAccessService.instance.hasCompanyModule('asset_management') &&
+        ModuleAccessService.instance.hasPermission('asset:view');
     final canSeeProposals =
         ModuleAccessService.instance.hasCompanyModule('sale_forms') &&
         (ModuleAccessService.instance.hasPermission('proposal:view') ||
@@ -1043,8 +1049,9 @@ class _AppDrawerState extends State<AppDrawer> {
         ModuleAccessService.instance.hasPermission('condominium:view');
 
     // OCULTOS do menu (rotas vivas), espelhando o menu do web: Visitas,
-    // MCMV, Metas, Checklists, Patrimônio, Locações/Seguros/Crédito/Régua,
+    // MCMV, Metas, Checklists, Locações/Seguros/Crédito/Régua,
     // Gamificação/Prêmios, Zezin, Automações e analytics avançado.
+    // Patrimônio voltou ao menu em 09/09/2026 (ver canSeeAssets).
 
     // WhatsApp inbox (paridade com /whatsapp do web: módulo api_integrations
     // + ANY-OF whatsapp:view / whatsapp:view_messages).
@@ -1573,8 +1580,26 @@ class _AppDrawerState extends State<AppDrawer> {
                                 ).pushNamed(AppRoutes.notes);
                               },
                             ),
+                          if (canSeeAssets)
+                            _buildDrawerItem(
+                              context: context,
+                              currentRoute: activeRoute,
+                              route: AppRoutes.assets,
+                              icon: LucideIcons.boxes,
+                              activeIcon: LucideIcons.boxes,
+                              title: 'Patrimônio',
+                              accent: accent,
+                              showLeadingTile: true,
+                              onTap: () {
+                                Navigator.pop(context);
+                                if (activeRoute == AppRoutes.assets) return;
+                                Navigator.of(
+                                  context,
+                                ).pushNamed(AppRoutes.assets);
+                              },
+                            ),
                           // Comissões: oculto do menu (rota /commissions viva).
-                          // Produtividade (Checklists/Patrimônio/Metas) e
+                          // Produtividade (Checklists/Metas) e
                           // Operacional (Locações/Seguros/Crédito/Régua):
                           // OCULTOS — não estão visíveis no menu do web.
                           // Rotas continuam vivas; Fichas de Locação mora em
@@ -2291,53 +2316,23 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet>
           ),
           child: SafeArea(
             top: false,
-            child: Stack(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                // Decoração de gradient sutil no topo do sheet — dá
-                // sensação de "luz vinda da empresa ativa" sem ser
-                // chamativo. Pintada por baixo do conteúdo.
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: 200,
-                  child: IgnorePointer(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            accent.withValues(alpha: isDark ? 0.12 : 0.06),
-                            accent.withValues(alpha: 0),
-                          ],
-                        ),
-                      ),
+                // Drag handle — filete sólido neutro (sem gradiente).
+                Padding(
+                  padding: const EdgeInsets.only(top: 10, bottom: 4),
+                  child: Container(
+                    width: 44,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: ThemeHelpers.borderColor(
+                        context,
+                      ).withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(999),
                     ),
                   ),
                 ),
-
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Drag handle premium accent
-                    Padding(
-                      padding: const EdgeInsets.only(top: 10, bottom: 4),
-                      child: Container(
-                        width: 48,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              accent.withValues(alpha: 0.5),
-                              accent,
-                              accent.withValues(alpha: 0.5),
-                            ],
-                          ),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                      ),
-                    ),
 
                     // Header
                     _buildHeader(
@@ -2365,6 +2360,7 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet>
                               accent: accent,
                               monogramColor: _monogramColor(current.name),
                               initials: _initials(current.name),
+                              logoUrl: current.logoUrl,
                               pulse: _pulse,
                             ),
                             const SizedBox(height: 22),
@@ -2387,6 +2383,7 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet>
                                   accent: accent,
                                   monogramColor: _monogramColor(c.name),
                                   initials: _initials(c.name),
+                                  logoUrl: c.logoUrl,
                                   onTap: () => widget.onPick(c),
                                 ),
                               ),
@@ -2397,8 +2394,6 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet>
                     ),
                   ],
                 ),
-              ],
-            ),
           ),
         ),
       ),
@@ -2673,6 +2668,7 @@ class _CompanyActiveCard extends StatelessWidget {
     required this.accent,
     required this.monogramColor,
     required this.initials,
+    required this.logoUrl,
     required this.pulse,
   });
 
@@ -2680,74 +2676,38 @@ class _CompanyActiveCard extends StatelessWidget {
   final Color accent;
   final Color monogramColor;
   final String initials;
+  final String? logoUrl;
   final Animation<double> pulse;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
     final modulesCount = company.availableModules.length;
+    final location = _companyLocation(company);
+    final plan = _planLabel(company.planType);
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            accent.withValues(alpha: isDark ? 0.16 : 0.10),
-            accent.withValues(alpha: isDark ? 0.06 : 0.04),
-          ],
-        ),
+        borderRadius: BorderRadius.circular(18),
+        // Superfície CHAPADA (sem gradiente): tinta sólida do acento + borda.
+        color: accent.withValues(alpha: isDark ? 0.10 : 0.055),
         border: Border.all(
-          color: accent.withValues(alpha: isDark ? 0.5 : 0.36),
+          color: accent.withValues(alpha: isDark ? 0.42 : 0.30),
           width: 1.4,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: accent.withValues(alpha: isDark ? 0.22 : 0.12),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
-            spreadRadius: -4,
-          ),
-        ],
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Monograma maior (52px) com sombra premium accent
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  monogramColor,
-                  Color.lerp(monogramColor, Colors.black, 0.22) ??
-                      monogramColor,
-                ],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: monogramColor.withValues(alpha: 0.42),
-                  blurRadius: 14,
-                  offset: const Offset(0, 5),
-                ),
-              ],
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              initials,
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: Colors.white,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 0.5,
-                fontSize: 17,
-              ),
-            ),
+          _CompanyAvatar(
+            logoUrl: logoUrl,
+            initials: initials,
+            color: monogramColor,
+            size: 54,
+            radius: 16,
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -2767,14 +2727,6 @@ class _CompanyActiveCard extends StatelessWidget {
                           color: const Color(
                             0xFF22C55E,
                           ).withValues(alpha: pulse.value),
-                          boxShadow: [
-                            BoxShadow(
-                              color: const Color(
-                                0xFF22C55E,
-                              ).withValues(alpha: pulse.value * 0.6),
-                              blurRadius: 5,
-                            ),
-                          ],
                         ),
                       ),
                     ),
@@ -2788,9 +2740,13 @@ class _CompanyActiveCard extends StatelessWidget {
                         fontSize: 9.5,
                       ),
                     ),
+                    if (company.isMatrix) ...[
+                      const SizedBox(width: 8),
+                      _MatrixBadge(accent: accent),
+                    ],
                   ],
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 5),
                 Text(
                   company.name,
                   style: theme.textTheme.titleMedium?.copyWith(
@@ -2802,48 +2758,50 @@ class _CompanyActiveCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 2),
-                Wrap(
-                  spacing: 5,
-                  runSpacing: 4,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    if (company.isMatrix)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 7,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(999),
-                          color: accent.withValues(alpha: 0.18),
-                          border: Border.all(
-                            color: accent.withValues(alpha: 0.36),
-                          ),
-                        ),
-                        child: Text(
-                          'MATRIZ',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            fontWeight: FontWeight.w900,
-                            color: accent,
-                            letterSpacing: 0.8,
-                            fontSize: 9,
-                          ),
-                        ),
-                      ),
-                    Text(
+                if (company.corporateName != null &&
+                    company.corporateName!.toLowerCase() !=
+                        company.name.toLowerCase()) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    company.corporateName!,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: secondary,
+                      fontWeight: FontWeight.w600,
+                      height: 1.2,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+                const SizedBox(height: 7),
+                // Linha de meta rica: local · plano · módulos.
+                _MetaLine(
+                  parts: [
+                    if (location != null) (Icons.place_outlined, location),
+                    if (plan != null) (Icons.workspace_premium_outlined, plan),
+                    (
+                      Icons.widgets_outlined,
                       modulesCount > 0
                           ? '$modulesCount ${modulesCount == 1 ? "módulo" : "módulos"}'
                           : 'Sem módulos',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: ThemeHelpers.textSecondaryColor(context),
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.2,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
                     ),
                   ],
+                  color: secondary,
                 ),
+                if (company.cnpj != null) ...[
+                  const SizedBox(height: 5),
+                  Text(
+                    'CNPJ ${company.cnpj}',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: secondary.withValues(alpha: 0.85),
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.2,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
               ],
             ),
           ),
@@ -2860,6 +2818,7 @@ class _CompanyOptionTile extends StatelessWidget {
     required this.accent,
     required this.monogramColor,
     required this.initials,
+    required this.logoUrl,
     required this.onTap,
   });
 
@@ -2867,13 +2826,19 @@ class _CompanyOptionTile extends StatelessWidget {
   final Color accent;
   final Color monogramColor;
   final String initials;
+  final String? logoUrl;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
     final modulesCount = company.availableModules.length;
+    final location = _companyLocation(company);
+    final modulesLabel = modulesCount > 0
+        ? '$modulesCount ${modulesCount == 1 ? "módulo" : "módulos"}'
+        : 'Sem módulos';
 
     return Material(
       color: Colors.transparent,
@@ -2895,38 +2860,14 @@ class _CompanyOptionTile extends StatelessWidget {
           ),
           child: Row(
             children: [
-              // Monograma 44×44 — menor que o ativo (52) pra estabelecer
-              // hierarquia visual clara entre "ativa" e "outras"
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(13),
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      monogramColor.withValues(alpha: 0.95),
-                      monogramColor.withValues(alpha: 0.78),
-                    ],
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: monogramColor.withValues(alpha: 0.28),
-                      blurRadius: 10,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  initials,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.4,
-                  ),
-                ),
+              // Logo/monograma 44×44 — menor que o ativo (54) pra estabelecer
+              // hierarquia visual clara entre "ativa" e "outras".
+              _CompanyAvatar(
+                logoUrl: logoUrl,
+                initials: initials,
+                color: monogramColor,
+                size: 44,
+                radius: 13,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -2934,69 +2875,35 @@ class _CompanyOptionTile extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      company.name,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: ThemeHelpers.textColor(context),
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.2,
-                        height: 1.15,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 3),
                     Row(
                       children: [
-                        if (company.isMatrix) ...[
-                          Container(
-                            width: 5,
-                            height: 5,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: monogramColor,
-                            ),
-                          ),
-                          const SizedBox(width: 5),
-                          Text(
-                            'Matriz',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: monogramColor,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 0.4,
-                              fontSize: 10,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            '·',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: ThemeHelpers.textSecondaryColor(
-                                context,
-                              ).withValues(alpha: 0.5),
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                        ],
-                        Flexible(
+                        Expanded(
                           child: Text(
-                            modulesCount > 0
-                                ? '$modulesCount ${modulesCount == 1 ? "módulo" : "módulos"}'
-                                : 'Sem módulos',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: ThemeHelpers.textSecondaryColor(context),
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.2,
-                              fontFeatures: const [
-                                FontFeature.tabularFigures(),
-                              ],
+                            company.name,
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              color: ThemeHelpers.textColor(context),
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.2,
+                              height: 1.15,
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
+                        if (company.isMatrix) ...[
+                          const SizedBox(width: 8),
+                          _MatrixBadge(accent: monogramColor),
+                        ],
                       ],
+                    ),
+                    const SizedBox(height: 4),
+                    _MetaLine(
+                      parts: [
+                        if (location != null)
+                          (Icons.place_outlined, location),
+                        (Icons.widgets_outlined, modulesLabel),
+                      ],
+                      color: secondary,
                     ),
                   ],
                 ),
@@ -3024,6 +2931,183 @@ class _CompanyOptionTile extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Logo da empresa em quadrado arredondado. Mostra a imagem real (contida,
+/// sobre superfície branca para logos com transparência); enquanto carrega ou
+/// se falhar, cai para o monograma em cor sólida — SEM gradiente.
+class _CompanyAvatar extends StatelessWidget {
+  const _CompanyAvatar({
+    required this.logoUrl,
+    required this.initials,
+    required this.color,
+    required this.size,
+    required this.radius,
+  });
+
+  final String? logoUrl;
+  final String initials;
+  final Color color;
+  final double size;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasLogo = logoUrl != null && logoUrl!.isNotEmpty;
+    // Fallback do MONOGRAMA (sem logo): chapa na cor da empresa + inicial branca.
+    final monogram = Container(
+      color: color,
+      alignment: Alignment.center,
+      child: Text(
+        initials,
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.4,
+          fontSize: size * 0.32,
+        ),
+      ),
+    );
+    // Fallback quando a logo falha/está carregando: inicial branca sobre a
+    // chapa PRETA (mesma superfície da logo), nunca a cor da marca.
+    final logoFallback = Center(
+      child: Text(
+        initials,
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.92),
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.4,
+          fontSize: size * 0.3,
+        ),
+      ),
+    );
+    if (!hasLogo) {
+      return Container(
+        width: size,
+        height: size,
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(borderRadius: BorderRadius.circular(radius)),
+        child: monogram,
+      );
+    }
+    // Chapa PRETA fixa (paridade com o web): a maioria das logos de imobiliária
+    // é PNG desenhada para fundo escuro; branco "come" a arte. `contain` +
+    // respiro + borda clara sutil + cantos internos arredondados.
+    final pad = size * 0.09;
+    final innerRadius = (radius - pad).clamp(4.0, radius);
+    return Container(
+      width: size,
+      height: size,
+      padding: EdgeInsets.all(pad),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(radius),
+        color: const Color(0xFF0B0B10),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(innerRadius),
+        child: Image.network(
+          logoUrl!,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => logoFallback,
+          loadingBuilder: (_, child, prog) =>
+              prog == null ? child : logoFallback,
+        ),
+      ),
+    );
+  }
+}
+
+/// Selo "MATRIZ" — contorno tonal, sem preenchimento chapado.
+class _MatrixBadge extends StatelessWidget {
+  const _MatrixBadge({required this.accent});
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: accent.withValues(alpha: 0.14),
+        border: Border.all(color: accent.withValues(alpha: 0.36)),
+      ),
+      child: Text(
+        'MATRIZ',
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          fontWeight: FontWeight.w900,
+          color: accent,
+          letterSpacing: 0.8,
+          fontSize: 8.5,
+        ),
+      ),
+    );
+  }
+}
+
+/// Linha de metadados: ícone-glifo + rótulo, em fileira que quebra sem estourar.
+class _MetaLine extends StatelessWidget {
+  const _MetaLine({required this.parts, required this.color});
+  final List<(IconData, String)> parts;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    if (parts.isEmpty) return const SizedBox.shrink();
+    final style = Theme.of(context).textTheme.labelSmall?.copyWith(
+      color: color,
+      fontWeight: FontWeight.w600,
+      letterSpacing: 0.1,
+      height: 1.1,
+    );
+    return Wrap(
+      spacing: 12,
+      runSpacing: 5,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        for (final (icon, label) in parts)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 12.5, color: color.withValues(alpha: 0.9)),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: style,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
+String? _companyLocation(Company c) {
+  final city = c.city?.trim();
+  final st = c.state?.trim();
+  final hasCity = city != null && city.isNotEmpty;
+  final hasSt = st != null && st.isNotEmpty;
+  if (hasCity && hasSt) return '$city/$st';
+  if (hasCity) return city;
+  if (hasSt) return st;
+  return null;
+}
+
+String? _planLabel(String? plan) {
+  final p = plan?.trim().toLowerCase();
+  if (p == null || p.isEmpty) return null;
+  switch (p) {
+    case 'basic':
+      return 'Plano Básico';
+    case 'pro':
+      return 'Plano Pro';
+    case 'custom':
+      return 'Plano Personalizado';
+    default:
+      return 'Plano ${p[0].toUpperCase()}${p.substring(1)}';
   }
 }
 

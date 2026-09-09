@@ -8,7 +8,6 @@ import '../../../shared/utils/input_formatters.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/custom_button.dart';
 import '../../../shared/widgets/custom_text_field.dart';
-import '../../documents/widgets/entity_selector.dart';
 import '../models/asset_models.dart';
 import '../services/asset_service.dart';
 import '../widgets/asset_card.dart';
@@ -227,7 +226,20 @@ class _CreateAssetPageState extends State<CreateAssetPage> {
       showBottomNavigation: false,
       body: _loading
           ? Center(child: CircularProgressIndicator(color: accent))
-          : SingleChildScrollView(
+          : Theme(
+              // Inputs mais enxutos nesta tela: reduz a altura/gordura dos
+              // campos (o tema global usa 16px verticais — aqui 11).
+              data: Theme.of(context).copyWith(
+                inputDecorationTheme:
+                    Theme.of(context).inputDecorationTheme.copyWith(
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 11,
+                          ),
+                        ),
+              ),
+              child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -285,45 +297,37 @@ class _CreateAssetPageState extends State<CreateAssetPage> {
                     hint: 'Como o item entra no inventário.',
                     tone: cClass,
                   ),
-                  const SizedBox(height: 12),
-                  _chipsLabel(context, 'Categoria'),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+                  const SizedBox(height: 14),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      for (final c in AssetCategory.values)
-                        _choiceChip(
+                      Expanded(
+                        child: _selectField(
                           context,
-                          label: c.label,
-                          icon: assetCategoryIcon(c),
-                          selected: _category == c,
-                          accent: cClass,
-                          onTap: () => setState(() => _category = c),
+                          label: 'Categoria',
+                          leading: Icon(assetCategoryIcon(_category),
+                              size: 18, color: cClass),
+                          value: _category.label,
+                          onTap: _pickCategory,
                         ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  _chipsLabel(context, 'Situação'),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final s in const [
-                        AssetStatus.available,
-                        AssetStatus.inUse,
-                        AssetStatus.maintenance,
-                        AssetStatus.disposed,
-                        AssetStatus.lost,
-                      ])
-                        _choiceChip(
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _selectField(
                           context,
-                          label: s.label,
-                          selected: _status == s,
-                          accent: assetStatusColor(context, s),
-                          onTap: () => setState(() => _status = s),
+                          label: 'Situação',
+                          leading: Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: assetStatusColor(context, _status),
+                            ),
+                          ),
+                          value: _status.label,
+                          onTap: _pickStatus,
                         ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 26),
@@ -382,24 +386,14 @@ class _CreateAssetPageState extends State<CreateAssetPage> {
                   const SizedBox(height: 26),
                   _sectionHeader(
                     context,
-                    icon: LucideIcons.link,
-                    eyebrow: 'VÍNCULOS',
-                    title: 'Responsável e imóvel',
-                    hint: 'Vincule o item a um colaborador ou imóvel (opcional).',
+                    icon: LucideIcons.userCheck,
+                    eyebrow: 'RESPONSÁVEL',
+                    title: 'Quem responde pelo item',
+                    hint: 'Vincule o bem a um colaborador (opcional).',
                     tone: cVinculos,
                   ),
                   const SizedBox(height: 14),
                   _responsibleField(context),
-                  const SizedBox(height: 14),
-                  EntitySelector(
-                    type: 'property',
-                    selectedId: _propertyId,
-                    selectedName: _propertyName,
-                    onSelected: (id, name) => setState(() {
-                      _propertyId = id;
-                      _propertyName = name;
-                    }),
-                  ),
                   const SizedBox(height: 20),
                   CustomTextField(
                     controller: _notesController,
@@ -425,6 +419,14 @@ class _CreateAssetPageState extends State<CreateAssetPage> {
                     icon: const Icon(LucideIcons.x, size: 16),
                     label: const Text('Cancelar'),
                     style: OutlinedButton.styleFrom(
+                      // "Cancelar" NUNCA em vermelho: o tema global pinta o
+                      // OutlinedButton com a cor da marca (vermelha). Cancelar
+                      // não é destrutivo — força ferragem neutra.
+                      foregroundColor: ThemeHelpers.textSecondaryColor(context),
+                      side: BorderSide(
+                        color: ThemeHelpers.borderColor(context),
+                        width: 1.5,
+                      ),
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
@@ -434,70 +436,254 @@ class _CreateAssetPageState extends State<CreateAssetPage> {
                 ],
               ),
             ),
+            ),
     );
   }
 
-  Widget _chipsLabel(BuildContext context, String text) {
+  /// Campo-seletor de uma linha (categoria/situação) — mesma anatomia do tema
+  /// (fill + borda), abre uma folha de opções. Substitui as paredes de pills.
+  Widget _selectField(
+    BuildContext context, {
+    required String label,
+    required Widget leading,
+    required String value,
+    required VoidCallback onTap,
+  }) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _fieldLabel(context, label),
+        const SizedBox(height: 8),
+        InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: InputDecorator(
+            decoration: const InputDecoration(),
+            child: Row(
+              children: [
+                leading,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: ThemeHelpers.textColor(context),
+                        ),
+                  ),
+                ),
+                Icon(Icons.keyboard_arrow_down_rounded, color: secondary),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _pickCategory() async {
+    final chosen = await _showOptionSheet<AssetCategory>(
+      title: 'Categoria do item',
+      values: AssetCategory.values,
+      current: _category,
+      labelOf: (c) => c.label,
+      iconOf: (c) => assetCategoryIcon(c),
+      accentOf: (_) => _accent(context),
+    );
+    if (chosen != null) setState(() => _category = chosen);
+  }
+
+  Future<void> _pickStatus() async {
+    final chosen = await _showOptionSheet<AssetStatus>(
+      title: 'Situação do item',
+      values: const [
+        AssetStatus.available,
+        AssetStatus.inUse,
+        AssetStatus.maintenance,
+        AssetStatus.disposed,
+        AssetStatus.lost,
+      ],
+      current: _status,
+      labelOf: (s) => s.label,
+      accentOf: (s) => assetStatusColor(context, s),
+    );
+    if (chosen != null) setState(() => _status = chosen);
+  }
+
+  /// Folha de opções na anatomia da casa (grabber + título + lista com glifo
+  /// tonal, rótulo e check no ativo). Sem vermelho chapado.
+  Future<T?> _showOptionSheet<T>({
+    required String title,
+    required List<T> values,
+    required T current,
+    required String Function(T) labelOf,
+    required Color Function(T) accentOf,
+    IconData Function(T)? iconOf,
+  }) {
+    return showModalBottomSheet<T>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final media = MediaQuery.of(ctx);
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        final secondary = ThemeHelpers.textSecondaryColor(ctx);
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: media.size.height * 0.8),
+          child: Container(
+            decoration: BoxDecoration(
+              color: ThemeHelpers.backgroundColor(ctx),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 10, bottom: 4),
+                  child: Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: ThemeHelpers.borderColor(ctx)
+                            .withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 12, 12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w900,
+                                color: ThemeHelpers.textColor(ctx),
+                              ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        icon: Icon(Icons.close_rounded,
+                            size: 19, color: secondary),
+                        visualDensity: VisualDensity.compact,
+                        tooltip: 'Fechar',
+                      ),
+                    ],
+                  ),
+                ),
+                Divider(height: 1, color: ThemeHelpers.borderLightColor(ctx)),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    padding: EdgeInsets.fromLTRB(
+                        12, 8, 12, 16 + media.padding.bottom),
+                    children: [
+                      for (final v in values)
+                        _optionRow<T>(
+                          ctx,
+                          selected: v == current,
+                          label: labelOf(v),
+                          accent: accentOf(v),
+                          icon: iconOf?.call(v),
+                          isDark: isDark,
+                          onTap: () => Navigator.of(ctx).pop(v),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _optionRow<T>(
+    BuildContext ctx, {
+    required bool selected,
+    required String label,
+    required Color accent,
+    required IconData? icon,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Material(
+        color: selected
+            ? accent.withValues(alpha: isDark ? 0.14 : 0.08)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 11, 12, 11),
+            child: Row(
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                    color: accent.withValues(
+                        alpha: selected ? (isDark ? 0.26 : 0.16) : 0.10),
+                  ),
+                  child: icon != null
+                      ? Icon(icon,
+                          size: 16,
+                          color: selected
+                              ? accent
+                              : ThemeHelpers.textSecondaryColor(ctx))
+                      : Container(
+                          width: 9,
+                          height: 9,
+                          decoration:
+                              BoxDecoration(shape: BoxShape.circle, color: accent),
+                        ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: Theme.of(ctx).textTheme.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: selected
+                              ? accent
+                              : ThemeHelpers.textColor(ctx),
+                          letterSpacing: -0.1,
+                        ),
+                  ),
+                ),
+                if (selected)
+                  Icon(Icons.check_circle_rounded, size: 19, color: accent),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Rótulo de campo — idêntico ao do [CustomTextField] (labelLarge w600 acima),
+  /// para que todos os campos da tela fiquem alinhados.
+  Widget _fieldLabel(BuildContext context, String text) {
     return Text(
       text,
       style: Theme.of(context).textTheme.labelLarge?.copyWith(
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w600,
             color: ThemeHelpers.textColor(context),
           ),
-    );
-  }
-
-  Widget _choiceChip(
-    BuildContext context, {
-    required String label,
-    IconData? icon,
-    required bool selected,
-    required Color accent,
-    required VoidCallback onTap,
-  }) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final fieldFill = isDark
-        ? AppColors.background.backgroundTertiaryDarkMode
-        : AppColors.background.backgroundTertiary;
-    final fg = selected
-        ? accent
-        : ThemeHelpers.textColor(context).withValues(alpha: 0.82);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(999),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
-        decoration: BoxDecoration(
-          color: selected
-              ? accent.withValues(alpha: isDark ? 0.18 : 0.10)
-              : fieldFill,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color:
-                selected ? accent : ThemeHelpers.borderLightColor(context),
-            width: selected ? 1.2 : 1,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (icon != null) ...[
-              Icon(icon, size: 14, color: fg),
-              const SizedBox(width: 6),
-            ],
-            Text(
-              label,
-              style: theme.textTheme.labelMedium?.copyWith(
-                fontSize: 12.5,
-                color: fg,
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.1,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -508,54 +694,36 @@ class _CreateAssetPageState extends State<CreateAssetPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Aquisição',
-          style: theme.textTheme.labelLarge?.copyWith(
-            fontWeight: FontWeight.w700,
-            color: ThemeHelpers.textColor(context),
-          ),
-        ),
+        _fieldLabel(context, 'Aquisição'),
         const SizedBox(height: 8),
         InkWell(
           onTap: _pickAcquisitionDate,
           borderRadius: BorderRadius.circular(12),
-          child: Container(
-            height: 52,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: ThemeHelpers.cardBackgroundColor(context),
-              borderRadius: BorderRadius.circular(12),
-              border:
-                  Border.all(color: ThemeHelpers.borderColor(context)),
+          child: InputDecorator(
+            // Sem `border` explícito: herda o InputDecorationTheme (fill
+            // terciário + borda 1.5 + radius 12), casando com os CustomTextField.
+            decoration: InputDecoration(
+              prefixIcon: Icon(LucideIcons.calendarDays, size: 18, color: secondary),
+              suffixIcon: filled
+                  ? IconButton(
+                      icon: Icon(LucideIcons.x, size: 16, color: secondary),
+                      onPressed: () => setState(() => _acquisitionDate = null),
+                      tooltip: 'Limpar data',
+                    )
+                  : null,
             ),
-            child: Row(
-              children: [
-                Icon(LucideIcons.calendarDays, size: 16, color: secondary),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    filled
-                        ? DateFormat('dd/MM/yyyy', 'pt_BR')
-                            .format(_acquisitionDate!)
-                        : 'Selecionar',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w600,
-                      color: filled
-                          ? ThemeHelpers.textColor(context)
-                          : secondary.withValues(alpha: 0.85),
-                    ),
-                  ),
-                ),
-                if (filled)
-                  InkResponse(
-                    radius: 16,
-                    onTap: () => setState(() => _acquisitionDate = null),
-                    child: Icon(LucideIcons.x, size: 14, color: secondary),
-                  ),
-              ],
+            child: Text(
+              filled
+                  ? DateFormat('dd/MM/yyyy', 'pt_BR').format(_acquisitionDate!)
+                  : 'Selecionar',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: filled
+                    ? ThemeHelpers.textColor(context)
+                    : secondary.withValues(alpha: 0.9),
+              ),
             ),
           ),
         ),
@@ -567,25 +735,40 @@ class _CreateAssetPageState extends State<CreateAssetPage> {
     final theme = Theme.of(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final hasUser = (_assignedUserName ?? '').trim().isNotEmpty;
-    return InkWell(
-      onTap: _pickResponsible,
-      borderRadius: BorderRadius.circular(12),
-      child: InputDecorator(
-        decoration: InputDecoration(
-          labelText: 'Responsável',
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _fieldLabel(context, 'Responsável'),
+        const SizedBox(height: 8),
+        InkWell(
+          onTap: _pickResponsible,
+          borderRadius: BorderRadius.circular(12),
+          child: InputDecorator(
+            decoration: InputDecoration(
+              prefixIcon: const Icon(Icons.person_outline),
+              suffixIcon: hasUser
+                  ? IconButton(
+                      icon: Icon(LucideIcons.x, size: 16, color: secondary),
+                      onPressed: () => setState(() {
+                        _assignedUserId = null;
+                        _assignedUserName = null;
+                      }),
+                      tooltip: 'Remover responsável',
+                    )
+                  : const Icon(Icons.arrow_drop_down),
+            ),
+            child: Text(
+              hasUser ? _assignedUserName!.trim() : 'Selecionar colaborador',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: hasUser ? ThemeHelpers.textColor(context) : secondary,
+              ),
+            ),
           ),
-          prefixIcon: const Icon(Icons.person_outline),
-          suffixIcon: const Icon(Icons.arrow_drop_down),
         ),
-        child: Text(
-          hasUser ? _assignedUserName!.trim() : 'Selecionar colaborador',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: hasUser ? ThemeHelpers.textColor(context) : secondary,
-          ),
-        ),
-      ),
+      ],
     );
   }
 

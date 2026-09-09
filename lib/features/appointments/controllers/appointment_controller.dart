@@ -196,8 +196,14 @@ class AppointmentController extends ChangeNotifier {
       final response = await _appointmentService.listAppointments(
         status: _filterStatus,
         type: _filterType,
-        startDate: _windowStart?.toIso8601String(),
-        endDate: _windowEnd?.toIso8601String(),
+        // PARIDADE COM O WEB: o CalendarPage envia o range em UTC absoluto
+        // (`start.toISOString()` → `...Z`). O backend filtra pela string CRUA,
+        // então uma data SEM `Z` era lida no fuso da sessão do banco e a janela
+        // do mobile ficava 3h deslocada da do web — compromissos de borda
+        // (noturnos, fim da janela) apareciam num e sumiam no outro. `.toUtc()`
+        // aqui deixa mobile e web pedindo EXATAMENTE o mesmo intervalo.
+        startDate: _windowStart?.toUtc().toIso8601String(),
+        endDate: _windowEnd?.toUtc().toIso8601String(),
         propertyId: _filterPropertyId,
         clientId: _filterClientId,
         // Escopo exclusivo: empresa > seleção > meus (default do modelo).

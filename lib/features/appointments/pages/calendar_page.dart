@@ -13,7 +13,6 @@ import '../../../shared/services/module_access_service.dart';
 import '../../../shared/utils/error_cause.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
-import '../../../shared/widgets/minimal_body_chrome.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../controllers/appointment_controller.dart';
 import '../models/appointment_model.dart';
@@ -41,10 +40,7 @@ class _CalendarPageState extends State<CalendarPage>
   CalendarFormat _tableFormat = CalendarFormat.month;
   CalendarViewMode _viewMode = CalendarViewMode.month;
 
-  // Busca / filtros locais
-  final TextEditingController _searchController = TextEditingController();
-  bool _searchOpen = false;
-  late final FocusNode _searchFocusNode;
+  // Filtros locais (a busca foi removida do topo da agenda).
   CalendarFiltersState _filters = const CalendarFiltersState();
 
   // Cache para markers do calendário (evita rebuild pesado)
@@ -54,7 +50,6 @@ class _CalendarPageState extends State<CalendarPage>
   @override
   void initState() {
     super.initState();
-    _searchFocusNode = FocusNode();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final ctrl = context.read<AppointmentController>();
       // Novo modelo: escopo persistido + janela derivada da navegação.
@@ -67,8 +62,6 @@ class _CalendarPageState extends State<CalendarPage>
 
   @override
   void dispose() {
-    _searchController.dispose();
-    _searchFocusNode.dispose();
     super.dispose();
   }
 
@@ -128,7 +121,7 @@ class _CalendarPageState extends State<CalendarPage>
     return _eventsByDay[AppointmentVisuals.dayKey(day)] ?? const [];
   }
 
-  void _openCreate({DateTime? date}) {
+  Future<void> _openCreate({DateTime? date}) async {
     final base = date ?? _selectedDay;
     final now = DateTime.now();
 
@@ -150,18 +143,44 @@ class _CalendarPageState extends State<CalendarPage>
           : 9,
       0,
     );
-    Navigator.push(
+
+    // PARIDADE COM O WEB: criar a partir da agenda de OUTRA pessoa já semeia
+    // essa pessoa como convidada (o web faz via `?guests=`). Sem isso o
+    // compromisso nascia só do criador e não voltava para a agenda do alvo —
+    // "marquei na agenda de fulano e não apareceu". Só semeia quando o escopo
+    // é de pessoas específicas (não "toda a empresa"), e nunca a si mesmo.
+    final ctrl = context.read<AppointmentController>();
+    List<({String id, String name})>? convidados;
+    if (!ctrl.scopeAllCompany && ctrl.scopeUserIds.isNotEmpty) {
+      await _ensureMembersLoaded((fn) {
+        if (mounted) setState(fn);
+      });
+      if (!mounted) return;
+      final myId = ModuleAccessService.instance.userId;
+      final membros = _members ?? const <({String id, String name})>[];
+      final porId = {for (final m in membros) m.id: m};
+      final semente = ctrl.scopeUserIds
+          .where((id) => id.isNotEmpty && id != myId)
+          .map<({String id, String name})>(
+            (id) => porId[id] ?? (id: id, name: 'Convidado'),
+          )
+          .toList();
+      if (semente.isNotEmpty) convidados = semente;
+    }
+
+    if (!mounted) return;
+    await Navigator.push(
       context,
       adaptivePageRoute<void>(
         builder: (_) => CreateAppointmentPage(
           initialStartDate: start,
           initialEndDate: start.add(const Duration(hours: 1)),
+          initialInvitees: convidados,
         ),
       ),
-    ).then((_) {
-      if (!mounted) return;
-      context.read<AppointmentController>().loadAppointments(reset: true);
-    });
+    );
+    if (!mounted) return;
+    context.read<AppointmentController>().loadAppointments(reset: true);
   }
 
   void _openDetails(Appointment a) {
@@ -199,19 +218,6 @@ class _CalendarPageState extends State<CalendarPage>
     );
   }
 
-  void _toggleSearch() {
-    setState(() {
-      _searchOpen = !_searchOpen;
-      if (_searchOpen) {
-        WidgetsBinding.instance.addPostFrameCallback(
-          (_) => _searchFocusNode.requestFocus(),
-        );
-      } else {
-        _searchController.clear();
-        context.read<AppointmentController>().setSearchTerm('');
-      }
-    });
-  }
 
   // ===========================================================================
   // BUILD
@@ -225,39 +231,15 @@ class _CalendarPageState extends State<CalendarPage>
       title: 'Agenda',
       currentBottomNavIndex: 2,
       actions: [
-        ChromeToolbarIconButton(
-          icon: _searchOpen ? Icons.close_rounded : Icons.search_rounded,
-          tooltip: _searchOpen ? 'Fechar busca' : 'Buscar',
-          onPressed: _toggleSearch,
-        ),
-        // Máximo de 2 ícones na navbar: busca + filtros. O escopo de
-        // pessoas vive como chip na ContextBar, não como terceiro ícone.
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            ChromeToolbarIconButton(
-              icon: Icons.tune_rounded,
-              tooltip: 'Filtros',
-              onPressed: _openFilters,
-            ),
-            if (_filters.hasActiveFilters)
-              Positioned(
-                top: 6,
-                right: 6,
-                child: Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.primary,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: theme.scaffoldBackgroundColor,
-                      width: 1.5,
-                    ),
-                  ),
-                ),
-              ),
-          ],
+        // Só filtros no topo (a busca saiu). Botão-pílula com anatomia da casa
+        // — estado tonal + contador quando há filtro ativo, em vez do ícone
+        // de action bar cru.
+        Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: _CalendarFilterButton(
+            count: _filters.activeFilterCount,
+            onPressed: _openFilters,
+          ),
         ),
       ],
       body: Consumer<AppointmentController>(
@@ -281,15 +263,6 @@ class _CalendarPageState extends State<CalendarPage>
             child: CustomScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
               slivers: [
-                SliverToBoxAdapter(
-                  child: AnimatedSize(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeInOutCubic,
-                    child: _searchOpen
-                        ? _buildSearchBar(ctrl, theme)
-                        : const SizedBox.shrink(),
-                  ),
-                ),
                 // Hero editorial (gramática do hero das Propriedades):
                 // identidade + ações — sem dados de contagem no topo.
                 SliverToBoxAdapter(
@@ -314,68 +287,6 @@ class _CalendarPageState extends State<CalendarPage>
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // SEARCH BAR
-  // ---------------------------------------------------------------------------
-  Widget _buildSearchBar(AppointmentController ctrl, ThemeData theme) {
-    final isDark = theme.brightness == Brightness.dark;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      child: Container(
-        decoration: BoxDecoration(
-          color: isDark ? Colors.white.withValues(alpha: 0.04) : Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: ThemeHelpers.borderColor(context)),
-          boxShadow: isDark
-              ? null
-              : [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-        ),
-        child: TextField(
-          controller: _searchController,
-          focusNode: _searchFocusNode,
-          decoration: InputDecoration(
-            hintText: 'Buscar por título, descrição ou local…',
-            hintStyle: TextStyle(
-              color: ThemeHelpers.textSecondaryColor(context),
-              fontWeight: FontWeight.w500,
-            ),
-            prefixIcon: Icon(
-              Icons.search_rounded,
-              color: AppColors.primary.primary,
-            ),
-            suffixIcon: _searchController.text.isNotEmpty
-                ? IconButton(
-                    icon: const Icon(Icons.clear_rounded),
-                    onPressed: () {
-                      _searchController.clear();
-                      ctrl.setSearchTerm('');
-                      setState(() {});
-                    },
-                  )
-                : null,
-            border: InputBorder.none,
-            enabledBorder: InputBorder.none,
-            focusedBorder: InputBorder.none,
-            filled: false,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 14,
-            ),
-          ),
-          onChanged: (v) {
-            ctrl.setSearchTerm(v);
-            setState(() {});
-          },
-        ),
-      ),
-    );
-  }
 
   // ---------------------------------------------------------------------------
   // HERO — identidade da agenda (gramática do hero das Propriedades)
@@ -1495,7 +1406,8 @@ class _CalendarPageState extends State<CalendarPage>
             focusedDay: _focusedDay,
             selectedDayPredicate: (day) => _isSameDay(_selectedDay, day),
             calendarFormat: _tableFormat,
-            startingDayOfWeek: StartingDayOfWeek.monday,
+            // Semana começa no DOMINGO e termina no SÁBADO (decisão do dono).
+            startingDayOfWeek: StartingDayOfWeek.sunday,
             locale: 'pt_BR',
             rowHeight: _tableFormat == CalendarFormat.month ? 68 : 52,
             daysOfWeekHeight: 30,
@@ -2341,6 +2253,89 @@ class _TimelineRow extends StatelessWidget {
                 color: muted.withValues(alpha: 0.6),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Botão de filtros da agenda — pílula com a anatomia da casa em vez do ícone
+/// de action bar cru. Em repouso é neutro (hairline); com filtro ativo veste a
+/// cor da marca e mostra a contagem num selo, então dá para ver de relance que
+/// a lista está estreitada e por quantos critérios.
+class _CalendarFilterButton extends StatelessWidget {
+  const _CalendarFilterButton({required this.count, required this.onPressed});
+
+  final int count;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final ativo = count > 0;
+    final accent = isDark
+        ? AppColors.primary.primaryDarkMode
+        : AppColors.primary.primary;
+    final fg = ativo
+        ? accent
+        : ThemeHelpers.textColor(context).withValues(alpha: 0.9);
+
+    return Tooltip(
+      message: ativo ? 'Filtros ($count)' : 'Filtros',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(11),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            height: 38,
+            width: ativo ? null : 38,
+            alignment: Alignment.center,
+            padding: EdgeInsets.symmetric(horizontal: ativo ? 9 : 0),
+            decoration: BoxDecoration(
+              color: ativo
+                  ? accent.withValues(alpha: isDark ? 0.16 : 0.10)
+                  : (isDark
+                        ? Colors.white.withValues(alpha: 0.05)
+                        : Colors.black.withValues(alpha: 0.035)),
+              borderRadius: BorderRadius.circular(11),
+              border: Border.all(
+                color: ativo
+                    ? accent.withValues(alpha: isDark ? 0.42 : 0.30)
+                    : ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.tune_rounded, size: 18, color: fg),
+                if (ativo) ...[
+                  const SizedBox(width: 7),
+                  Container(
+                    constraints: const BoxConstraints(minWidth: 18),
+                    height: 18,
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: accent,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '$count',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w900,
+                        height: 1,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
       ),

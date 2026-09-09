@@ -71,6 +71,13 @@ class CreateAppointmentPage extends StatefulWidget {
   final String? clientId;
   final AppointmentType? initialType;
 
+  /// Convidados já marcados quando a criação abre a partir da agenda de outra
+  /// pessoa (paridade com o `?guests=` do web `CreateAppointmentPage`). É o que
+  /// faz "marcar na agenda de fulano" realmente cair na agenda dele: sem semear
+  /// aqui, o compromisso nasce só do criador e não aparece para o alvo. Cada
+  /// item é `(id, name)` — o nome vem do cache de membros que a agenda já tem.
+  final List<({String id, String name})>? initialInvitees;
+
   const CreateAppointmentPage({
     super.key,
     this.initialStartDate,
@@ -80,6 +87,7 @@ class CreateAppointmentPage extends StatefulWidget {
     this.propertyId,
     this.clientId,
     this.initialType,
+    this.initialInvitees,
   });
 
   @override
@@ -128,6 +136,18 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
     }
     if (widget.initialType != null) {
       _type = widget.initialType!;
+    }
+    // Semeia os convidados vindos da agenda de outra pessoa (ver doc do
+    // campo). Sem isto, o compromisso não voltaria para a agenda do alvo.
+    final semente = widget.initialInvitees;
+    if (semente != null && semente.isNotEmpty) {
+      for (final g in semente) {
+        if (g.id.isEmpty) continue;
+        if (_invited.any((m) => m.id == g.id)) continue;
+        _invited.add(
+          _MemberOption(id: g.id, name: g.name.isEmpty ? 'Convidado' : g.name),
+        );
+      }
     }
     // Preview + contadores + motivo do rodapé acompanham a digitação.
     _titleController.addListener(() => setState(() {}));

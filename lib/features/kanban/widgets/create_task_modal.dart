@@ -9,29 +9,7 @@ import '../../../shared/utils/jwt_utils.dart';
 import '../controllers/kanban_controller.dart';
 import '../models/kanban_models.dart';
 import '../services/kanban_service.dart';
-
-/// Opções de mídia / origem — mesma lista base do CRM web (`CreateTaskPage`).
-const List<(String value, String label, IconData icon, Color? color)>
-    _kLeadSources = <(String, String, IconData, Color?)>[
-  ('WhatsApp', 'WhatsApp', Icons.chat_rounded, Color(0xFF25D366)),
-  ('Site', 'Site', Icons.language_rounded, null),
-  ('Landing Page', 'Landing Page', Icons.web_asset_rounded, null),
-  ('Meta', 'Meta (Facebook/Instagram)', Icons.public_rounded, Color(0xFF1877F2)),
-  ('Indicação', 'Indicação', Icons.group_rounded, null),
-  (
-    'Presencial Imobiliária',
-    'Presencial Imobiliária',
-    Icons.storefront_rounded,
-    null,
-  ),
-  ('Google', 'Google', Icons.travel_explore_rounded, Color(0xFF4285F4)),
-  ('Chaves na Mão', 'Chaves na Mão', Icons.vpn_key_rounded, null),
-  ('ImóvelWeb', 'ImóvelWeb', Icons.apartment_rounded, null),
-  ('ManyChat', 'ManyChat', Icons.forum_rounded, null),
-  ('Telefone', 'Telefone', Icons.call_rounded, null),
-  ('Placa', 'Placa', Icons.signpost_rounded, null),
-  ('Outro', 'Outro', Icons.more_horiz_rounded, null),
-];
+import '../utils/kanban_source_options.dart';
 
 const Map<KanbanPriority, ({Color fg, Color bg, String label})>
     _kPriorityPalette = {
@@ -442,6 +420,9 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
       clientId: _pickedClient?.id,
       propertyId: _pickedProperty?.id,
       source: _sourceForApi(_sourceDropdown),
+      // Paridade com a edição do card (e com o web): source E mediaSource
+      // nascem com o mesmo valor — o catálogo resolve por mediaSource primeiro.
+      mediaSource: _sourceForApi(_sourceDropdown),
       campaign: _trimOrNull(_campaignController.text),
       metaCampaignId: _trimOrNull(_metaCampaignIdController.text),
       systemCampaignId: _trimOrNull(_systemCampaignIdController.text),
@@ -1188,15 +1169,20 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
       child: Wrap(
         spacing: 8,
         runSpacing: 8,
-        children: _kLeadSources.map((s) {
-          final selected = _sourceDropdown == s.$1;
-          final fg = s.$4 ?? _accent(context);
+        // Catálogo oficial (o mesmo do CRM web e do detalhe do card).
+        children: kKanbanSourceOptions.map((s) {
+          final selected = _sourceDropdown == s.value;
+          final fg = s.color;
           return InkWell(
             borderRadius: BorderRadius.circular(999),
             onTap: () {
               setState(() {
-                _sourceDropdown = selected ? '' : s.$1;
-                if (s.$1 != 'Meta') _metaCampaignIdController.clear();
+                _sourceDropdown = selected ? '' : s.value;
+                // O ID Meta só faz sentido com a fonte Meta: some ao trocar
+                // de chip E ao desmarcar o próprio Meta (revisão 09/09/2026).
+                if (_sourceDropdown != 'Meta') {
+                  _metaCampaignIdController.clear();
+                }
               });
             },
             child: AnimatedContainer(
@@ -1216,10 +1202,10 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(s.$3, size: 16, color: selected ? fg : ThemeHelpers.textSecondaryColor(context)),
+                  Icon(s.icon, size: 16, color: selected ? fg : ThemeHelpers.textSecondaryColor(context)),
                   const SizedBox(width: 6),
                   Text(
-                    s.$2,
+                    s.label,
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       color: selected

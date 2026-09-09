@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../../core/constants/api_constants.dart';
+import '../utils/avatar_url_resolver.dart';
 import 'api_service.dart';
 
 class CompanyUserRow {
@@ -10,12 +11,16 @@ class CompanyUserRow {
   final String role;
   final bool isActiveInCompany;
 
+  /// Foto de perfil já resolvida para URL absoluta (CDN); `null` sem avatar.
+  final String? avatarUrl;
+
   CompanyUserRow({
     required this.id,
     required this.name,
     required this.email,
     required this.role,
     required this.isActiveInCompany,
+    this.avatarUrl,
   });
 
   factory CompanyUserRow.fromJson(Map<String, dynamic> j) {
@@ -25,6 +30,7 @@ class CompanyUserRow {
       email: j['email']?.toString() ?? '',
       role: j['role']?.toString() ?? '',
       isActiveInCompany: j['isActiveInCompany'] != false,
+      avatarUrl: AvatarUrlResolver.resolve(j['avatar']?.toString()),
     );
   }
 }

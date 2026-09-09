@@ -14,12 +14,20 @@ class EntitySelector extends StatefulWidget {
   final String? selectedName;
   final Function(String id, String name) onSelected;
 
+  /// Quando `false`, o rótulo flutuante interno é omitido — o chamador desenha
+  /// o próprio rótulo acima do campo (padrão de formulário da casa). Placeholder
+  /// exibido no lugar do valor.
+  final bool floatingLabel;
+  final String? placeholder;
+
   const EntitySelector({
     super.key,
     required this.type,
     this.selectedId,
     this.selectedName,
     required this.onSelected,
+    this.floatingLabel = true,
+    this.placeholder,
   });
 
   @override
@@ -465,21 +473,24 @@ class _EntitySelectorState extends State<EntitySelector> {
       },
       child: InputDecorator(
         decoration: InputDecoration(
-          labelText: widget.type == 'client' ? 'Cliente *' : 'Propriedade *',
-          hintText: widget.type == 'client'
-              ? 'Selecione um cliente'
-              : 'Selecione uma propriedade',
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
+          labelText: widget.floatingLabel
+              ? (widget.type == 'client' ? 'Cliente *' : 'Propriedade *')
+              : null,
+          hintText: widget.placeholder ??
+              (widget.type == 'client'
+                  ? 'Selecione um cliente'
+                  : 'Selecione uma propriedade'),
           prefixIcon: Icon(
-            widget.type == 'client' ? Icons.person : Icons.home,
+            widget.type == 'client' ? Icons.person_outline : Icons.home_outlined,
           ),
           suffixIcon: const Icon(Icons.arrow_drop_down),
         ),
         child: Text(
-          widget.selectedName ?? 
-              (widget.type == 'client' ? 'Selecione um cliente' : 'Selecione uma propriedade'),
+          widget.selectedName ??
+              (widget.placeholder ??
+                  (widget.type == 'client'
+                      ? 'Selecione um cliente'
+                      : 'Selecione uma propriedade')),
           style: theme.textTheme.bodyMedium?.copyWith(
             color: widget.selectedName != null
                 ? ThemeHelpers.textColor(context)
