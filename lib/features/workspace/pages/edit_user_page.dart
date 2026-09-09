@@ -311,6 +311,7 @@ class _EditUserPageState extends State<EditUserPage> {
               for (final m in selected)
                 _ManagerChip(
                   name: m.name,
+                  avatarUrl: m.avatar,
                   accent: _accent,
                   onRemove: () =>
                       setState(() => _selectedManagers.remove(m.id)),
@@ -318,6 +319,7 @@ class _EditUserPageState extends State<EditUserPage> {
               for (final id in unknown)
                 _ManagerChip(
                   name: 'Gestor',
+                  avatarUrl: null,
                   accent: _accent,
                   onRemove: () => setState(() => _selectedManagers.remove(id)),
                 ),
@@ -659,28 +661,37 @@ class _FlushHero extends StatelessWidget {
         ? DateFormat("d 'de' MMM yyyy", 'pt_BR').format(user.createdAt!.toLocal())
         : '—';
 
+    final initialsFallback = Container(
+      width: 60,
+      height: 60,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [accent, deep],
+        ),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        _initials(),
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w900,
+          fontSize: 21,
+        ),
+      ),
+    );
     final avatarInner = hasPhoto
-        ? Image.network(user.avatar!, width: 60, height: 60, fit: BoxFit.cover)
-        : Container(
+        ? Image.network(
+            user.avatar!,
             width: 60,
             height: 60,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [accent, deep],
-              ),
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              _initials(),
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w900,
-                fontSize: 21,
-              ),
-            ),
-          );
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => initialsFallback,
+            loadingBuilder: (_, child, prog) =>
+                prog == null ? child : initialsFallback,
+          )
+        : initialsFallback;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1091,8 +1102,12 @@ class _AddGestorButton extends StatelessWidget {
 /// Chip horizontal de um gestor vinculado — avatar + primeiro nome + remover.
 class _ManagerChip extends StatelessWidget {
   const _ManagerChip(
-      {required this.name, required this.accent, required this.onRemove});
+      {required this.name,
+      required this.avatarUrl,
+      required this.accent,
+      required this.onRemove});
   final String name;
+  final String? avatarUrl;
   final Color accent;
   final VoidCallback onRemove;
 
@@ -1106,6 +1121,18 @@ class _ManagerChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasPhoto = (avatarUrl ?? '').trim().isNotEmpty;
+    final initialsBox = Container(
+      width: 24,
+      height: 24,
+      color: accent,
+      alignment: Alignment.center,
+      child: Text(
+        _initials,
+        style: const TextStyle(
+            color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.w900),
+      ),
+    );
     return Container(
       padding: const EdgeInsets.fromLTRB(4, 4, 8, 4),
       decoration: BoxDecoration(
@@ -1116,17 +1143,19 @@ class _ManagerChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: accent),
-            alignment: Alignment.center,
-            child: Text(
-              _initials,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 9.5,
-                  fontWeight: FontWeight.w900),
+          ClipOval(
+            child: SizedBox(
+              width: 24,
+              height: 24,
+              child: hasPhoto
+                  ? Image.network(
+                      avatarUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => initialsBox,
+                      loadingBuilder: (_, child, prog) =>
+                          prog == null ? child : initialsBox,
+                    )
+                  : initialsBox,
             ),
           ),
           const SizedBox(width: 7),
@@ -1184,22 +1213,37 @@ class _ManagerRow extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
+            Builder(builder: (_) {
+              final hasPhoto = (user.avatar ?? '').trim().isNotEmpty;
+              final initialsBox = Container(
+                width: 34,
+                height: 34,
                 color: selected ? accent : secondary.withValues(alpha: 0.25),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                _initials,
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w900),
-              ),
-            ),
+                alignment: Alignment.center,
+                child: Text(
+                  _initials,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900),
+                ),
+              );
+              return ClipOval(
+                child: SizedBox(
+                  width: 34,
+                  height: 34,
+                  child: hasPhoto
+                      ? Image.network(
+                          user.avatar!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => initialsBox,
+                          loadingBuilder: (_, child, prog) =>
+                              prog == null ? child : initialsBox,
+                        )
+                      : initialsBox,
+                ),
+              );
+            }),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
