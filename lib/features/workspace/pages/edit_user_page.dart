@@ -470,7 +470,10 @@ class _EditUserPageState extends State<EditUserPage> {
                   final on = _selectedPerms.contains(p.id);
                   return _PermRow(
                     label: PermissionMeta.actionLabel(p.name),
-                    description: p.description,
+                    description: PermissionMeta.permissionDescription(
+                      p.name,
+                      fallback: p.description,
+                    ),
                     selected: on,
                     accent: _accent,
                     onTap: () {
