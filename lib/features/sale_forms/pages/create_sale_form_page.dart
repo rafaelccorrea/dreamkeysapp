@@ -184,6 +184,8 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
   /// null = ainda não respondido
   bool? _debtConfession;
   bool? _fullFinancing;
+  /// Ficha criada antes dos campos novos (sem resposta gravada): não cobra.
+  bool _fichaAnteriorAosCamposNovos = false;
   CommissionPaymentModel _commissionModel = CommissionPaymentModel.obrigatorio;
   final _commissionDesc = TextEditingController();
 
@@ -375,6 +377,8 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
         r['debtConfession'] is bool ? r['debtConfession'] as bool : null;
     _fullFinancing =
         r['fullFinancing'] is bool ? r['fullFinancing'] as bool : null;
+    _fichaAnteriorAosCamposNovos =
+        _debtConfession == null && _fullFinancing == null;
     final dcv = num.tryParse((r['debtConfessionValue'] ?? '').toString());
     _debtConfessionValue.text = dcv != null ? moneyText(dcv) : '';
     _commissionModel = f.commissionPaymentModel;
@@ -495,14 +499,14 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
         _commissionDesc.text.trim().isEmpty) {
       return 'Descreva o modelo de pagamento da comissão.';
     }
-    if (_debtConfession == null) {
+    if (_debtConfession == null && !_fichaAnteriorAosCamposNovos) {
       return 'Informe se a imobiliária paga a confissão de dívida.';
     }
     if (_debtConfession == true &&
         (_money(_debtConfessionValue.text) ?? 0) <= 0) {
       return 'Informe o valor da confissão de dívida.';
     }
-    if (_fullFinancing == null) {
+    if (_fullFinancing == null && !_fichaAnteriorAosCamposNovos) {
       return 'Informe se o financiamento é 100%.';
     }
     for (final p in _participants) {
