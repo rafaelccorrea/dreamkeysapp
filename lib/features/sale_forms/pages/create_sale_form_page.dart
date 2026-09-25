@@ -180,6 +180,12 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
   final _saleValue = TextEditingController();
   final _totalCommission = TextEditingController();
   final _goalValue = TextEditingController();
+  final _debtConfessionValue = TextEditingController();
+  /// null = ainda não respondido
+  bool? _debtConfession;
+  bool? _fullFinancing;
+  /// Ficha criada antes dos campos novos (sem resposta gravada): não cobra.
+  bool _fichaAnteriorAosCamposNovos = false;
   CommissionPaymentModel _commissionModel = CommissionPaymentModel.obrigatorio;
   final _commissionDesc = TextEditingController();
 
@@ -367,6 +373,14 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     _saleValue.text = moneyText(f.saleValue);
     _totalCommission.text = moneyText(f.totalCommission);
     _goalValue.text = moneyText(f.goalValue);
+    _debtConfession =
+        r['debtConfession'] is bool ? r['debtConfession'] as bool : null;
+    _fullFinancing =
+        r['fullFinancing'] is bool ? r['fullFinancing'] as bool : null;
+    _fichaAnteriorAosCamposNovos =
+        _debtConfession == null && _fullFinancing == null;
+    final dcv = num.tryParse((r['debtConfessionValue'] ?? '').toString());
+    _debtConfessionValue.text = dcv != null ? moneyText(dcv) : '';
     _commissionModel = f.commissionPaymentModel;
     _commissionDesc.text = sv('commissionPaymentModelDescription');
 
@@ -439,7 +453,8 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
       _propNeighborhood, _propCity,
       _empIncorporadora, _empNome, _empUnidade, _empValorEntrada,
       _empFormaPagamento,
-      _saleValue, _totalCommission, _goalValue, _commissionDesc,
+      _saleValue, _totalCommission, _goalValue, _debtConfessionValue,
+      _commissionDesc,
     ]) {
       c.dispose();
     }
@@ -483,6 +498,16 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     if (_commissionModel == CommissionPaymentModel.obrigatorio &&
         _commissionDesc.text.trim().isEmpty) {
       return 'Descreva o modelo de pagamento da comissão.';
+    }
+    if (_debtConfession == null && !_fichaAnteriorAosCamposNovos) {
+      return 'Informe se a imobiliária paga a confissão de dívida.';
+    }
+    if (_debtConfession == true &&
+        (_money(_debtConfessionValue.text) ?? 0) <= 0) {
+      return 'Informe o valor da confissão de dívida.';
+    }
+    if (_fullFinancing == null && !_fichaAnteriorAosCamposNovos) {
+      return 'Informe se o financiamento é 100%.';
     }
     for (final p in _participants) {
       if (p.userId == null) {
@@ -602,6 +627,12 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     if (tc != null) body['totalCommission'] = tc;
     final gv = _money(_goalValue.text);
     if (gv != null) body['goalValue'] = gv;
+    if (_debtConfession != null) {
+      body['debtConfession'] = _debtConfession;
+      body['debtConfessionValue'] =
+          _debtConfession == true ? _money(_debtConfessionValue.text) : null;
+    }
+    if (_fullFinancing != null) body['fullFinancing'] = _fullFinancing;
     if (_commissionModel == CommissionPaymentModel.obrigatorio) {
       put('commissionPaymentModelDescription', _t(_commissionDesc));
     }
@@ -1201,6 +1232,29 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
         ),
         _Field(label: 'Meta', controller: _goalValue, money: true),
         const SizedBox(height: 12),
+        _MiniLabel('A imobiliária paga a confissão de dívida?'),
+        const SizedBox(height: 2),
+        _simNao(
+          _debtConfession,
+          (v) => setState(() {
+            _debtConfession = v;
+            if (!v) _debtConfessionValue.clear();
+          }),
+        ),
+        if (_debtConfession == true) ...[
+          const SizedBox(height: 12),
+          _Field(
+            label: 'Valor da confissão de dívida',
+            controller: _debtConfessionValue,
+            money: true,
+            required: true,
+          ),
+        ],
+        const SizedBox(height: 12),
+        _MiniLabel('Financiamento é 100%?'),
+        const SizedBox(height: 2),
+        _simNao(_fullFinancing, (v) => setState(() => _fullFinancing = v)),
+        const SizedBox(height: 12),
         _MiniLabel('Modelo de comissão'),
         const SizedBox(height: 2),
         Row(
@@ -1237,6 +1291,28 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
         ],
         const SizedBox(height: 16),
       ];
+
+  Widget _simNao(bool? value, ValueChanged<bool> onChanged) => Row(
+        children: [
+          Expanded(
+            child: _Choice(
+              label: 'Sim',
+              selected: value == true,
+              accent: _accent,
+              onTap: () => onChanged(true),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _Choice(
+              label: 'Não',
+              selected: value == false,
+              accent: _accent,
+              onTap: () => onChanged(false),
+            ),
+          ),
+        ],
+      );
 
   List<Widget> _sectionComissoes() => [
         _Band('COMISSÕES', LucideIcons.users),
