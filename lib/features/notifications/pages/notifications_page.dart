@@ -33,11 +33,20 @@ class _NotificationsPageState extends State<NotificationsPage> {
       title: 'Notificações',
       body: Consumer<NotificationController>(
         builder: (context, controller, child) {
+          // Chip aceso = filtro ATIVO no controller (25/09/2026). Antes
+          // "Todas" acendia sempre que a lista tinha item e os outros nunca
+          // acendiam — o usuário não sabia qual filtro estava valendo.
+          final readFilter = controller.filterRead;
+          final categoryFilter = controller.filterCategory;
+          final isAll = readFilter == null && categoryFilter == null;
+
           return Column(
             children: [
-              // Filtros
+              // Filtros — UMA linha, rolável na horizontal. Com quatro chips
+              // o `Expanded` espremia "Não lidas" em telas estreitas; a
+              // barra nunca cresce na vertical.
               Container(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.symmetric(vertical: 12),
                 decoration: BoxDecoration(
                   color: isDark
                       ? AppColors.background.backgroundSecondaryDarkMode
@@ -50,38 +59,46 @@ class _NotificationsPageState extends State<NotificationsPage> {
                     ),
                   ),
                 ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: _FilterChip(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    children: [
+                      _FilterChip(
                         label: 'Todas',
-                        selected: controller.notifications.isNotEmpty,
+                        selected: isAll,
                         onTap: () {
                           controller.clearFilters();
                         },
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _FilterChip(
+                      const SizedBox(width: 8),
+                      _FilterChip(
                         label: 'Não lidas',
-                        selected: false,
+                        selected: readFilter == false && categoryFilter == null,
                         onTap: () {
                           controller.setFilters(read: false);
                         },
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _FilterChip(
+                      const SizedBox(width: 8),
+                      _FilterChip(
                         label: 'Lidas',
-                        selected: false,
+                        selected: readFilter == true && categoryFilter == null,
                         onTap: () {
                           controller.setFilters(read: true);
                         },
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 8),
+                      // Fichas de venda, propostas e documentos — categoria
+                      // `fichas` do catálogo do back (25/09/2026).
+                      _FilterChip(
+                        label: 'Fichas',
+                        selected: categoryFilter == 'fichas',
+                        onTap: () {
+                          controller.setFilters(category: 'fichas');
+                        },
+                      ),
+                    ],
+                  ),
                 ),
               ),
               // Lista

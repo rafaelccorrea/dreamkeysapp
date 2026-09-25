@@ -14,10 +14,78 @@ import '../../core/routes/app_routes.dart';
 /// Ofertas e Matches estão OCULTAS no app (ver `FeatureVisibility`): deep
 /// links dessas áreas caem no detalhe do imóvel quando há `propertyId`,
 /// senão no fallback do chamador. Nunca nas telas escondidas.
+///
+/// LINK EXTERNO (25/09/2026): a notificação "Assine a ficha" traz como
+/// `actionUrl` o short link do Autentique — host de fora do sistema. Isso
+/// não é rota do app nem do SPA: o destino digno é o NAVEGADOR. Por isso
+/// existe [resolveTarget], que separa "rota interna" de "URL externa";
+/// [resolve] continua devolvendo só rota interna, para os chamadores que
+/// nunca abrem navegador (app links do `DeepLinkService`).
 class AppDeepLink {
   AppDeepLink._();
 
+  /// Domínios do sistema. Um `actionUrl` absoluto nesses hosts é o SPA
+  /// (`${FRONTEND_URL}/kanban/task/{id}`) e continua resolvendo por PATH;
+  /// qualquer outro host é link de terceiro (Autentique, portal…) e abre
+  /// fora do app. `intellisysbr.com` é o mesmo domínio dos app links do
+  /// `DeepLinkService`; `dreamkeys.com.br` é a API. Localhost e IPs de rede
+  /// privada cobrem o front local em desenvolvimento.
+  static const Set<String> _systemHostSuffixes = <String>{
+    'intellisysbr.com',
+    'dreamkeys.com.br',
+  };
+
+  static final RegExp _privateNetworkHost = RegExp(
+    r'^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$',
+  );
+
+  /// `true` quando [host] pertence ao sistema (SPA, API ou ambiente local).
+  static bool isSystemHost(String host) {
+    final h = host.trim().toLowerCase();
+    if (h.isEmpty) return false;
+    if (_privateNetworkHost.hasMatch(h)) return true;
+    for (final suffix in _systemHostSuffixes) {
+      if (h == suffix || h.endsWith('.$suffix')) return true;
+    }
+    return false;
+  }
+
+  /// Resolve o destino completo: rota interna OU URL externa.
+  ///
+  /// Ordem — e ela importa:
+  ///  1. `metadata.externo == true` com `metadata.signatureUrl` válida →
+  ///     externa. É o contrato explícito do back para "assine a ficha";
+  ///  2. `actionUrl` absoluto http(s) em host que NÃO é do sistema →
+  ///     externa. Cobre o push FCM, que leva `data.actionUrl` mas NÃO leva
+  ///     `metadata` (ver `mobile-push.service.ts`);
+  ///  3. senão, rota interna por [resolve]. A checagem externa vem ANTES
+  ///     da resolução por entidade de propósito: o short link do Autentique
+  ///     tem path opaco (`/abc123`) que não casa com rota nenhuma, e sem
+  ///     esta ordem o fallback `sale_form_signature` → detalhe da ficha
+  ///     engoliria o link e o usuário nunca chegaria ao documento.
+  static AppDeepLinkTarget? resolveTarget({
+    String? actionUrl,
+    String? entityType,
+    String? entityId,
+    Map<String, dynamic>? metadata,
+  }) {
+    final external = _externalFrom(actionUrl: actionUrl, metadata: metadata);
+    if (external != null) return external;
+
+    final route = resolve(
+      actionUrl: actionUrl,
+      entityType: entityType,
+      entityId: entityId,
+      metadata: metadata,
+    );
+    if (route == null || route.isEmpty) return null;
+    return AppDeepLinkRoute(route);
+  }
+
   /// Converte [actionUrl] web ou payload FCM em rota interna.
+  ///
+  /// URL externa (host fora do sistema) devolve `null` aqui — quem quer
+  /// abrir navegador usa [resolveTarget].
   static String? resolve({
     String? actionUrl,
     String? entityType,
@@ -38,7 +106,13 @@ class AppDeepLink {
   }
 
   static String? fromPushData(Map<String, dynamic> data) {
-    return resolve(
+    final target = targetFromPushData(data);
+    return target is AppDeepLinkRoute ? target.route : null;
+  }
+
+  /// Versão de [fromPushData] que também enxerga link externo.
+  static AppDeepLinkTarget? targetFromPushData(Map<String, dynamic> data) {
+    return resolveTarget(
       actionUrl: data['actionUrl']?.toString() ?? data['url']?.toString(),
       entityType: data['entityType']?.toString(),
       entityId: data['entityId']?.toString() ?? data['id']?.toString(),
@@ -47,6 +121,48 @@ class AppDeepLink {
           : null,
     );
   }
+
+  static AppDeepLinkExternal? _externalFrom({
+    String? actionUrl,
+    Map<String, dynamic>? metadata,
+  }) {
+    // 1. Contrato explícito: metadata.externo + metadata.signatureUrl.
+    final externo = metadata?['externo'];
+    final isExterno = externo == true || externo?.toString() == 'true';
+    if (isExterno) {
+      final signatureUri = _httpUri(metadata?['signatureUrl']?.toString());
+      if (signatureUri != null) return AppDeepLinkExternal(signatureUri);
+    }
+    // 2. actionUrl absoluto em host de terceiro.
+    final actionUri = _httpUri(actionUrl);
+    if (actionUri != null && !isSystemHost(actionUri.host)) {
+      return AppDeepLinkExternal(actionUri);
+    }
+    return null;
+  }
+
+  /// `Uri` só quando for http(s) absoluto com host — o resto (relativo,
+  /// `dreamkeys://`, lixo) não é link de navegador.
+  static Uri? _httpUri(String? raw) {
+    final value = raw?.trim();
+    if (value == null || value.isEmpty) return null;
+    final uri = Uri.tryParse(value);
+    if (uri == null) return null;
+    if (uri.scheme != 'http' && uri.scheme != 'https') return null;
+    if (uri.host.isEmpty) return null;
+    return uri;
+  }
+
+  /// Segmentos de `/fichas-venda/{x}` que NÃO são id de ficha.
+  static const Set<String> _saleFormReservedSegments = <String>{
+    'nova',
+    'novo',
+    'new',
+    'create',
+    'dashboard',
+    'editar',
+    'edit',
+  };
 
   static String? _fromActionUrl(String url) {
     // Sempre parsear como Uri — actionUrls do backend vêm relativas
@@ -182,7 +298,20 @@ class AppDeepLink {
         // /fichas-proposta?highlightProposal={id} — lista de propostas.
         return AppRoutes.proposals;
       case 'fichas-venda':
-        // /fichas-venda/nova?propostaId={id} — fichas de venda.
+        // /fichas-venda/detalhes/{id} — assinou/recusou/finalizada (25/09/2026)
+        // /fichas-venda/{id}          — atalho curto, mesmo destino
+        // /fichas-venda/nova?propostaId={id}, /fichas-venda/dashboard… → lista.
+        // Antes TUDO caía na lista e o usuário tinha que achar a ficha na mão.
+        if (segments.length >= 3 &&
+            segments[1] == 'detalhes' &&
+            segments[2].isNotEmpty) {
+          return AppRoutes.saleFormDetails(segments[2]);
+        }
+        if (segments.length == 2 &&
+            segments[1].isNotEmpty &&
+            !_saleFormReservedSegments.contains(segments[1])) {
+          return AppRoutes.saleFormDetails(segments[1]);
+        }
         return AppRoutes.saleForms;
 
       // ── Vistorias ───────────────────────────────────────────────────
@@ -277,6 +406,18 @@ class AppDeepLink {
       case 'proposal':
       case 'purchase_proposal':
         return AppRoutes.proposalEdit(entityId);
+      // Ficha de venda (25/09/2026): `sale_form` traz o id da ficha;
+      // `sale_form_signature` traz o id da ASSINATURA, que não tem tela — a
+      // ficha vem em `metadata.saleFormId`. O caso externo (assine) já foi
+      // capturado antes em [resolveTarget]; aqui só chega assinou/recusou.
+      case 'sale_form':
+        return AppRoutes.saleFormDetails(entityId);
+      case 'sale_form_signature':
+        final saleFormId = metadata?['saleFormId']?.toString();
+        if (saleFormId != null && saleFormId.isNotEmpty) {
+          return AppRoutes.saleFormDetails(saleFormId);
+        }
+        return null;
       case 'inspection':
         return AppRoutes.inspectionDetails(entityId);
       case 'document':
@@ -296,4 +437,24 @@ class AppDeepLink {
         return null;
     }
   }
+}
+
+/// Destino resolvido de uma notificação/push (25/09/2026).
+///
+/// Duas formas, e só duas: [AppDeepLinkRoute] (rota nomeada do app, vai pro
+/// `Navigator`) e [AppDeepLinkExternal] (URL http(s) de terceiro, vai pro
+/// navegador via `url_launcher`). Quem consome faz `switch`/`is` — sem
+/// campo mágico do tipo "isExternal + url nullable".
+sealed class AppDeepLinkTarget {
+  const AppDeepLinkTarget();
+}
+
+class AppDeepLinkRoute extends AppDeepLinkTarget {
+  const AppDeepLinkRoute(this.route);
+  final String route;
+}
+
+class AppDeepLinkExternal extends AppDeepLinkTarget {
+  const AppDeepLinkExternal(this.uri);
+  final Uri uri;
 }

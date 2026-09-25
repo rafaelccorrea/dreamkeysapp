@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../controllers/notification_controller.dart';
 import '../models/notification_model.dart';
 import '../utils/notification_navigation.dart';
@@ -9,6 +10,7 @@ import 'notification_item.dart';
 import '../../../core/notifications/app_toast.dart';
 import '../../../core/session/session_bootstrap.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../shared/utils/app_deep_link.dart';
 import '../../../shared/widgets/app_error_state.dart';
 
 /// Lista de notificações com scroll infinito
@@ -73,20 +75,25 @@ class _NotificationListState extends State<NotificationList> {
   ///  4. fecha o painel e só então navega, no Navigator RAIZ. Navegar com o
   ///     bottom sheet ainda aberto empilhava a tela por cima da rota modal
   ///     (scrim vivo, back voltando pro sheet).
+  ///
+  /// LINK EXTERNO (25/09/2026): "Assine a ficha" traz o short link do
+  /// Autentique. Não há tela no app para isso — o destino é o navegador
+  /// (`LaunchMode.externalApplication`). O painel fica aberto: quando o
+  /// usuário volta do navegador, está onde estava. Marcar como lida segue
+  /// igual para os dois casos.
   Future<void> _handleNotificationTap(
     BuildContext context,
     NotificationController controller,
     NotificationModel notification,
   ) async {
-    final destination =
-        NotificationNavigation.getNotificationNavigationUrl(notification);
+    final target = NotificationNavigation.getNotificationTarget(notification);
 
     if (!notification.read) {
       unawaited(controller.markAsRead(notification.id));
     }
 
-    if (destination == null || destination.isEmpty) {
-      // Notificação sem tela correspondente no app (financeiro, assinatura,
+    if (target == null) {
+      // Notificação sem tela correspondente no app (financeiro,
       // permissões…). Fica no painel com aviso discreto.
       AppToast.show(
         context,
@@ -94,6 +101,13 @@ class _NotificationListState extends State<NotificationList> {
       );
       return;
     }
+
+    if (target is AppDeepLinkExternal) {
+      await _openExternal(context, target.uri);
+      return;
+    }
+
+    final destination = (target as AppDeepLinkRoute).route;
 
     final sheetNavigator = Navigator.of(context);
     final rootNavigator = Navigator.of(context, rootNavigator: true);
@@ -113,6 +127,26 @@ class _NotificationListState extends State<NotificationList> {
 
     if (!rootNavigator.mounted) return;
     rootNavigator.pushNamed(destination);
+  }
+
+  /// Abre [uri] no navegador do aparelho. Falha vira toast com a CAUSA
+  /// (sem navegador, esquema bloqueado, exceção da plataforma) — "não
+  /// abriu" sem motivo não ajuda ninguém a resolver.
+  Future<void> _openExternal(BuildContext context, Uri uri) async {
+    String? causa;
+    try {
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (ok) return;
+      causa = 'Nenhum aplicativo do aparelho aceitou abrir ${uri.host}.';
+    } catch (e) {
+      causa = e.toString();
+    }
+    if (!context.mounted) return;
+    AppToast.error(
+      context,
+      'Não foi possível abrir o link no navegador.',
+      subtitle: causa,
+    );
   }
 
   @override

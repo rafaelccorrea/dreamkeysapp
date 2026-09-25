@@ -11,6 +11,7 @@ import 'package:flutter/widgets.dart' show NavigatorState;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../constants/api_constants.dart';
 import '../navigation/app_navigator.dart';
@@ -629,16 +630,36 @@ class AppPushService {
       return;
     }
 
-    final route = AppDeepLink.fromPushData(data);
-    if (route != null && route.isNotEmpty) {
-      nav.pushNamed(route);
+    // MESMO resolvedor do toque no painel (`NotificationNavigation` →
+    // `AppDeepLink.resolveTarget`): rota interna ou link externo.
+    final target = AppDeepLink.targetFromPushData(data);
+    if (target is AppDeepLinkRoute) {
+      nav.pushNamed(target.route);
       return;
+    }
+    if (target is AppDeepLinkExternal) {
+      // "Assine a ficha" (25/09/2026): o push traz o short link do
+      // Autentique em `data.actionUrl` — abre no navegador do aparelho.
+      // Se o navegador não abrir, cai no mesmo fallback abaixo: o usuário
+      // encontra a notificação no painel e tenta de lá (toast com a causa).
+      if (await _openExternal(target.uri)) return;
     }
     // Fallback DIGNO quando o payload não resolve pra nenhuma tela real:
     // Home + painel de notificações (o mesmo sheet do sino do dashboard).
     // A antiga rota /notifications é tela legada — empurrá-la era o bug de
     // "tela de notificações que nem existe mais".
     _openHomeWithNotificationsPanel(nav);
+  }
+
+  /// Abre [uri] no navegador externo; `false` quando a plataforma recusa ou
+  /// estoura — o chamador decide o fallback.
+  Future<bool> _openExternal(Uri uri) async {
+    try {
+      return await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      debugPrint('[PUSH] falha ao abrir link externo $uri: $e');
+      return false;
+    }
   }
 
   /// Home limpa (padrão da casa: mesma navegação do drawer/back do

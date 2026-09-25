@@ -14,8 +14,31 @@ class NotificationNavigation {
     );
   }
 
+  /// Destino completo do toque: rota interna OU link externo (25/09/2026).
+  ///
+  /// "Assine a ficha" traz o short link do Autentique — abre no navegador,
+  /// não no `Navigator`. Mesmo resolvedor do push (`AppDeepLink`), para o
+  /// toque no painel e o toque na notificação do sistema nunca divergirem.
+  static AppDeepLinkTarget? getNotificationTarget(
+    NotificationModel notification,
+  ) {
+    return AppDeepLink.resolveTarget(
+      actionUrl: notification.actionUrl,
+      entityType: notification.entityType,
+      entityId: notification.entityId,
+      metadata: notification.metadata,
+    );
+  }
+
   static String getNotificationTypeLabel(String type) {
     switch (type.toLowerCase()) {
+      // Ficha de venda (25/09/2026): assinatura pedida/feita/recusada e
+      // ficha finalizada.
+      case 'sale_form_signature_requested':
+      case 'sale_form_signature_signed':
+      case 'sale_form_signature_rejected':
+      case 'sale_form_finalized':
+        return 'Ficha de venda';
       case 'rental_expiring':
       case 'rental_expired':
         return 'Aluguel';

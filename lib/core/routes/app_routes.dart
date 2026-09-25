@@ -52,6 +52,7 @@ import '../../features/proposals/pages/create_proposal_page.dart';
 import '../../features/proposals/pages/proposals_page.dart';
 import '../../features/sale_forms/pages/sale_forms_page.dart';
 import '../../features/sale_forms/pages/sale_forms_dashboard_page.dart';
+import '../../features/sale_forms/pages/sale_form_detail_page.dart';
 import '../../features/commissions/pages/commissions_page.dart';
 import '../../features/workspace/pages/workspace_page.dart';
 import '../../features/workspace/pages/users_page.dart';
@@ -254,6 +255,12 @@ class AppRoutes {
 
   /// Painel de fichas de venda (paridade com `/fichas-venda/dashboard` do web).
   static const String saleFormsDashboard = '/sale-forms/dashboard';
+
+  /// Detalhe (read-only) de uma ficha de venda — paridade com
+  /// `/fichas-venda/detalhes/:id` do web. Rota NOMEADA porque notificação e
+  /// push chegam pelo `Navigator` raiz com `pushNamed` (25/09/2026); a lista
+  /// continua abrindo o detalhe por `MaterialPageRoute`, sem mudança.
+  static String saleFormDetails(String id) => '/sale-forms/$id';
 
   // Relatórios de Visita (módulo `visit_report`)
   static const String visits = '/visits';
@@ -644,6 +651,17 @@ class AppRoutes {
       return _buildRoute(const SaleFormsPage(), settings);
     } else if (routeName == AppRoutes.saleFormsDashboard) {
       return _buildRoute(const SaleFormsDashboardPage(), settings);
+    } else if (routeName != null && routeName.startsWith('/sale-forms/')) {
+      // Detalhe: /sale-forms/:id (notificações de ficha de venda, 25/09/2026).
+      // `dashboard` já casou na igualdade acima; qualquer outro segmento
+      // único é id de ficha.
+      final segments = routeName.split('/');
+      if (segments.length == 3 && segments[2].isNotEmpty) {
+        return _buildRoute(
+          SaleFormDetailPage(saleFormId: segments[2]),
+          settings,
+        );
+      }
     } else if (routeName == AppRoutes.proposals) {
       return _buildRoute(const ProposalsPage(), settings);
     } else if (routeName == AppRoutes.proposalCreate) {

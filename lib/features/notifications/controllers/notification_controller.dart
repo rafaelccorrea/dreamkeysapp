@@ -40,11 +40,33 @@ class NotificationController extends ChangeNotifier {
   String? _filterType;
   String? _filterCompanyId;
 
+  /// Filtro por categoria do catálogo (`fichas`…), aplicado NO APP
+  /// (25/09/2026): o `GET /notifications` não aceita `category`, só
+  /// `read`/`type`/`companyId`. Como a página vem paginada do servidor, uma
+  /// página pode ter zero itens da categoria — [_categoryFillBudget] puxa
+  /// as próximas automaticamente até encher a tela, com teto para não
+  /// varrer o histórico inteiro.
+  String? _filterCategory;
+  int _categoryFillBudget = 0;
+  static const int _categoryFillMaxPages = 5;
+
   // WebSocket
   bool _wsConnected = false;
 
   // Getters
-  List<NotificationModel> get notifications => List.unmodifiable(_notifications);
+  List<NotificationModel> get notifications {
+    final category = _filterCategory;
+    if (category == null || category.isEmpty) {
+      return List.unmodifiable(_notifications);
+    }
+    return List.unmodifiable(
+      _notifications.where((n) => n.categoryKey == category),
+    );
+  }
+
+  /// Filtros ativos — os chips da tela cheia se pintam a partir daqui.
+  bool? get filterRead => _filterRead;
+  String? get filterCategory => _filterCategory;
   int get unreadCount => _unreadCount;
   bool get loading => _loading;
   bool get loadingMore => _loadingMore;
@@ -235,6 +257,8 @@ class NotificationController extends ChangeNotifier {
       _currentPage = 1;
       _hasMore = true;
       _notifications.clear();
+      _categoryFillBudget =
+          _filterCategory == null ? 0 : _categoryFillMaxPages;
     }
 
     if (_loading || (_loadingMore && !reset)) {
@@ -286,7 +310,20 @@ class NotificationController extends ChangeNotifier {
       _loading = false;
       _loadingMore = false;
       notifyListeners();
+      _fillCategoryPageIfSparse();
     }
+  }
+
+  /// Com filtro de categoria ativo, a página do servidor pode ter vindo
+  /// quase sem itens dela — a lista fica curta demais para o scroll
+  /// disparar `loadMore`. Puxa a próxima página até a tela ter uma página
+  /// "cheia" de itens da categoria ou o orçamento acabar.
+  void _fillCategoryPageIfSparse() {
+    if (_filterCategory == null || _error != null) return;
+    if (!_hasMore || _categoryFillBudget <= 0) return;
+    if (notifications.length >= _pageLimit) return;
+    _categoryFillBudget--;
+    unawaited(loadMore());
   }
 
   /// Carrega mais notificações (paginção)
@@ -538,10 +575,12 @@ class NotificationController extends ChangeNotifier {
     bool? read,
     String? type,
     String? companyId,
+    String? category,
   }) {
     _filterRead = read;
     _filterType = type;
     _filterCompanyId = companyId;
+    _filterCategory = category;
     loadNotifications(reset: true);
   }
 
@@ -550,6 +589,7 @@ class NotificationController extends ChangeNotifier {
     _filterRead = null;
     _filterType = null;
     _filterCompanyId = null;
+    _filterCategory = null;
     loadNotifications(reset: true);
   }
 

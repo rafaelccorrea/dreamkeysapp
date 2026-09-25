@@ -11,6 +11,11 @@ class NotificationModel {
   final String? entityType;
   final String? entityId;
   final Map<String, dynamic>? metadata;
+
+  /// Categoria do catálogo do back (`leads`, `fichas`, `agenda`…) — chave
+  /// minúscula que o item traz no JSON (25/09/2026). `null` enquanto o back
+  /// não a emitir: por isso o filtro usa [categoryKey], que infere pelo tipo.
+  final String? category;
   final String userId;
   final String? companyId;
   final DateTime createdAt;
@@ -28,11 +33,39 @@ class NotificationModel {
     this.entityType,
     this.entityId,
     this.metadata,
+    this.category,
     required this.userId,
     this.companyId,
     required this.createdAt,
     required this.updatedAt,
   });
+
+  /// Categoria efetiva: a do JSON ou, na falta dela, a inferida pelo `type`.
+  ///
+  /// O fallback espelha `notification-category.catalog.ts` do back só para
+  /// a categoria `fichas` — é a única que o app filtra hoje. Sem isso, o
+  /// chip "Fichas" ficaria vazio contra um back que ainda não manda
+  /// `category` (janela de deploy).
+  String? get categoryKey {
+    final raw = category?.trim().toLowerCase();
+    if (raw != null && raw.isNotEmpty) return raw;
+    return _fichasTypes.contains(type.toLowerCase()) ? 'fichas' : null;
+  }
+
+  static const Set<String> _fichasTypes = <String>{
+    'sale_form_signature_requested',
+    'sale_form_signature_signed',
+    'sale_form_signature_rejected',
+    'sale_form_finalized',
+    'proposal_finalized',
+    'proposal_stage_completed',
+    'document_signed',
+    'document_rejected',
+    'checklist_item_delayed',
+    'checklist_critical_delay',
+    'note_pending',
+    'client_document_expiring',
+  };
 
   factory NotificationModel.fromJson(Map<String, dynamic> json) {
     return NotificationModel(
@@ -49,6 +82,7 @@ class NotificationModel {
       entityType: json['entityType']?.toString(),
       entityId: json['entityId']?.toString(),
       metadata: json['metadata'] as Map<String, dynamic>?,
+      category: json['category']?.toString(),
       userId: json['userId']?.toString() ?? '',
       companyId: json['companyId']?.toString(),
       createdAt: DateTime.parse(json['createdAt'].toString()),
@@ -69,6 +103,7 @@ class NotificationModel {
       'entityType': entityType,
       'entityId': entityId,
       'metadata': metadata,
+      'category': category,
       'userId': userId,
       'companyId': companyId,
       'createdAt': createdAt.toIso8601String(),
@@ -88,6 +123,7 @@ class NotificationModel {
     String? entityType,
     String? entityId,
     Map<String, dynamic>? metadata,
+    String? category,
     String? userId,
     String? companyId,
     DateTime? createdAt,
@@ -105,6 +141,7 @@ class NotificationModel {
       entityType: entityType ?? this.entityType,
       entityId: entityId ?? this.entityId,
       metadata: metadata ?? this.metadata,
+      category: category ?? this.category,
       userId: userId ?? this.userId,
       companyId: companyId ?? this.companyId,
       createdAt: createdAt ?? this.createdAt,

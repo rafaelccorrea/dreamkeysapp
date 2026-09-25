@@ -19,6 +19,7 @@ enum NotificationCategory {
   propertyMatch,
   propertyApproval,
   property,
+  saleForm,
   message,
   system,
   generic;
@@ -56,6 +57,8 @@ enum NotificationCategory {
         return 'Aprovação';
       case NotificationCategory.property:
         return 'Imóvel';
+      case NotificationCategory.saleForm:
+        return 'Ficha';
       case NotificationCategory.message:
         return 'Mensagem';
       case NotificationCategory.system:
@@ -352,6 +355,39 @@ class NotificationTypeStyle {
         category: NotificationCategory.property,
         color: Color(0xFFF59E0B),
         icon: Icons.update_rounded,
+      );
+    }
+
+    // ── Ficha de venda (25/09/2026) ──────────────────────────────────────
+    // Mesma régua de cor do resto do arquivo: âmbar = pede ação, verde =
+    // concluído, vermelho = recusado. O ícone de caneta marca "assinatura";
+    // a ficha finalizada ganha o selo de verificado.
+    if (type == 'sale_form_signature_requested') {
+      return const NotificationTypeStyle(
+        category: NotificationCategory.saleForm,
+        color: Color(0xFFF59E0B),
+        icon: Icons.draw_rounded,
+      );
+    }
+    if (type == 'sale_form_signature_signed') {
+      return const NotificationTypeStyle(
+        category: NotificationCategory.saleForm,
+        color: Color(0xFF10B981),
+        icon: Icons.draw_rounded,
+      );
+    }
+    if (type == 'sale_form_signature_rejected') {
+      return const NotificationTypeStyle(
+        category: NotificationCategory.saleForm,
+        color: Color(0xFFEF4444),
+        icon: Icons.draw_rounded,
+      );
+    }
+    if (type == 'sale_form_finalized') {
+      return const NotificationTypeStyle(
+        category: NotificationCategory.saleForm,
+        color: Color(0xFF10B981),
+        icon: Icons.verified_rounded,
       );
     }
 
