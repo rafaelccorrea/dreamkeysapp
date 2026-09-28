@@ -436,7 +436,7 @@ class _CreateTaskModalState extends State<CreateTaskModal> {
       setState(() => _isLoading = false);
 
       if (task == null) {
-        _showError(controller.error ?? 'Erro ao criar negociação');
+        _showError(controller.mutationError ?? 'Erro ao criar negociação');
         return;
       }
 

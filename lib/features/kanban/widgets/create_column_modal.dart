@@ -94,7 +94,7 @@ class _CreateColumnModalState extends State<CreateColumnModal> {
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(controller.error ?? 'Erro ao criar coluna'),
+            content: Text(controller.mutationError ?? 'Erro ao criar coluna'),
             backgroundColor: Colors.red,
           ),
         );

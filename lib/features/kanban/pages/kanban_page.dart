@@ -1337,11 +1337,13 @@ class _KanbanPageState extends State<KanbanPage> {
                         ? (_) => false
                         : (details) => details.data.columnId != column.id,
                     onAcceptWithDetails: (details) {
-                      _handleTaskDrop(
-                        context,
-                        controller,
-                        details.data,
-                        column.id,
+                      unawaited(
+                        _handleTaskDrop(
+                          context,
+                          controller,
+                          details.data,
+                          column.id,
+                        ),
                       );
                     },
                     builder: (context, candidateData, rejectedData) {
@@ -1714,12 +1716,12 @@ class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
-  void _handleTaskDrop(
+  Future<void> _handleTaskDrop(
     BuildContext context,
     KanbanController controller,
     KanbanTask task,
     String targetColumnId,
-  ) {
+  ) async {
     if (task.columnId == targetColumnId) return;
     if (KanbanSyntheticColumns.isSyntheticId(targetColumnId)) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1739,18 +1741,41 @@ class _KanbanPageState extends State<KanbanPage> {
     final targetTasks = controller.getTasksForColumn(targetColumnId);
     final newPosition = targetTasks.length;
 
-    // Fire-and-forget: o controller já faz update otimista (notifyListeners
-    // antes da chamada à API), então a UI move o card em real time. Enviamos
-    // explicitamente `fromColumnId` (coluna atual antes do drop) porque o
-    // backend valida `@IsUUID` e rejeita 400 se ausente.
-    unawaited(
-      controller.moveTask(
-        taskId: task.id,
-        fromColumnId: task.columnId,
-        targetColumnId: targetColumnId,
-        targetPosition: newPosition,
-      ),
+    // O controller já faz update otimista (notifyListeners antes da chamada
+    // à API), então a UI move o card na hora. Enviamos explicitamente
+    // `fromColumnId` (coluna atual antes do drop) porque o backend valida
+    // `@IsUUID` e rejeita 400 se ausente. Mas o RESULTADO importa: se o
+    // servidor recusar, o controller já voltou o card para a origem e a
+    // pessoa precisa saber por quê — antes o drop era fire-and-forget e a
+    // recusa virava tela de erro no lugar do quadro.
+    final ok = await controller.moveTask(
+      taskId: task.id,
+      fromColumnId: task.columnId,
+      targetColumnId: targetColumnId,
+      targetPosition: newPosition,
     );
+    if (ok || !mounted) return;
+
+    final motivo = controller.consumeMutationError();
+    ScaffoldMessenger.of(this.context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(motivo ?? 'Não foi possível mover o card.'),
+          backgroundColor: Colors.red.shade700,
+          duration: const Duration(seconds: 6),
+          action: SnackBarAction(
+            label: 'Tentar de novo',
+            textColor: Colors.white,
+            onPressed: () {
+              if (!mounted) return;
+              unawaited(
+                _handleTaskDrop(this.context, controller, task, targetColumnId),
+              );
+            },
+          ),
+        ),
+      );
   }
 
   /// Tipo do funil do card quando ele não traz `project` (board enxuto).
@@ -3150,7 +3175,7 @@ class _KanbanPageState extends State<KanbanPage> {
                   content: Text(
                     ok
                         ? 'Exclusão concluída.'
-                        : (controller.error ??
+                        : (controller.mutationError ??
                               'Alguns ou todos os cards não puderam ser excluídos. O quadro foi atualizado.'),
                   ),
                   backgroundColor: ok ? Colors.green : Colors.orange.shade900,
@@ -3197,7 +3222,7 @@ class _KanbanPageState extends State<KanbanPage> {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
-                        controller.error ?? 'Erro ao deletar tarefa',
+                        controller.mutationError ?? 'Erro ao deletar tarefa',
                       ),
                       backgroundColor: Colors.red,
                     ),
@@ -3247,7 +3272,7 @@ class _KanbanPageState extends State<KanbanPage> {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
-                        controller.error ?? 'Erro ao deletar coluna',
+                        controller.mutationError ?? 'Erro ao deletar coluna',
                       ),
                       backgroundColor: Colors.red,
                     ),

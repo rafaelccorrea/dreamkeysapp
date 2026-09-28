@@ -43,7 +43,9 @@ class _EditTaskModalState extends State<EditTaskModal> {
     _selectedPriority = widget.task.priority;
     _selectedDueDate = widget.task.dueDate;
     _selectedAssignedToId = widget.task.assignedToId;
-    _selectedTags = KanbanUiTagFilter.visible(widget.task.tags ?? []);
+    // `allTagNames`, não `tags`: no board enxuto os nomes podem vir só em
+    // `tagDetails`, e o `_save` compara com a mesma fonte.
+    _selectedTags = KanbanUiTagFilter.visible(widget.task.allTagNames);
     _loadTags();
     _loadProjectMembers();
   }
@@ -235,18 +237,33 @@ class _EditTaskModalState extends State<EditTaskModal> {
     setState(() => _isLoading = true);
 
     final controller = context.read<KanbanController>();
+    final task = widget.task;
+
+    // Campo esvaziado na tela precisa CHEGAR ao servidor: antes virava
+    // `null`, o DTO omitia, e o 200 vinha com o valor antigo (desktop igual).
+    final descricao = _descriptionController.text.trim();
+    final tinhaDescricao = (task.description ?? '').trim().isNotEmpty;
+
+    // Tags: as ocultas (Imobzi) nunca aparecem na tela, mas o servidor
+    // compara o conjunto inteiro — sem devolvê-las, corretor leva 403 e
+    // admin as apaga sem querer. E se as visíveis não mudaram, `tags` nem
+    // vai (a regra de gestor não é acionada por uma edição de outro campo).
+    final visiveisAntes = KanbanUiTagFilter.visible(task.allTagNames);
+    final tagsMudaram =
+        !KanbanUiTagFilter.sameSet(_selectedTags, visiveisAntes);
 
     final success = await controller.updateTask(
-      widget.task.id,
+      task.id,
       UpdateTaskDto(
         title: _titleController.text.trim(),
-        description: _descriptionController.text.trim().isEmpty
-            ? null
-            : _descriptionController.text.trim(),
+        description: descricao.isEmpty ? null : descricao,
+        clearDescription: descricao.isEmpty && tinhaDescricao,
         priority: _selectedPriority?.name,
         dueDate: _selectedDueDate,
-        assignedToId: _selectedAssignedToId ?? widget.task.assignedToId,
-        tags: _selectedTags.isNotEmpty ? _selectedTags : null,
+        clearDueDate: _selectedDueDate == null && task.dueDate != null,
+        assignedToId: _selectedAssignedToId ?? task.assignedToId,
+        tags: tagsMudaram ? [..._selectedTags, ...task.hiddenTagNames] : null,
+        includeTags: tagsMudaram,
       ),
     );
 
@@ -264,7 +281,7 @@ class _EditTaskModalState extends State<EditTaskModal> {
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(controller.error ?? 'Erro ao atualizar tarefa'),
+            content: Text(controller.mutationError ?? 'Erro ao atualizar tarefa'),
             backgroundColor: Colors.red,
           ),
         );

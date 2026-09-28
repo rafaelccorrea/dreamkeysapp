@@ -483,7 +483,7 @@ class _TransferTaskSheetState extends State<TransferTaskSheet> {
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(c.error ?? 'Falha na transferência.')),
+        SnackBar(content: Text(c.mutationError ?? 'Falha na transferência.')),
       );
     }
   }

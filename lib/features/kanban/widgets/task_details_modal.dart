@@ -1004,7 +1004,7 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
     final ok = await controller.updateTask(widget.task.id, dto);
     if (!mounted) return false;
     if (!ok) {
-      _snack(controller.error ?? 'Não foi possível salvar a alteração.',
+      _snack(controller.mutationError ?? 'Não foi possível salvar a alteração.',
           erro: true);
       return false;
     }
@@ -1470,7 +1470,7 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
     if (!mounted) return;
     setState(() => _deleting = false);
     if (!ok) {
-      _snack(controller.error ?? 'Não foi possível excluir o card.',
+      _snack(controller.mutationError ?? 'Não foi possível excluir o card.',
           erro: true);
       return;
     }
@@ -1490,19 +1490,25 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
 
   Future<void> _manageTags() async {
     final task = _taskNow;
-    final atuais = List<String>.from(task.displayTags ?? const <String>[]);
+    final atuais =
+        List<String>.from(KanbanUiTagFilter.visible(task.allTagNames));
     final novas = await TaskTagsSheet.show(
       context,
       teamId: KanbanController.instance.teamId,
       selected: atuais,
     );
     if (novas == null || !mounted) return;
+    // Mesmo conjunto: nada a salvar (e nada a disparar na regra de gestor).
+    if (KanbanUiTagFilter.sameSet(novas, atuais)) return;
+    // As ocultas (Imobzi) voltam junto: o servidor compara o conjunto
+    // inteiro, e sem elas o corretor leva 403 e o admin as apaga sem ver.
+    final completas = [...novas, ...task.hiddenTagNames];
     setState(() => _savingField = 'tags');
     // Aqui a lista COMPLETA é a intenção — `includeTags` fica no padrão
-    // (true) justamente para conseguir esvaziar as tags do card.
+    // (true) justamente para conseguir esvaziar as tags visíveis do card.
     final ok = await _patchTask(
-      UpdateTaskDto(tags: novas),
-      overlay: (t) => t.copyWith(tags: novas),
+      UpdateTaskDto(tags: completas),
+      overlay: (t) => t.copyWith(tags: completas),
     );
     if (!mounted) return;
     setState(() => _savingField = null);
@@ -1595,7 +1601,7 @@ class _TaskDetailsPageState extends State<TaskDetailsPage>
     if (!ok) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(controller.error ?? 'Erro ao mover o lead'),
+          content: Text(controller.mutationError ?? 'Erro ao mover o lead'),
           backgroundColor: Colors.red,
         ),
       );

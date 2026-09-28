@@ -415,10 +415,22 @@ class ApiService {
 
         bool isCompanyIdProblem;
         if (response.statusCode == 403) {
-          // 403 com menção a empresa/company normalmente significa "sem
-          // acesso à empresa" — manter o comportamento antigo neste caso.
-          isCompanyIdProblem = errorMessage.contains('company') ||
-              errorMessage.contains('empresa');
+          // Só as frases do CompanyGuard do back (28/09/2026). Antes, qualquer
+          // 403 com "empresa" no texto ("Projeto não pertence à empresa",
+          // "Permissão não pertence à empresa" — regras de negócio do funil)
+          // apagava o companyId do aparelho: dali em diante as requisições
+          // caíam em "Company ID não encontrado" e, no próximo boot, o app
+          // abria na matriz — o corretor gravava numa empresa e olhava outra
+          // no desktop.
+          isCompanyIdProblem =
+              errorMessage.contains('não tem acesso a esta empresa') ||
+              errorMessage.contains('nao tem acesso a esta empresa') ||
+              errorMessage.contains('não está vinculado a nenhuma empresa') ||
+              errorMessage.contains('nao esta vinculado a nenhuma empresa') ||
+              errorMessage.contains('sem acesso à empresa') ||
+              errorMessage.contains('sem acesso a empresa') ||
+              errorMessage.contains('x-company-id') ||
+              errorMessage.contains('company id');
         } else {
           // 400: precisa ser sobre o Company ID em si, não sobre uma
           // configuração da empresa qualquer.

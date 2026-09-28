@@ -103,7 +103,7 @@ class _MarkTaskResultSheetState extends State<MarkTaskResultSheet> {
         const SnackBar(content: Text('Resultado atualizado.')),
       );
     } else {
-      final msg = controller.error ?? 'Não foi possível atualizar o resultado.';
+      final msg = controller.mutationError ?? 'Não foi possível atualizar o resultado.';
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     }
   }

@@ -347,6 +347,24 @@ abstract final class KanbanUiTagFilter {
     if (tags == null || tags.isEmpty) return const [];
     return tags.where((t) => !isHidden(t)).toList();
   }
+
+  /// As ocultas (Imobzi) que o card carrega. Precisam VOLTAR em todo `tags:`
+  /// enviado ao servidor: ele compara o conjunto inteiro com o gravado e, se
+  /// difere, exige gestor (403 para corretor, edição inteira recusada) — e
+  /// para admin apaga as ocultas sem avisar.
+  static List<String> hidden(List<String>? tags) {
+    if (tags == null || tags.isEmpty) return const [];
+    return tags.where(isHidden).toList();
+  }
+
+  /// Mesmo conjunto de tags, na régua do servidor: sem ordem, sem caixa,
+  /// sem espaços nas pontas, sem repetidas.
+  static bool sameSet(Iterable<String> a, Iterable<String> b) {
+    String norm(String t) => t.trim().toLowerCase();
+    final sa = a.map(norm).where((t) => t.isNotEmpty).toSet();
+    final sb = b.map(norm).where((t) => t.isNotEmpty).toSet();
+    return sa.length == sb.length && sa.containsAll(sb);
+  }
 }
 
 /// Resultado normalizado de uma negociação para filtro/UI.
@@ -917,6 +935,25 @@ class KanbanTask {
     if (list.isEmpty) return null;
     return list;
   }
+
+  /// Todos os nomes de tag do card, ocultas incluídas: `tags` e, quando o
+  /// board enxuto só manda `tagDetails`, os nomes de lá (sem repetir).
+  List<String> get allTagNames {
+    final vistos = <String>{};
+    final out = <String>[];
+    void add(String raw) {
+      final t = raw.trim();
+      if (t.isEmpty || !vistos.add(t.toLowerCase())) return;
+      out.add(t);
+    }
+
+    tags?.forEach(add);
+    tagDetails?.forEach((d) => add(d.name));
+    return out;
+  }
+
+  /// Ocultas (Imobzi) que o card carrega — ver [KanbanUiTagFilter.hidden].
+  List<String> get hiddenTagNames => KanbanUiTagFilter.hidden(allTagNames);
 
   /// Melhor telefone para contato rápido do lead: WhatsApp do cliente,
   /// senão telefone do cliente, senão o 1º contato com telefone.
@@ -1851,9 +1888,13 @@ class CreateTaskDto {
 
 class UpdateTaskDto {
   final String? title;
+
+  /// Descrição. `null` = não mexer; para APAGAR use [clearDescription].
   final String? description;
-  final String? columnId;
-  final int? position;
+
+  // `columnId`/`position` saíram (28/09/2026): o `UpdateKanbanTaskDto` do
+  // back não os tem, a whitelist descartava em silêncio e o 200 era falso.
+  // Mudança de etapa é só por `moveTask`.
   final String? priority;
   final String? assignedToId;
   final DateTime? dueDate;
@@ -1884,18 +1925,28 @@ class UpdateTaskDto {
   /// Envia `cardColor: null` (remove a cor personalizada).
   final bool clearCardColor;
 
+  /// Envia `description: ''` (apaga a descrição). Sem isto, campo esvaziado
+  /// na tela virava `null`, o `toJson` o omitia e o servidor respondia 200
+  /// com o texto antigo — "atualizada com sucesso" e o desktop igual.
+  final bool clearDescription;
+
+  /// Envia `dueDate: null` (remove o prazo). Mesmo motivo de
+  /// [clearDescription]; o back só limpa quando a chave chega nula.
+  final bool clearDueDate;
+
   /// Por que existe: o `toJson` historicamente sempre manda `tags` (o
   /// `edit_task_modal` conta com isso para LIMPAR as tags mandando `tags: null`).
   /// Num patch parcial — salvar só a cor do card, por exemplo — esse
   /// comportamento apagaria as tags do card. Quem faz patch parcial deve passar
   /// `includeTags: false`.
+  ///
+  /// E quem manda `tags` manda a lista COMPLETA, ocultas incluídas
+  /// ([KanbanTask.hiddenTagNames]): o servidor compara o conjunto inteiro.
   final bool includeTags;
 
   UpdateTaskDto({
     this.title,
     this.description,
-    this.columnId,
-    this.position,
     this.priority,
     this.assignedToId,
     this.dueDate,
@@ -1908,21 +1959,30 @@ class UpdateTaskDto {
     this.cardColor,
     this.clearEmpreendimentoId = false,
     this.clearCardColor = false,
+    this.clearDescription = false,
+    this.clearDueDate = false,
     this.includeTags = true,
   });
 
   Map<String, dynamic> toJson() {
     final map = <String, dynamic>{};
     if (title != null) map['title'] = title;
-    if (description != null) map['description'] = description;
-    if (columnId != null) map['columnId'] = columnId;
-    if (position != null) map['position'] = position;
+    // Apagar = mandar '' (o back aplica o que chega; ausente = não mexe).
+    if (clearDescription) {
+      map['description'] = '';
+    } else if (description != null) {
+      map['description'] = description;
+    }
     if (priority != null) map['priority'] = priority;
     // assignedToId é obrigatório - sempre enviar (não pode ser null)
     if (assignedToId != null && assignedToId!.isNotEmpty) {
       map['assignedToId'] = assignedToId;
     }
-    if (dueDate != null) {
+    if (clearDueDate) {
+      // `null` explícito: o back só limpa o prazo quando a chave chega nula
+      // (ausente = mantém o que está).
+      map['dueDate'] = null;
+    } else if (dueDate != null) {
       // Formatar como YYYY-MM-DDTHH:MM:SS.000Z (meia-noite UTC)
       final utcDate = DateTime.utc(
         dueDate!.year,

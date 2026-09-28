@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import '../models/kanban_models.dart';
 import '../services/kanban_service.dart';
+import '../services/kanban_socket_service.dart';
 import '../services/team_service.dart';
 import '../../../shared/services/secure_storage_service.dart';
 
@@ -23,7 +24,15 @@ class KanbanController extends ChangeNotifier {
   // Estado
   KanbanBoard? _board;
   bool _loading = false;
+
+  /// Erro de CARGA do quadro (`loadBoard`) — é o que vira tela de erro.
   String? _error;
+
+  /// Falha de AÇÃO sobre o quadro (mover, editar, criar, apagar, coluna…),
+  /// separada da carga (28/09/2026): antes ia para `_error` e a página
+  /// inteira virava AppErrorState por um drop que o servidor recusou. Quem
+  /// age lê aqui e mostra num SnackBar; o quadro continua em pé.
+  String? _mutationError;
   String? _teamId;
   String? _projectId;
   List<KanbanProject> _projects = [];
@@ -73,7 +82,19 @@ class KanbanController extends ChangeNotifier {
   bool get shouldShowKanbanSkeleton =>
       _loading || (_board == null && _error == null);
 
+  /// Só a carga do quadro grava aqui (ver [_error]).
   String? get error => _error;
+
+  /// Última falha de ação sobre o quadro (mensagem do servidor quando há).
+  String? get mutationError => _mutationError;
+
+  /// Lê e zera a última falha de ação — para o SnackBar mostrar uma vez.
+  String? consumeMutationError() {
+    final m = _mutationError;
+    _mutationError = null;
+    return m;
+  }
+
   String? get teamId => _teamId;
   String? get projectId => _projectId;
   List<KanbanProject> get projects => _projects;
@@ -640,13 +661,13 @@ class KanbanController extends ChangeNotifier {
         await loadBoard(teamId: _teamId, projectId: _projectId);
         return true;
       } else {
-        _error = response.message ?? 'Erro ao criar coluna';
+        _mutationError = response.message ?? 'Erro ao criar coluna';
         notifyListeners();
         return false;
       }
     } catch (e) {
       debugPrint('❌ [KANBAN_CTRL] Erro ao criar coluna: $e');
-      _error = 'Erro ao criar coluna: ${e.toString()}';
+      _mutationError = 'Erro aocriar coluna: ${e.toString()}';
       notifyListeners();
       return false;
     }
@@ -678,13 +699,13 @@ class KanbanController extends ChangeNotifier {
         }
         return true;
       } else {
-        _error = response.message ?? 'Erro ao atualizar coluna';
+        _mutationError = response.message ?? 'Erro ao atualizar coluna';
         notifyListeners();
         return false;
       }
     } catch (e) {
       debugPrint('❌ [KANBAN_CTRL] Erro ao atualizar coluna: $e');
-      _error = 'Erro ao atualizar coluna: ${e.toString()}';
+      _mutationError = 'Erro aoatualizar coluna: ${e.toString()}';
       notifyListeners();
       return false;
     }
@@ -700,13 +721,13 @@ class KanbanController extends ChangeNotifier {
         await loadBoard(teamId: _teamId, projectId: _projectId);
         return true;
       } else {
-        _error = response.message ?? 'Erro ao deletar coluna';
+        _mutationError = response.message ?? 'Erro ao deletar coluna';
         notifyListeners();
         return false;
       }
     } catch (e) {
       debugPrint('❌ [KANBAN_CTRL] Erro ao deletar coluna: $e');
-      _error = 'Erro ao deletar coluna: ${e.toString()}';
+      _mutationError = 'Erro aodeletar coluna: ${e.toString()}';
       notifyListeners();
       return false;
     }
@@ -728,13 +749,13 @@ class KanbanController extends ChangeNotifier {
         await loadBoard(teamId: _teamId, projectId: _projectId);
         return true;
       } else {
-        _error = response.message ?? 'Erro ao reordenar colunas';
+        _mutationError = response.message ?? 'Erro ao reordenar colunas';
         notifyListeners();
         return false;
       }
     } catch (e) {
       debugPrint('❌ [KANBAN_CTRL] Erro ao reordenar colunas: $e');
-      _error = 'Erro ao reordenar colunas: ${e.toString()}';
+      _mutationError = 'Erro aoreordenar colunas: ${e.toString()}';
       notifyListeners();
       return false;
     }
@@ -874,7 +895,7 @@ class KanbanController extends ChangeNotifier {
         debugPrint(
           '🚀 [KANBAN_CTRL] ❌ Erro ao criar tarefa: ${response.message}',
         );
-        _error = response.message ?? 'Erro ao criar tarefa';
+        _mutationError = response.message ?? 'Erro ao criar tarefa';
         notifyListeners();
         debugPrint(
           '🚀 [KANBAN_CTRL] ========== FIM createTask (ERRO) ==========',
@@ -885,7 +906,7 @@ class KanbanController extends ChangeNotifier {
       debugPrint('❌ [KANBAN_CTRL] ========== EXCEÇÃO em createTask ==========');
       debugPrint('❌ [KANBAN_CTRL] Erro: $e');
       debugPrint('📚 [KANBAN_CTRL] StackTrace: $stackTrace');
-      _error = 'Erro ao criar tarefa: ${e.toString()}';
+      _mutationError = 'Erro aocriar tarefa: ${e.toString()}';
       notifyListeners();
       debugPrint(
         '🚀 [KANBAN_CTRL] ========== FIM createTask (EXCEÇÃO) ==========',
@@ -920,13 +941,13 @@ class KanbanController extends ChangeNotifier {
         }
         return true;
       } else {
-        _error = response.message ?? 'Erro ao atualizar tarefa';
+        _mutationError = response.message ?? 'Erro ao atualizar tarefa';
         notifyListeners();
         return false;
       }
     } catch (e) {
       debugPrint('❌ [KANBAN_CTRL] Erro ao atualizar tarefa: $e');
-      _error = 'Erro ao atualizar tarefa: ${e.toString()}';
+      _mutationError = 'Erro aoatualizar tarefa: ${e.toString()}';
       notifyListeners();
       return false;
     }
@@ -942,13 +963,13 @@ class KanbanController extends ChangeNotifier {
         await loadBoard(teamId: _teamId, projectId: _projectId);
         return true;
       } else {
-        _error = response.message ?? 'Erro ao deletar tarefa';
+        _mutationError = response.message ?? 'Erro ao deletar tarefa';
         notifyListeners();
         return false;
       }
     } catch (e) {
       debugPrint('❌ [KANBAN_CTRL] Erro ao deletar tarefa: $e');
-      _error = 'Erro ao deletar tarefa: ${e.toString()}';
+      _mutationError = 'Erro aodeletar tarefa: ${e.toString()}';
       notifyListeners();
       return false;
     }
@@ -973,12 +994,12 @@ class KanbanController extends ChangeNotifier {
         await loadBoard(teamId: _teamId, projectId: _projectId);
         return true;
       }
-      _error = response.message ?? 'Erro ao marcar resultado';
+      _mutationError = response.message ?? 'Erro ao marcar resultado';
       notifyListeners();
       return false;
     } catch (e) {
       debugPrint('❌ [KANBAN_CTRL] markTaskResult: $e');
-      _error = 'Erro ao marcar resultado: ${e.toString()}';
+      _mutationError = 'Erro aomarcar resultado: ${e.toString()}';
       notifyListeners();
       return false;
     }
@@ -996,12 +1017,12 @@ class KanbanController extends ChangeNotifier {
         await loadBoard(teamId: _teamId, projectId: _projectId);
         return true;
       }
-      _error = response.message ?? 'Erro ao transferir tarefa';
+      _mutationError = response.message ?? 'Erro ao transferir tarefa';
       notifyListeners();
       return false;
     } catch (e) {
       debugPrint('❌ [KANBAN_CTRL] transferTask: $e');
-      _error = 'Erro ao transferir tarefa: ${e.toString()}';
+      _mutationError = 'Erro aotransferir tarefa: ${e.toString()}';
       notifyListeners();
       return false;
     }
@@ -1086,7 +1107,7 @@ class KanbanController extends ChangeNotifier {
           _board = previousBoard;
           notifyListeners();
         }
-        _error = 'Coluna de origem da tarefa não identificada.';
+        _mutationError = 'Coluna de origem da tarefa não identificada.';
         notifyListeners();
         return false;
       }
@@ -1111,7 +1132,7 @@ class KanbanController extends ChangeNotifier {
           _board = previousBoard;
           notifyListeners();
         }
-        _error = response.message ?? 'Erro ao mover tarefa';
+        _mutationError = response.message ?? 'Erro ao mover tarefa';
         notifyListeners();
         return false;
       }
@@ -1123,7 +1144,7 @@ class KanbanController extends ChangeNotifier {
         notifyListeners();
       }
       debugPrint('❌ [KANBAN_CTRL] Erro ao mover tarefa: $e');
-      _error = 'Erro ao mover tarefa: ${e.toString()}';
+      _mutationError = 'Erro aomover tarefa: ${e.toString()}';
       notifyListeners();
       return false;
     }
@@ -1410,7 +1431,7 @@ class KanbanController extends ChangeNotifier {
   Future<bool> bulkDeleteSelectedTasks() async {
     if (!_bulkSelectionActive || _bulkSelectedTaskIds.isEmpty) return false;
     if (!(permissions?.canDeleteTasks ?? false)) {
-      _error =
+      _mutationError =
           'Sem permissão para excluir cards. Verifique o perfil no CRM web.';
       notifyListeners();
       return false;
@@ -1421,7 +1442,7 @@ class KanbanController extends ChangeNotifier {
         .where((e) => e.isNotEmpty)
         .toList();
     if (ids.isEmpty) {
-      _error = 'Nenhum id de card válido para excluir.';
+      _mutationError = 'Nenhum id de card válido para excluir.';
       notifyListeners();
       return false;
     }
@@ -1448,10 +1469,10 @@ class KanbanController extends ChangeNotifier {
       _bulkDeleting = false;
 
       if (failures > 0) {
-        _error =
+        _mutationError =
             lastFailMessage ?? '$failures exclusão(ões) falhou(ram). Verifique a conexão ou as permissões.';
       } else {
-        _error = null;
+        _mutationError = null;
       }
 
       notifyListeners();
@@ -1467,6 +1488,145 @@ class KanbanController extends ChangeNotifier {
           lastFailMessage ?? 'Erro ao excluir em massa: ${e.toString()}';
       notifyListeners();
       return false;
+    }
+  }
+
+  // ── Funil ao vivo (socket `/kanban`, 28/09/2026) ─────────────────────
+  //
+  // Lead novo entrava só como notificação; o card só aparecia ao recarregar.
+  // Agora o quadro escuta a sala da equipe, igual ao web: card criado entra
+  // na coluna dele (a primeira, no caso do lead), movido/editado é trocado
+  // no lugar, apagado sai. Sem refetch: o payload já é o card formatado.
+
+  bool _socketLigado = false;
+
+  void _assinarFunilAoVivo(String? teamId) {
+    if (teamId == null || teamId.isEmpty) return;
+    final socket = KanbanSocketService.instance;
+    if (!_socketLigado) {
+      _socketLigado = true;
+      socket.onTaskCreated = _aoCardChegar;
+      socket.onTaskMoved = _aoCardMudar;
+      socket.onTaskUpdated = _aoCardMudar;
+      socket.onTaskDeleted = _aoCardSair;
+      socket.onReconnected = recarregarSeAberto;
+      socket.onResumed = recarregarSeAberto;
+    }
+    unawaited(socket.joinTeam(teamId));
+  }
+
+  /// O card pertence ao quadro em cartaz? (coluna do quadro e, se houver
+  /// projeto selecionado, o mesmo projeto.)
+  bool _cardEDesteQuadro(KanbanTask task) {
+    final board = _board;
+    if (board == null) return false;
+    if (!board.columns.any((c) => c.id == task.columnId)) return false;
+    if (_projectId != null &&
+        task.projectId != null &&
+        task.projectId != _projectId) {
+      return false;
+    }
+    return true;
+  }
+
+  KanbanTask? _parseCard(Map<String, dynamic> json) {
+    try {
+      return KanbanTask.fromJson(json);
+    } catch (e) {
+      debugPrint('[KANBAN_CTRL] card do socket ilegível: $e');
+      return null;
+    }
+  }
+
+  void _trocarQuadro(List<KanbanTask> tasks) {
+    final board = _board;
+    if (board == null) return;
+    _board = KanbanBoard(
+      columns: board.columns,
+      tasks: tasks,
+      projects: board.projects,
+      permissions: board.permissions,
+      team: board.team,
+    );
+    notifyListeners();
+  }
+
+  void _aoCardChegar(Map<String, dynamic> json) {
+    final task = _parseCard(json);
+    final board = _board;
+    if (task == null || board == null || !_cardEDesteQuadro(task)) return;
+    if (board.tasks.any((t) => t.id == task.id)) return;
+    // No topo da coluna: é o que acabou de chegar (-1 fica acima do
+    // position 0 já existente; a coluna ordena por position).
+    final noTopo = task.copyWith(position: -1);
+    _columnTotalDelta[task.columnId] =
+        (_columnTotalDelta[task.columnId] ?? 0) + 1;
+    _trocarQuadro([noTopo, ...board.tasks]);
+  }
+
+  void _aoCardMudar(Map<String, dynamic> json) {
+    final task = _parseCard(json);
+    final board = _board;
+    if (task == null || board == null) return;
+    final indice = board.tasks.indexWhere((t) => t.id == task.id);
+    final pertence = _cardEDesteQuadro(task);
+    if (indice == -1) {
+      // Chegou de outro funil/coluna que não estava em cartaz.
+      if (pertence) _aoCardChegar(json);
+      return;
+    }
+    final atual = board.tasks[indice];
+    if (!pertence) {
+      // Saiu deste quadro (foi para outro funil).
+      _columnTotalDelta[atual.columnId] =
+          (_columnTotalDelta[atual.columnId] ?? 0) - 1;
+      _trocarQuadro([...board.tasks]..removeAt(indice));
+      return;
+    }
+    if (atual.columnId != task.columnId) {
+      _columnTotalDelta[atual.columnId] =
+          (_columnTotalDelta[atual.columnId] ?? 0) - 1;
+      _columnTotalDelta[task.columnId] =
+          (_columnTotalDelta[task.columnId] ?? 0) + 1;
+    }
+    _trocarQuadro([...board.tasks]..[indice] = task);
+  }
+
+  void _aoCardSair(String taskId) {
+    final board = _board;
+    if (board == null) return;
+    final indice = board.tasks.indexWhere((t) => t.id == taskId);
+    if (indice == -1) return;
+    final atual = board.tasks[indice];
+    _columnTotalDelta[atual.columnId] =
+        (_columnTotalDelta[atual.columnId] ?? 0) - 1;
+    _trocarQuadro([...board.tasks]..removeAt(indice));
+  }
+
+  /// Relê o quadro em cartaz SEM passar por `loadBoard` (que liga `_loading`
+  /// e troca o quadro pelo esqueleto). Usado quando o socket volta de uma
+  /// queda, quando o app volta do segundo plano e quando chega aviso de
+  /// lead: o quadro fica na tela e só o conteúdo muda.
+  bool _relendoEmSilencio = false;
+
+  Future<void> recarregarSeAberto() async {
+    if (_board == null || _loading || _teamId == null) return;
+    if (_relendoEmSilencio) return;
+    _relendoEmSilencio = true;
+    try {
+      final response = await _kanbanService.getBoard(
+        _teamId!,
+        projectId: _projectId,
+        filters: _boardFilters,
+      );
+      if (response.success && response.data != null && _board != null) {
+        _columnTotalDelta.clear();
+        _updateState(board: response.data);
+      }
+    } catch (e) {
+      debugPrint('[KANBAN_CTRL] releitura silenciosa falhou: $e');
+    } finally {
+      _relendoEmSilencio = false;
     }
   }
 
@@ -1486,9 +1646,14 @@ class KanbanController extends ChangeNotifier {
       // os contadores de página ficavam fora de sincronia com o novo
       // conjunto de cards e o "Carregar mais" duplicava ou parava cedo.
       _resetColumnPagination(board);
+      _assinarFunilAoVivo(teamId ?? _teamId);
     }
     if (loading != null) _loading = loading;
-    if (clearError) _error = null;
+    if (clearError) {
+      _error = null;
+      // Quadro recarregado: a falha de ação antiga não tem mais contexto.
+      _mutationError = null;
+    }
     if (error != null) _error = error;
     if (teamId != null) _teamId = teamId;
     if (projectId != null) _projectId = projectId;
@@ -1497,9 +1662,11 @@ class KanbanController extends ChangeNotifier {
 
   /// Limpa estado
   void clear() {
+    KanbanSocketService.instance.leaveTeam();
     _board = null;
     _loading = false;
     _error = null;
+    _mutationError = null;
     _teamId = null;
     _projectId = null;
     _projects = [];

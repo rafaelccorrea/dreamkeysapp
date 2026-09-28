@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import '../../core/constants/api_constants.dart';
 import '../../core/push/app_push_service.dart';
 import '../../core/session/session_bootstrap.dart';
+import '../../features/kanban/controllers/kanban_controller.dart';
 import '../utils/avatar_url_resolver.dart';
 import 'api_service.dart';
 import 'module_access_service.dart';
@@ -455,6 +456,9 @@ class AuthService {
       _apiService.clearToken();
       await SecureStorageService.instance.clearAuthSessionKeepCredentials();
       ModuleAccessService.instance.clear();
+      // Funil é singleton: o próximo login (outra pessoa, outra empresa)
+      // herdaria equipe/funil/quadro e a sala do socket deste.
+      KanbanController.instance.clear();
       SubscriptionService.instance.clearCache();
       // Sem isto, o `SessionBootstrap` continuaria a dizer "pronto" depois do
       // logout — mas o companyId acabou de ser apagado. O próximo login (o do
@@ -476,6 +480,7 @@ class AuthService {
         _apiService.clearToken();
         await SecureStorageService.instance.clearAuthSessionKeepCredentials();
         ModuleAccessService.instance.clear();
+        KanbanController.instance.clear();
         SessionBootstrap.instance.reset();
         await LiveActivityService.instance.endCheckIn();
       } catch (clearError) {

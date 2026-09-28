@@ -9,6 +9,7 @@ import '../services/notification_websocket_service.dart';
 import '../services/notification_counts_service.dart';
 import '../../../shared/services/secure_storage_service.dart';
 import '../../../shared/services/auth_service.dart';
+import '../../kanban/controllers/kanban_controller.dart';
 
 /// Controller para gerenciar estado das notificações
 class NotificationController extends ChangeNotifier {
@@ -148,6 +149,11 @@ class NotificationController extends ChangeNotifier {
     }
   }
 
+  static bool _ehAvisoDeLead(String? type) {
+    final t = (type ?? '').toLowerCase();
+    return t.endsWith('_lead_received') || t == 'task_assigned';
+  }
+
   /// Configura callbacks do WebSocket
   void _setupWebSocketCallbacks() {
     _wsService.setOnNotificationReceived((notification) {
@@ -157,6 +163,12 @@ class NotificationController extends ChangeNotifier {
         _unreadCount++;
       }
       notifyListeners();
+      // Rede de segurança do funil ao vivo (28/09/2026): se o socket do
+      // Kanban perdeu o `task_created`, o aviso de lead recarrega o quadro
+      // em cartaz. Sem quadro aberto, não faz nada.
+      if (_ehAvisoDeLead(notification.type)) {
+        unawaited(KanbanController.instance.recarregarSeAberto());
+      }
     });
 
     _wsService.setOnBadgeUpdate((count) {

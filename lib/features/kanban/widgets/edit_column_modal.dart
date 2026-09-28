@@ -88,7 +88,7 @@ class _EditColumnModalState extends State<EditColumnModal> {
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(controller.error ?? 'Erro ao atualizar coluna'),
+            content: Text(controller.mutationError ?? 'Erro ao atualizar coluna'),
             backgroundColor: Colors.red,
           ),
         );

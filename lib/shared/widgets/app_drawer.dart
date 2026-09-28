@@ -20,6 +20,7 @@ import 'logout_confirm_sheet.dart';
 import 'skeleton_box.dart';
 import '../../features/notifications/controllers/notification_controller.dart';
 import '../../features/chat/controllers/chat_unread_controller.dart';
+import '../../features/kanban/controllers/kanban_controller.dart';
 
 /// Drawer (menu lateral) — itens alinhados ao menu **visível** do web
 /// (`imobx-front/src/components/layout/Drawer.tsx`): sem Chat, Matches,
@@ -458,6 +459,10 @@ class _AppDrawerState extends State<AppDrawer> {
     }
     NotificationController.instance.subscribeCompany(company.id);
     NotificationController.instance.clear();
+    // O funil é singleton: sem isto, a empresa nova abria com equipe, funil
+    // e quadro da anterior (o `loadBoard()` sem argumentos reaproveita
+    // `_teamId`/`_projectId`), e a sala do socket continuava a antiga.
+    KanbanController.instance.clear();
 
     // 1) Limpa o cache local de permissões (storage) ANTES de
     //    `refreshPermissions` — assim a próxima leitura via `_getMyPermissions`
