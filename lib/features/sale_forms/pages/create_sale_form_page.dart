@@ -42,7 +42,10 @@ const List<String> _kUfs = [
   'SP', 'SE', 'TO',
 ];
 
-enum _Funcao { corretor, captador, sdr, gerencia }
+/// Diretor e Gestor SDR são da família da gerência (viajam em
+/// `commissionsData.gerencias` com `papel`), como na web; aparecem só quando
+/// as regras de comissão da empresa os habilitam.
+enum _Funcao { corretor, captador, sdr, gerencia, diretor, gestorSdr }
 
 extension _FuncaoX on _Funcao {
   String get label => switch (this) {
@@ -50,12 +53,29 @@ extension _FuncaoX on _Funcao {
         _Funcao.captador => 'Captador',
         _Funcao.sdr => 'SDR',
         _Funcao.gerencia => 'Gerência',
+        _Funcao.diretor => 'Diretor',
+        _Funcao.gestorSdr => 'Gestor SDR',
       };
   String get api => switch (this) {
         _Funcao.corretor => 'corretor',
         _Funcao.captador => 'captador',
         _Funcao.sdr => 'sdr',
         _Funcao.gerencia => 'gerencia',
+        _Funcao.diretor => 'diretor',
+        _Funcao.gestorSdr => 'gestor_sdr',
+      };
+
+  /// Linhas que vão em `gerencias` (gestor comum, diretor, gestor SDR).
+  bool get ehGerencia =>
+      this == _Funcao.gerencia ||
+      this == _Funcao.diretor ||
+      this == _Funcao.gestorSdr;
+
+  /// `papel` da linha de gerência no back; gestor comum não leva papel.
+  String? get papel => switch (this) {
+        _Funcao.diretor => 'diretor',
+        _Funcao.gestorSdr => 'gestor_sdr',
+        _ => null,
       };
 }
 
@@ -191,6 +211,18 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
 
   // Comissões
   final List<_Participant> _participants = [];
+  // Travas de comissão da empresa: decidem quais funções aparecem (Diretor,
+  // Gestor SDR), a % fixa do diretor e as somas máximas de cada grupo.
+  SaleFormCommissionRules _rules = SaleFormCommissionRules.padrao;
+
+  List<_Funcao> get _funcoesDisponiveis => [
+        _Funcao.corretor,
+        _Funcao.captador,
+        _Funcao.sdr,
+        _Funcao.gerencia,
+        if (_rules.usaDiretor) _Funcao.diretor,
+        if (_rules.usaGestorSdr) _Funcao.gestorSdr,
+      ];
 
   // Vincular usuários
   final List<AdminUser> _linkedUsers = [];
@@ -261,7 +293,34 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     _type = widget.choice?.type ?? SaleFormType.terceiros;
     _teamId = widget.choice?.teamId ?? '';
     _teamName = widget.choice?.teamName ?? '';
+    _loadRules();
     if (_isEdit) _loadExisting();
+  }
+
+  Future<void> _loadRules() async {
+    final res = await SaleFormsService.instance.getCommissionRules();
+    if (!mounted || !res.success || res.data == null) return;
+    setState(() {
+      _rules = res.data!;
+      // Diretor já escolhido (edição hidratada antes das regras): a % é fixa.
+      for (final p in _participants) {
+        if (p.funcao == _Funcao.diretor) _aplicarPercentFixo(p);
+      }
+    });
+  }
+
+  /// Diretor tem percentual fixo pelas regras da empresa — o campo só reflete.
+  void _aplicarPercentFixo(_Participant p) {
+    final fixo = _rules.diretorPercent;
+    if (fixo == null) return;
+    p.percent.text = _pctText(fixo);
+  }
+
+  /// % em pt-BR ("2,5"): o `_money` trata ponto como milhar, então o texto
+  /// do campo precisa ir com vírgula para voltar como o mesmo número.
+  static String _pctText(num v) {
+    final s = v.toStringAsFixed(2).replaceFirst(RegExp(r'\.?0+$'), '');
+    return s.replaceFirst('.', ',');
   }
 
   Future<void> _loadExisting() async {
@@ -399,17 +458,22 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
           p.valorFixo.text = vf is num ? moneyText(vf) : '';
         } else {
           final pc = c['porcentagem'];
-          p.percent.text = pc is num ? pc.toString() : '';
+          p.percent.text = pc is num ? _pctText(pc) : '';
         }
         _participants.add(p);
       }
       for (final g in (cd['gerencias'] as List? ?? const [])) {
         if (g is! Map) continue;
         final p = _Participant();
-        p.funcao = _Funcao.gerencia;
-        p.userName = (g['nome'] ?? 'Gerência').toString();
+        p.funcao = switch (g['papel']?.toString()) {
+          'diretor' => _Funcao.diretor,
+          'gestor_sdr' => _Funcao.gestorSdr,
+          _ => _Funcao.gerencia,
+        };
+        p.userId = g['gestorId']?.toString();
+        p.userName = (g['nome'] ?? p.funcao.label).toString();
         final pc = g['porcentagem'];
-        p.percent.text = pc is num ? pc.toString() : '';
+        p.percent.text = pc is num ? _pctText(pc) : '';
         p.emitirNota = g['emitirNota'] == true;
         _participants.add(p);
       }
@@ -429,6 +493,10 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
         return _Funcao.sdr;
       case 'gerencia':
         return _Funcao.gerencia;
+      case 'diretor':
+        return _Funcao.diretor;
+      case 'gestor_sdr':
+        return _Funcao.gestorSdr;
       default:
         return _Funcao.corretor;
     }
@@ -642,12 +710,16 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     final gerencias = <Map<String, dynamic>>[];
     var nivel = 0;
     for (final p in _participants) {
-      if (p.funcao == _Funcao.gerencia) {
+      if (p.funcao.ehGerencia) {
         nivel++;
         gerencias.add({
           'nivel': nivel,
-          'porcentagem': _money(p.percent.text) ?? 0,
+          'porcentagem': p.funcao == _Funcao.diretor
+              ? (_rules.diretorPercent ?? _money(p.percent.text) ?? 0)
+              : (_money(p.percent.text) ?? 0),
           'nome': p.userName,
+          'gestorId': p.userId,
+          'papel': p.funcao.papel,
           'emitirNota': p.emitirNota,
         });
       } else {
@@ -922,14 +994,52 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
           return 'Descreva o modelo de pagamento da comissão.';
         }
         for (final p in _participants) {
-          if (p.userId == null && p.funcao != _Funcao.gerencia) {
+          if (p.userId == null && !p.funcao.ehGerencia) {
             return 'Selecione o usuário de cada participante da comissão.';
           }
         }
-        return null;
+        return _validarTravasDeComissao();
       default:
         return null;
     }
+  }
+
+  /// Mesmas travas da web (`validateSaleFormCommissions`): as somas valem
+  /// para a ficha, não por pessoa. SDR (valor fixo) fica fora das somas.
+  String? _validarTravasDeComissao() {
+    const tol = 0.001;
+    double corretores = 0, gerencia = 0, gestorSdr = 0;
+    for (final p in _participants) {
+      final v = _money(p.percent.text) ?? 0;
+      switch (p.funcao) {
+        case _Funcao.corretor:
+        case _Funcao.captador:
+          corretores += v;
+        case _Funcao.gerencia:
+          gerencia += v;
+        case _Funcao.gestorSdr:
+          gestorSdr += v;
+        case _Funcao.diretor:
+          if (!_rules.usaDiretor) {
+            return 'Comissão de diretor não está habilitada nas regras de comissão da empresa.';
+          }
+        case _Funcao.sdr:
+          break;
+      }
+    }
+    final maxC = _rules.corretoresTotalMax;
+    if (maxC != null && corretores > maxC + tol) {
+      return 'Corretores e captadores somam no máximo ${_pctText(maxC)}% na ficha. Atual: ${_pctText(corretores)}%';
+    }
+    final maxG = _rules.gerenciaTotalMax;
+    if (maxG != null && gerencia > maxG + tol) {
+      return 'Gestores/gerentes somam no máximo ${_pctText(maxG)}% na ficha (divida entre eles). Atual: ${_pctText(gerencia)}%';
+    }
+    final maxS = _rules.gestorSdrMax;
+    if (maxS != null && gestorSdr > maxS + tol) {
+      return 'Gestores SDR somam no máximo ${_pctText(maxS)}% na ficha. Atual: ${_pctText(gestorSdr)}%';
+    }
+    return null;
   }
 
   void _next(int total) {
@@ -1321,8 +1431,14 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
             index: i,
             participant: _participants[i],
             accent: _accent,
+            funcoes: _funcoesDisponiveis,
+            diretorPercent: _rules.diretorPercent,
             onPickUser: () => _pickParticipantUser(_participants[i]),
-            onFuncao: (f) => setState(() => _participants[i].funcao = f),
+            onFuncao: (f) => setState(() {
+              final p = _participants[i];
+              p.funcao = f;
+              if (f == _Funcao.diretor) _aplicarPercentFixo(p);
+            }),
             onEmitir: (v) => setState(() => _participants[i].emitirNota = v),
             onRemove: () => setState(() {
               _participants[i].dispose();
@@ -1911,6 +2027,8 @@ class _ParticipantCard extends StatelessWidget {
     required this.index,
     required this.participant,
     required this.accent,
+    required this.funcoes,
+    required this.diretorPercent,
     required this.onPickUser,
     required this.onFuncao,
     required this.onEmitir,
@@ -1919,6 +2037,13 @@ class _ParticipantCard extends StatelessWidget {
   final int index;
   final _Participant participant;
   final Color accent;
+
+  /// Funções habilitadas pelas regras da empresa (a atual entra mesmo que
+  /// a empresa tenha desligado a função depois — ficha antiga continua legível).
+  final List<_Funcao> funcoes;
+
+  /// % fixa do diretor (regras da empresa); `null` = empresa não usa diretor.
+  final double? diretorPercent;
   final VoidCallback onPickUser;
   final ValueChanged<_Funcao> onFuncao;
   final ValueChanged<bool> onEmitir;
@@ -1929,6 +2054,11 @@ class _ParticipantCard extends StatelessWidget {
     final p = participant;
     final muted = ThemeHelpers.textSecondaryColor(context);
     final isSdr = p.funcao == _Funcao.sdr;
+    final isDiretor = p.funcao == _Funcao.diretor;
+    final opcoes = [
+      ...funcoes,
+      if (!funcoes.contains(p.funcao)) p.funcao,
+    ];
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
@@ -1978,7 +2108,7 @@ class _ParticipantCard extends StatelessWidget {
             spacing: 6,
             runSpacing: 6,
             children: [
-              for (final f in _Funcao.values)
+              for (final f in opcoes)
                 GestureDetector(
                   onTap: () => onFuncao(f),
                   child: Container(
@@ -2010,16 +2140,31 @@ class _ParticipantCard extends StatelessWidget {
           const SizedBox(height: 10),
           TextField(
             controller: isSdr ? p.valorFixo : p.percent,
+            // Diretor: % fixa pelas regras da empresa — o campo só mostra.
+            readOnly: isDiretor,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             inputFormatters: isSdr
                 ? [CurrencyInputFormatter()]
                 : [FilteringTextInputFormatter.allow(RegExp(r'[\d.,]'))],
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   fontWeight: FontWeight.w600,
+                  color: isDiretor ? muted : null,
                 ),
             decoration: InputDecoration(
-              labelText: isSdr ? 'Valor fixo' : 'Porcentagem (%)',
+              labelText: isSdr
+                  ? 'Valor fixo'
+                  : isDiretor
+                      ? 'Porcentagem fixa (%)'
+                      : 'Porcentagem (%)',
               prefixText: isSdr ? 'R\$ ' : null,
+              helperText: isDiretor
+                  ? (diretorPercent != null
+                      ? 'Definida nas regras de comissão da empresa.'
+                      : 'A empresa não usa comissão de diretor.')
+                  : null,
+              suffixIcon: isDiretor
+                  ? Icon(LucideIcons.lock, size: 16, color: muted)
+                  : null,
             ),
           ),
           const SizedBox(height: 4),

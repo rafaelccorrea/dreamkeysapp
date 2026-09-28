@@ -662,6 +662,10 @@ class ApiConstants {
   // Espelha `SaleFormsController` em `sistema/fichas-venda`.
   static const String saleForms = '/sistema/fichas-venda';
   static const String saleFormsStats = '/sistema/fichas-venda/stats';
+  // Travas de comissão da empresa (Diretor fixo, tetos de gerência/corretores/
+  // gestor SDR) — `MandatorySignerConfigController`, BypassPermissions.
+  static const String saleFormCommissionRules =
+      '/sistema/mandatory-signer-config/settings/sale-form-commission-rules';
   static String saleFormById(String id) => '/sistema/fichas-venda/$id';
   static String saleFormCancelar(String id) =>
       '/sistema/fichas-venda/$id/cancelar';

@@ -597,6 +597,30 @@ class SaleFormsService {
     }
   }
 
+  /// Travas de comissão da empresa da ficha. Mesmo contrato da web
+  /// (`saleFormCommissionRules.ts`): `null` num campo = sem trava; no
+  /// diretor, `null` = a empresa não usa a função.
+  Future<ApiResponse<SaleFormCommissionRules>> getCommissionRules() async {
+    try {
+      final res = await _api.get<Map<String, dynamic>>(
+        ApiConstants.saleFormCommissionRules,
+      );
+      if (!res.success || res.data == null) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao obter regras de comissão',
+          statusCode: res.statusCode,
+        );
+      }
+      return ApiResponse.success(
+        data: SaleFormCommissionRules.fromJson(res.data!),
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [SALE_FORMS] commission rules: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
   Future<ApiResponse<SaleFormStats>> getStats({
     SaleFormFilters filters = const SaleFormFilters(),
   }) async {
@@ -1331,4 +1355,57 @@ DateTime? _date(dynamic v) {
 Map<String, dynamic>? _map(dynamic v) {
   if (v is Map) return Map<String, dynamic>.from(v);
   return null;
+}
+
+
+/// Travas de comissão da ficha de venda, por empresa
+/// (`companies.sale_form_commission_rules`). Espelho de
+/// `imobx-front/src/utils/saleFormCommissionRules.ts`.
+class SaleFormCommissionRules {
+  const SaleFormCommissionRules({
+    this.gerenciaTotalMax = 5,
+    this.corretoresTotalMax = 60,
+    this.diretorPercent,
+    this.gestorSdrMax = 2,
+  });
+
+  /// Soma máxima dos gestores/gerentes (gerências sem papel).
+  final double? gerenciaTotalMax;
+
+  /// Soma máxima de corretores + captadores.
+  final double? corretoresTotalMax;
+
+  /// Percentual FIXO do diretor; `null` = a empresa não usa diretor.
+  final double? diretorPercent;
+
+  /// Soma máxima dos gestores SDR (grupo próprio, fora da gerência).
+  final double? gestorSdrMax;
+
+  static const SaleFormCommissionRules padrao = SaleFormCommissionRules();
+
+  bool get usaDiretor => diretorPercent != null;
+  bool get usaGestorSdr => gestorSdrMax != null;
+
+  static double? _pct(dynamic v, double? fallback) {
+    if (v == null) return null;
+    final n = v is num ? v.toDouble() : double.tryParse(v.toString());
+    if (n == null || n.isNaN || n < 0) return fallback;
+    return n;
+  }
+
+  factory SaleFormCommissionRules.fromJson(Map<String, dynamic> j) {
+    const d = SaleFormCommissionRules();
+    return SaleFormCommissionRules(
+      gerenciaTotalMax: j.containsKey('gerenciaTotalMax')
+          ? _pct(j['gerenciaTotalMax'], d.gerenciaTotalMax)
+          : d.gerenciaTotalMax,
+      corretoresTotalMax: j.containsKey('corretoresTotalMax')
+          ? _pct(j['corretoresTotalMax'], d.corretoresTotalMax)
+          : d.corretoresTotalMax,
+      diretorPercent: _pct(j['diretorPercent'], null),
+      gestorSdrMax: j.containsKey('gestorSdrMax')
+          ? _pct(j['gestorSdrMax'], d.gestorSdrMax)
+          : d.gestorSdrMax,
+    );
+  }
 }
