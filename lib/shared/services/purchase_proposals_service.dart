@@ -126,6 +126,20 @@ class PurchaseProposal {
 
   String? get saleUnit => _strNull(raw['saleUnit']);
   String? get captureUnit => _strNull(raw['captureUnit']);
+  String? get teamId => _strNull(raw['teamId']);
+  String? get observations => _strNull(raw['observations']);
+
+  /// Usuários vinculados (`linkedUsers: [{ userId }]`) — o web hidrata a
+  /// etapa 3 ("Usuários que poderão ver esta proposta") a partir daqui.
+  List<String> get linkedUserIds {
+    final list = raw['linkedUsers'];
+    if (list is! List) return const [];
+    return list
+        .whereType<Map>()
+        .map((m) => _str(m['userId']))
+        .where((id) => id.isNotEmpty)
+        .toList();
+  }
 
   // Proponent (comprador)
   String? get proponentName => _strNull(raw['proponentName']);
@@ -356,6 +370,35 @@ class ProposalFilters {
     this.sortOrder = 'DESC',
   });
 
+  /// Contagem do botão "Filtros" — campos do drawer do web (status, etapa,
+  /// unidade, autor, datas). Busca fica fora: tem campo próprio na lista.
+  int get drawerFilterCount {
+    var n = 0;
+    if (status != null) n++;
+    if (etapa != null) n++;
+    if (saleUnit?.trim().isNotEmpty ?? false) n++;
+    if (userId?.isNotEmpty ?? false) n++;
+    if (dateFrom != null) n++;
+    if (dateTo != null) n++;
+    return n;
+  }
+
+  /// "Limpar" do modal (web `clearDrawerFilters`): zera os recortes, mantém
+  /// busca, ordenação e paginação.
+  ProposalFilters withoutListFilters() => ProposalFilters(
+        search: search,
+        saleFormId: saleFormId,
+        listDeletedOnly: listDeletedOnly,
+        limit: limit,
+        sortBy: sortBy,
+        sortOrder: sortOrder,
+      );
+
+  static String _ymd(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-'
+      '${d.month.toString().padLeft(2, '0')}-'
+      '${d.day.toString().padLeft(2, '0')}';
+
   Map<String, String> toQuery() {
     final qp = <String, String>{
       'page': '$page',
@@ -372,12 +415,11 @@ class ProposalFilters {
     if (saleUnit != null && saleUnit!.trim().isNotEmpty) {
       qp['saleUnit'] = saleUnit!.trim();
     }
-    if (dateFrom != null) {
-      qp['dateFrom'] = dateFrom!.toUtc().toIso8601String();
-    }
-    if (dateTo != null) {
-      qp['dateTo'] = dateTo!.toUtc().toIso8601String();
-    }
+    // `YYYY-MM-DD` do dia local, como o web (`localDateToYmdString`); no
+    // `dateTo` o back inclui o dia inteiro. Antes ia o instante UTC da
+    // meia-noite local, o que cortava o último dia do período.
+    if (dateFrom != null) qp['dateFrom'] = _ymd(dateFrom!);
+    if (dateTo != null) qp['dateTo'] = _ymd(dateTo!);
     if (etapa != null) qp['etapa'] = '${etapa!.number}';
     if (status != null) qp['status'] = status!.apiValue;
     if (listDeletedOnly == true) qp['listDeletedOnly'] = 'true';
@@ -604,308 +646,215 @@ class ProposalHistorico {
       );
 }
 
-/// Payload de criar/editar (mesmos campos do `CreateProposalAuthDto` no back).
+/// Payload de criar/editar — espelha EXATAMENTE o objeto que o
+/// `CreatePurchaseProposalPage.tsx` (web) manda no create e no update,
+/// inclusive no que ele NÃO manda:
+///   - sem `brokersData`/`captadoresData` (o web não envia; `captadoresData`
+///     nem existe no `CreateProposalAuthDto` e cai no `whitelist`);
+///   - `propertyData` só com as chaves que o back lê (`address`, não
+///     `street`/`number`/`complement`/`cityRegistry`);
+///   - proprietário (`propertyData.owner*`) só no update — a etapa 2 fica
+///     travada na criação.
+/// Os campos guardam o texto do formulário (com máscara, como o web) e o
+/// [toJson] aplica as mesmas conversões (`toDigits`, `parseInt || padrão`,
+/// `|| undefined`).
 class CreateProposalPayload {
   CreateProposalPayload();
 
-  String? saleFormId;
   DateTime? proposalDate;
-  int? validityDays;
+  String validityDays = '';
   double? proposedPrice;
-  String? paymentConditions;
+  String paymentConditions = '';
   double? downPayment;
-  int? downPaymentDays;
+  String downPaymentDays = '';
   double? commissionPercentage;
-  int? deliveryDays;
+  String deliveryDays = '';
   double? monthlyPenalty;
-  String? saleUnit;
-  String? captureUnit;
-  String? observations;
+  String teamId = '';
+  String saleUnit = '';
+  String captureUnit = '';
+  String observations = '';
 
-  // Comprador
-  String? buyerName;
-  String? buyerCpf;
-  String? buyerRg;
+  // Comprador (proponente)
+  String buyerName = '';
+  String buyerCpf = '';
+  String buyerRg = '';
   DateTime? buyerBirthDate;
-  String? buyerEmail;
-  String? buyerPhone;
-  String? buyerProfession;
-  String? buyerNationality;
-  String? buyerMaritalStatus;
-  String? buyerMarriageRegime;
-  String? buyerZipCode;
-  String? buyerStreet;
-  String? buyerNumber;
-  String? buyerComplement;
-  String? buyerNeighborhood;
-  String? buyerCity;
-  String? buyerState;
+  String buyerEmail = '';
+  String buyerPhone = '';
+  String buyerProfession = '';
+  String buyerNationality = '';
+  String buyerMaritalStatus = '';
+  String buyerMarriageRegime = '';
+  String buyerZipCode = '';
+  String buyerAddress = '';
+  String buyerNeighborhood = '';
+  String buyerCity = '';
+  String buyerState = '';
 
-  // Cônjuge comprador
-  String? buyerSpouseName;
-  String? buyerSpouseCpf;
-  String? buyerSpouseRg;
-  DateTime? buyerSpouseBirthDate;
-  String? buyerSpouseEmail;
-  String? buyerSpousePhone;
-  String? buyerSpouseProfession;
+  // Cônjuge do comprador
+  String buyerSpouseName = '';
+  String buyerSpouseCpf = '';
+  String buyerSpouseRg = '';
+  String buyerSpouseEmail = '';
+  String buyerSpousePhone = '';
+  String buyerSpouseProfession = '';
 
   // Imóvel
-  String? propertyRegistry;
-  String? propertyNotary;
-  String? propertyCityRegistry;
-  String? propertyCode;
-  String? propertyZipCode;
-  String? propertyAddress;
-  String? propertyStreet;
-  String? propertyNumber;
-  String? propertyComplement;
-  String? propertyNeighborhood;
-  String? propertyCity;
-  String? propertyState;
+  String propertyRegistry = '';
+  String propertyNotary = '';
+  String propertyCode = '';
+  String propertyZipCode = '';
+  String propertyAddress = '';
+  String propertyNeighborhood = '';
+  String propertyCity = '';
+  String propertyState = '';
 
-  // Proprietário
-  String? ownerName;
-  String? ownerCpf;
-  String? ownerRg;
+  // Proprietário (etapa 2 — só vai no update, como no web)
+  String ownerName = '';
+  String ownerCpf = '';
+  String ownerRg = '';
   DateTime? ownerBirthDate;
-  String? ownerEmail;
-  String? ownerPhone;
-  String? ownerProfession;
-  String? ownerNationality;
-  String? ownerMaritalStatus;
-  String? ownerMarriageRegime;
-  String? ownerZipCode;
-  String? ownerAddress;
-  String? ownerNeighborhood;
-  String? ownerCity;
-  String? ownerState;
+  String ownerEmail = '';
+  String ownerPhone = '';
+  String ownerProfession = '';
+  String ownerNationality = '';
+  String ownerMaritalStatus = '';
+  String ownerMarriageRegime = '';
+  String ownerZipCode = '';
+  String ownerAddress = '';
+  String ownerNeighborhood = '';
+  String ownerCity = '';
+  String ownerState = '';
 
-  // Cônjuge proprietário
-  String? ownerSpouseName;
-  String? ownerSpouseCpf;
-  String? ownerSpouseRg;
-  DateTime? ownerSpouseBirthDate;
-  String? ownerSpouseEmail;
-  String? ownerSpousePhone;
-  String? ownerSpouseProfession;
+  // Cônjuge do proprietário
+  String ownerSpouseName = '';
+  String ownerSpouseCpf = '';
+  String ownerSpouseRg = '';
+  String ownerSpouseEmail = '';
+  String ownerSpousePhone = '';
+  String ownerSpouseProfession = '';
 
-  // Corretores / Captadores
-  List<ProposalBroker> brokersData = const [];
-  List<ProposalCaptador> captadoresData = const [];
-
-  List<String> linkedUserIds = const [];
-
-  void _addIfPresent(
-    Map<String, dynamic> body,
-    String key,
-    Object? value,
-  ) {
-    if (value == null) return;
-    if (value is String && value.trim().isEmpty) return;
+  /// `x || undefined` do web: string vazia não vai no JSON.
+  static void _put(Map<String, dynamic> body, String key, String value) {
+    if (value.isEmpty) return;
     body[key] = value;
   }
 
-  void _addDate(Map<String, dynamic> body, String key, DateTime? value) {
-    if (value == null) return;
-    body[key] = value.toIso8601String().substring(0, 10);
+  static String _digits(String v) => v.replaceAll(RegExp(r'\D'), '');
+
+  static String _isoDate(DateTime? d) {
+    if (d == null) return '';
+    return '${d.year.toString().padLeft(4, '0')}-'
+        '${d.month.toString().padLeft(2, '0')}-'
+        '${d.day.toString().padLeft(2, '0')}';
   }
 
-  /// Monta payload compatível com `CreateProposalAuthDto`.
-  Map<String, dynamic> toJson() {
+  /// `parseInt(v) || fallback` do web (NaN e 0 caem no padrão).
+  static int _intOr(String v, int fallback) {
+    final n = int.tryParse(v.trim());
+    return (n == null || n == 0) ? fallback : n;
+  }
+
+  /// Monta o corpo igual ao web. [forUpdate] = `executeEditSave`
+  /// (manda proprietário, `observations ?? ''` e `buyerMarriageRegime ?? ''`).
+  Map<String, dynamic> toJson({bool forUpdate = false}) {
     final body = <String, dynamic>{};
-    _addIfPresent(body, 'saleFormId', saleFormId);
-    _addDate(body, 'proposalDate', proposalDate);
-    _addIfPresent(body, 'validityDays', validityDays);
-    _addIfPresent(body, 'proposedPrice', proposedPrice);
-    _addIfPresent(body, 'paymentConditions', paymentConditions?.trim());
-    _addIfPresent(body, 'downPayment', downPayment);
-    _addIfPresent(body, 'downPaymentDays', downPaymentDays);
-    _addIfPresent(body, 'commissionPercentage', commissionPercentage);
-    _addIfPresent(body, 'deliveryDays', deliveryDays);
-    _addIfPresent(body, 'monthlyPenalty', monthlyPenalty);
-    _addIfPresent(body, 'saleUnit', saleUnit?.trim());
-    _addIfPresent(body, 'captureUnit', captureUnit?.trim());
-    _addIfPresent(body, 'observations', observations?.trim());
+    _put(body, 'proposalDate', _isoDate(proposalDate));
+    body['validityDays'] = _intOr(validityDays, 5);
+    body['proposedPrice'] = proposedPrice ?? 0;
+    body['paymentConditions'] = paymentConditions;
+    if (downPayment != null) body['downPayment'] = downPayment;
+    final dpd = int.tryParse(downPaymentDays.trim());
+    if (downPaymentDays.isNotEmpty && dpd != null) {
+      body['downPaymentDays'] = dpd;
+    }
+    body['commissionPercentage'] = commissionPercentage ?? 0;
+    body['deliveryDays'] = _intOr(deliveryDays, 30);
+    body['monthlyPenalty'] = monthlyPenalty ?? 0;
+    _put(body, 'teamId', teamId.trim());
+    _put(body, 'saleUnit', saleUnit);
+    _put(body, 'captureUnit', captureUnit);
 
     // Comprador
-    _addIfPresent(body, 'buyerName', buyerName?.trim());
-    _addIfPresent(body, 'buyerCpf', buyerCpf?.replaceAll(RegExp(r'\D'), ''));
-    _addIfPresent(body, 'buyerRg', buyerRg?.trim());
-    _addDate(body, 'buyerBirthDate', buyerBirthDate);
-    _addIfPresent(body, 'buyerEmail', buyerEmail?.trim());
-    _addIfPresent(
-        body, 'buyerPhone', buyerPhone?.replaceAll(RegExp(r'\D'), ''));
-    _addIfPresent(body, 'buyerProfession', buyerProfession?.trim());
-    _addIfPresent(body, 'buyerNationality', buyerNationality?.trim());
-    _addIfPresent(body, 'buyerMaritalStatus', buyerMaritalStatus?.trim());
-    _addIfPresent(body, 'buyerMarriageRegime', buyerMarriageRegime?.trim());
-    _addIfPresent(
-        body, 'buyerZipCode', buyerZipCode?.replaceAll(RegExp(r'\D'), ''));
-    _addIfPresent(body, 'buyerStreet', buyerStreet?.trim());
-    _addIfPresent(body, 'buyerNumber', buyerNumber?.trim());
-    _addIfPresent(body, 'buyerComplement', buyerComplement?.trim());
-    _addIfPresent(body, 'buyerNeighborhood', buyerNeighborhood?.trim());
-    _addIfPresent(body, 'buyerCity', buyerCity?.trim());
-    _addIfPresent(body, 'buyerState', buyerState?.trim());
+    body['buyerName'] = buyerName;
+    body['buyerCpf'] = _digits(buyerCpf);
+    body['buyerRg'] = buyerRg;
+    _put(body, 'buyerBirthDate', _isoDate(buyerBirthDate));
+    _put(body, 'buyerEmail', buyerEmail);
+    _put(body, 'buyerPhone', buyerPhone);
+    _put(body, 'buyerProfession', buyerProfession);
+    _put(body, 'buyerNationality', buyerNationality);
+    _put(body, 'buyerMaritalStatus', buyerMaritalStatus);
+    if (forUpdate) {
+      body['buyerMarriageRegime'] = buyerMarriageRegime;
+    } else {
+      _put(body, 'buyerMarriageRegime', buyerMarriageRegime);
+    }
+    body['buyerStreet'] = buyerAddress;
+    body['buyerNumber'] = '';
+    body['buyerComplement'] = '';
+    body['buyerNeighborhood'] = buyerNeighborhood;
+    body['buyerZipCode'] = buyerZipCode;
+    body['buyerCity'] = buyerCity;
+    body['buyerState'] = buyerState;
 
-    // Cônjuge comprador
-    _addIfPresent(body, 'buyerSpouseName', buyerSpouseName?.trim());
-    _addIfPresent(
-        body, 'buyerSpouseCpf', buyerSpouseCpf?.replaceAll(RegExp(r'\D'), ''));
-    _addIfPresent(body, 'buyerSpouseRg', buyerSpouseRg?.trim());
-    _addDate(body, 'buyerSpouseBirthDate', buyerSpouseBirthDate);
-    _addIfPresent(body, 'buyerSpouseEmail', buyerSpouseEmail?.trim());
-    _addIfPresent(body, 'buyerSpousePhone',
-        buyerSpousePhone?.replaceAll(RegExp(r'\D'), ''));
-    _addIfPresent(body, 'buyerSpouseProfession', buyerSpouseProfession?.trim());
+    // Cônjuge do comprador
+    _put(body, 'buyerSpouseName', buyerSpouseName);
+    if (buyerSpouseCpf.isNotEmpty) {
+      body['buyerSpouseCpf'] = _digits(buyerSpouseCpf);
+    }
+    _put(body, 'buyerSpouseRg', buyerSpouseRg);
+    _put(body, 'buyerSpouseEmail', buyerSpouseEmail);
+    _put(body, 'buyerSpousePhone', buyerSpousePhone);
+    _put(body, 'buyerSpouseProfession', buyerSpouseProfession);
 
-    // Imóvel — vai como propertyData JSON livre
-    final property = <String, dynamic>{};
-    _addIfPresent(property, 'registry', propertyRegistry?.trim());
-    _addIfPresent(property, 'notary', propertyNotary?.trim());
-    _addIfPresent(property, 'cityRegistry', propertyCityRegistry?.trim());
-    _addIfPresent(property, 'code', propertyCode?.trim());
-    _addIfPresent(property, 'zipCode',
-        propertyZipCode?.replaceAll(RegExp(r'\D'), ''));
-    _addIfPresent(property, 'address', propertyAddress?.trim());
-    _addIfPresent(property, 'street', propertyStreet?.trim());
-    _addIfPresent(property, 'number', propertyNumber?.trim());
-    _addIfPresent(property, 'complement', propertyComplement?.trim());
-    _addIfPresent(property, 'neighborhood', propertyNeighborhood?.trim());
-    _addIfPresent(property, 'city', propertyCity?.trim());
-    _addIfPresent(property, 'state', propertyState?.trim());
-    if (property.isNotEmpty) body['propertyData'] = property;
+    // Imóvel — o back lê `propertyData.address` (nunca `street`).
+    final property = <String, dynamic>{
+      'registry': propertyRegistry,
+      'notary': propertyNotary,
+      'code': propertyCode,
+      'address': propertyAddress,
+      'neighborhood': propertyNeighborhood,
+      'city': propertyCity,
+      'state': propertyState,
+    };
+    _put(property, 'zipCode', _digits(propertyZipCode));
 
-    // Proprietário — vai espelhado no propertyData.owner (backend aceita)
-    final ownerData = <String, dynamic>{};
-    _addIfPresent(ownerData, 'ownerName', ownerName?.trim());
-    _addIfPresent(
-        ownerData, 'ownerCpf', ownerCpf?.replaceAll(RegExp(r'\D'), ''));
-    _addIfPresent(ownerData, 'ownerRg', ownerRg?.trim());
-    _addDate(ownerData, 'ownerBirthDate', ownerBirthDate);
-    _addIfPresent(ownerData, 'ownerEmail', ownerEmail?.trim());
-    _addIfPresent(
-        ownerData, 'ownerPhone', ownerPhone?.replaceAll(RegExp(r'\D'), ''));
-    _addIfPresent(ownerData, 'ownerProfession', ownerProfession?.trim());
-    _addIfPresent(ownerData, 'ownerNationality', ownerNationality?.trim());
-    _addIfPresent(ownerData, 'ownerMaritalStatus', ownerMaritalStatus?.trim());
-    _addIfPresent(
-        ownerData, 'ownerMarriageRegime', ownerMarriageRegime?.trim());
-    _addIfPresent(ownerData, 'ownerZipCode',
-        ownerZipCode?.replaceAll(RegExp(r'\D'), ''));
-    _addIfPresent(ownerData, 'ownerAddress', ownerAddress?.trim());
-    _addIfPresent(ownerData, 'ownerNeighborhood', ownerNeighborhood?.trim());
-    _addIfPresent(ownerData, 'ownerCity', ownerCity?.trim());
-    _addIfPresent(ownerData, 'ownerState', ownerState?.trim());
-    _addIfPresent(ownerData, 'ownerSpouseName', ownerSpouseName?.trim());
-    _addIfPresent(ownerData, 'ownerSpouseCpf',
-        ownerSpouseCpf?.replaceAll(RegExp(r'\D'), ''));
-    _addIfPresent(ownerData, 'ownerSpouseRg', ownerSpouseRg?.trim());
-    _addDate(ownerData, 'ownerSpouseBirthDate', ownerSpouseBirthDate);
-    _addIfPresent(ownerData, 'ownerSpouseEmail', ownerSpouseEmail?.trim());
-    _addIfPresent(ownerData, 'ownerSpousePhone',
-        ownerSpousePhone?.replaceAll(RegExp(r'\D'), ''));
-    _addIfPresent(
-        ownerData, 'ownerSpouseProfession', ownerSpouseProfession?.trim());
-    if (ownerData.isNotEmpty) {
-      final base = body['propertyData'];
-      if (base is Map) {
-        body['propertyData'] = {
-          ...Map<String, dynamic>.from(base),
-          ...ownerData,
-        };
-      } else {
-        body['propertyData'] = ownerData;
+    if (forUpdate) {
+      _put(property, 'ownerName', ownerName);
+      _put(property, 'ownerRg', ownerRg);
+      if (ownerCpf.isNotEmpty) property['ownerCpf'] = _digits(ownerCpf);
+      _put(property, 'ownerZipCode', _digits(ownerZipCode));
+      _put(property, 'ownerCity', ownerCity);
+      _put(property, 'ownerState', ownerState);
+      _put(property, 'ownerNationality', ownerNationality);
+      _put(property, 'ownerMaritalStatus', ownerMaritalStatus);
+      _put(property, 'ownerMarriageRegime', ownerMarriageRegime);
+      _put(property, 'ownerBirthDate', _isoDate(ownerBirthDate));
+      _put(property, 'ownerProfession', ownerProfession);
+      _put(property, 'ownerEmail', ownerEmail);
+      _put(property, 'ownerPhone', ownerPhone);
+      _put(property, 'ownerAddress', ownerAddress);
+      _put(property, 'ownerNeighborhood', ownerNeighborhood);
+      _put(property, 'ownerSpouseName', ownerSpouseName);
+      _put(property, 'ownerSpouseRg', ownerSpouseRg);
+      if (ownerSpouseCpf.isNotEmpty) {
+        property['ownerSpouseCpf'] = _digits(ownerSpouseCpf);
       }
+      _put(property, 'ownerSpouseProfession', ownerSpouseProfession);
+      _put(property, 'ownerSpouseEmail', ownerSpouseEmail);
+      _put(property, 'ownerSpousePhone', ownerSpousePhone);
     }
+    body['propertyData'] = property;
+    body['financialData'] = <String, dynamic>{};
 
-    if (brokersData.isNotEmpty) {
-      body['brokersData'] = brokersData.map((e) => e.toJson()).toList();
+    if (forUpdate) {
+      body['observations'] = observations;
+    } else {
+      _put(body, 'observations', observations);
     }
-    if (captadoresData.isNotEmpty) {
-      body['captadoresData'] =
-          captadoresData.map((e) => e.toJson()).toList();
-    }
-
-    if (linkedUserIds.isNotEmpty) {
-      body['linkedUserIds'] = linkedUserIds;
-    }
-
     return body;
-  }
-
-  /// Constrói payload a partir de uma proposta existente para a tela de edição.
-  static CreateProposalPayload fromProposal(PurchaseProposal p) {
-    final c = CreateProposalPayload()
-      ..proposalDate = p.proposalDate
-      ..validityDays = p.validityDays
-      ..proposedPrice = p.proposedPrice
-      ..paymentConditions = p.paymentConditions
-      ..downPayment = p.downPayment
-      ..downPaymentDays = p.downPaymentDays
-      ..commissionPercentage = p.commissionPercentage
-      ..deliveryDays = p.deliveryDays
-      ..monthlyPenalty = p.monthlyPenalty
-      ..saleUnit = p.saleUnit
-      ..captureUnit = p.captureUnit
-      ..buyerName = p.proponentName
-      ..buyerCpf = p.proponentCpf
-      ..buyerRg = p.proponentRg
-      ..buyerBirthDate = p.proponentBirthDate
-      ..buyerEmail = p.proponentEmail
-      ..buyerPhone = p.proponentPhone
-      ..buyerProfession = p.proponentProfession
-      ..buyerNationality = p.proponentNationality
-      ..buyerMaritalStatus = p.proponentMaritalStatus
-      ..buyerMarriageRegime = p.proponentMarriageRegime
-      ..buyerZipCode = p.proponentZipCode
-      ..buyerStreet = p.proponentAddress
-      ..buyerNeighborhood = p.proponentNeighborhood
-      ..buyerCity = p.proponentCity
-      ..buyerState = p.proponentState
-      ..buyerSpouseName = p.proponentSpouseName
-      ..buyerSpouseCpf = p.proponentSpouseCpf
-      ..buyerSpouseRg = p.proponentSpouseRg
-      ..buyerSpouseEmail = p.proponentSpouseEmail
-      ..buyerSpousePhone = p.proponentSpousePhone
-      ..buyerSpouseProfession = p.proponentSpouseProfession
-      ..propertyRegistry = p.propertyRegistry
-      ..propertyNotary = p.propertyNotary
-      ..propertyCityRegistry = p.propertyCityRegistry
-      ..propertyCode = p.propertyCode
-      ..propertyZipCode = p.propertyZipCode
-      ..propertyAddress = p.propertyAddress
-      ..propertyStreet = p.propertyStreet
-      ..propertyNumber = p.propertyNumber
-      ..propertyComplement = p.propertyComplement
-      ..propertyNeighborhood = p.propertyNeighborhood
-      ..propertyCity = p.propertyCity
-      ..propertyState = p.propertyState
-      ..ownerName = p.ownerName
-      ..ownerCpf = p.ownerCpf
-      ..ownerRg = p.ownerRg
-      ..ownerBirthDate = p.ownerBirthDate
-      ..ownerEmail = p.ownerEmail
-      ..ownerPhone = p.ownerPhone
-      ..ownerProfession = p.ownerProfession
-      ..ownerNationality = p.ownerNationality
-      ..ownerMaritalStatus = p.ownerMaritalStatus
-      ..ownerMarriageRegime = p.ownerMarriageRegime
-      ..ownerZipCode = p.ownerZipCode
-      ..ownerAddress = p.ownerAddress
-      ..ownerNeighborhood = p.ownerNeighborhood
-      ..ownerCity = p.ownerCity
-      ..ownerState = p.ownerState
-      ..ownerSpouseName = p.ownerSpouseName
-      ..ownerSpouseCpf = p.ownerSpouseCpf
-      ..ownerSpouseRg = p.ownerSpouseRg
-      ..ownerSpouseEmail = p.ownerSpouseEmail
-      ..ownerSpousePhone = p.ownerSpousePhone
-      ..ownerSpouseProfession = p.ownerSpouseProfession
-      ..brokersData = p.brokersData
-      ..captadoresData = p.captadoresData;
-    return c;
   }
 }
 
@@ -1092,7 +1041,7 @@ class PurchaseProposalsService {
     try {
       final res = await _api.patch<Map<String, dynamic>>(
         ApiConstants.purchaseProposalById(id),
-        body: payload.toJson(),
+        body: payload.toJson(forUpdate: true),
       );
       if (!res.success || res.data == null) {
         return ApiResponse.error(
@@ -1175,6 +1124,135 @@ class PurchaseProposalsService {
       );
     } catch (e) {
       debugPrint('❌ [PROPOSALS] addUsers: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  // ─── Catálogos da ficha (mesmas fontes do web) ─────────────────────────
+
+  /// Equipes da proposta — `teamApi.getTeams({ useInSaleForms: true })`
+  /// (`GET /teams?useInSaleForms=true`), filtradas como o web: ativas e
+  /// não pessoais.
+  Future<ApiResponse<List<ProposalOption>>> listTeamsForProposal() async {
+    try {
+      final res = await _api.get<dynamic>(
+        ApiConstants.teams,
+        queryParameters: const {'useInSaleForms': 'true'},
+      );
+      if (!res.success) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao carregar equipes',
+          statusCode: res.statusCode,
+        );
+      }
+      final list = _asList(res.data);
+      final teams = list
+          .whereType<Map>()
+          .where((t) =>
+              _str(t['id']).isNotEmpty &&
+              t['isActive'] != false &&
+              t['isPersonal'] != true)
+          .map((t) => ProposalOption(id: _str(t['id']), name: _str(t['name'])))
+          .toList();
+      return ApiResponse.success(data: teams, statusCode: res.statusCode);
+    } catch (e) {
+      debugPrint('❌ [PROPOSALS] teams: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// Unidades de venda configuradas — `useSaleUnits({ activeOnly: true })`
+  /// (`GET /sistema/sale-units-config?activeOnly=true`). O select do web
+  /// usa o **nome** como valor (venda e captação).
+  Future<ApiResponse<List<ProposalOption>>> listSaleUnits() async {
+    try {
+      final res = await _api.get<dynamic>(
+        _kSaleUnitsConfig,
+        queryParameters: const {'activeOnly': 'true'},
+      );
+      if (!res.success) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao carregar unidades de venda',
+          statusCode: res.statusCode,
+        );
+      }
+      final units = _asList(res.data)
+          .whereType<Map>()
+          .where((u) => _str(u['name']).trim().isNotEmpty)
+          .map((u) => ProposalOption(id: _str(u['id']), name: _str(u['name'])))
+          .toList();
+      return ApiResponse.success(data: units, statusCode: res.statusCode);
+    } catch (e) {
+      debugPrint('❌ [PROPOSALS] saleUnits: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// Membros da empresa — `companyMembersApi.getMembersSimple()`
+  /// (`GET /users/company-members/simple`), a fonte do `UserMultiSelect`
+  /// da etapa 3 no web.
+  Future<ApiResponse<List<ProposalMember>>> listCompanyMembers() async {
+    try {
+      final res = await _api.get<dynamic>(_kCompanyMembersSimple);
+      if (!res.success) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao carregar usuários',
+          statusCode: res.statusCode,
+        );
+      }
+      final members = _asList(res.data)
+          .whereType<Map>()
+          .map((m) => ProposalMember(
+                id: _str(m['id']),
+                name: _str(m['name']),
+                email: _strNull(m['email']),
+              ))
+          .where((m) => m.id.isNotEmpty && m.name.trim().isNotEmpty)
+          .toList()
+        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      return ApiResponse.success(data: members, statusCode: res.statusCode);
+    } catch (e) {
+      debugPrint('❌ [PROPOSALS] members: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// Busca de imóvel por código — `propertyApi.getProperties({ code },
+  /// { page: 1, limit: 20 })` (`GET /properties?code=…&onlyMyData=false`).
+  Future<ApiResponse<List<ProposalPropertyHit>>> searchPropertiesByCode(
+    String code,
+  ) async {
+    try {
+      final res = await _api.get<dynamic>(
+        _kProperties,
+        queryParameters: {
+          'code': code.trim(),
+          'onlyMyData': 'false',
+          'page': '1',
+          'limit': '20',
+        },
+      );
+      if (!res.success) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao buscar imóveis',
+          statusCode: res.statusCode,
+        );
+      }
+      final raw = res.data;
+      final list = raw is Map
+          ? (raw['data'] is List
+              ? raw['data'] as List
+              : (raw['properties'] is List
+                  ? raw['properties'] as List
+                  : const []))
+          : _asList(raw);
+      final hits = list
+          .whereType<Map>()
+          .map((m) => ProposalPropertyHit.fromJson(Map<String, dynamic>.from(m)))
+          .toList();
+      return ApiResponse.success(data: hits, statusCode: res.statusCode);
+    } catch (e) {
+      debugPrint('❌ [PROPOSALS] searchProperties: $e');
       return ApiResponse.error(message: e.toString(), statusCode: 0);
     }
   }
@@ -1275,7 +1353,8 @@ class PurchaseProposalsService {
     int? etapa,
     String? documentName,
     String? documentMessage,
-    bool refusable = true,
+    // Web (`ProposalSignaturesModalPrivate`) envia `refusable: false`.
+    bool refusable = false,
     bool sortable = false,
   }) async {
     try {
@@ -1652,6 +1731,73 @@ String? _validateProposalAnexo(File file) {
     // Se não conseguir medir o tamanho aqui, o backend valida.
   }
   return null;
+}
+
+// ─── Catálogos da ficha ─────────────────────────────────────────────────
+
+/// Caminhos que o web usa e ainda não existem no `ApiConstants`
+/// (`saleUnitsConfigApi`, `companyMembersApi`, `propertyApi`).
+const String _kSaleUnitsConfig = '/sistema/sale-units-config';
+const String _kCompanyMembersSimple = '/users/company-members/simple';
+const String _kProperties = '/properties';
+
+/// Opção simples de select (equipe, unidade de venda).
+class ProposalOption {
+  final String id;
+  final String name;
+  const ProposalOption({required this.id, required this.name});
+}
+
+/// Membro da empresa para a etapa 3 (usuários que poderão ver a proposta).
+class ProposalMember {
+  final String id;
+  final String name;
+  final String? email;
+  const ProposalMember({required this.id, required this.name, this.email});
+}
+
+/// Resultado da busca de imóvel por código, já no recorte que a ficha usa
+/// (`propertyToProposalImovel` do web).
+class ProposalPropertyHit {
+  final String id;
+  final String code;
+  final String zipCode;
+  final String address;
+  final String neighborhood;
+  final String city;
+  final String state;
+
+  const ProposalPropertyHit({
+    required this.id,
+    required this.code,
+    required this.zipCode,
+    required this.address,
+    required this.neighborhood,
+    required this.city,
+    required this.state,
+  });
+
+  factory ProposalPropertyHit.fromJson(Map<String, dynamic> j) {
+    final zip = _str(j['zipCode']).replaceAll(RegExp(r'\D'), '');
+    final uf = _str(j['state']).toUpperCase();
+    final address = _strNull(j['address']) ?? _strNull(j['street']) ?? '';
+    return ProposalPropertyHit(
+      id: _str(j['id']),
+      code: _strNull(j['code']) ?? _str(j['id']),
+      zipCode: zip.length > 8 ? zip.substring(0, 8) : zip,
+      address: address,
+      neighborhood: _str(j['neighborhood']),
+      city: _str(j['city']),
+      // Web: `(prop.state ?? '').toUpperCase().slice(0, 2) || 'SP'`.
+      state: uf.isEmpty ? 'SP' : (uf.length > 2 ? uf.substring(0, 2) : uf),
+    );
+  }
+}
+
+List<dynamic> _asList(dynamic raw) {
+  if (raw is List) return raw;
+  if (raw is Map && raw['data'] is List) return raw['data'] as List;
+  return const [];
 }
 
 // ─── Helpers locais ─────────────────────────────────────────────────────

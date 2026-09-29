@@ -700,6 +700,29 @@ class ApiConstants {
       '/sistema/fichas-venda/$id/assinatura-automatica-signers-preview';
   static String saleFormUsuarios(String id) =>
       '/sistema/fichas-venda/$id/usuarios';
+  static String saleFormReenviarEmailTodos(String id) =>
+      '/sistema/fichas-venda/$id/assinaturas/reenviar-email';
+  static String saleFormReenviarEmailUm(String id, String signatureId) =>
+      '/sistema/fichas-venda/$id/assinaturas/$signatureId/reenviar-email';
+  static String saleFormUltimoEnvioEmail(String id) =>
+      '/sistema/fichas-venda/$id/assinaturas/email-envio';
+  static String saleFormDistrato(String id) =>
+      '/sistema/fichas-venda/$id/distrato';
+  static String saleFormEquipe(String id) =>
+      '/sistema/fichas-venda/$id/equipe';
+  static String saleFormTransferirResponsabilidade(String id) =>
+      '/sistema/fichas-venda/$id/transferir-responsabilidade';
+  // Painel de assinaturas pendentes (`?escopo=minhas|todas`) e trava global
+  // por assinatura parada (`SignatureLockGate` do web).
+  static const String saleFormsAssinaturasPendentes =
+      '/sistema/fichas-venda/assinaturas/pendentes';
+  static const String saleFormsAssinaturaLockStatus =
+      '/sistema/fichas-venda/assinatura-lock/status';
+  static const String saleFormsAssinaturaLockRecusar =
+      '/sistema/fichas-venda/assinatura-lock/recusar';
+  // Seletor de membros da empresa para signatários extras (web:
+  // `userApi.getCompanyMembersPage`, `?page&limit<=100&search`).
+  static const String saleFormCompanyMembers = '/users/company-members';
 
   // Endpoints de utilizadores (admin — módulo `user_management`)
   static const String adminUsers = '/admin/users';

@@ -1,17 +1,40 @@
 import 'dart:io' show File, Directory;
+import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/constants/api_constants.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/services/api_service.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/purchase_proposals_service.dart';
+import '../../../shared/services/sale_forms_service.dart'
+    show saleFormLinkAbrivel, saleFormSignerExcluido;
+import '../../../shared/widgets/skeleton_box.dart';
 
+/// Bottom sheet de assinaturas da PROPOSTA — paridade com
+/// `ProposalSignaturesModalPrivate.tsx` (web).
+///
+/// Três etapas (1 comprador, 2 proprietário, 3 corretor/captadores); a 2 e a
+/// 3 só abrem quando o back libera (`historico.maxEtapaLiberadaParaEnvio`).
+/// Cada etapa mostra só as próprias assinaturas; o formulário some quando a
+/// etapa já tem assinatura concluída. Modo de envio vale para todos:
+/// **Enviar por e-mail** (nome + e-mail) ou **Gerar apenas link** (só nome —
+/// o link sai por cópia/WhatsApp).
+///
+/// Linhas do usuário logado ("você") ganham **Assinar**, que abre o link do
+/// Autentique fora do app.
+///
+/// [defaultSigners] ficou como reserva: o sheet preenche sozinho pela etapa
+/// (proponente / proprietário / 1º corretor ou captador), como o web; a lista
+/// passada só é usada se a proposta não carregar.
 Future<void> showProposalSignaturesSheet(
   BuildContext context, {
   required String proposalId,
@@ -60,64 +83,93 @@ class _ProposalSignaturesSheet extends StatefulWidget {
       _ProposalSignaturesSheetState();
 }
 
+const Map<String, String> _kEventLabels = {
+  'etapa_1_criada': 'Etapa 1 criada',
+  'proposta_enviada': 'Proposta enviada para assinatura',
+  'assinatura_comprador': 'Assinatura do comprador',
+  'assinatura_proprietario': 'Assinatura do proprietário',
+  'etapa_3_vinculada': 'Etapa 3 vinculada',
+};
+
 class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
     with SingleTickerProviderStateMixin {
-  late TabController _tab;
+  late final TabController _tab;
   bool _loading = true;
   ProposalHistorico? _historico;
+  PurchaseProposal? _proposta;
   List<ProposalSignature> _signatures = const [];
+
+  /// id da assinatura → link já gerado (`signatureUrl`, fora do model).
+  Map<String, String> _urls = const {};
   String? _error;
   bool _sending = false;
   bool _syncing = false;
   bool _uploading = false;
+  bool _pdfLoading = false;
+  String? _linkBusyId;
 
   final ImagePicker _imagePicker = ImagePicker();
 
   late int _etapa;
-  late final List<_SignerForm> _forms = [];
+  final TextEditingController _docName = TextEditingController();
+  final TextEditingController _docMessage = TextEditingController();
+  bool _docNameTouched = false;
+  bool _porEmail = true;
+  final List<_SignerForm> _forms = [];
+
+  /// Etapa cujo formulário já foi pré-preenchido (evita apagar digitação).
+  int? _prefilledEtapa;
 
   @override
   void initState() {
     super.initState();
-    _etapa = widget.etapa;
+    _etapa = math.max(1, math.min(3, widget.etapa));
     _tab = TabController(
       length: 2,
       vsync: this,
       initialIndex: widget.initialHistorico ? 1 : 0,
     );
-    for (final s in widget.defaultSigners) {
-      _forms.add(_SignerForm.fromInput(s));
-    }
-    if (_forms.isEmpty) {
-      _forms.add(_SignerForm());
-    }
     _load();
   }
 
   @override
   void dispose() {
     _tab.dispose();
+    _docName.dispose();
+    _docMessage.dispose();
     for (final f in _forms) {
       f.dispose();
     }
     super.dispose();
   }
 
-  Color get _accent => Theme.of(context).brightness == Brightness.dark
-      ? AppColors.primary.primaryDarkMode
-      : AppColors.primary.primary;
+  bool get _isDark => Theme.of(context).brightness == Brightness.dark;
+  Color get _accent =>
+      _isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+  Color get _green =>
+      _isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
+  Color get _red =>
+      _isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+  Color get _warn =>
+      _isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
+  Color get _blue =>
+      _isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
+
+  // ─── Carga ────────────────────────────────────────────────────────────────
 
   Future<void> _load() async {
     setState(() {
       _loading = true;
       _error = null;
     });
-    final histFut = PurchaseProposalsService.instance
-        .getHistorico(widget.proposalId);
-    final sigsFut = PurchaseProposalsService.instance
-        .listSignatures(widget.proposalId);
+    final svc = PurchaseProposalsService.instance;
+    final histFut = svc.getHistorico(widget.proposalId);
+    final sigsFut = _listarAssinaturas();
+    final propFut =
+        _proposta == null ? svc.getById(widget.proposalId) : null;
     final histRes = await histFut;
-    final sigsRes = await sigsFut;
+    final sigs = await sigsFut;
+    final propRes = await propFut;
     if (!mounted) return;
     setState(() {
       _loading = false;
@@ -126,168 +178,80 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
       } else {
         _error = histRes.message;
       }
-      if (sigsRes.success && sigsRes.data != null) {
-        _signatures = sigsRes.data!;
+      if (sigs != null) {
+        _signatures = sigs.$1;
+        _urls = sigs.$2;
       }
+      if (propRes != null && propRes.success && propRes.data != null) {
+        _proposta = propRes.data;
+      }
+      if (_etapa > _maxLiberada) _etapa = _maxLiberada;
     });
+    _prefillEtapa();
   }
 
-  Future<void> _sync() async {
-    setState(() => _syncing = true);
-    final res = await PurchaseProposalsService.instance
-        .syncAssinaturas(widget.proposalId);
-    if (!mounted) return;
-    if (res.success && res.data != null) {
-      setState(() {
-        _signatures = res.data!;
-        _syncing = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Assinaturas sincronizadas.')),
-      );
-      widget.onChanged?.call();
-      _load();
-    } else {
-      setState(() => _syncing = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res.message ?? 'Erro ao sincronizar.')),
-      );
-    }
-  }
-
-  Future<void> _enviar() async {
-    final valid = _forms.where((f) => f.isValid).toList();
-    if (valid.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Informe pelo menos um signatário (nome + e-mail).'),
-        ),
-      );
-      return;
-    }
-    setState(() => _sending = true);
-    final res = await PurchaseProposalsService.instance.enviarParaAssinatura(
-      widget.proposalId,
-      signers: valid.map((f) => f.toInput()).toList(),
-      etapa: _etapa,
-      documentName: 'Proposta ${widget.proposalNumber} - Etapa $_etapa',
-    );
-    if (!mounted) return;
-    setState(() => _sending = false);
-    if (res.success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enviado para assinatura.')),
-      );
-      widget.onChanged?.call();
-      _tab.animateTo(1);
-      _load();
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res.message ?? 'Erro ao enviar.')),
-      );
-    }
-  }
-
-  Future<void> _abrirPdf() async {
-    final res = await PurchaseProposalsService.instance.downloadPdf(
-      widget.proposalId,
-      etapa: _etapa,
-    );
-    if (!mounted) return;
-    if (!res.success || res.data == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res.message ?? 'Erro ao baixar PDF.')),
-      );
-      return;
-    }
-    // Salvar em ficheiro temporário e tentar abrir.
+  /// `GET …/assinaturas` lido cru para ter o `signatureUrl` (o model da
+  /// proposta não o carrega) — assim o link existente não gera `POST /link`.
+  Future<(List<ProposalSignature>, Map<String, String>)?>
+      _listarAssinaturas() async {
     try {
-      final bytes = res.data!.bytes;
-      final dir = Directory.systemTemp;
-      final ext = res.data!.contentType.contains('zip') ? 'zip' : 'pdf';
-      final file = File(
-          '${dir.path}/proposta_${widget.proposalNumber}_etapa$_etapa.$ext');
-      await file.writeAsBytes(bytes);
-      final uri = Uri.file(file.path);
-      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (!ok && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('PDF salvo em ${file.path}')),
-        );
+      final res = await ApiService.instance.get<dynamic>(
+        ApiConstants.purchaseProposalAssinaturas(widget.proposalId),
+      );
+      if (!res.success) return null;
+      final raw = res.data;
+      final list = raw is List ? raw : (raw is Map ? raw['data'] : null);
+      if (list is! List) return (const <ProposalSignature>[], const <String, String>{});
+      final sigs = <ProposalSignature>[];
+      final urls = <String, String>{};
+      for (final m in list.whereType<Map>()) {
+        final j = Map<String, dynamic>.from(m);
+        final s = ProposalSignature.fromJson(j);
+        sigs.add(s);
+        final u = (j['signatureUrl'] ?? j['signature_url'])?.toString().trim();
+        if (u != null && u.isNotEmpty) urls[s.id] = u;
       }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao abrir PDF: $e')),
-      );
+      return (sigs, urls);
+    } catch (_) {
+      return null;
     }
   }
 
-  Future<void> _copiarLink(ProposalSignature sig) async {
-    final res = await PurchaseProposalsService.instance.obterLinkAssinatura(
-      widget.proposalId,
-      sig.id,
-    );
-    if (!mounted) return;
-    if (res.success && res.data != null) {
-      await Clipboard.setData(ClipboardData(text: res.data!));
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Link copiado para a área de transferência.')),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res.message ?? 'Erro ao obter link.')),
-      );
-    }
+  // ─── Regras (espelho do web) ─────────────────────────────────────────────
+
+  int get _maxLiberada =>
+      math.max(1, math.min(3, _historico?.maxEtapaLiberadaParaEnvio ?? 1));
+
+  List<ProposalSignature> get _daEtapa =>
+      _signatures.where((s) => s.etapa == _etapa).toList();
+
+  bool get _alreadySent => _signatures.isNotEmpty;
+
+  bool get _mostrarFormulario {
+    final daEtapa = _daEtapa;
+    final nenhumaAssinada = daEtapa.every((s) => !_assinada(s));
+    return !_alreadySent || nenhumaAssinada;
   }
 
-  Future<void> _abrirLink(ProposalSignature sig) async {
-    final res = await PurchaseProposalsService.instance.obterLinkAssinatura(
-      widget.proposalId,
-      sig.id,
-    );
-    if (!mounted) return;
-    if (res.success && res.data != null) {
-      final uri = Uri.tryParse(res.data!);
-      if (uri != null) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      }
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res.message ?? 'Erro ao obter link.')),
-      );
-    }
+  static bool _assinada(ProposalSignature s) =>
+      s.status.toLowerCase() == 'signed';
+
+  static bool _encerrada(ProposalSignature s) {
+    final st = s.status.toLowerCase();
+    return st == 'signed' ||
+        st == 'rejected' ||
+        st == 'cancelled' ||
+        st == 'canceled';
   }
 
-  Future<void> _reenviarEmail(ProposalSignature sig) async {
-    final res = await PurchaseProposalsService.instance
-        .reenviarPorEmail(widget.proposalId, sig.id);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          res.success
-              ? 'E-mail reenviado.'
-              : res.message ?? 'Erro ao reenviar e-mail.',
-        ),
-      ),
-    );
-  }
+  String get _meuEmail =>
+      (ModuleAccessService.instance.userPermissions?.userEmail ?? '')
+          .trim()
+          .toLowerCase();
 
-  Future<void> _reenviarWhatsapp(ProposalSignature sig) async {
-    final res = await PurchaseProposalsService.instance
-        .reenviarUmWhatsapp(widget.proposalId, sig.id);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          res.success
-              ? 'Reenvio WhatsApp iniciado.'
-              : res.message ?? 'Erro ao reenviar via WhatsApp.',
-        ),
-      ),
-    );
+  bool _ehVoce(String? email) {
+    final me = _meuEmail;
+    return me.isNotEmpty && (email ?? '').trim().toLowerCase() == me;
   }
 
   bool get _isGestor {
@@ -295,22 +259,21 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
     return role == 'manager' || role == 'admin' || role == 'master';
   }
 
-  /// Etapas em que ainda é permitido anexar a ficha física: liberadas para
-  /// envio (<= maxEtapaLiberadaParaEnvio) e ainda não concluídas por
-  /// assinatura registrada ou anexo já aprovado.
+  /// Etapas em que ainda cabe anexar a ficha física: liberadas, sem anexo
+  /// aprovado e não concluídas por assinatura (todas assinadas).
   List<int> get _etapasDisponiveis {
     final h = _historico;
-    final max = h?.maxEtapaLiberadaParaEnvio ?? _etapa;
-    final concluidas = <int>{};
-    for (final s in [..._signatures, ...?h?.signatures]) {
-      if (s.status.toLowerCase() == 'signed') concluidas.add(s.etapa);
-    }
-    for (final a in h?.attachments ?? const <ProposalAttachment>[]) {
-      if (a.status.toLowerCase() == 'approved') concluidas.add(a.etapa);
-    }
+    final aprovadas = <int>{
+      for (final a in h?.attachments ?? const <ProposalAttachment>[])
+        if (a.status.toLowerCase() == 'approved') a.etapa,
+    };
     final out = <int>[];
-    for (var i = 1; i <= max && i <= 3; i++) {
-      if (!concluidas.contains(i)) out.add(i);
+    for (var i = 1; i <= _maxLiberada; i++) {
+      final sigs = (h?.signatures ?? const <ProposalSignature>[])
+          .where((s) => s.etapa == i)
+          .toList();
+      final completa = sigs.isNotEmpty && sigs.every(_assinada);
+      if (!aprovadas.contains(i) && !completa) out.add(i);
     }
     return out;
   }
@@ -318,23 +281,277 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
   String _etapaLabel(int etapa) => switch (etapa) {
         1 => 'Comprador',
         2 => 'Proprietário',
-        _ => 'Corretor',
+        _ => 'Corretor/Captadores',
       };
+
+  /// Pré-preenche o formulário da etapa quando ela ainda não tem assinaturas
+  /// (1 proponente, 2 proprietário, 3 primeiro corretor ou captador).
+  void _prefillEtapa() {
+    if (!mounted || _prefilledEtapa == _etapa) return;
+    if (_alreadySent && _daEtapa.isNotEmpty) {
+      _prefilledEtapa = _etapa;
+      if (_forms.isEmpty) setState(() => _forms.add(_SignerForm()));
+      return;
+    }
+    String nome = '';
+    String email = '';
+    final p = _proposta;
+    if (p != null) {
+      if (_etapa == 1) {
+        nome = p.proponentName ?? '';
+        email = p.proponentEmail ?? '';
+      } else if (_etapa == 2) {
+        nome = p.ownerName ?? '';
+        email = p.ownerEmail ?? '';
+      } else {
+        Map? primeiro;
+        for (final k in ['brokersData', 'captadoresData']) {
+          final l = p.raw[k];
+          if (l is List && l.whereType<Map>().isNotEmpty) {
+            primeiro = l.whereType<Map>().first;
+            break;
+          }
+        }
+        nome = (primeiro?['nome'] ?? primeiro?['name'] ?? '').toString();
+        email = (primeiro?['email'] ?? '').toString();
+      }
+    } else if (_etapa == widget.etapa && widget.defaultSigners.isNotEmpty) {
+      nome = widget.defaultSigners.first.name;
+      email = widget.defaultSigners.first.email;
+    }
+    final n = _proposalNumber;
+    setState(() {
+      _prefilledEtapa = _etapa;
+      for (final f in _forms) {
+        f.dispose();
+      }
+      _forms
+        ..clear()
+        ..add(_SignerForm(name: nome.trim(), email: email.trim()));
+      _porEmail = email.trim().isNotEmpty;
+      _docName.text =
+          'Proposta de Compra $n${_etapa == 3 ? ' – Etapa 3' : ''}';
+      if (_docMessage.text.trim().isEmpty) {
+        _docMessage.text = 'Por favor, assine a proposta de compra conforme '
+            'os dados informados.';
+      }
+    });
+  }
+
+  String get _proposalNumber {
+    final n = widget.proposalNumber.trim();
+    if (n.isNotEmpty) return n;
+    return _proposta?.proposalNumber ?? '';
+  }
+
+  void _trocarEtapa(int e) {
+    if (e > _maxLiberada || e == _etapa) return;
+    setState(() => _etapa = e);
+    _prefillEtapa();
+  }
+
+  // ─── Ações ───────────────────────────────────────────────────────────────
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _sync() async {
+    setState(() => _syncing = true);
+    final res = await PurchaseProposalsService.instance
+        .syncAssinaturas(widget.proposalId);
+    if (!mounted) return;
+    setState(() => _syncing = false);
+    if (res.success) {
+      _snack('Assinaturas verificadas.');
+      widget.onChanged?.call();
+      _load();
+    } else {
+      _snack(res.message ?? 'Erro ao verificar.');
+    }
+  }
+
+  Future<void> _enviar() async {
+    final nome = _docName.text.trim();
+    setState(() => _docNameTouched = true);
+    if (nome.isEmpty) {
+      _snack('Nome do documento é obrigatório.');
+      return;
+    }
+    final signers = <Map<String, dynamic>>[];
+    for (final f in _forms) {
+      final n = f.name.text.trim();
+      final e = f.email.text.trim();
+      if (saleFormSignerExcluido(email: e, name: n)) {
+        _snack('Caixa administrativa genérica ou nome institucional da '
+            'imobiliária não podem ser enviados. Use pessoas físicas.');
+        return;
+      }
+      if (_porEmail) {
+        if (e.isEmpty) {
+          _snack('Informe o e-mail do signatário quando "Enviar por e-mail" '
+              'estiver marcado.');
+          return;
+        }
+        signers.add({'email': e, if (n.isNotEmpty) 'name': n, 'action': 'SIGN'});
+      } else {
+        if (n.isEmpty) {
+          _snack('Informe o nome do signatário quando "Gerar apenas link" '
+              'estiver marcado.');
+          return;
+        }
+        signers.add({'name': n, 'action': 'SIGN'});
+      }
+    }
+    if (signers.isEmpty) {
+      _snack('Adicione ao menos um signatário.');
+      return;
+    }
+    final msg = _docMessage.text.trim();
+    setState(() => _sending = true);
+    ApiResponse<dynamic> res;
+    try {
+      res = await ApiService.instance.post<dynamic>(
+        ApiConstants.purchaseProposalAssinaturas(widget.proposalId),
+        body: {
+          'document': {
+            'name': nome,
+            if (msg.isNotEmpty) 'message': msg,
+            'refusable': false,
+            'sortable': false,
+          },
+          'signers': signers,
+          'etapa': _etapa,
+        },
+      );
+    } catch (e) {
+      res = ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+    if (!mounted) return;
+    setState(() => _sending = false);
+    if (res.success) {
+      _snack(_porEmail
+          ? 'Proposta enviada para assinatura.'
+          : 'Envio criado. Use Copiar link ou WhatsApp para cada signatário '
+              'na lista.');
+      widget.onChanged?.call();
+      _load();
+    } else {
+      _snack(res.message ?? 'Erro ao enviar para assinatura.');
+    }
+  }
+
+  Future<void> _abrirPdf() async {
+    setState(() => _pdfLoading = true);
+    final res = await PurchaseProposalsService.instance.downloadPdf(
+      widget.proposalId,
+      etapa: _etapa,
+    );
+    if (!mounted) return;
+    setState(() => _pdfLoading = false);
+    if (!res.success || res.data == null) {
+      _snack(res.message ?? 'Erro ao carregar PDF.');
+      return;
+    }
+    try {
+      final bytes = res.data!.bytes;
+      final dir = Directory.systemTemp;
+      final ext = res.data!.contentType.contains('zip') ? 'zip' : 'pdf';
+      final file = File(
+          '${dir.path}/proposta_${_proposalNumber}_etapa$_etapa.$ext');
+      await file.writeAsBytes(bytes);
+      final ok = await launchUrl(
+        Uri.file(file.path),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!ok && mounted) _snack('PDF salvo em ${file.path}');
+    } catch (e) {
+      if (!mounted) return;
+      _snack('Erro ao abrir PDF: $e');
+    }
+  }
+
+  /// Usa o link já existente; só pede `POST /link` quando não há.
+  Future<String?> _resolveLink(ProposalSignature sig) async {
+    final pronto = _urls[sig.id];
+    if (pronto != null && pronto.isNotEmpty) return pronto;
+    setState(() => _linkBusyId = sig.id);
+    final res = await PurchaseProposalsService.instance
+        .obterLinkAssinatura(widget.proposalId, sig.id);
+    if (!mounted) return null;
+    setState(() => _linkBusyId = null);
+    if (res.success && res.data != null) {
+      _urls = {..._urls, sig.id: res.data!};
+      return res.data;
+    }
+    _snack(res.message ?? 'Erro ao obter link.');
+    return null;
+  }
+
+  Future<void> _copiarLink(ProposalSignature sig) async {
+    final link = await _resolveLink(sig);
+    if (link == null || !mounted) return;
+    await Clipboard.setData(ClipboardData(text: link));
+    _snack('Link copiado. Envie apenas ao signatário correspondente.');
+  }
+
+  Future<void> _whatsapp(ProposalSignature sig) async {
+    final link = await _resolveLink(sig);
+    if (link == null || !mounted) return;
+    final msg = 'Olá! Segue o link para assinar a proposta '
+        '$_proposalNumber:\n\n$link';
+    await launchUrl(
+      Uri.parse('https://wa.me/?text=${Uri.encodeComponent(msg)}'),
+      mode: LaunchMode.externalApplication,
+    );
+  }
+
+  Future<void> _assinar(ProposalSignature sig) async {
+    final link = saleFormLinkAbrivel(await _resolveLink(sig));
+    if (!mounted) return;
+    if (link == null) {
+      _snack('Link de assinatura indisponível.');
+      return;
+    }
+    final ok = await launchUrl(
+      Uri.parse(link),
+      mode: LaunchMode.externalApplication,
+    );
+    if (!ok) {
+      _snack('Não foi possível abrir o link de assinatura.');
+      return;
+    }
+    _snack('Depois de assinar, toque em Verificar para atualizar o status.');
+  }
+
+  Future<void> _reenviarEmail(ProposalSignature sig) async {
+    final res = await PurchaseProposalsService.instance
+        .reenviarPorEmail(widget.proposalId, sig.id);
+    if (!mounted) return;
+    _snack(res.success
+        ? 'E-mail reenviado.'
+        : res.message ?? 'Erro ao reenviar e-mail.');
+  }
+
+  Future<void> _reenviarWhatsapp(ProposalSignature sig) async {
+    final res = await PurchaseProposalsService.instance
+        .reenviarUmWhatsapp(widget.proposalId, sig.id);
+    if (!mounted) return;
+    _snack(res.success
+        ? 'Reenvio pelo WhatsApp iniciado.'
+        : res.message ?? 'Erro ao reenviar pelo WhatsApp.');
+  }
 
   Future<void> _anexarFicha() async {
     final etapas = _etapasDisponiveis;
     if (etapas.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Nenhuma etapa disponível para anexo no momento.'),
-        ),
-      );
+      _snack('Nenhuma etapa disponível para anexo no momento.');
       return;
     }
-
-    final etapa = etapas.length == 1 ? etapas.first : await _escolherEtapa(etapas);
+    final etapa =
+        etapas.length == 1 ? etapas.first : await _escolherEtapa(etapas);
     if (etapa == null || !mounted) return;
-
     final origem = await _escolherOrigem();
     if (origem == null || !mounted) return;
 
@@ -356,35 +573,20 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
         if (path != null) file = File(path);
       }
     } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            origem == 'camera'
-                ? 'Não foi possível abrir a câmera.'
-                : 'Não foi possível abrir o seletor de arquivos.',
-          ),
-        ),
-      );
+      _snack(origem == 'camera'
+          ? 'Não foi possível abrir a câmera.'
+          : 'Não foi possível abrir o seletor de arquivos.');
       return;
     }
     if (file == null || !mounted) return;
 
-    // Validação no cliente (o service revalida): tipo e tamanho (15MB).
     final ext = file.path.split('.').last.toLowerCase();
     if (!_kAnexoExtensoes.contains(ext)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Formato inválido. Use PDF, JPG, PNG ou WEBP.'),
-        ),
-      );
+      _snack('Formato inválido. Use PDF, JPG, PNG ou WEBP.');
       return;
     }
     if (await file.length() > 15 * 1024 * 1024) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Arquivo acima do limite de 15MB.')),
-      );
+      _snack('Arquivo acima do limite de 15MB.');
       return;
     }
 
@@ -393,29 +595,19 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
       widget.proposalId,
       file,
       etapa: etapa,
-      uploadedByName:
-          ModuleAccessService.instance.userPermissions?.userName,
+      uploadedByName: ModuleAccessService.instance.userPermissions?.userName,
     );
     if (!mounted) return;
     setState(() => _uploading = false);
-
     if (res.success && res.data != null) {
       final approved = res.data!.status.toLowerCase() == 'approved';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            approved
-                ? 'Ficha anexada. Etapa ${_etapaLabel(etapa)} liberada.'
-                : 'Ficha anexada. Aguardando aprovação do gestor.',
-          ),
-        ),
-      );
+      _snack(approved
+          ? 'Ficha anexada. Etapa ${_etapaLabel(etapa)} liberada.'
+          : 'Ficha anexada. Aguardando aprovação do gestor.');
       widget.onChanged?.call();
       _load();
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res.message ?? 'Erro ao anexar ficha.')),
-      );
+      _snack(res.message ?? 'Erro ao anexar ficha.');
     }
   }
 
@@ -427,37 +619,43 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
       builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
-              child: Text(
-                'Anexar em qual etapa?',
-                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w900,
-                    ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+                child: Text(
+                  'Anexar em qual etapa?',
+                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
               ),
-            ),
-            for (final e in etapas)
-              ListTile(
-                leading: CircleAvatar(
-                  radius: 16,
-                  backgroundColor: _accent.withValues(alpha: 0.14),
-                  child: Text(
-                    '$e',
-                    style: TextStyle(
-                      color: _accent,
-                      fontWeight: FontWeight.w900,
+              for (final e in etapas)
+                ListTile(
+                  leading: CircleAvatar(
+                    radius: 16,
+                    backgroundColor: _accent.withValues(alpha: 0.14),
+                    child: Text(
+                      '$e',
+                      style: TextStyle(
+                        color: _accent,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                   ),
+                  title: Text(
+                    'Etapa $e — ${_etapaLabel(e)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onTap: () => Navigator.of(ctx).pop(e),
                 ),
-                title: Text('Etapa $e — ${_etapaLabel(e)}'),
-                onTap: () => Navigator.of(ctx).pop(e),
-              ),
-            const SizedBox(height: 8),
-          ],
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     );
@@ -476,12 +674,12 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
           children: [
             const SizedBox(height: 8),
             ListTile(
-              leading: Icon(Icons.photo_camera_rounded, color: _accent),
+              leading: Icon(LucideIcons.camera, color: _accent),
               title: const Text('Foto da câmera'),
               onTap: () => Navigator.of(ctx).pop('camera'),
             ),
             ListTile(
-              leading: Icon(Icons.upload_file_rounded, color: _accent),
+              leading: Icon(LucideIcons.fileUp, color: _accent),
               title: const Text('Arquivo (PDF ou imagem)'),
               onTap: () => Navigator.of(ctx).pop('file'),
             ),
@@ -497,15 +695,11 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
         .aprovarAnexo(widget.proposalId, att.id);
     if (!mounted) return;
     if (res.success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Anexo aprovado.')),
-      );
+      _snack('Anexo aprovado.');
       widget.onChanged?.call();
       _load();
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res.message ?? 'Erro ao aprovar anexo.')),
-      );
+      _snack(res.message ?? 'Erro ao aprovar anexo.');
     }
   }
 
@@ -528,11 +722,15 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
+            style: TextButton.styleFrom(
+              foregroundColor: ThemeHelpers.textSecondaryColor(ctx),
+            ),
             child: const Text('Cancelar'),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
+              backgroundColor: _red,
+              foregroundColor: Colors.white,
             ),
             onPressed: () {
               final txt = controller.text.trim();
@@ -546,176 +744,266 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
     );
     controller.dispose();
     if (reason == null || reason.isEmpty || !mounted) return;
-
     final res = await PurchaseProposalsService.instance
         .rejeitarAnexo(widget.proposalId, att.id, reason: reason);
     if (!mounted) return;
     if (res.success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Anexo rejeitado.')),
-      );
+      _snack('Anexo rejeitado.');
       widget.onChanged?.call();
       _load();
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res.message ?? 'Erro ao rejeitar anexo.')),
-      );
+      _snack(res.message ?? 'Erro ao rejeitar anexo.');
     }
   }
+
+  // ─── Build ───────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final canUpdate =
         ModuleAccessService.instance.hasPermission('proposal:update');
-    return DraggableScrollableSheet(
-      initialChildSize: 0.92,
-      minChildSize: 0.5,
-      maxChildSize: 0.95,
-      expand: false,
-      builder: (ctx, scroll) {
-        final theme = Theme.of(context);
-        return Container(
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: const BorderRadius.vertical(
-              top: Radius.circular(22),
-            ),
-          ),
-          child: Column(
-            children: [
-              _SheetHeader(
-                proposalNumber: widget.proposalNumber,
-                etapa: _etapa,
-                onClose: () => Navigator.of(ctx).pop(),
-              ),
-              TabBar(
-                controller: _tab,
-                indicatorColor: _accent,
-                labelColor: _accent,
-                unselectedLabelColor:
-                    ThemeHelpers.textSecondaryColor(context),
-                tabs: const [
-                  Tab(text: 'Enviar / Status'),
-                  Tab(text: 'Histórico'),
-                ],
-              ),
-              Expanded(
-                child: TabBarView(
-                  controller: _tab,
-                  children: [
-                    _buildSendTab(scroll, canUpdate: canUpdate),
-                    _buildHistoryTab(scroll),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+    final mq = MediaQuery.of(context);
+    final altura = math.min(
+      mq.size.height * 0.88,
+      mq.size.height - mq.viewInsets.bottom - mq.padding.top - 12,
     );
-  }
-
-  Widget _buildSendTab(ScrollController scroll, {required bool canUpdate}) {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Text(_error!),
+    return Padding(
+      padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
+      child: Container(
+        height: altura,
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
         ),
-      );
-    }
-    return ListView(
-      controller: scroll,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-      children: [
-        _EtapaPicker(
-          current: _etapa,
-          accent: _accent,
-          onChanged: (n) => setState(() => _etapa = n),
-        ),
-        const SizedBox(height: 16),
-        Row(
+        child: Column(
           children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _abrirPdf,
-                icon: const Icon(Icons.picture_as_pdf_outlined),
-                label: const Text('Ver PDF'),
-              ),
+            _SheetHeader(
+              proposalNumber: _proposalNumber,
+              titulo: 'ASSINATURAS · ${_etapaLabel(_etapa).toUpperCase()}',
+              onClose: () => Navigator.of(context).pop(),
             ),
-            const SizedBox(width: 10),
+            TabBar(
+              controller: _tab,
+              indicatorColor: _accent,
+              labelColor: _accent,
+              unselectedLabelColor: ThemeHelpers.textSecondaryColor(context),
+              tabs: const [
+                Tab(text: 'Assinaturas'),
+                Tab(text: 'Histórico'),
+              ],
+            ),
             Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _syncing ? null : _sync,
-                icon: _syncing
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.sync_rounded),
-                label: const Text('Sincronizar'),
+              child: TabBarView(
+                controller: _tab,
+                children: [
+                  _buildSendTab(canUpdate: canUpdate),
+                  _buildHistoryTab(),
+                ],
               ),
             ),
           ],
         ),
-        const SizedBox(height: 20),
-        Text(
-          'Status atual',
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: ThemeHelpers.textSecondaryColor(context),
-                letterSpacing: 0.5,
+      ),
+    );
+  }
+
+  Widget _skeleton() {
+    return ListView(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+      children: [
+        const SkeletonBox(height: 52, borderRadius: 12),
+        const SizedBox(height: 18),
+        for (var i = 0; i < 4; i++) ...[
+          const SkeletonBox(height: 54, borderRadius: 10),
+          const SizedBox(height: 10),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildSendTab({required bool canUpdate}) {
+    if (_loading && _historico == null) return _skeleton();
+    final t = Theme.of(context).textTheme;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    if (_error != null && _historico == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_error!, textAlign: TextAlign.center),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _load,
+                icon: const Icon(LucideIcons.refreshCw, size: 16),
+                label: const Text('Tentar de novo'),
               ),
+            ],
+          ),
         ),
-        const SizedBox(height: 6),
-        if (_signatures.isEmpty)
-          Text(
-            'Ainda não há assinaturas registradas para esta proposta.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                ),
-          )
-        else
-          ..._signatures.map(
-            (s) => _SignatureTile(
-              signature: s,
-              accent: _accent,
-              onCopyLink: () => _copiarLink(s),
-              onOpenLink: () => _abrirLink(s),
-              onResendEmail: canUpdate ? () => _reenviarEmail(s) : null,
-              onResendWhatsapp:
-                  canUpdate ? () => _reenviarWhatsapp(s) : null,
+      );
+    }
+    final daEtapa = _daEtapa;
+    final mostrarForm = canUpdate && _mostrarFormulario;
+    final nomeVazio = _docNameTouched && _docName.text.trim().isEmpty;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      children: [
+        _EtapaPicker(
+          current: _etapa,
+          maxLiberada: _maxLiberada,
+          accent: _accent,
+          onChanged: _trocarEtapa,
+        ),
+        const SizedBox(height: 14),
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          children: [
+            _AcaoTexto(
+              icon: LucideIcons.fileText,
+              label: _pdfLoading ? 'Carregando PDF…' : 'PDF da proposta',
+              busy: _pdfLoading,
+              onTap: _pdfLoading ? null : _abrirPdf,
+            ),
+            if (_alreadySent)
+              _AcaoTexto(
+                icon: LucideIcons.refreshCw,
+                label: _syncing ? 'Verificando…' : 'Verificar',
+                busy: _syncing,
+                onTap: _syncing || _loading ? null : _sync,
+              ),
+            if (_etapasDisponiveis.isNotEmpty)
+              _AcaoTexto(
+                icon: LucideIcons.paperclip,
+                label: _uploading ? 'Enviando…' : 'Anexar ficha física',
+                color: _green,
+                busy: _uploading,
+                onTap: _uploading ? null : _anexarFicha,
+              ),
+          ],
+        ),
+        if (_etapasDisponiveis.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'A ficha física anexada dispensa a assinatura digital da etapa.',
+              style: t.labelSmall?.copyWith(color: muted),
             ),
           ),
-        if (canUpdate) ...[
-          const SizedBox(height: 24),
-          Text(
-            'Enviar para assinatura (Etapa $_etapa)',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
-                ),
+        if (_alreadySent) ...[
+          const SizedBox(height: 18),
+          _SectionLabel('STATUS DAS ASSINATURAS', accent: _accent),
+          const SizedBox(height: 4),
+          if (daEtapa.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'Nenhum signatário nesta etapa. Adicione abaixo e envie.',
+                style: t.bodySmall?.copyWith(color: muted),
+              ),
+            )
+          else
+            for (final s in daEtapa)
+              _SignatureRow(
+                signature: s,
+                ehVoce: _ehVoce(s.signerEmail),
+                busy: _linkBusyId == s.id,
+                temLink: _urls.containsKey(s.id),
+                encerrada: _encerrada(s),
+                green: _green,
+                warn: _warn,
+                red: _red,
+                blue: _blue,
+                accent: _accent,
+                onAssinar: () => _assinar(s),
+                onCopyLink: () => _copiarLink(s),
+                onWhatsapp: () => _whatsapp(s),
+                onResendEmail: canUpdate &&
+                        (s.signerEmail?.trim().isNotEmpty ?? false)
+                    ? () => _reenviarEmail(s)
+                    : null,
+                onResendWhatsapp:
+                    canUpdate ? () => _reenviarWhatsapp(s) : null,
+              ),
+        ],
+        if (mostrarForm) ...[
+          const SizedBox(height: 22),
+          _SectionLabel('ENVIAR — ETAPA $_etapa', accent: _accent),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _docName,
+            onChanged: (_) {
+              if (_docNameTouched) setState(() {});
+            },
+            decoration: InputDecoration(
+              labelText: 'Nome do documento *',
+              border: const OutlineInputBorder(),
+              errorText: nomeVazio ? 'Nome do documento é obrigatório.' : null,
+            ),
           ),
           const SizedBox(height: 12),
-          ..._forms.asMap().entries.map(
-                (entry) => _SignerFormCard(
-                  index: entry.key,
-                  form: entry.value,
-                  onRemove: _forms.length > 1
-                      ? () => setState(() {
-                            entry.value.dispose();
-                            _forms.removeAt(entry.key);
-                          })
-                      : null,
+          TextField(
+            controller: _docMessage,
+            minLines: 2,
+            maxLines: 4,
+            decoration: const InputDecoration(
+              labelText: 'Mensagem ao signatário (opcional)',
+              hintText: 'Por favor, assine este documento.',
+              alignLabelWithHint: true,
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'O modo abaixo vale para todos os signatários.',
+            style: t.bodySmall?.copyWith(color: muted),
+          ),
+          const SizedBox(height: 8),
+          SegmentedButton<bool>(
+            segments: const [
+              ButtonSegment(
+                value: true,
+                icon: Icon(LucideIcons.mail, size: 16),
+                label: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text('Enviar por e-mail'),
                 ),
               ),
-          TextButton.icon(
-            onPressed: () => setState(() => _forms.add(_SignerForm())),
-            icon: const Icon(Icons.add),
-            label: const Text('Adicionar signatário'),
+              ButtonSegment(
+                value: false,
+                icon: Icon(LucideIcons.link, size: 16),
+                label: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text('Gerar apenas link'),
+                ),
+              ),
+            ],
+            selected: {_porEmail},
+            showSelectedIcon: false,
+            onSelectionChanged: (v) => setState(() => _porEmail = v.first),
+          ),
+          const SizedBox(height: 6),
+          for (var i = 0; i < _forms.length; i++)
+            _SignerFormRow(
+              index: i,
+              form: _forms[i],
+              porEmail: _porEmail,
+              onRemove: _forms.length > 1
+                  ? () => setState(() => _forms.removeAt(i).dispose())
+                  : null,
+            ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => setState(() => _forms.add(_SignerForm())),
+              icon: const Icon(LucideIcons.plus, size: 17),
+              label: const Text('Adicionar signatário'),
+              style: TextButton.styleFrom(foregroundColor: _accent),
+            ),
           ),
           const SizedBox(height: 12),
           SizedBox(
@@ -723,176 +1011,221 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
             child: FilledButton.icon(
               onPressed: _sending ? null : _enviar,
               icon: _sending
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.draw_rounded),
-              label: const Text('Enviar para assinatura'),
+                  ? const _Spin(color: Colors.white)
+                  : Icon(
+                      _porEmail ? LucideIcons.send : LucideIcons.link,
+                      size: 18,
+                    ),
+              label: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  _sending
+                      ? 'Enviando…'
+                      : _porEmail
+                          ? 'Enviar por e-mail'
+                          : 'Gerar link',
+                ),
+              ),
               style: FilledButton.styleFrom(
-                backgroundColor: _accent,
-                padding: const EdgeInsets.symmetric(vertical: 16),
+                backgroundColor: _green,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 15),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
             ),
+          ),
+        ] else if (canUpdate && daEtapa.any(_assinada)) ...[
+          const SizedBox(height: 16),
+          Text(
+            'Esta etapa já tem assinatura concluída.',
+            style: t.bodySmall?.copyWith(color: muted),
           ),
         ],
       ],
     );
   }
 
-  Widget _buildHistoryTab(ScrollController scroll) {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
+  Widget _buildHistoryTab() {
+    if (_loading && _historico == null) return _skeleton();
     final h = _historico;
+    final t = Theme.of(context).textTheme;
+    final muted = ThemeHelpers.textSecondaryColor(context);
     if (h == null) {
-      return const Center(child: Text('Histórico indisponível.'));
+      return Center(
+        child: Text(
+          'Histórico indisponível.',
+          style: t.bodySmall?.copyWith(color: muted),
+        ),
+      );
     }
     final events = [...h.stageHistory]..sort(
-        (a, b) =>
-            (b.createdAt ?? DateTime(2000)).compareTo(a.createdAt ?? DateTime(2000)),
+        (a, b) => (b.createdAt ?? DateTime(2000))
+            .compareTo(a.createdAt ?? DateTime(2000)),
       );
     final atts = h.attachments;
-    return ListView(
-      controller: scroll,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-      children: [
-        Text(
-          'Anexos físicos',
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w900,
+    return RefreshIndicator(
+      onRefresh: _load,
+      color: _accent,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+        children: [
+          _SectionLabel('ANEXOS FÍSICOS', accent: _accent),
+          const SizedBox(height: 4),
+          if (atts.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Text(
+                'Sem anexos.',
+                style: t.bodySmall?.copyWith(color: muted),
               ),
-        ),
-        const SizedBox(height: 8),
-        if (atts.isEmpty)
-          Text(
-            'Sem anexos.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                ),
-          )
-        else
-          ...atts.map(
-            (a) => _AttachmentTile(
-              att: a,
-              accent: _accent,
-              onApprove: _isGestor && a.status.toLowerCase() == 'pending_approval'
-                  ? () => _aprovarAnexo(a)
-                  : null,
-              onReject: _isGestor && a.status.toLowerCase() == 'pending_approval'
-                  ? () => _rejeitarAnexo(a)
-                  : null,
-            ),
-          ),
-        if (_etapasDisponiveis.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: _uploading ? null : _anexarFicha,
-              icon: _uploading
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.note_add_outlined),
-              label: const Text('Anexar ficha física'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: _accent,
-                side: BorderSide(color: _accent.withValues(alpha: 0.6)),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+            )
+          else
+            for (final a in atts)
+              _AttachmentRow(
+                att: a,
+                label: _etapaLabel(a.etapa),
+                green: _green,
+                red: _red,
+                warn: _warn,
+                onApprove:
+                    _isGestor && a.status.toLowerCase() == 'pending_approval'
+                        ? () => _aprovarAnexo(a)
+                        : null,
+                onReject:
+                    _isGestor && a.status.toLowerCase() == 'pending_approval'
+                        ? () => _rejeitarAnexo(a)
+                        : null,
               ),
-            ),
-          ),
+          const SizedBox(height: 20),
+          _SectionLabel('EVENTOS', accent: _accent),
+          const SizedBox(height: 4),
+          if (events.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Text(
+                'Nenhum evento registrado.',
+                style: t.bodySmall?.copyWith(color: muted),
+              ),
+            )
+          else
+            for (final e in events) _EventRow(event: e),
         ],
-        const SizedBox(height: 18),
-        Text(
-          'Eventos',
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-              ),
-        ),
-        const SizedBox(height: 8),
-        if (events.isEmpty)
-          Text(
-            'Sem eventos.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                ),
-          )
-        else
-          ...events.map((e) => _EventTile(event: e)),
-      ],
+      ),
     );
   }
 }
 
+// ─── Peças ────────────────────────────────────────────────────────────────────
+
 class _SheetHeader extends StatelessWidget {
   const _SheetHeader({
     required this.proposalNumber,
-    required this.etapa,
+    required this.titulo,
     required this.onClose,
   });
 
   final String proposalNumber;
-  final int etapa;
+  final String titulo;
   final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
     final muted = ThemeHelpers.textSecondaryColor(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 14, 8, 6),
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(20, 10, 8, 4),
+      child: Column(
         children: [
           Container(
             width: 38,
             height: 4,
-            margin: const EdgeInsets.only(bottom: 12),
+            margin: const EdgeInsets.only(bottom: 10),
             decoration: BoxDecoration(
               color: muted.withValues(alpha: 0.25),
               borderRadius: BorderRadius.circular(2),
             ),
           ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'ASSINATURAS · ETAPA $etapa',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: muted,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.6,
-                      ),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      titulo,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: muted,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1.4,
+                          ),
+                    ),
+                    Text(
+                      'Proposta nº $proposalNumber',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w900,
+                          ),
+                    ),
+                  ],
                 ),
-                Text(
-                  'Proposta nº $proposalNumber',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w900,
-                      ),
-                ),
-              ],
-            ),
-          ),
-          IconButton(
-            onPressed: onClose,
-            icon: const Icon(Icons.close_rounded),
+              ),
+              IconButton(
+                tooltip: 'Fechar',
+                onPressed: onClose,
+                icon: const Icon(LucideIcons.x, size: 20),
+              ),
+            ],
           ),
         ],
       ),
+    );
+  }
+}
+
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.text, {required this.accent});
+  final String text;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 3,
+          height: 15,
+          decoration: BoxDecoration(
+            color: accent,
+            borderRadius: BorderRadius.circular(999),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.3,
+                  color: ThemeHelpers.textColor(context),
+                  fontSize: 11,
+                ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Container(
+            height: 1,
+            color: ThemeHelpers.borderLightColor(context),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -900,27 +1233,84 @@ class _SheetHeader extends StatelessWidget {
 class _EtapaPicker extends StatelessWidget {
   const _EtapaPicker({
     required this.current,
+    required this.maxLiberada,
     required this.accent,
     required this.onChanged,
   });
 
   final int current;
+  final int maxLiberada;
   final Color accent;
   final ValueChanged<int> onChanged;
 
   @override
   Widget build(BuildContext context) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final t = Theme.of(context).textTheme;
     return Row(
       children: [
         for (var i = 1; i <= 3; i++)
           Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: _EtapaChip(
-                etapa: i,
-                selected: current == i,
-                accent: accent,
-                onTap: () => onChanged(i),
+            child: InkWell(
+              onTap: i <= maxLiberada ? () => onChanged(i) : null,
+              child: Tooltip(
+                message: i <= maxLiberada
+                    ? ''
+                    : 'Conclua a Etapa ${i - 1} antes.',
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 9),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      bottom: BorderSide(
+                        color: current == i
+                            ? accent
+                            : ThemeHelpers.borderLightColor(context),
+                        width: current == i ? 2 : 1,
+                      ),
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          if (i > maxLiberada) ...[
+                            Icon(LucideIcons.lock, size: 11, color: muted),
+                            const SizedBox(width: 4),
+                          ],
+                          Flexible(
+                            child: Text(
+                              'ETAPA $i',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: t.labelSmall?.copyWith(
+                                color: current == i ? accent : muted,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.2,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        switch (i) {
+                          1 => 'Comprador',
+                          2 => 'Proprietário',
+                          _ => 'Corretor',
+                        },
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: t.bodySmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: i > maxLiberada
+                              ? muted.withValues(alpha: 0.6)
+                              : null,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
@@ -929,343 +1319,415 @@ class _EtapaPicker extends StatelessWidget {
   }
 }
 
-class _EtapaChip extends StatelessWidget {
-  const _EtapaChip({
-    required this.etapa,
-    required this.selected,
-    required this.accent,
+class _AcaoTexto extends StatelessWidget {
+  const _AcaoTexto({
+    required this.icon,
+    required this.label,
     required this.onTap,
+    this.busy = false,
+    this.color,
   });
 
-  final int etapa;
-  final bool selected;
-  final Color accent;
-  final VoidCallback onTap;
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final bool busy;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
-    final label = switch (etapa) {
-      1 => 'Comprador',
-      2 => 'Proprietário',
-      _ => 'Corretor',
-    };
-    return Material(
-      color: selected ? accent.withValues(alpha: 0.14) : Colors.transparent,
-      borderRadius: BorderRadius.circular(10),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(10),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: selected
-                  ? accent.withValues(alpha: 0.6)
-                  : ThemeHelpers.borderColor(context),
-            ),
-          ),
-          child: Column(
-            children: [
-              Text(
-                'ETAPA $etapa',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: selected
-                          ? accent
-                          : ThemeHelpers.textSecondaryColor(context),
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 1.4,
-                    ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                label,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
+    return TextButton.icon(
+      onPressed: onTap,
+      icon: busy ? const _Spin() : Icon(icon, size: 16),
+      label: Text(label),
+      style: TextButton.styleFrom(
+        foregroundColor: color ?? ThemeHelpers.textColor(context),
+        visualDensity: VisualDensity.compact,
+        side: BorderSide(color: ThemeHelpers.borderLightColor(context)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
 }
 
-class _SignatureTile extends StatelessWidget {
-  const _SignatureTile({
+class _Spin extends StatelessWidget {
+  const _Spin({this.color});
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 16,
+      height: 16,
+      child: CircularProgressIndicator(strokeWidth: 2, color: color),
+    );
+  }
+}
+
+class _VoceBadge extends StatelessWidget {
+  const _VoceBadge({required this.color});
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(
+        'VOCÊ',
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.8,
+              fontSize: 9.5,
+            ),
+      ),
+    );
+  }
+}
+
+class _SignatureRow extends StatelessWidget {
+  const _SignatureRow({
     required this.signature,
+    required this.ehVoce,
+    required this.busy,
+    required this.temLink,
+    required this.encerrada,
+    required this.green,
+    required this.warn,
+    required this.red,
+    required this.blue,
     required this.accent,
+    required this.onAssinar,
     required this.onCopyLink,
-    required this.onOpenLink,
+    required this.onWhatsapp,
     this.onResendEmail,
     this.onResendWhatsapp,
   });
 
   final ProposalSignature signature;
+  final bool ehVoce;
+  final bool busy;
+  final bool temLink;
+  final bool encerrada;
+  final Color green;
+  final Color warn;
+  final Color red;
+  final Color blue;
   final Color accent;
+  final VoidCallback onAssinar;
   final VoidCallback onCopyLink;
-  final VoidCallback onOpenLink;
+  final VoidCallback onWhatsapp;
   final VoidCallback? onResendEmail;
   final VoidCallback? onResendWhatsapp;
 
-  @override
-  Widget build(BuildContext context) {
-    final tone = _statusTone(signature.status);
-    return Container(
-      margin: const EdgeInsets.only(top: 10),
-      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 2,
-                ),
-                decoration: BoxDecoration(
-                  color: tone.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  signature.statusLabel.toUpperCase(),
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: tone,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1,
-                      ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'ETAPA ${signature.etapa}',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
-                      fontWeight: FontWeight.w800,
-                    ),
-              ),
-              const Spacer(),
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.more_horiz),
-                itemBuilder: (ctx) => [
-                  const PopupMenuItem(
-                    value: 'copy',
-                    child: Text('Copiar link'),
-                  ),
-                  const PopupMenuItem(
-                    value: 'open',
-                    child: Text('Abrir link'),
-                  ),
-                  if (onResendEmail != null)
-                    const PopupMenuItem(
-                      value: 'email',
-                      child: Text('Reenviar e-mail'),
-                    ),
-                  if (onResendWhatsapp != null)
-                    const PopupMenuItem(
-                      value: 'whatsapp',
-                      child: Text('Reenviar WhatsApp'),
-                    ),
-                ],
-                onSelected: (v) {
-                  switch (v) {
-                    case 'copy':
-                      onCopyLink();
-                      break;
-                    case 'open':
-                      onOpenLink();
-                      break;
-                    case 'email':
-                      onResendEmail?.call();
-                      break;
-                    case 'whatsapp':
-                      onResendWhatsapp?.call();
-                      break;
-                  }
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            signature.signerName?.trim().isNotEmpty == true
-                ? signature.signerName!
-                : 'Signatário não identificado',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
-          ),
-          if (signature.signerEmail != null)
-            Text(
-              signature.signerEmail!,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                  ),
-            ),
-          if (signature.signedAt != null)
-            Text(
-              'Assinada em ${DateFormat('dd/MM/yyyy HH:mm', 'pt_BR').format(signature.signedAt!.toLocal())}',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                  ),
-            ),
-          if (signature.rejectionReason != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                'Motivo: ${signature.rejectionReason}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFFDC2626),
-                    ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Color _statusTone(String s) {
-    switch (s.toLowerCase()) {
+  Color _tone(BuildContext context) {
+    switch (signature.status.toLowerCase()) {
       case 'signed':
-        return const Color(0xFF16A34A);
+        return green;
       case 'rejected':
+        return red;
       case 'cancelled':
       case 'canceled':
-        return const Color(0xFFDC2626);
+        return ThemeHelpers.textSecondaryColor(context);
+      case 'viewed':
+        return blue;
       default:
-        return const Color(0xFF6366F1);
+        return warn;
     }
   }
-}
 
-class _AttachmentTile extends StatelessWidget {
-  const _AttachmentTile({
-    required this.att,
-    required this.accent,
-    this.onApprove,
-    this.onReject,
-  });
-
-  final ProposalAttachment att;
-  final Color accent;
-  final VoidCallback? onApprove;
-  final VoidCallback? onReject;
+  String get _label {
+    switch (signature.status.toLowerCase()) {
+      case 'signed':
+        return 'Assinado';
+      case 'rejected':
+        return 'Rejeitado';
+      case 'viewed':
+        return 'Visualizado';
+      case 'approved':
+        return 'Aprovado';
+      case 'cancelled':
+      case 'canceled':
+        return 'Cancelado';
+      default:
+        return 'Pendente';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
     final muted = ThemeHelpers.textSecondaryColor(context);
-    final tone = _statusTone(att.status);
-    final etapaLabel = switch (att.etapa) {
-      1 => 'Comprador',
-      2 => 'Proprietário',
-      _ => 'Corretor',
-    };
-    final canOpen = att.fileUrl.isNotEmpty;
+    final tone = _tone(context);
+    final nome = signature.signerName?.trim().isNotEmpty == true
+        ? signature.signerName!.trim()
+        : (signature.signerEmail ?? '—');
     return Container(
-      margin: const EdgeInsets.only(top: 10),
-      padding: const EdgeInsets.fromLTRB(12, 10, 8, 12),
+      padding: const EdgeInsets.symmetric(vertical: 10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
+        border: Border(
+          bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
         ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: tone.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(6),
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Icon(
+                  signature.signerEmail != null
+                      ? LucideIcons.mail
+                      : LucideIcons.userCheck,
+                  size: 16,
+                  color: tone,
                 ),
-                child: Text(
-                  _statusLabel(att.status).toUpperCase(),
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: tone,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            nome,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: t.bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                        if (ehVoce) ...[
+                          const SizedBox(width: 6),
+                          _VoceBadge(color: accent),
+                        ],
+                      ],
+                    ),
+                    if (signature.signerEmail != null)
+                      Text(
+                        signature.signerEmail!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: t.bodySmall?.copyWith(color: muted),
                       ),
+                    if (signature.signedAt != null)
+                      Text(
+                        'Assinado em ${DateFormat('dd/MM/yyyy HH:mm', 'pt_BR').format(signature.signedAt!.toLocal())}',
+                        style: t.labelSmall?.copyWith(color: green),
+                      ),
+                    if (signature.rejectionReason != null)
+                      Text(
+                        'Motivo: ${signature.rejectionReason}',
+                        style: t.bodySmall?.copyWith(color: red),
+                      ),
+                  ],
                 ),
               ),
               const SizedBox(width: 8),
               Text(
-                'ETAPA ${att.etapa} · ${etapaLabel.toUpperCase()}',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: muted,
-                      fontWeight: FontWeight.w800,
-                    ),
+                _label.toUpperCase(),
+                style: t.labelSmall?.copyWith(
+                  color: tone,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.8,
+                ),
               ),
-              const Spacer(),
-              if (canOpen)
-                IconButton(
-                  tooltip: 'Abrir',
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.open_in_new_rounded, size: 20),
-                  onPressed: () async {
-                    final uri = Uri.tryParse(att.fileUrl);
-                    if (uri != null) {
-                      await launchUrl(uri,
-                          mode: LaunchMode.externalApplication);
+              if (!encerrada)
+                PopupMenuButton<String>(
+                  padding: EdgeInsets.zero,
+                  tooltip: 'Ações',
+                  icon: busy
+                      ? const _Spin()
+                      : Icon(LucideIcons.ellipsisVertical,
+                          size: 18, color: muted),
+                  itemBuilder: (ctx) => [
+                    PopupMenuItem(
+                      value: 'copy',
+                      child: Text(temLink ? 'Copiar link' : 'Gerar e copiar link'),
+                    ),
+                    const PopupMenuItem(
+                      value: 'wa',
+                      child: Text('Compartilhar no WhatsApp'),
+                    ),
+                    if (onResendEmail != null)
+                      const PopupMenuItem(
+                        value: 'email',
+                        child: Text('Reenviar e-mail'),
+                      ),
+                    if (onResendWhatsapp != null)
+                      const PopupMenuItem(
+                        value: 'resend',
+                        child: Text('Reenviar pelo WhatsApp da empresa'),
+                      ),
+                  ],
+                  onSelected: (v) {
+                    switch (v) {
+                      case 'copy':
+                        onCopyLink();
+                        break;
+                      case 'wa':
+                        onWhatsapp();
+                        break;
+                      case 'email':
+                        onResendEmail?.call();
+                        break;
+                      case 'resend':
+                        onResendWhatsapp?.call();
+                        break;
                     }
                   },
                 ),
             ],
           ),
-          const SizedBox(height: 4),
+          if (ehVoce && !encerrada) ...[
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.only(left: 26),
+              child: FilledButton.icon(
+                onPressed: busy ? null : onAssinar,
+                icon: const Icon(LucideIcons.penLine, size: 16),
+                label: const Text('Assinar'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: green,
+                  foregroundColor: Colors.white,
+                  visualDensity: VisualDensity.compact,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _AttachmentRow extends StatelessWidget {
+  const _AttachmentRow({
+    required this.att,
+    required this.label,
+    required this.green,
+    required this.red,
+    required this.warn,
+    this.onApprove,
+    this.onReject,
+  });
+
+  final ProposalAttachment att;
+  final String label;
+  final Color green;
+  final Color red;
+  final Color warn;
+  final VoidCallback? onApprove;
+  final VoidCallback? onReject;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final st = att.status.toLowerCase();
+    final tone = st == 'approved'
+        ? green
+        : st == 'rejected'
+            ? red
+            : warn;
+    final statusLabel = st == 'approved'
+        ? 'Aprovado'
+        : st == 'rejected'
+            ? 'Rejeitado'
+            : 'Aguardando aprovação';
+    final canOpen = att.fileUrl.isNotEmpty;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
           Row(
             children: [
-              Icon(Icons.attach_file_rounded, size: 16, color: muted),
-              const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  att.fileName,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                  'ETAPA ${att.etapa} · ${label.toUpperCase()}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: t.labelSmall?.copyWith(
+                    color: muted,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              Text(
+                statusLabel.toUpperCase(),
+                style: t.labelSmall?.copyWith(
+                  color: tone,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.8,
                 ),
               ),
             ],
           ),
-          if (att.uploadedByName != null && att.uploadedByName!.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Text(
-                'Enviado por ${att.uploadedByName}',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: muted,
-                    ),
-              ),
-            ),
-          if (att.createdAt != null)
-            Text(
-              DateFormat('dd/MM/yyyy HH:mm', 'pt_BR')
-                  .format(att.createdAt!.toLocal()),
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: muted,
+          const SizedBox(height: 4),
+          InkWell(
+            onTap: canOpen
+                ? () async {
+                    final uri = Uri.tryParse(att.fileUrl);
+                    if (uri != null) {
+                      await launchUrl(uri,
+                          mode: LaunchMode.externalApplication);
+                    }
+                  }
+                : null,
+            child: Row(
+              children: [
+                Icon(LucideIcons.paperclip, size: 15, color: muted),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    att.fileName,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
                   ),
+                ),
+                if (canOpen) ...[
+                  const SizedBox(width: 6),
+                  Icon(LucideIcons.externalLink, size: 15, color: muted),
+                ],
+              ],
             ),
-          if (att.rejectionReason != null &&
-              att.rejectionReason!.isNotEmpty)
+          ),
+          Text(
+            [
+              if (att.uploadedByName?.isNotEmpty == true)
+                'Enviado por ${att.uploadedByName}',
+              if (att.createdAt != null)
+                DateFormat('dd/MM/yyyy HH:mm', 'pt_BR')
+                    .format(att.createdAt!.toLocal()),
+            ].join(' · '),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: t.labelSmall?.copyWith(color: muted),
+          ),
+          if (att.rejectionReason?.isNotEmpty == true)
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(
                 'Motivo: ${att.rejectionReason}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFFDC2626),
-                    ),
+                style: t.bodySmall?.copyWith(color: red),
               ),
             ),
           if (onApprove != null || onReject != null) ...[
@@ -1274,13 +1736,15 @@ class _AttachmentTile extends StatelessWidget {
               children: [
                 if (onReject != null)
                   Expanded(
-                    child: OutlinedButton.icon(
+                    child: OutlinedButton(
                       onPressed: onReject,
-                      icon: const Icon(Icons.close_rounded, size: 18),
-                      label: const Text('Rejeitar'),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFFDC2626),
-                        side: const BorderSide(color: Color(0x55DC2626)),
+                        foregroundColor: red,
+                        side: BorderSide(color: red.withValues(alpha: 0.45)),
+                      ),
+                      child: const FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('Rejeitar'),
                       ),
                     ),
                   ),
@@ -1288,12 +1752,15 @@ class _AttachmentTile extends StatelessWidget {
                   const SizedBox(width: 10),
                 if (onApprove != null)
                   Expanded(
-                    child: FilledButton.icon(
+                    child: FilledButton(
                       onPressed: onApprove,
-                      icon: const Icon(Icons.check_rounded, size: 18),
-                      label: const Text('Aprovar'),
                       style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF16A34A),
+                        backgroundColor: green,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('Aprovar'),
                       ),
                     ),
                   ),
@@ -1304,78 +1771,49 @@ class _AttachmentTile extends StatelessWidget {
       ),
     );
   }
-
-  Color _statusTone(String s) {
-    switch (s.toLowerCase()) {
-      case 'approved':
-        return const Color(0xFF16A34A);
-      case 'rejected':
-        return const Color(0xFFDC2626);
-      case 'pending_approval':
-      case 'pending':
-        return const Color(0xFFD97706);
-      default:
-        return const Color(0xFF6366F1);
-    }
-  }
-
-  String _statusLabel(String s) {
-    switch (s.toLowerCase()) {
-      case 'approved':
-        return 'Aprovado';
-      case 'rejected':
-        return 'Rejeitado';
-      case 'pending_approval':
-      case 'pending':
-        return 'Aguardando aprovação';
-      default:
-        return s;
-    }
-  }
 }
 
-class _EventTile extends StatelessWidget {
-  const _EventTile({required this.event});
+class _EventRow extends StatelessWidget {
+  const _EventRow({required this.event});
   final ProposalHistoryEvent event;
 
   @override
   Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final muted = ThemeHelpers.textSecondaryColor(context);
     return Container(
-      margin: const EdgeInsets.only(top: 6),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      padding: const EdgeInsets.symmetric(vertical: 10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
+        border: Border(
+          bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
         ),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'E${event.etapa}',
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: ThemeHelpers.textSecondaryColor(context),
-                ),
+          SizedBox(
+            width: 28,
+            child: Text(
+              'E${event.etapa}',
+              style: t.labelSmall?.copyWith(
+                fontWeight: FontWeight.w900,
+                color: muted,
+              ),
+            ),
           ),
-          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  event.eventType,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
+                  _kEventLabels[event.eventType] ?? event.eventType,
+                  style: t.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
                 ),
                 if (event.createdAt != null)
                   Text(
                     DateFormat('dd/MM/yyyy HH:mm', 'pt_BR')
                         .format(event.createdAt!.toLocal()),
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                        ),
+                    style: t.labelSmall?.copyWith(color: muted),
                   ),
               ],
             ),
@@ -1389,66 +1827,39 @@ class _EventTile extends StatelessWidget {
 const List<String> _kAnexoExtensoes = ['pdf', 'jpg', 'jpeg', 'png', 'webp'];
 
 class _SignerForm {
-  _SignerForm()
-      : name = TextEditingController(),
-        email = TextEditingController(),
-        phone = TextEditingController(),
-        action = 'SIGN';
-
-  _SignerForm.fromInput(ProposalSignerInput input)
-      : name = TextEditingController(text: input.name),
-        email = TextEditingController(text: input.email),
-        phone = TextEditingController(text: input.phone ?? ''),
-        action = input.action;
+  _SignerForm({String name = '', String email = ''})
+      : name = TextEditingController(text: name),
+        email = TextEditingController(text: email);
 
   final TextEditingController name;
   final TextEditingController email;
-  final TextEditingController phone;
-  String action;
-
-  bool get isValid =>
-      name.text.trim().isNotEmpty && email.text.trim().contains('@');
-
-  ProposalSignerInput toInput() => ProposalSignerInput(
-        name: name.text.trim(),
-        email: email.text.trim(),
-        phone: phone.text.trim().isEmpty ? null : phone.text.trim(),
-        action: action,
-      );
 
   void dispose() {
     name.dispose();
     email.dispose();
-    phone.dispose();
   }
 }
 
-class _SignerFormCard extends StatefulWidget {
-  const _SignerFormCard({
+class _SignerFormRow extends StatelessWidget {
+  const _SignerFormRow({
     required this.index,
     required this.form,
+    required this.porEmail,
     this.onRemove,
   });
 
   final int index;
   final _SignerForm form;
+  final bool porEmail;
   final VoidCallback? onRemove;
 
   @override
-  State<_SignerFormCard> createState() => _SignerFormCardState();
-}
-
-class _SignerFormCardState extends State<_SignerFormCard> {
-  @override
   Widget build(BuildContext context) {
-    final f = widget.form;
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+      padding: const EdgeInsets.only(top: 6, bottom: 12),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
+        border: Border(
+          bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
         ),
       ),
       child: Column(
@@ -1456,59 +1867,42 @@ class _SignerFormCardState extends State<_SignerFormCard> {
         children: [
           Row(
             children: [
-              Text(
-                'Signatário ${widget.index + 1}',
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      fontWeight: FontWeight.w900,
-                    ),
-              ),
-              const Spacer(),
-              if (widget.onRemove != null)
-                IconButton(
-                  tooltip: 'Remover',
-                  onPressed: widget.onRemove,
-                  icon: const Icon(Icons.close_rounded),
+              Expanded(
+                child: Text(
+                  'Signatário ${index + 1}',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w900,
+                      ),
                 ),
-            ],
-          ),
-          TextField(
-            controller: f.name,
-            decoration: const InputDecoration(
-              labelText: 'Nome completo *',
-            ),
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: f.email,
-            keyboardType: TextInputType.emailAddress,
-            decoration: const InputDecoration(
-              labelText: 'E-mail *',
-            ),
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: f.phone,
-            keyboardType: TextInputType.phone,
-            decoration: const InputDecoration(
-              labelText: 'Telefone (WhatsApp)',
-              helperText: 'Opcional — usado para reenviar link por WhatsApp',
-            ),
-          ),
-          const SizedBox(height: 10),
-          DropdownButtonFormField<String>(
-            initialValue: f.action,
-            decoration: const InputDecoration(labelText: 'Ação'),
-            items: const [
-              DropdownMenuItem(value: 'SIGN', child: Text('Assinar')),
-              DropdownMenuItem(value: 'APPROVE', child: Text('Aprovar')),
-              DropdownMenuItem(value: 'RECOGNIZE', child: Text('Reconhecer')),
-              DropdownMenuItem(
-                value: 'SIGN_AS_A_WITNESS',
-                child: Text('Assinar como testemunha'),
+              ),
+              IconButton(
+                tooltip: 'Remover',
+                onPressed: onRemove,
+                icon: const Icon(LucideIcons.trash2, size: 17),
+                visualDensity: VisualDensity.compact,
               ),
             ],
-            onChanged: (v) => setState(() => f.action = v ?? 'SIGN'),
           ),
+          TextField(
+            controller: form.name,
+            textCapitalization: TextCapitalization.words,
+            decoration: InputDecoration(
+              labelText: porEmail ? 'Nome do signatário' : 'Nome do signatário *',
+              border: const OutlineInputBorder(),
+            ),
+          ),
+          if (porEmail) ...[
+            const SizedBox(height: 10),
+            TextField(
+              controller: form.email,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(
+                labelText: 'E-mail *',
+                hintText: 'email@exemplo.com',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
         ],
       ),
     );

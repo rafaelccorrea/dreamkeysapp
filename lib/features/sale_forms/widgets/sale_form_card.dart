@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../../core/constants/app_permissions.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/sale_forms_service.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import 'sale_form_row_rules.dart';
 
 /// Card de uma ficha de venda na listagem (mobile).
 ///
@@ -20,15 +20,15 @@ class SaleFormCard extends StatelessWidget {
     required this.saleForm,
     required this.accent,
     this.onTap,
-    this.onCancelar,
-    this.onExcluir,
+    this.onAction,
   });
 
   final SaleForm saleForm;
   final Color accent;
   final VoidCallback? onTap;
-  final VoidCallback? onCancelar;
-  final VoidCallback? onExcluir;
+
+  /// Ações do menu (mesmas do menu da listagem web, na mesma ordem).
+  final ValueChanged<SaleFormRowAction>? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -36,16 +36,10 @@ class SaleFormCard extends StatelessWidget {
     final muted = ThemeHelpers.textSecondaryColor(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    final canUpdate = ModuleAccessService.instance.hasPermission(
-      AppPermissions.saleFormUpdate,
-    );
-    final canDelete = ModuleAccessService.instance.hasPermission(
-      AppPermissions.saleFormDelete,
-    );
+    final rules = SaleFormRowRules(saleForm);
 
     final statusTone = _statusTone(context, saleForm.status);
     final isCanceled = saleForm.status == SaleFormStatus.canceled;
-    final isFinalized = saleForm.status == SaleFormStatus.finalized;
 
     final money = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
     final priceText = saleForm.saleValue != null && saleForm.saleValue! > 0
@@ -74,8 +68,6 @@ class SaleFormCard extends StatelessWidget {
     final sigDone = saleForm.assinaturasAssinadas;
     final showSig = sigTotal > 0 && !isCanceled;
 
-    final canCancel = canUpdate && !isCanceled && !isFinalized;
-    final canExclude = canDelete && saleForm.deletedAt == null && !isCanceled;
 
     return Material(
       color: Colors.transparent,
@@ -170,12 +162,10 @@ class SaleFormCard extends StatelessWidget {
                         ],
                       ),
                     ),
-                    if (canCancel || canExclude)
-                      _MoreMenu(
-                        canCancel: canCancel,
-                        canExclude: canExclude,
-                        onCancelar: onCancelar,
-                        onExcluir: onExcluir,
+                    if (onAction != null)
+                      SaleFormActionsMenu(
+                        rules: rules,
+                        onAction: onAction!,
                       ),
                   ],
                 ),
@@ -720,28 +710,38 @@ class _MetaItem extends StatelessWidget {
   }
 }
 
-class _MoreMenu extends StatelessWidget {
-  const _MoreMenu({
-    required this.canCancel,
-    required this.canExclude,
-    this.onCancelar,
-    this.onExcluir,
+/// Menu de ações da ficha — o mesmo do web, na mesma ordem (lista e detalhe).
+class SaleFormActionsMenu extends StatelessWidget {
+  const SaleFormActionsMenu({
+    super.key,
+    required this.rules,
+    required this.onAction,
+    this.noDetalhe = false,
   });
-  final bool canCancel;
-  final bool canExclude;
-  final VoidCallback? onCancelar;
-  final VoidCallback? onExcluir;
+  final SaleFormRowRules rules;
+  final ValueChanged<SaleFormRowAction> onAction;
+
+  /// Dentro do detalhe: sem "Ver" (já está vendo) e sem "Editar" (o detalhe
+  /// tem o botão próprio).
+  final bool noDetalhe;
+
   @override
   Widget build(BuildContext context) {
     final muted = ThemeHelpers.textSecondaryColor(context);
     final textColor = ThemeHelpers.textColor(context);
-    final danger = Theme.of(context).brightness == Brightness.dark
-        ? AppColors.status.errorDarkMode
-        : AppColors.status.error;
-    final warn = Theme.of(context).brightness == Brightness.dark
-        ? AppColors.status.warningDarkMode
-        : AppColors.status.warning;
-    return PopupMenuButton<String>(
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final danger =
+        dark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    final warn =
+        dark ? AppColors.status.warningDarkMode : AppColors.status.warning;
+    final info = dark ? AppColors.status.infoDarkMode : AppColors.status.info;
+    final ok =
+        dark ? AppColors.status.successDarkMode : AppColors.status.success;
+    final role = ModuleAccessService.instance.userRole;
+    final deleted = rules.form.deletedAt != null;
+    final motivo = rules.auditMotivo;
+
+    return PopupMenuButton<SaleFormRowAction>(
       tooltip: 'Ações',
       padding: EdgeInsets.zero,
       splashRadius: 20,
@@ -749,6 +749,7 @@ class _MoreMenu extends StatelessWidget {
       color: ThemeHelpers.cardBackgroundColor(context),
       elevation: 12,
       shadowColor: Colors.black.withValues(alpha: 0.25),
+      constraints: const BoxConstraints(minWidth: 236, maxWidth: 300),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(
@@ -765,55 +766,113 @@ class _MoreMenu extends StatelessWidget {
         ),
         child: Icon(Icons.more_horiz_rounded, size: 19, color: muted),
       ),
-      itemBuilder: (ctx) => [
-        if (canCancel && onCancelar != null)
-          _item(
-            'cancelar',
-            Icons.block_rounded,
-            'Cancelar ficha',
-            warn,
-            textColor,
-          ),
-        if (canExclude && onExcluir != null)
-          _item(
-            'excluir',
-            Icons.delete_outline_rounded,
-            'Excluir',
-            danger,
-            danger,
-          ),
-      ],
-      onSelected: (v) {
-        switch (v) {
-          case 'cancelar':
-            onCancelar?.call();
-            break;
-          case 'excluir':
-            onExcluir?.call();
-            break;
+      itemBuilder: (ctx) {
+        final items = <PopupMenuEntry<SaleFormRowAction>>[
+          if (!noDetalhe)
+            _item(SaleFormRowAction.ver, Icons.visibility_outlined,
+                'Ver (somente leitura)', muted, textColor),
+          _item(SaleFormRowAction.usuariosVinculados, Icons.group_outlined,
+              'Ver usuários vinculados', muted, textColor),
+          if (rules.canChangeTeam)
+            _item(SaleFormRowAction.trocarEquipe, Icons.swap_horiz_rounded,
+                'Trocar equipe', muted, textColor),
+          if (motivo != null)
+            _item(SaleFormRowAction.motivo, Icons.comment_outlined,
+                'Ver motivo', muted, textColor),
+        ];
+        if (!deleted) {
+          final acoes = <PopupMenuEntry<SaleFormRowAction>>[
+            if (rules.canPdf) ...[
+              _item(SaleFormRowAction.pdfSistema,
+                  Icons.picture_as_pdf_outlined, 'PDF (sem assinatura)',
+                  info, textColor),
+              _item(SaleFormRowAction.pdfAssinaturas,
+                  Icons.picture_as_pdf_rounded, 'PDF (com assinaturas)',
+                  info, textColor),
+            ],
+            if (rules.canTransfer(role: role))
+              _item(SaleFormRowAction.transferir,
+                  Icons.swap_horiz_rounded, 'Transferir responsabilidade',
+                  muted, textColor),
+            if (rules.canDistrato)
+              _item(SaleFormRowAction.distrato, Icons.cancel_outlined,
+                  'Distratar (cancelar venda)', warn, textColor),
+            if (rules.showSignatures)
+              _item(
+                SaleFormRowAction.assinaturas,
+                rules.hasActiveSignatures
+                    ? Icons.assignment_outlined
+                    : Icons.draw_outlined,
+                rules.signaturesLabel,
+                ok,
+                textColor,
+              ),
+            if (rules.canCancelSignaturesForResend)
+              _item(SaleFormRowAction.cancelarAssinaturas,
+                  Icons.remove_done_rounded, 'Cancelar assinaturas (reenvio)',
+                  danger, danger),
+            if (rules.showEdit && !noDetalhe)
+              rules.canEdit
+                  ? _item(SaleFormRowAction.editar, Icons.edit_outlined,
+                      'Editar', muted, textColor)
+                  : _item(SaleFormRowAction.editar, Icons.lock_outline_rounded,
+                      'Editar', muted, muted, hint: 'bloqueada'),
+            if (rules.canCancelFicha)
+              _item(SaleFormRowAction.cancelarFicha, Icons.block_rounded,
+                  'Cancelar ficha', warn, textColor),
+          ];
+          if (acoes.isNotEmpty) {
+            items
+              ..add(const PopupMenuDivider(height: 8))
+              ..addAll(acoes);
+          }
         }
+        if (rules.canExclude) {
+          items
+            ..add(const PopupMenuDivider(height: 8))
+            ..add(_item(SaleFormRowAction.excluir,
+                Icons.delete_outline_rounded, 'Excluir', danger, danger));
+        }
+        return items;
       },
+      onSelected: onAction,
     );
   }
 
-  PopupMenuItem<String> _item(
-    String value,
+  PopupMenuItem<SaleFormRowAction> _item(
+    SaleFormRowAction value,
     IconData icon,
     String label,
     Color iconColor,
-    Color textColor,
-  ) {
-    return PopupMenuItem<String>(
+    Color textColor, {
+    String? hint,
+  }) {
+    return PopupMenuItem<SaleFormRowAction>(
       value: value,
       height: 44,
       child: Row(
         children: [
           Icon(icon, size: 18, color: iconColor),
           const SizedBox(width: 11),
-          Text(
-            label,
-            style: TextStyle(fontWeight: FontWeight.w700, color: textColor),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontWeight: FontWeight.w700, color: textColor),
+            ),
           ),
+          if (hint != null) ...[
+            const SizedBox(width: 8),
+            Text(
+              hint,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: textColor,
+              ),
+            ),
+          ],
         ],
       ),
     );

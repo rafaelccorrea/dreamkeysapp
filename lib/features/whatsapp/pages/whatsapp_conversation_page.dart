@@ -9,6 +9,7 @@ import '../../../shared/services/module_access_service.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../../../shared/widgets/app_error_state.dart';
+import '../../notifications/services/notification_websocket_service.dart';
 import '../models/whatsapp_models.dart';
 import '../services/whatsapp_service.dart';
 import '../widgets/whatsapp_conversation_card.dart'
@@ -109,10 +110,41 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     _pollTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       if (mounted && !_loading && !_sending) _syncLatest();
     });
+    // Tempo real (29/09/2026): mensagem nova ou mudança de status desta
+    // conversa chega pelo socket, como no web; o poll de 20 s vira só a rede
+    // de segurança.
+    _aoVivo = NotificationWebSocketService.instance.eventosAoVivo.listen((e) {
+      if (e.tipo == 'new_whatsapp_message' && !_ehDestaConversa(e.dados)) {
+        return;
+      }
+      if (e.tipo != 'new_whatsapp_message' &&
+          e.tipo != 'whatsapp_message_status') {
+        return;
+      }
+      _debounceAoVivo?.cancel();
+      _debounceAoVivo = Timer(const Duration(milliseconds: 400), () {
+        if (mounted && !_loading && !_sending) _syncLatest();
+      });
+    });
+  }
+
+  StreamSubscription<AvisoAoVivo>? _aoVivo;
+  Timer? _debounceAoVivo;
+
+  /// Mesmo número, comparando os 8 últimos dígitos (com ou sem o 9 e o DDI).
+  bool _ehDestaConversa(Map<String, dynamic> dados) {
+    String digitos(String v) => v.replaceAll(RegExp(r'\D'), '');
+    String cauda(String v) => v.length > 8 ? v.substring(v.length - 8) : v;
+    final dele = digitos((dados['phoneNumber'] ?? '').toString());
+    final meu = digitos(widget.phoneNumber);
+    if (dele.isEmpty || meu.isEmpty) return false;
+    return cauda(dele) == cauda(meu);
   }
 
   @override
   void dispose() {
+    _aoVivo?.cancel();
+    _debounceAoVivo?.cancel();
     _pollTimer?.cancel();
     _scrollController.dispose();
     _composerController.dispose();

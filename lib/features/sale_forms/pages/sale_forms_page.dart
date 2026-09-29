@@ -9,10 +9,13 @@ import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/sale_forms_service.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
+import '../widgets/fichas_filters_kit.dart';
 import '../widgets/sale_form_card.dart';
+import '../widgets/sale_form_row_actions.dart';
+import '../widgets/sale_form_row_rules.dart';
 import '../widgets/sale_form_type_modal.dart';
+import '../widgets/sale_forms_filters_sheet.dart';
 import 'create_sale_form_page.dart';
-import 'sale_form_detail_page.dart';
 
 const double _kPadH = 16;
 
@@ -128,24 +131,29 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
     });
   }
 
+  /// Tocar na linha abre a ficha em LEITURA (igual ao web); editar é uma
+  /// ação do menu, bloqueada com motivo quando a ficha não pode mudar.
   Future<void> _openDetail(SaleForm f) async {
-    // Com permissão e ficha editável → abre em EDIÇÃO; senão, visualização.
-    final canUpdate = ModuleAccessService.instance.hasPermission(
-      AppPermissions.saleFormUpdate,
-    );
-    final editable =
-        canUpdate &&
-        f.deletedAt == null &&
-        f.status != SaleFormStatus.finalized &&
-        f.status != SaleFormStatus.canceled;
-    final changed = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => editable
-            ? CreateSaleFormPage(saleFormId: f.id)
-            : SaleFormDetailPage(saleFormId: f.id),
-      ),
-    );
-    if (changed == true && mounted) _load();
+    if (await runSaleFormRowAction(context, f, SaleFormRowAction.ver) &&
+        mounted) {
+      _load();
+    }
+  }
+
+  Future<void> _onAction(SaleForm f, SaleFormRowAction a) async {
+    if (await runSaleFormRowAction(context, f, a) && mounted) _load();
+  }
+
+  /// Modal "Filtros" (paridade com `SaleFormsFiltersDrawer` do web). Limpar
+  /// também desliga "Apenas excluídas", como o `handleClearFilters` do web.
+  Future<void> _openFilters() async {
+    final out = await showSaleFormsFiltersSheet(context, initial: _filters);
+    if (out == null || !mounted) return;
+    setState(() {
+      _filters = out.filters;
+      if (out.cleared) _showDeletedOnly = false;
+    });
+    _load();
   }
 
   Future<void> _openCreate() async {
@@ -160,40 +168,6 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
     }
   }
 
-  Future<void> _confirmCancelar(SaleForm f) async {
-    final reason = await _askReason(
-      title: 'Cancelar ficha de venda',
-      message:
-          'A ficha nº ${f.formNumber} será cancelada e não poderá mais ser enviada para assinatura.',
-      confirmLabel: 'Cancelar ficha',
-    );
-    if (reason == null || !mounted) return;
-    final res = await SaleFormsService.instance.cancelar(f.id, reason);
-    if (!mounted) return;
-    _toast(
-      res.success ? 'Ficha cancelada.' : (res.message ?? 'Falha ao cancelar.'),
-      ok: res.success,
-    );
-    if (res.success) _load();
-  }
-
-  Future<void> _confirmExcluir(SaleForm f) async {
-    final reason = await _askReason(
-      title: 'Excluir ficha de venda',
-      message:
-          'Excluir a ficha nº ${f.formNumber}? Esta ação fica em auditoria.',
-      confirmLabel: 'Excluir',
-    );
-    if (reason == null || !mounted) return;
-    final res = await SaleFormsService.instance.excluir(f.id, reason);
-    if (!mounted) return;
-    _toast(
-      res.success ? 'Ficha excluída.' : (res.message ?? 'Falha ao excluir.'),
-      ok: res.success,
-    );
-    if (res.success) _load();
-  }
-
   void _toast(String msg, {bool ok = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -202,57 +176,6 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
         behavior: SnackBarBehavior.floating,
       ),
     );
-  }
-
-  Future<String?> _askReason({
-    required String title,
-    required String message,
-    required String confirmLabel,
-  }) async {
-    final controller = TextEditingController();
-    final accent = _accent(context);
-    final res = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(message),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              minLines: 2,
-              maxLines: 4,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                labelText: 'Motivo *',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Voltar'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: accent),
-            onPressed: () {
-              final r = controller.text.trim();
-              if (r.length < 5) return; // backend exige motivo (mín. 5)
-              Navigator.of(ctx).pop(r);
-            },
-            child: Text(confirmLabel),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    return res;
   }
 
   @override
@@ -299,6 +222,13 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
       currentBottomNavIndex: -1,
       showBottomNavigation: false,
       actions: [
+        // Assinaturas pendentes (web: link no topo da lista de fichas).
+        IconButton(
+          tooltip: 'Assinaturas pendentes',
+          icon: const Icon(LucideIcons.penLine, size: 19),
+          onPressed: () => Navigator.of(context)
+              .pushNamed(AppRoutes.saleFormsPendingSignatures),
+        ),
         // Painel de fichas (paridade com "Dash Fichas Venda" do web —
         // permissão sale_form:view_dashboard; backend valida o escopo).
         if (ModuleAccessService.instance
@@ -333,24 +263,40 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
                           stats: _stats,
                           filteredCount: _data?.total,
                           hasFilter:
-                              _filters.status != null ||
+                              _filters.drawerFilterCount > 0 ||
                               _showDeletedOnly ||
                               _search.text.trim().isNotEmpty,
                           showingDeletedOnly: _showDeletedOnly,
                         ),
                         const SizedBox(height: 16),
-                        _SearchBar(
-                          controller: _search,
-                          accent: accent,
-                          onSubmitted: _load,
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _SearchBar(
+                                controller: _search,
+                                accent: accent,
+                                onSubmitted: _load,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            FichasFiltersButton(
+                              count: _filters.drawerFilterCount,
+                              onTap: _openFilters,
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 12),
                         _StatusChips(
-                          current: _filters.status,
-                          onChanged: (status) {
+                          current: _filters.effectiveStatuses.toSet(),
+                          onChanged: (selected) {
                             setState(
-                              () =>
-                                  _filters = _filters.copyWith(status: status),
+                              () => _filters = _filters.copyWith(
+                                status: null,
+                                statuses: [
+                                  for (final s in SaleFormStatus.values)
+                                    if (selected.contains(s)) s,
+                                ],
+                              ),
                             );
                             _load();
                           },
@@ -412,8 +358,7 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
                           saleForm: f,
                           accent: accent,
                           onTap: () => _openDetail(f),
-                          onCancelar: () => _confirmCancelar(f),
-                          onExcluir: () => _confirmExcluir(f),
+                          onAction: (a) => _onAction(f, a),
                         );
                       },
                     ),
@@ -752,10 +697,22 @@ class _SearchBar extends StatelessWidget {
   }
 }
 
+/// Atalhos de status — MULTI, como o drawer do web (`statuses[]`): cada chip
+/// liga/desliga o seu status; "Todas" limpa. Mesmo estado do modal Filtros.
 class _StatusChips extends StatelessWidget {
   const _StatusChips({required this.current, required this.onChanged});
-  final SaleFormStatus? current;
-  final ValueChanged<SaleFormStatus?> onChanged;
+  final Set<SaleFormStatus> current;
+  final ValueChanged<Set<SaleFormStatus>> onChanged;
+
+  void _tap(SaleFormStatus? s) {
+    if (s == null) {
+      onChanged(<SaleFormStatus>{});
+      return;
+    }
+    final next = {...current};
+    if (!next.remove(s)) next.add(s);
+    onChanged(next);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -801,8 +758,10 @@ class _StatusChips extends StatelessWidget {
                 child: _StatusChip(
                   label: items[i].$2,
                   tone: items[i].$3,
-                  selected: items[i].$1 == current,
-                  onTap: () => onChanged(items[i].$1),
+                  selected: items[i].$1 == null
+                      ? current.isEmpty
+                      : current.contains(items[i].$1),
+                  onTap: () => _tap(items[i].$1),
                 ),
               ),
           ],

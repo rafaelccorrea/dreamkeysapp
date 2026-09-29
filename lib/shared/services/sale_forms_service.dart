@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -229,6 +230,24 @@ class SaleForm {
   // ── Assinaturas (resumo p/ fases futuras) ──────────────────────────────
   int get assinaturasTotal => _int(raw['assinaturasTotal']) ?? 0;
   int get assinaturasAssinadas => _int(raw['assinaturasAssinadas']) ?? 0;
+
+  /// Regra do backend (criador, admin/master, líder de equipe do criador ou
+  /// gestor com acesso) para "Cancelar todas as assinaturas (reenvio)". Vem
+  /// na listagem e no `GET /:id`; ausente = não pode.
+  bool get canInvalidateSignatures =>
+      _bool(raw['canInvalidateSignatures'], defaultValue: false);
+
+  /// Usuários vinculados à ficha (`linkedUsers` do `GET /:id`, relação
+  /// `sale_form_users` + `user`). Cada item traz `userId` e, quando o back
+  /// carrega, o objeto `user` ({id, name, email}).
+  List<Map<String, dynamic>> get linkedUsers {
+    final l = raw['linkedUsers'] ?? raw['linked_users'];
+    if (l is! List) return const [];
+    return l
+        .whereType<Map>()
+        .map((m) => Map<String, dynamic>.from(m))
+        .toList();
+  }
 }
 
 /// Estatísticas do hero (`GET /sistema/fichas-venda/stats`).
@@ -287,11 +306,47 @@ class SaleFormListResult {
 
 const _kKeep = Object();
 
+/// Filtros da listagem — espelho de `SaleFormFilters` do web
+/// (`saleFormsApi.ts`) e do `ListSaleFormsDto` do back.
+///
+/// Listas (`statuses`, `userIds`, `teamIds`, `unitIds`) vão **separadas por
+/// vírgula** numa chave só: o `@Transform` do DTO faz `split(',')` (aceita
+/// tanto chave repetida quanto vírgula), e o `ApiService` só leva
+/// `Map<String, String>`. Datas vão como `YYYY-MM-DD` (dia local, igual ao
+/// web); no `dateTo` o back inclui o dia inteiro.
 class SaleFormFilters {
   final String? search;
+
+  /// Status único (legado). O back une `status` + `statuses` (OR).
   final SaleFormStatus? status;
+
+  /// Vários status (chips do topo e do modal — multi, como no web).
+  final List<SaleFormStatus> statuses;
   final String? saleUnit;
   final bool? listDeletedOnly;
+
+  /// Um criador específico (gestor/admin) — o web não expõe na lista.
+  final String? userId;
+
+  /// Corretores (criadores das fichas).
+  final List<String> userIds;
+
+  /// Equipes vinculadas às fichas.
+  final List<String> teamIds;
+
+  /// Unidades (filiais): ficha dona ou compartilhada — usado pelo painel.
+  final List<String> unitIds;
+
+  /// Apenas fichas com compartilhamento ativo entre unidades.
+  final bool? sharedOnly;
+
+  /// Criação da ficha (dia inicial / final).
+  final DateTime? dateFrom;
+  final DateTime? dateTo;
+
+  /// Data da venda (`saleDate`), não a de criação.
+  final DateTime? saleDateFrom;
+  final DateTime? saleDateTo;
   final int page;
   final int limit;
   final String sortBy;
@@ -300,13 +355,68 @@ class SaleFormFilters {
   const SaleFormFilters({
     this.search,
     this.status,
+    this.statuses = const [],
     this.saleUnit,
     this.listDeletedOnly,
+    this.userId,
+    this.userIds = const [],
+    this.teamIds = const [],
+    this.unitIds = const [],
+    this.sharedOnly,
+    this.dateFrom,
+    this.dateTo,
+    this.saleDateFrom,
+    this.saleDateTo,
     this.page = 1,
     this.limit = 20,
     this.sortBy = 'createdAt',
     this.sortOrder = 'DESC',
   });
+
+  /// `status` + `statuses` sem repetição, na ordem do enum.
+  List<SaleFormStatus> get effectiveStatuses => [
+        for (final s in SaleFormStatus.values)
+          if (s == status || statuses.contains(s)) s,
+      ];
+
+  /// Contagem do botão "Filtros" — mesma regra de
+  /// `countSaleFormsDrawerFilters` (web): status conta 1, cada lista conta 1,
+  /// cada data conta 1. Busca fica fora (tem campo próprio na lista).
+  int get drawerFilterCount {
+    var n = 0;
+    if (effectiveStatuses.isNotEmpty) n++;
+    if (userIds.isNotEmpty || (userId?.isNotEmpty ?? false)) n++;
+    if (teamIds.isNotEmpty) n++;
+    if (unitIds.isNotEmpty) n++;
+    if (sharedOnly == true) n++;
+    if (saleUnit?.trim().isNotEmpty ?? false) n++;
+    if (dateFrom != null) n++;
+    if (dateTo != null) n++;
+    if (saleDateFrom != null) n++;
+    if (saleDateTo != null) n++;
+    return n;
+  }
+
+  /// "Limpar" do modal (web `handleClearFilters`): zera os recortes, mantém
+  /// busca, ordenação e paginação.
+  SaleFormFilters withoutListFilters() => SaleFormFilters(
+        search: search,
+        listDeletedOnly: listDeletedOnly,
+        limit: limit,
+        sortBy: sortBy,
+        sortOrder: sortOrder,
+      );
+
+  static String _ymd(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-'
+      '${d.month.toString().padLeft(2, '0')}-'
+      '${d.day.toString().padLeft(2, '0')}';
+
+  static String? _csv(Iterable<String> values) {
+    final list =
+        values.map((v) => v.trim()).where((v) => v.isNotEmpty).toList();
+    return list.isEmpty ? null : list.join(',');
+  }
 
   Map<String, String> toQuery() {
     final qp = <String, String>{
@@ -317,19 +427,49 @@ class SaleFormFilters {
     };
     final s = search?.trim();
     if (s != null && s.isNotEmpty) qp['search'] = s;
-    if (status != null) qp['status'] = status!.apiValue;
+    final sts = effectiveStatuses;
+    // Igual ao web: `status` só quando há exatamente um; `statuses` sempre.
+    if (sts.length == 1) qp['status'] = sts.first.apiValue;
+    final stsCsv = _csv(sts.map((e) => e.apiValue));
+    if (stsCsv != null) qp['statuses'] = stsCsv;
     if (saleUnit != null && saleUnit!.trim().isNotEmpty) {
       qp['saleUnit'] = saleUnit!.trim();
     }
+    if (userId != null && userId!.trim().isNotEmpty) {
+      qp['userId'] = userId!.trim();
+    }
+    final usersCsv = _csv(userIds);
+    if (usersCsv != null) qp['userIds'] = usersCsv;
+    final teamsCsv = _csv(teamIds);
+    if (teamsCsv != null) qp['teamIds'] = teamsCsv;
+    final unitsCsv = _csv(unitIds);
+    if (unitsCsv != null) qp['unitIds'] = unitsCsv;
+    if (sharedOnly == true) qp['sharedOnly'] = 'true';
+    if (dateFrom != null) qp['dateFrom'] = _ymd(dateFrom!);
+    if (dateTo != null) qp['dateTo'] = _ymd(dateTo!);
+    if (saleDateFrom != null) qp['saleDateFrom'] = _ymd(saleDateFrom!);
+    if (saleDateTo != null) qp['saleDateTo'] = _ymd(saleDateTo!);
     if (listDeletedOnly == true) qp['listDeletedOnly'] = 'true';
     return qp;
   }
 
+  /// Anuláveis: passar `null` limpa, omitir mantém. Listas: `null` mantém,
+  /// lista vazia limpa.
   SaleFormFilters copyWith({
     Object? search = _kKeep,
     Object? status = _kKeep,
+    List<SaleFormStatus>? statuses,
     Object? saleUnit = _kKeep,
     Object? listDeletedOnly = _kKeep,
+    Object? userId = _kKeep,
+    List<String>? userIds,
+    List<String>? teamIds,
+    List<String>? unitIds,
+    Object? sharedOnly = _kKeep,
+    Object? dateFrom = _kKeep,
+    Object? dateTo = _kKeep,
+    Object? saleDateFrom = _kKeep,
+    Object? saleDateTo = _kKeep,
     int? page,
     int? limit,
     String? sortBy,
@@ -340,11 +480,29 @@ class SaleFormFilters {
         status: identical(status, _kKeep)
             ? this.status
             : status as SaleFormStatus?,
+        statuses: statuses ?? this.statuses,
         saleUnit:
             identical(saleUnit, _kKeep) ? this.saleUnit : saleUnit as String?,
         listDeletedOnly: identical(listDeletedOnly, _kKeep)
             ? this.listDeletedOnly
             : listDeletedOnly as bool?,
+        userId: identical(userId, _kKeep) ? this.userId : userId as String?,
+        userIds: userIds ?? this.userIds,
+        teamIds: teamIds ?? this.teamIds,
+        unitIds: unitIds ?? this.unitIds,
+        sharedOnly: identical(sharedOnly, _kKeep)
+            ? this.sharedOnly
+            : sharedOnly as bool?,
+        dateFrom: identical(dateFrom, _kKeep)
+            ? this.dateFrom
+            : dateFrom as DateTime?,
+        dateTo: identical(dateTo, _kKeep) ? this.dateTo : dateTo as DateTime?,
+        saleDateFrom: identical(saleDateFrom, _kKeep)
+            ? this.saleDateFrom
+            : saleDateFrom as DateTime?,
+        saleDateTo: identical(saleDateTo, _kKeep)
+            ? this.saleDateTo
+            : saleDateTo as DateTime?,
         page: page ?? this.page,
         limit: limit ?? this.limit,
         sortBy: sortBy ?? this.sortBy,
@@ -525,10 +683,18 @@ class SaleFormWhatsappEnvio {
   final String? sessionKind;
   final bool canResend;
 
+  /// Sessão escolhida em Signatários obrigatórios › WhatsApp (null = automático).
+  final String? preferredSessionKind;
+
+  /// Número que envia os links, quando conhecido (só dígitos).
+  final String? phoneNumber;
+
   const SaleFormWhatsappEnvio({
     required this.autoSendEnabled,
     this.sessionKind,
     required this.canResend,
+    this.preferredSessionKind,
+    this.phoneNumber,
   });
 
   factory SaleFormWhatsappEnvio.fromJson(Map<String, dynamic> j) {
@@ -538,12 +704,353 @@ class SaleFormWhatsappEnvio {
           _bool(root['autoSendEnabled'] ?? root['auto_send_enabled']),
       sessionKind: _strNull(root['sessionKind'] ?? root['session_kind']),
       canResend: _bool(root['canResend'] ?? root['can_resend']),
+      preferredSessionKind: _strNull(
+        root['preferredSessionKind'] ?? root['preferred_session_kind'],
+      ),
+      phoneNumber: _strNull(root['phoneNumber'] ?? root['phone_number']),
     );
   }
 }
 
+/// Resultado de um envio dos links por e-mail (`POST …/reenviar-email`) e,
+/// com [at], o último envio registrado (`GET …/assinaturas/email-envio`).
+class SaleFormEmailEnvio {
+  /// 'enviado' | 'parcial' | 'nao_enviado'
+  final String status;
+  final String? motivo;
+  final int sent;
+  final int failed;
+  final int skippedNoEmail;
+  final int total;
+
+  /// 'criacao' | 'reenvio_manual'
+  final String? origem;
+  final DateTime? at;
+
+  const SaleFormEmailEnvio({
+    required this.status,
+    this.motivo,
+    required this.sent,
+    required this.failed,
+    required this.skippedNoEmail,
+    required this.total,
+    this.origem,
+    this.at,
+  });
+
+  factory SaleFormEmailEnvio.fromJson(Map<String, dynamic> j) =>
+      SaleFormEmailEnvio(
+        status: _str(j['status']),
+        motivo: _strNull(j['motivo']),
+        sent: _int(j['sent']) ?? 0,
+        failed: _int(j['failed']) ?? 0,
+        skippedNoEmail: _int(j['skippedNoEmail']) ?? 0,
+        total: _int(j['total']) ?? 0,
+        origem: _strNull(j['origem']),
+        at: _date(j['at']),
+      );
+
+  /// "2 e-mail(s) enviado(s) · 1 sem e-mail" — mesmo texto do web.
+  String get resumo {
+    final parts = <String>[
+      if (sent > 0) '$sent e-mail(s) enviado(s)',
+      if (skippedNoEmail > 0) '$skippedNoEmail sem e-mail',
+      if (failed > 0) '$failed falha(s)',
+    ];
+    return parts.isEmpty ? 'Nenhum e-mail enviado.' : parts.join(' · ');
+  }
+}
+
+/// Um signatário que ainda não assinou (`GET …/assinaturas/pendentes`).
+class SaleFormPendingSignature {
+  final String signatureId;
+  final String? signerName;
+  final String? signerEmail;
+
+  /// 'pending' | 'viewed'
+  final String status;
+  final DateTime? viewedAt;
+  final DateTime? enviadaEm;
+  final int diasPendente;
+  final String? signatureUrl;
+
+  /// `true` quando o signatário é o usuário logado (o back compara o e-mail).
+  final bool ehVoce;
+  final int lembretesWhatsApp;
+
+  const SaleFormPendingSignature({
+    required this.signatureId,
+    this.signerName,
+    this.signerEmail,
+    required this.status,
+    this.viewedAt,
+    this.enviadaEm,
+    required this.diasPendente,
+    this.signatureUrl,
+    required this.ehVoce,
+    required this.lembretesWhatsApp,
+  });
+
+  bool get abriu => status.toLowerCase() == 'viewed';
+
+  /// Nome exibido (nome → e-mail → travessão), como `nomeDoSignatario` do web.
+  String get nomeExibido {
+    final n = signerName?.trim() ?? '';
+    if (n.isNotEmpty) return n;
+    final e = signerEmail?.trim() ?? '';
+    return e.isNotEmpty ? e : '—';
+  }
+
+  /// Link externo seguro (só http/https) — espelho de `linkAbrivel` do web.
+  String? get linkAbrivel => saleFormLinkAbrivel(signatureUrl);
+
+  factory SaleFormPendingSignature.fromJson(Map<String, dynamic> j) =>
+      SaleFormPendingSignature(
+        signatureId: _str(j['signatureId'] ?? j['id']),
+        signerName: _strNull(j['signerName']),
+        signerEmail: _strNull(j['signerEmail']),
+        status: _str(j['status']),
+        viewedAt: _date(j['viewedAt']),
+        enviadaEm: _date(j['enviadaEm']),
+        diasPendente: _int(j['diasPendente']) ?? 0,
+        signatureUrl: _strNull(j['signatureUrl']),
+        ehVoce: _bool(j['ehVoce']),
+        lembretesWhatsApp: _int(j['lembretesWhatsApp']) ?? 0,
+      );
+}
+
+/// Ficha com assinatura em aberto no painel de pendentes.
+class SaleFormWithPendingSignatures {
+  final String saleFormId;
+  final String formNumber;
+  final String? buyerName;
+  final String? sellerName;
+  final String? criadorId;
+  final String? criadorName;
+  final DateTime? enviadaEm;
+  final int diasPendente;
+  final int assinadas;
+  final int total;
+  final List<SaleFormPendingSignature> pendentes;
+  final DateTime? ultimoEmailEm;
+  final DateTime? ultimoWhatsAppEm;
+
+  const SaleFormWithPendingSignatures({
+    required this.saleFormId,
+    required this.formNumber,
+    this.buyerName,
+    this.sellerName,
+    this.criadorId,
+    this.criadorName,
+    this.enviadaEm,
+    required this.diasPendente,
+    required this.assinadas,
+    required this.total,
+    required this.pendentes,
+    this.ultimoEmailEm,
+    this.ultimoWhatsAppEm,
+  });
+
+  factory SaleFormWithPendingSignatures.fromJson(Map<String, dynamic> j) {
+    final criador = j['criador'];
+    final email = j['ultimoEmail'];
+    final wa = j['ultimoWhatsApp'];
+    final pend = j['pendentes'];
+    return SaleFormWithPendingSignatures(
+      saleFormId: _str(j['saleFormId']),
+      formNumber: _str(j['formNumber']),
+      buyerName: _strNull(j['buyerName']),
+      sellerName: _strNull(j['sellerName']),
+      criadorId: criador is Map ? _strNull(criador['id']) : null,
+      criadorName: criador is Map ? _strNull(criador['name']) : null,
+      enviadaEm: _date(j['enviadaEm']),
+      diasPendente: _int(j['diasPendente']) ?? 0,
+      assinadas: _int(j['assinadas']) ?? 0,
+      total: _int(j['total']) ?? 0,
+      pendentes: pend is List
+          ? pend
+              .whereType<Map>()
+              .map((m) => SaleFormPendingSignature.fromJson(
+                    Map<String, dynamic>.from(m),
+                  ))
+              .toList()
+          : const [],
+      ultimoEmailEm: email is Map ? _date(email['at']) : null,
+      ultimoWhatsAppEm: wa is Map ? _date(wa['at']) : null,
+    );
+  }
+}
+
+/// Resposta de `GET /sistema/fichas-venda/assinaturas/pendentes?escopo=`.
+class SaleFormPendingSignaturesResponse {
+  /// 'minhas' | 'todas'
+  final String escopo;
+  final int diasParaTravar;
+  final int resumoFichas;
+  final int resumoAssinaturas;
+  final int resumoMinhas;
+  final int resumoParadas;
+  final int resumoSemEmail;
+  final List<SaleFormWithPendingSignatures> fichas;
+
+  const SaleFormPendingSignaturesResponse({
+    required this.escopo,
+    required this.diasParaTravar,
+    required this.resumoFichas,
+    required this.resumoAssinaturas,
+    required this.resumoMinhas,
+    required this.resumoParadas,
+    required this.resumoSemEmail,
+    required this.fichas,
+  });
+
+  factory SaleFormPendingSignaturesResponse.fromJson(Map<String, dynamic> j) {
+    final r = j['resumo'] is Map
+        ? Map<String, dynamic>.from(j['resumo'] as Map)
+        : const <String, dynamic>{};
+    final f = j['fichas'];
+    return SaleFormPendingSignaturesResponse(
+      escopo: _str(j['escopo']),
+      diasParaTravar: _int(j['diasParaTravar']) ?? 3,
+      resumoFichas: _int(r['fichas']) ?? 0,
+      resumoAssinaturas: _int(r['assinaturas']) ?? 0,
+      resumoMinhas: _int(r['minhas']) ?? 0,
+      resumoParadas: _int(r['paradas']) ?? 0,
+      resumoSemEmail: _int(r['semEmail']) ?? 0,
+      fichas: f is List
+          ? f
+              .whereType<Map>()
+              .map((m) => SaleFormWithPendingSignatures.fromJson(
+                    Map<String, dynamic>.from(m),
+                  ))
+              .toList()
+          : const [],
+    );
+  }
+}
+
+/// Item da trava de assinatura (`GET …/assinatura-lock/status`).
+class SaleFormSignatureLockItem {
+  final String saleFormId;
+  final String formNumber;
+  final String? signerEmail;
+  final int daysPending;
+  final int notificationCount;
+
+  const SaleFormSignatureLockItem({
+    required this.saleFormId,
+    required this.formNumber,
+    this.signerEmail,
+    required this.daysPending,
+    required this.notificationCount,
+  });
+
+  factory SaleFormSignatureLockItem.fromJson(Map<String, dynamic> j) =>
+      SaleFormSignatureLockItem(
+        saleFormId: _str(j['saleFormId']),
+        formNumber: _str(j['formNumber']),
+        signerEmail: _strNull(j['signerEmail']),
+        daysPending: _int(j['daysPending']) ?? 0,
+        notificationCount: _int(j['notificationCount']) ?? 0,
+      );
+}
+
+class SaleFormSignatureLockStatus {
+  final bool blocked;
+  final int maxNotifications;
+  final int thresholdDays;
+  final List<SaleFormSignatureLockItem> items;
+
+  const SaleFormSignatureLockStatus({
+    required this.blocked,
+    required this.maxNotifications,
+    required this.thresholdDays,
+    required this.items,
+  });
+
+  factory SaleFormSignatureLockStatus.fromJson(Map<String, dynamic> j) {
+    final items = j['items'];
+    return SaleFormSignatureLockStatus(
+      blocked: _bool(j['blocked']),
+      maxNotifications: _int(j['maxNotifications']) ?? 3,
+      thresholdDays: _int(j['thresholdDays']) ?? 3,
+      items: items is List
+          ? items
+              .whereType<Map>()
+              .map((m) => SaleFormSignatureLockItem.fromJson(
+                    Map<String, dynamic>.from(m),
+                  ))
+              .toList()
+          : const [],
+    );
+  }
+}
+
+/// Membro da empresa para o seletor de signatários extras
+/// (`GET /users/company-members`).
+class SaleFormCompanyMember {
+  final String id;
+  final String name;
+  final String email;
+
+  const SaleFormCompanyMember({
+    required this.id,
+    required this.name,
+    required this.email,
+  });
+
+  factory SaleFormCompanyMember.fromJson(Map<String, dynamic> j) =>
+      SaleFormCompanyMember(
+        id: _str(j['id']),
+        name: _str(j['name']),
+        email: _str(j['email']),
+      );
+}
+
+/// Link externo seguro para abrir fora do app (só http/https) — espelho de
+/// `linkAbrivel` (`regrasDasAssinaturas.ts`).
+String? saleFormLinkAbrivel(String? url) {
+  final u = (url ?? '').trim();
+  return RegExp(r'^https?://', caseSensitive: false).hasMatch(u) ? u : null;
+}
+
+/// Contas administrativas genéricas e nomes institucionais que não podem ir
+/// para o Autentique — espelho de `saleFormMandatorySignersFilter.ts` (web)
+/// e `sale-form-mandatory-signers.filter.ts` (back).
+bool saleFormSignerExcluido({String? email, String? name}) {
+  const emails = {
+    'administrativo@imobiliariauniao.com.br',
+    'sistema@imobx.com.br',
+  };
+  const nomes = {
+    'uniao imobiliaria',
+    'uniao empreendimentos imobiliarios',
+    'uniao empreendimentos imobiliarios s/c ltda',
+    'sistema imobx (remetente)',
+    'sistema imobx',
+  };
+  final e = (email ?? '').trim().toLowerCase();
+  if (e.isNotEmpty && emails.contains(e)) return true;
+  final n = _semAcento((name ?? '').trim().toLowerCase());
+  return n.isNotEmpty && nomes.contains(n);
+}
+
+String _semAcento(String s) {
+  const de = 'áàâãäéèêëíìîïóòôõöúùûüçñ';
+  const para = 'aaaaaeeeeiiiiooooouuuucn';
+  final b = StringBuffer();
+  for (final ch in s.split('')) {
+    final i = de.indexOf(ch);
+    b.write(i >= 0 ? para[i] : ch);
+  }
+  return b.toString();
+}
+
 /// Service de Fichas de Venda — espelha `saleFormsApi.ts` (web) e o
 /// `SaleFormsController` do backend. Fase 1: leitura + cancelar/excluir.
+/// Teto das operações pesadas de assinatura (paridade com o web: 120 s).
+const Duration _kLongTimeout = Duration(seconds: 120);
+
 class SaleFormsService {
   SaleFormsService._();
   static final SaleFormsService instance = SaleFormsService._();
@@ -900,7 +1407,7 @@ class SaleFormsService {
         'signers': signers.map((s) => s.toJson()).toList(),
         'document': document,
       };
-      final res = await _api.post<dynamic>(
+      final res = await _postLong<dynamic>(
         ApiConstants.saleFormAssinaturas(id),
         body: body,
       );
@@ -932,7 +1439,7 @@ class SaleFormsService {
   Future<ApiResponse<List<SaleFormSignature>>> syncAssinaturas(
       String id) async {
     try {
-      final res = await _api.post<dynamic>(
+      final res = await _postLong<dynamic>(
         ApiConstants.saleFormAssinaturasSync(id),
       );
       if (!res.success || res.data == null) {
@@ -965,7 +1472,7 @@ class SaleFormsService {
     String signatureId,
   ) async {
     try {
-      final res = await _api.post<Map<String, dynamic>>(
+      final res = await _postLong<Map<String, dynamic>>(
         ApiConstants.saleFormAssinaturaLink(saleFormId, signatureId),
       );
       if (!res.success || res.data == null) {
@@ -1017,7 +1524,7 @@ class SaleFormsService {
   Future<ApiResponse<Map<String, dynamic>>> reenviarTodosWhatsapp(
       String id) async {
     try {
-      final res = await _api.post<Map<String, dynamic>>(
+      final res = await _postLong<Map<String, dynamic>>(
         ApiConstants.saleFormReenviarWhatsappTodos(id),
       );
       if (!res.success || res.data == null) {
@@ -1038,7 +1545,7 @@ class SaleFormsService {
     String signatureId,
   ) async {
     try {
-      final res = await _api.post<Map<String, dynamic>>(
+      final res = await _postLong<Map<String, dynamic>>(
         ApiConstants.saleFormReenviarWhatsappUm(id, signatureId),
       );
       if (!res.success || res.data == null) {
@@ -1056,7 +1563,7 @@ class SaleFormsService {
 
   Future<ApiResponse<void>> invalidarAssinaturas(String id) async {
     try {
-      final res = await _api.post(
+      final res = await _postLong<dynamic>(
         ApiConstants.saleFormInvalidarAssinaturas(id),
         body: const <String, dynamic>{},
       );
@@ -1120,6 +1627,374 @@ class SaleFormsService {
       );
     } catch (e) {
       debugPrint('❌ [SALE_FORMS] $tag: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  // ─── Assinaturas: e-mail, pendentes, trava ──────────────────────────────────
+
+  /// Envia por e-mail o link de cada signatário pendente da ficha (provedor
+  /// da plataforma, não o Autentique). O back ignora quem recebeu há < 5 min.
+  Future<ApiResponse<SaleFormEmailEnvio>> reenviarTodosEmail(String id) async {
+    return _envioEmail(
+      ApiConstants.saleFormReenviarEmailTodos(id),
+      tag: 'reenviarEmail all',
+    );
+  }
+
+  /// Envia por e-mail o link de UM signatário.
+  Future<ApiResponse<SaleFormEmailEnvio>> reenviarUmEmail(
+    String id,
+    String signatureId,
+  ) async {
+    return _envioEmail(
+      ApiConstants.saleFormReenviarEmailUm(id, signatureId),
+      tag: 'reenviarEmail one',
+      timeout: const Duration(seconds: 60),
+    );
+  }
+
+  Future<ApiResponse<SaleFormEmailEnvio>> _envioEmail(
+    String endpoint, {
+    required String tag,
+    Duration timeout = _kLongTimeout,
+  }) async {
+    try {
+      final res = await _postLong<Map<String, dynamic>>(
+        endpoint,
+        timeout: timeout,
+      );
+      if (!res.success || res.data == null) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao enviar por e-mail',
+          statusCode: res.statusCode,
+        );
+      }
+      return ApiResponse.success(
+        data: SaleFormEmailEnvio.fromJson(res.data!),
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [SALE_FORMS] $tag: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// Último envio dos links por e-mail. `data == null` = nunca enviado.
+  Future<ApiResponse<SaleFormEmailEnvio?>> getUltimoEnvioEmail(
+      String id) async {
+    try {
+      final res = await _api.get<Map<String, dynamic>>(
+        ApiConstants.saleFormUltimoEnvioEmail(id),
+      );
+      if (!res.success) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao obter o último envio por e-mail',
+          statusCode: res.statusCode,
+        );
+      }
+      final u = res.data?['ultimoEnvio'];
+      return ApiResponse.success(
+        data: u is Map
+            ? SaleFormEmailEnvio.fromJson(Map<String, dynamic>.from(u))
+            : null,
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [SALE_FORMS] ultimoEnvioEmail: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// Painel de assinaturas pendentes. `escopo`: 'minhas' (o que espera a
+  /// MINHA assinatura) ou 'todas' (tudo que vejo na hierarquia).
+  Future<ApiResponse<SaleFormPendingSignaturesResponse>>
+      listarAssinaturasPendentes({required String escopo}) async {
+    try {
+      final res = await _api.get<Map<String, dynamic>>(
+        ApiConstants.saleFormsAssinaturasPendentes,
+        queryParameters: {'escopo': escopo == 'minhas' ? 'minhas' : 'todas'},
+      );
+      if (!res.success || res.data == null) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao carregar assinaturas pendentes',
+          statusCode: res.statusCode,
+        );
+      }
+      return ApiResponse.success(
+        data: SaleFormPendingSignaturesResponse.fromJson(res.data!),
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [SALE_FORMS] pendentes: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// Trava global por assinatura parada. ATENÇÃO: o back incrementa o
+  /// contador de avisos a cada chamada (até `maxNotifications`) — chamar uma
+  /// vez por entrada na tela, nunca em laço.
+  Future<ApiResponse<SaleFormSignatureLockStatus>>
+      getSignatureLockStatus() async {
+    try {
+      final res = await _api.get<Map<String, dynamic>>(
+        ApiConstants.saleFormsAssinaturaLockStatus,
+      );
+      if (!res.success || res.data == null) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao verificar assinaturas pendentes',
+          statusCode: res.statusCode,
+        );
+      }
+      return ApiResponse.success(
+        data: SaleFormSignatureLockStatus.fromJson(res.data!),
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [SALE_FORMS] lockStatus: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// Recusa a assinatura pendente (motivo >= 10 caracteres). O back invalida
+  /// TODAS as assinaturas ativas da ficha. Devolve a mensagem do back.
+  Future<ApiResponse<String>> recusarSignatureLock(
+    String saleFormId,
+    String reason,
+  ) async {
+    try {
+      final res = await _api.post<Map<String, dynamic>>(
+        ApiConstants.saleFormsAssinaturaLockRecusar,
+        body: {'saleFormId': saleFormId, 'reason': reason},
+      );
+      if (!res.success) {
+        return ApiResponse.error(
+          message: res.message ?? 'Não foi possível registrar a recusa',
+          statusCode: res.statusCode,
+        );
+      }
+      return ApiResponse.success(
+        data: res.data?['message']?.toString() ?? 'Recusa registrada.',
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [SALE_FORMS] recusarLock: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// Membros da empresa (busca por nome/e-mail) para signatários extras.
+  Future<ApiResponse<List<SaleFormCompanyMember>>> buscarMembrosEmpresa({
+    String? search,
+  }) async {
+    try {
+      final q = search?.trim() ?? '';
+      final res = await _api.get<Map<String, dynamic>>(
+        ApiConstants.saleFormCompanyMembers,
+        queryParameters: {
+          'page': '1',
+          'limit': '100',
+          if (q.isNotEmpty) 'search': q,
+        },
+      );
+      if (!res.success || res.data == null) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao buscar membros da empresa',
+          statusCode: res.statusCode,
+        );
+      }
+      final list = res.data!['data'];
+      return ApiResponse.success(
+        data: list is List
+            ? list
+                .whereType<Map>()
+                .map((m) =>
+                    SaleFormCompanyMember.fromJson(Map<String, dynamic>.from(m)))
+                .where((m) => m.name.trim().isNotEmpty)
+                .toList()
+            : const [],
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [SALE_FORMS] membros: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  // ─── Auditoria, distrato, equipe, responsável ─────────────────────────────
+
+  /// Histórico de auditoria (`GET /:id/auditoria`). Cada entrada:
+  /// `{id, createdAt, action, userId?, userName?, userEmail?,
+  ///   changes: [{field, label?, before?, after?}], metadata?}`.
+  Future<ApiResponse<List<Map<String, dynamic>>>> getAuditoria(
+      String id) async {
+    try {
+      final res = await _api.get<dynamic>(ApiConstants.saleFormAuditoria(id));
+      if (!res.success) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao carregar o histórico',
+          statusCode: res.statusCode,
+        );
+      }
+      final raw = res.data;
+      final list = raw is List ? raw : (raw is Map ? raw['data'] : null);
+      if (list is! List) {
+        return ApiResponse.success(data: const [], statusCode: res.statusCode);
+      }
+      return ApiResponse.success(
+        data: list
+            .whereType<Map>()
+            .map((m) => Map<String, dynamic>.from(m))
+            .toList(),
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [SALE_FORMS] auditoria: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// Abre o DISTRATO de uma ficha finalizada (cancela e avisa o Financeiro).
+  /// `PATCH /:id/distrato` `{reason}` — o web manda o motivo em `reason`.
+  Future<ApiResponse<SaleForm>> abrirDistrato(String id, String reason) async {
+    return _patchForm(
+      ApiConstants.saleFormDistrato(id),
+      {'reason': reason},
+      tag: 'distrato',
+      fallbackMessage: 'Erro ao abrir o distrato',
+    );
+  }
+
+  /// Troca só a equipe da ficha. `PATCH /:id/equipe` `{teamId}`.
+  Future<ApiResponse<SaleForm>> alterarEquipe(String id, String teamId) async {
+    return _patchForm(
+      ApiConstants.saleFormEquipe(id),
+      {'teamId': teamId},
+      tag: 'equipe',
+      fallbackMessage: 'Erro ao trocar a equipe',
+    );
+  }
+
+  /// Transfere o criador da ficha (só finalizada; exige ver todas).
+  /// `POST /:id/transferir-responsabilidade` `{newUserId}`.
+  Future<ApiResponse<SaleForm>> transferirResponsabilidade(
+    String id,
+    String newUserId,
+  ) async {
+    try {
+      final res = await _postLong<Map<String, dynamic>>(
+        ApiConstants.saleFormTransferirResponsabilidade(id),
+        body: {'newUserId': newUserId},
+      );
+      if (!res.success || res.data == null) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao transferir a responsabilidade',
+          statusCode: res.statusCode,
+        );
+      }
+      final root = res.data!;
+      final data = root['data'] is Map
+          ? Map<String, dynamic>.from(root['data'] as Map)
+          : root;
+      return ApiResponse.success(
+        data: SaleForm.fromJson(data),
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [SALE_FORMS] transferir: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  Future<ApiResponse<SaleForm>> _patchForm(
+    String endpoint,
+    Map<String, dynamic> body, {
+    required String tag,
+    required String fallbackMessage,
+  }) async {
+    try {
+      final res = await _api.patch<Map<String, dynamic>>(endpoint, body: body);
+      if (!res.success || res.data == null) {
+        return ApiResponse.error(
+          message: res.message ?? fallbackMessage,
+          statusCode: res.statusCode,
+        );
+      }
+      final root = res.data!;
+      final data = root['data'] is Map
+          ? Map<String, dynamic>.from(root['data'] as Map)
+          : root;
+      return ApiResponse.success(
+        data: SaleForm.fromJson(data),
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [SALE_FORMS] $tag: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  // ─── POST com teto longo ──────────────────────────────────────────────────
+
+  /// O `ApiService` corta toda requisição em 30 s; gerar o documento no
+  /// Autentique, sincronizar e reenviar links passa disso (o web usa 120 s,
+  /// `SALE_FORMS_LONG_REQUEST_TIMEOUT_MS`). Aqui a chamada sai direto pelo
+  /// `http` com os MESMOS headers do interceptor; num 401 (token vencido)
+  /// delega ao `ApiService`, que renova o token e repete — o 401 garante que
+  /// o servidor não executou a primeira tentativa.
+  Future<ApiResponse<T>> _postLong<T>(
+    String endpoint, {
+    Object? body,
+    Duration timeout = _kLongTimeout,
+  }) async {
+    try {
+      final headers = await _api.buildOutboundHeaders(endpoint: endpoint);
+      final uri = Uri.parse('${ApiConstants.baseApiUrl}$endpoint');
+      final res = await http
+          .post(
+            uri,
+            headers: headers,
+            body: body != null ? jsonEncode(body) : null,
+          )
+          .timeout(timeout);
+      if (res.statusCode == 401) {
+        return _api.post<T>(endpoint, body: body);
+      }
+      dynamic decoded;
+      if (res.bodyBytes.isNotEmpty) {
+        try {
+          decoded = jsonDecode(utf8.decode(res.bodyBytes));
+        } catch (_) {
+          decoded = null;
+        }
+      }
+      if (decoded is Map && decoded is! Map<String, dynamic>) {
+        decoded = Map<String, dynamic>.from(decoded);
+      }
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        return ApiResponse.success(
+          data: decoded is T ? decoded : null,
+          statusCode: res.statusCode,
+        );
+      }
+      String message = 'Erro na requisição (${res.statusCode})';
+      if (decoded is Map && decoded['message'] != null) {
+        final m = decoded['message'];
+        message = m is List ? m.join('\n') : m.toString();
+      }
+      return ApiResponse.error(
+        message: message,
+        statusCode: res.statusCode,
+        data: decoded,
+      );
+    } on TimeoutException {
+      return ApiResponse.error(
+        message: 'O servidor demorou para responder. Atualize a lista: a '
+            'operação pode ter sido concluída.',
+        statusCode: 0,
+      );
+    } catch (e) {
+      debugPrint('❌ [SALE_FORMS] postLong $endpoint: $e');
       return ApiResponse.error(message: e.toString(), statusCode: 0);
     }
   }

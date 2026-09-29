@@ -378,12 +378,13 @@ class ApiService {
             );
 
             // Fazer refresh proativo
-            final refreshSuccess = await _refreshTokenIfNeeded();
+            final resultado = await _refreshTokenIfNeeded();
 
-            if (!refreshSuccess) {
-              debugPrint('❌ [API_SERVICE] Refresh proativo falhou');
-              // Sessão acabou de verdade: manda pro login em vez de deixar a
-              // tela pintar erro.
+            // Só a recusa do refresh token encerra a sessão (29/09/2026).
+            // Falha de rede aqui NÃO desloga: o token atual ainda vale por
+            // alguns segundos e a requisição segue com ele.
+            if (resultado == ResultadoDoRefresh.sessaoInvalida) {
+              debugPrint('❌ [API_SERVICE] Refresh proativo recusado');
               _handleSessionExpired();
               return ApiResponse.error(
                 message: 'Sessão expirada. Faça login novamente.',
@@ -480,32 +481,43 @@ class ApiService {
       // (login/refresh/logout/2FA) — sem isso o refresh entraria em laço.
       // `_isAuthRouteWithoutToken` já é essa lista, e é a mesma usada para
       // decidir o header `Authorization`.
+      // Sem `!_isRefreshing` (29/09/2026): o 401 que chega durante um refresh
+      // em andamento ESPERA por ele (_refreshTokenIfNeeded enfileira) em vez
+      // de voltar para a tela como erro.
       if (response.statusCode == 401 &&
           retryOn401 &&
-          !_isRefreshing &&
           endpoint != null &&
           !_isAuthRouteWithoutToken(endpoint)) {
         debugPrint('🔄 [API_SERVICE] Token expirado, tentando refresh...');
 
         // Tentar refresh token
-        final refreshResponse = await _refreshTokenIfNeeded();
+        final resultado = await _refreshTokenIfNeeded();
 
-        if (refreshResponse) {
+        if (resultado == ResultadoDoRefresh.renovado) {
           // Reexecutar a requisição original
           debugPrint(
             '✅ [API_SERVICE] Token renovado, reexecutando requisição...',
           );
           return await request();
-        } else {
-          // Refresh falhou de verdade (refresh token vencido ou revogado):
-          // limpa e devolve a pessoa ao login, sem tela de erro no meio.
-          debugPrint('❌ [API_SERVICE] Falha ao renovar token');
+        }
+        if (resultado == ResultadoDoRefresh.sessaoInvalida) {
+          // Refresh token vencido, revogado ou ausente: limpa e devolve a
+          // pessoa ao login, sem tela de erro no meio.
+          debugPrint('❌ [API_SERVICE] Refresh recusado');
           _handleSessionExpired();
           return ApiResponse.error(
             message: 'Sessão expirada. Faça login novamente.',
             statusCode: 401,
           );
         }
+        // Falha transitória (rede, timeout, 5xx): a sessão continua; a tela
+        // mostra o motivo e a próxima tentativa renova.
+        debugPrint('⚠️ [API_SERVICE] Refresh sem rede — sessão mantida');
+        return ApiResponse.error(
+          message:
+              'Sem conexão para renovar a sessão. Verifique a internet e tente de novo.',
+          statusCode: 0,
+        );
       }
 
       return response;
@@ -593,48 +605,75 @@ class ApiService {
     });
   }
 
-  Future<bool> _refreshTokenIfNeeded() async {
+  /// Renovação ÚNICA do app (single-flight): requisições, refresh de fundo e
+  /// sockets passam todos por aqui, então nunca há dois refreshes ao mesmo
+  /// tempo. Classifica a falha: só 401/403 do endpoint de refresh (ou refresh
+  /// token ausente) é sessão inválida; o resto é transitório.
+  Future<ResultadoDoRefresh> _refreshTokenIfNeeded() async {
     if (_isRefreshing) {
-      // Se já está renovando, aguardar
       debugPrint('⏳ [API_SERVICE] Refresh já em andamento, aguardando...');
       return await _waitForRefresh();
     }
 
     _isRefreshing = true;
+    var resultado = ResultadoDoRefresh.falhaTransitoria;
     try {
-      final authService = AuthService.instance;
-      final refreshResponse = await authService.refreshToken();
+      final refreshResponse = await AuthService.instance.refreshToken();
 
       if (refreshResponse.success && refreshResponse.data != null) {
         _token = refreshResponse.data!.token;
-        _notifyPendingRequests(true);
-        return true;
-      } else {
-        _notifyPendingRequests(false);
-        return false;
+        resultado = ResultadoDoRefresh.renovado;
+      } else if (refreshResponse.statusCode == 401 ||
+          refreshResponse.statusCode == 403) {
+        resultado = ResultadoDoRefresh.sessaoInvalida;
       }
     } catch (e) {
       debugPrint('❌ [API_SERVICE] Erro ao renovar token: $e');
-      _notifyPendingRequests(false);
-      return false;
     } finally {
       _isRefreshing = false;
     }
+    _notifyPendingRequests(resultado);
+    return resultado;
   }
 
   /// Aguarda o refresh em andamento
-  Future<bool> _waitForRefresh() async {
-    final completer = Completer<bool>();
+  Future<ResultadoDoRefresh> _waitForRefresh() async {
+    final completer = Completer<ResultadoDoRefresh>();
     _pendingRequests.add(_PendingRequest(completer: completer));
     return completer.future;
   }
 
   /// Notifica requisições pendentes sobre o resultado do refresh
-  void _notifyPendingRequests(bool success) {
+  void _notifyPendingRequests(ResultadoDoRefresh resultado) {
     for (final pending in _pendingRequests) {
-      pending.completer.complete(success);
+      if (!pending.completer.isCompleted) pending.completer.complete(resultado);
     }
     _pendingRequests.clear();
+  }
+
+  /// Token pronto para abrir um socket ou para o refresh de fundo
+  /// (29/09/2026): se vence em menos de [margemSegundos], renova pela mesma
+  /// fila única. Devolve `null` quando não há sessão utilizável. Falha de
+  /// rede não desloga: devolve o token atual se ele ainda não venceu.
+  Future<String?> garantirTokenFresco({int margemSegundos = 60}) async {
+    final atual =
+        _token ?? await SecureStorageService.instance.getAccessToken();
+    if (atual == null || atual.isEmpty) return null;
+    _token ??= atual;
+
+    final resta = JwtUtils.getTimeUntilExpiry(atual);
+    if (resta != null && resta >= margemSegundos) return atual;
+
+    final resultado = await _refreshTokenIfNeeded();
+    switch (resultado) {
+      case ResultadoDoRefresh.renovado:
+        return _token;
+      case ResultadoDoRefresh.sessaoInvalida:
+        _handleSessionExpired();
+        return null;
+      case ResultadoDoRefresh.falhaTransitoria:
+        return (resta != null && resta > 0) ? atual : null;
+    }
   }
 
   /// Trata a resposta da API
@@ -743,9 +782,14 @@ class ApiService {
 
 /// Classe auxiliar para requisições pendentes durante refresh
 class _PendingRequest {
-  final Completer<bool> completer;
+  final Completer<ResultadoDoRefresh> completer;
   _PendingRequest({required this.completer});
 }
+
+/// Resultado de uma renovação de token (29/09/2026). Só [sessaoInvalida]
+/// encerra a sessão; [falhaTransitoria] (rede, timeout, 5xx) mantém o
+/// usuário logado — antes, qualquer falha mandava para o login.
+enum ResultadoDoRefresh { renovado, sessaoInvalida, falhaTransitoria }
 
 /// Resposta padronizada da API
 class ApiResponse<T> {

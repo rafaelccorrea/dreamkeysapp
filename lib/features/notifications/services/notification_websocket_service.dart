@@ -1,13 +1,43 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../../../core/constants/api_constants.dart';
-import '../../../shared/services/secure_storage_service.dart';
+import '../../../shared/services/api_service.dart';
 import '../models/notification_model.dart';
 
-/// Serviço para conexão WebSocket de notificações em tempo real
-class NotificationWebSocketService {
+/// Serviço para conexão WebSocket de notificações em tempo real.
+///
+/// Conexão sem quedas (29/09/2026): token sempre fresco antes de conectar,
+/// `auth_error` renova o token e reconecta (antes a reconexão ficava
+/// suspensa até alguém fazer uma requisição HTTP) e retomada ao voltar do
+/// segundo plano.
+class NotificationWebSocketService with WidgetsBindingObserver {
   NotificationWebSocketService._();
+
+  bool _observando = false;
+
+  final StreamController<AvisoAoVivo> _eventos =
+      StreamController<AvisoAoVivo>.broadcast();
+
+  /// Eventos em tempo real além das notificações (WhatsApp, leitura em lote,
+  /// fila de aprovação de imóveis). Broadcast: várias telas podem assinar.
+  Stream<AvisoAoVivo> get eventosAoVivo => _eventos.stream;
+
+  /// Uma tentativa de renovar e reconectar por `auth_error`; zera ao conectar.
+  bool _renovouPorAuthError = false;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    if (!_isConnected && _currentToken != null) {
+      _reconnectAttempts = 0;
+      _authRejected = false;
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+      _isReconnecting = false;
+      unawaited(connect(_currentUserId));
+    }
+  }
 
   static final NotificationWebSocketService _instance =
       NotificationWebSocketService._();
@@ -51,10 +81,16 @@ class NotificationWebSocketService {
   /// Conecta ao WebSocket
   Future<void> connect([String? userId]) async {
     try {
-      // Obter token
-      final token = await SecureStorageService.instance.getAccessToken();
+      if (!_observando) {
+        _observando = true;
+        WidgetsBinding.instance.addObserver(this);
+      }
+
+      // Token fresco pela fila única de refresh (nunca conectar com token
+      // vencido: o gateway responde auth_error).
+      final token = await ApiService.instance.garantirTokenFresco();
       if (token == null || token.isEmpty) {
-        debugPrint('⚠️ [WS] Token não encontrado, não é possível conectar');
+        debugPrint('⚠️ [WS] Sem sessão utilizável, não é possível conectar');
         return;
       }
 
@@ -124,6 +160,7 @@ class NotificationWebSocketService {
       debugPrint('✅ [WS] Conectado ao WebSocket de notificações');
       _isConnected = true;
       _reconnectAttempts = 0; // Resetar tentativas ao conectar com sucesso
+      _renovouPorAuthError = false;
       _isReconnecting = false;
       _onConnectionStatusChanged?.call(true);
 
@@ -176,6 +213,24 @@ class NotificationWebSocketService {
         debugPrint('📚 [WS] StackTrace: $stackTrace');
       }
     });
+
+    // Paridade com o web (29/09/2026): eventos que o web escuta neste mesmo
+    // namespace e o app ignorava. Vão para [eventosAoVivo]; cada tela assina
+    // o que lhe interessa (inbox/conversa do WhatsApp, lista do sino).
+    for (final tipo in const [
+      'new_whatsapp_message',
+      'whatsapp_message_status',
+      'whatsapp_unread_count_update',
+      'notifications_read',
+      'property_approval_queue_changed',
+    ]) {
+      _socket!.on(tipo, (data) {
+        final dados = data is Map
+            ? Map<String, dynamic>.from(data)
+            : const <String, dynamic>{};
+        if (!_eventos.isClosed) _eventos.add(AvisoAoVivo(tipo, dados));
+      });
+    }
 
     // Notificação marcada como lida
     _socket!.on('notification_read', (data) {
@@ -232,6 +287,21 @@ class NotificationWebSocketService {
       _reconnectTimer = null;
       _isReconnecting = false;
       _stopHeartbeat();
+
+      // Token vencido no meio do caminho: renova UMA vez pela fila única e
+      // reconecta. Se a sessão for mesmo inválida, garantirTokenFresco já
+      // manda para o login.
+      if (!_renovouPorAuthError) {
+        _renovouPorAuthError = true;
+        _currentToken = null;
+        unawaited(() async {
+          // Força a renovação: o gateway recusou este token mesmo que ele
+          // ainda não pareça vencido pelo relógio do aparelho.
+          await ApiService.instance.garantirTokenFresco(margemSegundos: 1 << 30);
+          await connect(_currentUserId);
+        }());
+        return;
+      }
 
       _onAuthError?.call(reason);
     });
@@ -415,4 +485,14 @@ class NotificationWebSocketService {
     _onCompanySubscribed = null;
     _onCompanyUnsubscribed = null;
   }
+}
+
+/// Evento em tempo real do namespace `/notifications` que não é uma
+/// notificação do sino (29/09/2026): WhatsApp, leitura em lote, fila de
+/// aprovação de imóveis.
+class AvisoAoVivo {
+  final String tipo;
+  final Map<String, dynamic> dados;
+
+  const AvisoAoVivo(this.tipo, this.dados);
 }

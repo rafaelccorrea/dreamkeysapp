@@ -1284,6 +1284,29 @@ class _AppDrawerState extends State<AppDrawer> {
                                     },
                                     isSubItem: true,
                                   ),
+                                // Assinaturas pendentes: no web mora no menu
+                                // Fichas (/fichas-venda/assinaturas-pendentes).
+                                if (canSeeSaleForms)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.saleFormsPendingSignatures,
+                                    icon: LucideIcons.penLine,
+                                    activeIcon: LucideIcons.penLine,
+                                    title: 'Assinaturas pendentes',
+                                    accent: accent,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute ==
+                                          AppRoutes.saleFormsPendingSignatures) {
+                                        return;
+                                      }
+                                      Navigator.of(context).pushNamed(
+                                        AppRoutes.saleFormsPendingSignatures,
+                                      );
+                                    },
+                                    isSubItem: true,
+                                  ),
                                 if (canSeeProposals)
                                   _buildDrawerItem(
                                     context: context,

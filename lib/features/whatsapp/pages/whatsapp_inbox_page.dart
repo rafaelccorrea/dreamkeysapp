@@ -13,6 +13,7 @@ import '../../../shared/utils/jwt_utils.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../../../shared/widgets/app_error_state.dart';
+import '../../notifications/services/notification_websocket_service.dart';
 import '../models/whatsapp_models.dart';
 import '../services/whatsapp_service.dart';
 import '../widgets/whatsapp_conversation_card.dart';
@@ -81,17 +82,61 @@ class _WhatsAppInboxPageState extends State<WhatsAppInboxPage> {
         const ['whatsapp:view', 'whatsapp:view_messages'],
       );
 
+  // Tempo real (29/09/2026): o web atualiza a caixa pelo socket
+  // (`new_whatsapp_message`, `whatsapp_unread_count_update`); o app só
+  // recarregava ao puxar a lista. Agora assina os mesmos eventos.
+  StreamSubscription<AvisoAoVivo>? _aoVivo;
+  Timer? _debounceAoVivo;
+
   @override
   void initState() {
     super.initState();
     _bootstrap();
+    _aoVivo = NotificationWebSocketService.instance.eventosAoVivo.listen((e) {
+      if (e.tipo != 'new_whatsapp_message' &&
+          e.tipo != 'whatsapp_unread_count_update') {
+        return;
+      }
+      _debounceAoVivo?.cancel();
+      _debounceAoVivo = Timer(
+        const Duration(milliseconds: 800),
+        () => unawaited(_atualizarEmSilencio()),
+      );
+    });
   }
 
   @override
   void dispose() {
+    _aoVivo?.cancel();
+    _debounceAoVivo?.cancel();
     _searchController.dispose();
     _searchDebounce?.cancel();
     super.dispose();
+  }
+
+  /// Relê a primeira página da aba aberta SEM ligar o carregamento (a lista
+  /// fica na tela e só o conteúdo muda) e os contadores das abas. Se a pessoa
+  /// já carregou mais páginas, só os contadores mudam, para a lista não
+  /// encolher debaixo do dedo.
+  Future<void> _atualizarEmSilencio() async {
+    if (!mounted) return;
+    unawaited(_loadCounts());
+    final tab = _activeTab;
+    final st = _state[tab]!;
+    if (st.loading || !st.loaded || st.items.length > _pageSize) return;
+    final res = await WhatsAppService.instance.getConversations(
+      tab: tab,
+      search: _appliedSearch,
+      filters: _filters,
+      currentUserId: _currentUserId,
+      limit: _pageSize,
+      offset: 0,
+    );
+    if (!mounted || !res.success || res.data == null) return;
+    setState(() {
+      st.items = res.data!.conversations;
+      st.total = res.data!.total;
+    });
   }
 
   Future<void> _bootstrap() async {

@@ -3,11 +3,13 @@ import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
-import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/sale_forms_service.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../widgets/sale_form_anexos_sheet.dart';
+import '../widgets/sale_form_card.dart';
+import '../widgets/sale_form_row_actions.dart';
+import '../widgets/sale_form_row_rules.dart';
 import '../widgets/sale_form_signatures_sheet.dart';
 
 /// Visualização (read-only) de uma ficha de venda — Fase 1.
@@ -86,10 +88,22 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
       context,
       saleFormId: widget.saleFormId,
       formNumber: _form?.formNumber,
-      canInvalidate:
-          ModuleAccessService.instance.hasPermission('sale_form:update'),
+      canInvalidate: _form != null &&
+          SaleFormRowRules(_form!).canCancelSignaturesForResend,
       onChanged: _loadSummary,
     );
+  }
+
+  Future<void> _onAction(SaleForm f, SaleFormRowAction a) async {
+    final changed = await runSaleFormRowAction(context, f, a);
+    if (!mounted || !changed) return;
+    // Excluída/cancelada volta para a lista já recarregada.
+    if (a == SaleFormRowAction.excluir) {
+      Navigator.of(context).pop(true);
+      return;
+    }
+    await _load();
+    _loadSummary();
   }
 
   void _openAnexos() {
@@ -228,6 +242,12 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
             color: tone,
             letterSpacing: -0.5,
           ),
+        ),
+
+        const SizedBox(height: 16),
+        _AcoesDaFicha(
+          rules: SaleFormRowRules(f),
+          onAction: (a) => _onAction(f, a),
         ),
 
         if (f.status == SaleFormStatus.canceled &&
@@ -640,6 +660,68 @@ class _Field extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Faixa de ações do detalhe: Editar em chapa (com cadeado e motivo quando a
+/// ficha não pode mudar — o web bloqueia e informa, não esconde) + o mesmo
+/// menu de ações da listagem.
+class _AcoesDaFicha extends StatelessWidget {
+  const _AcoesDaFicha({required this.rules, required this.onAction});
+  final SaleFormRowRules rules;
+  final ValueChanged<SaleFormRowAction> onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = ThemeHelpers.textColor(context);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final bloqueada = !rules.canEdit;
+    return Row(
+      children: [
+        if (rules.showEdit)
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: () => onAction(SaleFormRowAction.editar),
+              icon: Icon(
+                bloqueada ? Icons.lock_outline_rounded : Icons.edit_outlined,
+                size: 18,
+                color: bloqueada ? muted : text,
+              ),
+              label: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  bloqueada ? 'Editar · bloqueada' : 'Editar ficha',
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: bloqueada ? muted : text,
+                  ),
+                ),
+              ),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(0, 44),
+                backgroundColor: dark
+                    ? Colors.white.withValues(alpha: 0.04)
+                    : Colors.black.withValues(alpha: 0.025),
+                side: BorderSide(color: ThemeHelpers.borderColor(context)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          )
+        else
+          const Spacer(),
+        const SizedBox(width: 10),
+        SaleFormActionsMenu(
+          rules: rules,
+          onAction: onAction,
+          noDetalhe: true,
+        ),
+      ],
     );
   }
 }

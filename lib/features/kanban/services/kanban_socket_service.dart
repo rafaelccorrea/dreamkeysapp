@@ -4,7 +4,7 @@ import 'package:flutter/widgets.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
 import '../../../core/constants/api_constants.dart';
-import '../../../shared/services/secure_storage_service.dart';
+import '../../../shared/services/api_service.dart';
 
 /// Socket do funil em tempo real (namespace `/kanban` do back).
 ///
@@ -47,6 +47,9 @@ class KanbanSocketService with WidgetsBindingObserver {
   String? _joinedTeamId;
   bool _authRejected = false;
 
+  /// Uma tentativa de renovar e reconectar por `auth_error`; zera ao conectar.
+  bool _renovouPorAuthError = false;
+
   int _reconnectAttempts = 0;
   static const int _maxReconnectAttempts = 8;
   static const int _baseReconnectDelayMs = 1000;
@@ -79,7 +82,9 @@ class KanbanSocketService with WidgetsBindingObserver {
     }
     _joinedTeamId = teamId;
 
-    final token = await SecureStorageService.instance.getAccessToken();
+    // Token fresco pela fila única de refresh (29/09/2026): nunca conectar
+    // com token vencido — o gateway responderia auth_error.
+    final token = await ApiService.instance.garantirTokenFresco();
     if (token == null || token.isEmpty) return;
 
     if (token != _currentToken) _authRejected = false;
@@ -154,6 +159,7 @@ class KanbanSocketService with WidgetsBindingObserver {
       final reconectou = _reconnectAttempts > 0;
       _isConnected = true;
       _reconnectAttempts = 0;
+      _renovouPorAuthError = false;
       onConnectionChanged?.call(true);
       if (_joinedTeamId != null) {
         s.emit('join_team', {'teamId': _joinedTeamId});
@@ -174,9 +180,20 @@ class KanbanSocketService with WidgetsBindingObserver {
     });
 
     s.on('auth_error', (_) {
-      // Token recusado: parar de insistir até chegar um token novo.
-      _authRejected = true;
       _reconnectTimer?.cancel();
+      // Token recusado: renova UMA vez pela fila única e reconecta; se a
+      // sessão for mesmo inválida, garantirTokenFresco manda para o login.
+      if (!_renovouPorAuthError) {
+        _renovouPorAuthError = true;
+        final team = _joinedTeamId;
+        unawaited(() async {
+          await ApiService.instance.garantirTokenFresco(margemSegundos: 1 << 30);
+          _currentToken = null;
+          if (team != null) await joinTeam(team);
+        }());
+        return;
+      }
+      _authRejected = true;
     });
 
     s.on('task_created', (data) {

@@ -5,8 +5,11 @@ import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/purchase_proposals_service.dart';
 import '../../../shared/widgets/app_scaffold.dart';
+import '../../sale_forms/widgets/fichas_filters_kit.dart';
 import '../widgets/proposal_card.dart';
+import '../widgets/proposal_row_actions.dart';
 import '../widgets/proposal_signatures_sheet.dart';
+import '../widgets/proposals_filters_sheet.dart';
 import 'create_proposal_page.dart';
 
 const double _kPadH = 16;
@@ -119,6 +122,22 @@ class _ProposalsPageState extends State<ProposalsPage> {
     });
   }
 
+  /// Modal "Filtros" (paridade com o drawer do web). Limpar também desliga
+  /// "Apenas excluídas", como o `clearDrawerFilters` do web.
+  Future<void> _openFilters(bool canViewAll) async {
+    final out = await showProposalsFiltersSheet(
+      context,
+      initial: _filters,
+      canViewAll: canViewAll,
+    );
+    if (out == null || !mounted) return;
+    setState(() {
+      _filters = out.filters;
+      if (out.cleared) _showDeletedOnly = false;
+    });
+    _load();
+  }
+
   Future<void> _openCreate() async {
     final created = await Navigator.of(
       context,
@@ -181,101 +200,27 @@ class _ProposalsPageState extends State<ProposalsPage> {
     );
   }
 
-  Future<void> _confirmCancelar(PurchaseProposal p) async {
-    final reason = await _askReason(
-      title: 'Cancelar proposta',
-      message:
-          'A proposta nº ${p.proposalNumber} não poderá mais ser enviada para assinatura.',
-      confirmLabel: 'Cancelar proposta',
-    );
-    if (reason == null || !mounted) return;
-    final res = await PurchaseProposalsService.instance.cancelar(p.id, reason);
-    if (!mounted) return;
-    if (res.success) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Proposta cancelada.')));
-      _load();
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res.message ?? 'Falha ao cancelar.')),
-      );
-    }
-  }
-
-  Future<void> _confirmExcluir(PurchaseProposal p) async {
-    final reason = await _askReason(
-      title: 'Excluir proposta',
-      message:
-          'Excluir a ficha nº ${p.proposalNumber}? Esta ação fica em auditoria.',
-      confirmLabel: 'Excluir',
-    );
-    if (reason == null || !mounted) return;
-    final res = await PurchaseProposalsService.instance.excluir(p.id, reason);
-    if (!mounted) return;
-    if (res.success) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Proposta excluída.')));
-      _load();
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res.message ?? 'Falha ao excluir.')),
-      );
-    }
-  }
-
-  Future<String?> _askReason({
-    required String title,
-    required String message,
-    required String confirmLabel,
-  }) async {
-    final controller = TextEditingController();
-    final accent = _accent(context);
-    final res = await showDialog<String>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: Text(title),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(message),
-              const SizedBox(height: 12),
-              TextField(
-                controller: controller,
-                autofocus: true,
-                minLines: 2,
-                maxLines: 4,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: 'Motivo *',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
+  /// Menu da linha (espelho do web). Navegação fica aqui; o resto no
+  /// despachante compartilhado.
+  Future<void> _onAction(PurchaseProposal p, ProposalRowAction a) async {
+    switch (a) {
+      case ProposalRowAction.assinaturas:
+        _openSignatures(p);
+        return;
+      case ProposalRowAction.historico:
+        _openSignatures(p, showHistorico: true);
+        return;
+      case ProposalRowAction.editar:
+        final updated = await Navigator.of(context).push<bool>(
+          MaterialPageRoute(
+            builder: (_) => CreateProposalPage(proposalId: p.id),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Voltar'),
-            ),
-            FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: accent),
-              onPressed: () {
-                final r = controller.text.trim();
-                if (r.isEmpty) return;
-                Navigator.of(ctx).pop(r);
-              },
-              child: Text(confirmLabel),
-            ),
-          ],
         );
-      },
-    );
-    controller.dispose();
-    return res;
+        if (updated == true && mounted) _load();
+        return;
+      default:
+        if (await runProposalRowAction(context, p, a) && mounted) _load();
+    }
   }
 
   @override
@@ -339,16 +284,27 @@ class _ProposalsPageState extends State<ProposalsPage> {
                           stats: _stats,
                           filteredCount: _data?.total,
                           hasFilter:
-                              _filters.status != null ||
+                              _filters.drawerFilterCount > 0 ||
                               _showDeletedOnly ||
                               (_search.text.trim().isNotEmpty),
                           showingDeletedOnly: _showDeletedOnly,
                         ),
                         const SizedBox(height: 16),
-                        _SearchBar(
-                          controller: _search,
-                          accent: accent,
-                          onSubmitted: _load,
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _SearchBar(
+                                controller: _search,
+                                accent: accent,
+                                onSubmitted: _load,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            FichasFiltersButton(
+                              count: _filters.drawerFilterCount,
+                              onTap: () => _openFilters(canViewAll),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 12),
                         _StatusChips(
@@ -434,8 +390,7 @@ class _ProposalsPageState extends State<ProposalsPage> {
                           onContinue: () => _openSignatures(p),
                           onShowHistorico: () =>
                               _openSignatures(p, showHistorico: true),
-                          onCancelar: () => _confirmCancelar(p),
-                          onExcluir: () => _confirmExcluir(p),
+                          onAction: (a) => _onAction(p, a),
                         );
                       },
                     ),

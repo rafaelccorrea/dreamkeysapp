@@ -20,6 +20,7 @@ class NotificationController extends ChangeNotifier {
   final NotificationService _notificationService = NotificationService.instance;
   final NotificationWebSocketService _wsService =
       NotificationWebSocketService.instance;
+  StreamSubscription<AvisoAoVivo>? _aoVivo;
   final NotificationCountsService _countsService =
       NotificationCountsService.instance;
 
@@ -186,6 +187,28 @@ class NotificationController extends ChangeNotifier {
         }
         _notifications[index] = notification.copyWith(read: true);
         notifyListeners();
+      }
+    });
+
+    // Leitura em lote vinda de outra ponta (web ou outra aba) — paridade com
+    // o web, que já tratava `notifications_read` (29/09/2026). Antes a lista
+    // do app seguia acesa até recarregar.
+    _aoVivo ??= _wsService.eventosAoVivo.listen((e) {
+      if (e.tipo != 'notifications_read') return;
+      final ids = e.dados['notificationIds'];
+      final todas = e.dados['all'] == true;
+      var mudou = false;
+      for (var i = 0; i < _notifications.length; i++) {
+        final n = _notifications[i];
+        if (n.read) continue;
+        if (todas || (ids is List && ids.contains(n.id))) {
+          _notifications[i] = n.copyWith(read: true);
+          mudou = true;
+        }
+      }
+      if (mudou) {
+        notifyListeners();
+        unawaited(refreshUnreadCount());
       }
     });
 

@@ -5,6 +5,7 @@ import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/purchase_proposals_service.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import 'proposal_row_actions.dart';
 
 /// Card de uma proposta na listagem (mobile).
 ///
@@ -20,8 +21,7 @@ class ProposalCard extends StatelessWidget {
     this.onTap,
     this.onContinue,
     this.onShowHistorico,
-    this.onCancelar,
-    this.onExcluir,
+    this.onAction,
   });
 
   final PurchaseProposal proposal;
@@ -29,8 +29,9 @@ class ProposalCard extends StatelessWidget {
   final VoidCallback? onTap;
   final VoidCallback? onContinue;
   final VoidCallback? onShowHistorico;
-  final VoidCallback? onCancelar;
-  final VoidCallback? onExcluir;
+
+  /// Menu da linha — mesmas ações e regras do web.
+  final ValueChanged<ProposalRowAction>? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -39,9 +40,6 @@ class ProposalCard extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     final canUpdate = ModuleAccessService.instance.hasPermission(
       'proposal:update',
-    );
-    final canDelete = ModuleAccessService.instance.hasPermission(
-      'proposal:delete',
     );
 
     final statusTone = _statusTone(proposal.status);
@@ -185,13 +183,11 @@ class ProposalCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  _MoreMenu(
-                    canUpdate: canUpdate && isProcessing,
-                    canDelete: canDelete && proposal.deletedAt == null,
-                    onHistorico: onShowHistorico,
-                    onCancelar: onCancelar,
-                    onExcluir: onExcluir,
-                  ),
+                  if (onAction != null)
+                    ProposalActionsMenu(
+                      rules: ProposalRowRules(proposal),
+                      onAction: onAction!,
+                    ),
                 ],
               ),
 
@@ -841,56 +837,6 @@ class _FooterMeta extends StatelessWidget {
           ),
         ],
       ],
-    );
-  }
-}
-
-class _MoreMenu extends StatelessWidget {
-  const _MoreMenu({
-    required this.canUpdate,
-    required this.canDelete,
-    this.onHistorico,
-    this.onCancelar,
-    this.onExcluir,
-  });
-
-  final bool canUpdate;
-  final bool canDelete;
-  final VoidCallback? onHistorico;
-  final VoidCallback? onCancelar;
-  final VoidCallback? onExcluir;
-
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<String>(
-      icon: Icon(
-        Icons.more_vert_rounded,
-        color: ThemeHelpers.textSecondaryColor(context),
-      ),
-      itemBuilder: (ctx) => [
-        if (onHistorico != null)
-          const PopupMenuItem(value: 'historico', child: Text('Ver histórico')),
-        if (canUpdate && onCancelar != null)
-          const PopupMenuItem(
-            value: 'cancelar',
-            child: Text('Cancelar proposta'),
-          ),
-        if (canDelete && onExcluir != null)
-          const PopupMenuItem(value: 'excluir', child: Text('Excluir')),
-      ],
-      onSelected: (v) {
-        switch (v) {
-          case 'historico':
-            onHistorico?.call();
-            break;
-          case 'cancelar':
-            onCancelar?.call();
-            break;
-          case 'excluir':
-            onExcluir?.call();
-            break;
-        }
-      },
     );
   }
 }

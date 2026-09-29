@@ -1,12 +1,19 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../../../core/constants/api_constants.dart';
-import '../../../shared/services/secure_storage_service.dart';
+import '../../../shared/services/api_service.dart';
 import '../models/chat_models.dart';
 
-/// Serviço para conexão WebSocket de chat em tempo real
-class ChatSocketService {
+/// Serviço para conexão WebSocket de chat em tempo real.
+///
+/// Conexão sem quedas (29/09/2026): token sempre fresco antes de conectar
+/// (`ApiService.garantirTokenFresco`), reconexão com recuo exponencial SEM
+/// teto de tentativas (antes desistia na 3ª e nada reagendava), salas
+/// preservadas nas quedas (antes o `onDisconnect` limpava `_joinedRooms` e a
+/// reconexão não voltava a entrar em nenhuma: a conversa aberta ficava muda)
+/// e retomada ao voltar do segundo plano.
+class ChatSocketService with WidgetsBindingObserver {
   ChatSocketService._();
 
   static final ChatSocketService _instance = ChatSocketService._();
@@ -38,10 +45,33 @@ class ChatSocketService {
 
   // Reconexão
   int _reconnectAttempts = 0;
-  static const int _baseReconnectDelay = 5000; // 5 segundos
-  static const int _maxReconnectDelay = 30000; // 30 segundos
-  static const int _maxReconnectAttempts = 3; // Máximo de 3 tentativas
+  static const int _baseReconnectDelay = 2000; // 2 segundos
+  static const int _maxReconnectDelay = 30000; // 30 segundos (teto do recuo)
   Timer? _reconnectTimer;
+  bool _observando = false;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    // Voltou do segundo plano: o sistema derruba o socket lá.
+    if (!_isConnected && _currentCompanyId != null) {
+      _reconnectAttempts = 0;
+      _isReconnecting = false;
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+      unawaited(connect(_currentCompanyId!));
+    }
+  }
+
+  /// Fecha o socket atual SEM esquecer as salas (queda ou troca de token).
+  void _descartarSocket() {
+    final s = _socket;
+    if (s == null) return;
+    s.disconnect();
+    s.dispose();
+    _socket = null;
+    _isConnected = false;
+  }
   bool _isReconnecting = false;
 
   bool get isConnected => _isConnected;
@@ -50,19 +80,28 @@ class ChatSocketService {
   /// Conecta ao WebSocket do chat
   Future<void> connect(String companyId) async {
     try {
-      // Obter token
-      final token = await SecureStorageService.instance.getAccessToken();
+      if (!_observando) {
+        _observando = true;
+        WidgetsBinding.instance.addObserver(this);
+      }
+
+      // Token fresco pela fila única de refresh: socket nunca abre com token
+      // vencido (o gateway recusaria e a reconexão entraria em laço).
+      final token = await ApiService.instance.garantirTokenFresco();
       if (token == null || token.isEmpty) {
-        debugPrint('⚠️ [CHAT_WS] Token não encontrado, não é possível conectar');
+        debugPrint('⚠️ [CHAT_WS] Sem sessão utilizável, não é possível conectar');
         return;
       }
 
+      // Troca de empresa: as salas da empresa anterior não valem na nova.
+      if (_currentCompanyId != null && _currentCompanyId != companyId) {
+        _joinedRooms.clear();
+      }
       _currentCompanyId = companyId;
 
-      // Se já está conectado, desconectar primeiro
-      if (_socket != null && _socket!.connected) {
-        await disconnect();
-      }
+      // Sempre descartar o socket anterior (conectado ou não): socket órfão
+      // reconectando sozinho duplicava eventos. As salas ficam guardadas.
+      _descartarSocket();
 
       // Construir URL do WebSocket
       final wsUrl = _getWebSocketUrl();
@@ -76,6 +115,10 @@ class ChatSocketService {
             .setAuth({'token': token})
             .setExtraHeaders({'X-Company-ID': companyId})
             .setTimeout(20000)
+            .disableAutoConnect()
+            // A reconexão é nossa (com token fresco); a do pacote reusaria o
+            // token antigo e criaria um segundo caminho paralelo.
+            .disableReconnection()
             .build(),
       );
 
@@ -337,27 +380,16 @@ class ChatSocketService {
     _socket!.onDisconnect((reason) {
       debugPrint('❌ [CHAT_WS] Desconectado: $reason');
       _isConnected = false;
-      _joinedRooms.clear();
+      // NÃO limpar _joinedRooms aqui: o onConnect da reconexão reentra nelas.
       _onConnectionStatusChanged?.call(false);
 
       // Se foi desconexão intencional do cliente, não tentar reconectar
       if (reason.toString().contains('io client disconnect')) {
-        debugPrint('ℹ️ [CHAT_WS] Desconexão intencional do cliente, não tentando reconectar');
         _reconnectAttempts = 0;
         return;
       }
 
-      // Tentar reconectar apenas se não excedeu o limite
-      if (_reconnectAttempts < _maxReconnectAttempts) {
-        _handleReconnect();
-      } else {
-        debugPrint('⚠️ [CHAT_WS] Limite de tentativas de reconexão atingido ($_maxReconnectAttempts). Entrando em cooldown de 30s.');
-        _isReconnecting = false;
-        // Após 30s, permitir novas tentativas
-        Future.delayed(const Duration(seconds: 30), () {
-          _reconnectAttempts = 0;
-        });
-      }
+      _handleReconnect();
     });
 
     // Erro de conexão
@@ -365,18 +397,7 @@ class ChatSocketService {
       debugPrint('❌ [CHAT_WS] Erro de conexão: $error');
       _isConnected = false;
       _onConnectionStatusChanged?.call(false);
-
-      // Tentar reconectar apenas se não excedeu o limite
-      if (_reconnectAttempts < _maxReconnectAttempts) {
-        _handleReconnect();
-      } else {
-        debugPrint('⚠️ [CHAT_WS] Limite de tentativas de reconexão atingido ($_maxReconnectAttempts). Entrando em cooldown de 30s.');
-        _isReconnecting = false;
-        // Após 30s, permitir novas tentativas
-        Future.delayed(const Duration(seconds: 30), () {
-          _reconnectAttempts = 0;
-        });
-      }
+      _handleReconnect();
     });
 
     // Erro geral
@@ -387,27 +408,27 @@ class ChatSocketService {
   }
 
   /// Reconecta ao WebSocket
+  /// Recuo exponencial SEM teto de tentativas: 2 s, 4 s, 8 s… até 30 s.
   void _handleReconnect() {
-    if (_isReconnecting) return;
-    if (_reconnectAttempts >= _maxReconnectAttempts) {
-      debugPrint('⚠️ [CHAT_WS] Máximo de tentativas atingido, não tentando reconectar');
-      return;
-    }
+    if (_isReconnecting || _currentCompanyId == null) return;
 
     _isReconnecting = true;
+    final expoente = _reconnectAttempts.clamp(0, 5);
     _reconnectAttempts++;
-
-    final delay = (_baseReconnectDelay * _reconnectAttempts).clamp(
+    final delay = (_baseReconnectDelay * (1 << expoente)).clamp(
       _baseReconnectDelay,
       _maxReconnectDelay,
     );
 
-    debugPrint('🔄 [CHAT_WS] Tentando reconectar em ${delay}ms (tentativa $_reconnectAttempts/$_maxReconnectAttempts)');
+    debugPrint('🔄 [CHAT_WS] Reconectando em ${delay}ms (tentativa $_reconnectAttempts)');
 
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(Duration(milliseconds: delay), () {
-      if (_currentCompanyId != null) {
-        connect(_currentCompanyId!);
+      _reconnectTimer = null;
+      _isReconnecting = false;
+      final empresa = _currentCompanyId;
+      if (empresa != null && !_isConnected) {
+        unawaited(connect(empresa));
       }
     });
   }
