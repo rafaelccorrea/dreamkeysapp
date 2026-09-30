@@ -1,4 +1,4 @@
-import 'dart:io' show File, Directory;
+import 'dart:io' show File;
 import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
@@ -19,6 +19,7 @@ import '../../../shared/services/sale_forms_service.dart'
     show saleFormLinkAbrivel, saleFormSignerExcluido;
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import 'proposal_row_actions.dart' show showProposalPdfSheet;
 
 /// Bottom sheet de assinaturas da PROPOSTA — paridade com
 /// `ProposalSignaturesModalPrivate.tsx` (web).
@@ -461,34 +462,17 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
     }
   }
 
+  /// PDF da etapa pela folha de arquivo do app (Compartilhar / Salvar no
+  /// aparelho) — `Uri.file` não abre no Android nem no iOS.
   Future<void> _abrirPdf() async {
     setState(() => _pdfLoading = true);
-    final res = await PurchaseProposalsService.instance.downloadPdf(
-      widget.proposalId,
+    await showProposalPdfSheet(
+      context,
+      proposalId: widget.proposalId,
+      numero: _proposalNumber,
       etapa: _etapa,
     );
-    if (!mounted) return;
-    setState(() => _pdfLoading = false);
-    if (!res.success || res.data == null) {
-      _snack(res.message ?? 'Erro ao carregar PDF.');
-      return;
-    }
-    try {
-      final bytes = res.data!.bytes;
-      final dir = Directory.systemTemp;
-      final ext = res.data!.contentType.contains('zip') ? 'zip' : 'pdf';
-      final file = File(
-          '${dir.path}/proposta_${_proposalNumber}_etapa$_etapa.$ext');
-      await file.writeAsBytes(bytes);
-      final ok = await launchUrl(
-        Uri.file(file.path),
-        mode: LaunchMode.externalApplication,
-      );
-      if (!ok && mounted) _snack('PDF salvo em ${file.path}');
-    } catch (e) {
-      if (!mounted) return;
-      _snack('Erro ao abrir PDF: $e');
-    }
+    if (mounted) setState(() => _pdfLoading = false);
   }
 
   /// Usa o link já existente; só pede `POST /link` quando não há.

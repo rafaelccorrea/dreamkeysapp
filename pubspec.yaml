@@ -64,6 +64,8 @@ dependencies:
   # chave de API (paridade com o PropertyMap/Leaflet do web).
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
+  record: ^7.1.1
+  just_audio: ^0.10.6
 
 dev_dependencies:
   flutter_test:

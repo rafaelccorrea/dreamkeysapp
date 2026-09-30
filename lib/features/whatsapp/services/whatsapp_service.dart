@@ -530,18 +530,27 @@ class WhatsAppService {
   }
 
   /// `POST /whatsapp/send-template` — envia template aprovado (reabre a
-  /// janela de 24h da API oficial).
+  /// janela de 24h da API oficial). Mesmo payload do web
+  /// (`SendTemplateRequest` / `SendWhatsAppTemplateDto` do back):
+  /// `parameters` = variáveis do CORPO na ordem {{1}}…{{n}};
+  /// `headerParameters` = variáveis do CABEÇALHO de texto; `languageCode` =
+  /// idioma do template no catálogo (sem ele o back usa `pt_BR`).
   Future<ApiResponse<void>> sendTemplate({
     required String to,
     required String templateName,
     List<String> parameters = const [],
+    List<String> headerParameters = const [],
+    String? languageCode,
     String? clientId,
   }) async {
     try {
+      final idioma = languageCode?.trim() ?? '';
       final body = <String, dynamic>{
         'to': to,
         'templateName': templateName,
         if (parameters.isNotEmpty) 'parameters': parameters,
+        if (headerParameters.isNotEmpty) 'headerParameters': headerParameters,
+        if (idioma.isNotEmpty) 'languageCode': idioma,
         if (clientId != null && clientId.isNotEmpty) 'clientId': clientId,
       };
       final response = await _api.post<dynamic>(_kSendTemplate, body: body);
@@ -562,9 +571,10 @@ class WhatsAppService {
     }
   }
 
-  /// `GET /whatsapp/templates` — templates aprovados na Meta. Exige
-  /// `whatsapp:manage_config` no backend: quem não tem recebe 403 e a UI
-  /// oferece digitação manual do nome do template.
+  /// `GET /whatsapp/templates` — templates da Meta, cada um com `components`
+  /// (cabeçalho, corpo, rodapé, botões e exemplos das variáveis) para a
+  /// prévia. Exige `whatsapp:manage_config` no backend: quem não tem recebe
+  /// 403 e a UI oferece digitação manual do nome do template.
   Future<ApiResponse<List<WhatsAppTemplate>>> getTemplates() async {
     try {
       final response = await _api.get<dynamic>(_kTemplates);

@@ -1,14 +1,14 @@
 import 'dart:convert';
-import 'dart:io' show Directory, File;
 
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 
+import '../../../shared/services/api_service.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
+import '../../../shared/widgets/file_delivery_sheet.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../services/proposals_dashboard_service.dart';
 import '../widgets/dashboard/pd_common.dart';
@@ -215,38 +215,46 @@ class _ProposalsDashboardPageState extends State<ProposalsDashboardPage> {
     await _export(kind);
   }
 
+  /// Exporta o recorte e entrega pela folha de arquivo do app
+  /// (Compartilhar / Salvar no aparelho) — `Uri.file` não abre no Android
+  /// nem no iOS.
   Future<void> _export(PdExportKind kind) async {
-    final label = kind == PdExportKind.excel ? 'Excel' : 'PDF';
-    setState(() => _exporting = true);
-    _snack('Gerando o $label…', short: true);
+    final excel = kind == PdExportKind.excel;
+    final label = excel ? 'Excel' : 'PDF';
     // O web exporta sem `limit` (recorte completo).
     final filters = _filters().withoutLimit();
-    final res = kind == PdExportKind.excel
-        ? await _svc.exportExcel(filters)
-        : await _svc.exportPdf(filters);
-    if (!mounted) return;
-    setState(() => _exporting = false);
-    final file = res.data;
-    if (!res.success || file == null) {
-      _snack(res.message ?? 'Falha ao exportar o $label.');
-      return;
-    }
-    try {
-      final out = File('${Directory.systemTemp.path}/${file.fileName}');
-      await out.writeAsBytes(file.bytes);
-      final ok = await launchUrl(
-        Uri.file(out.path),
-        mode: LaunchMode.externalApplication,
-      );
-      if (!ok && mounted) _snack('$label salvo em ${out.path}');
-    } catch (_) {
-      if (mounted) {
-        _snack(
-          'Não foi possível abrir o $label. Confira se há um aplicativo '
-          'para abrir esse tipo de arquivo.',
+    setState(() => _exporting = true);
+    await showFileDeliverySheet(
+      context,
+      title: 'Painel de propostas em $label',
+      subtitle: '${_period.rangeLabel}, ${_period.granularityLabel}'
+          '${_advanced.count > 0 ? ', ${_advanced.count} filtro(s) avançado(s)' : ''}',
+      paper:
+          excel ? FileDeliveryPaper.spreadsheet : FileDeliveryPaper.document,
+      expectedType: excel ? 'XLSX' : 'PDF',
+      generatingTitle: 'Gerando o $label…',
+      readyTitle: '$label pronto',
+      shareSubject: 'Painel de propostas',
+      saveDialogTitle: 'Salvar $label',
+      load: () async {
+        final res = excel
+            ? await _svc.exportExcel(filters)
+            : await _svc.exportPdf(filters);
+        final file = res.data;
+        if (!res.success || file == null) {
+          return ApiResponse.error(
+            message: res.message ?? '',
+            statusCode: res.statusCode,
+            data: res.error,
+          );
+        }
+        return ApiResponse.success(
+          data: DeliverableFile(bytes: file.bytes, fileName: file.fileName),
+          statusCode: res.statusCode,
         );
-      }
-    }
+      },
+    );
+    if (mounted) setState(() => _exporting = false);
   }
 
   /// Abrir a proposta a partir do painel exige poder ver propostas; sem a

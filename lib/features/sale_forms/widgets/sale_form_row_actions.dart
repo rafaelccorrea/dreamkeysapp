@@ -1,8 +1,5 @@
-import 'dart:io' show Directory, File;
-
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
@@ -10,8 +7,10 @@ import '../../../features/workspace/models/admin_user_model.dart';
 import '../../../features/workspace/models/company_team_model.dart';
 import '../../../features/workspace/services/admin_users_service.dart';
 import '../../../features/workspace/services/company_team_service.dart';
+import '../../../shared/services/api_service.dart';
 import '../../../shared/services/sale_forms_service.dart';
 import '../../../shared/widgets/app_error_state.dart';
+import '../../../shared/widgets/file_delivery_sheet.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../pages/create_sale_form_page.dart';
 import '../pages/sale_form_detail_page.dart';
@@ -194,35 +193,77 @@ Future<bool> runSaleFormRowAction(
   }
 }
 
-/// Baixa e abre o PDF da ficha (`sistema` = sem assinatura; `assinaturas` =
-/// PDF(s) assinado(s) no Autentique — ZIP quando há mais de um).
+/// Baixa o PDF da ficha e entrega pela folha de arquivo do app
+/// (`sistema` = sem assinatura; `assinaturas` = PDF(s) assinado(s) no
+/// Autentique — ZIP quando há mais de um).
 Future<void> openSaleFormPdf(
   BuildContext context,
   SaleForm form,
   String modo,
-) async {
-  _snack(context, 'Gerando o PDF…', ok: true, curto: true);
-  final res = await SaleFormsService.instance.downloadPdf(form.id, modo: modo);
-  if (!context.mounted) return;
-  if (!res.success || res.data == null) {
-    _snack(context, res.message ?? 'Erro ao baixar o PDF.');
-    return;
-  }
-  try {
-    final ext = res.data!.contentType.contains('zip') ? 'zip' : 'pdf';
-    final num = form.formNumber.trim().isNotEmpty ? form.formNumber : form.id;
-    final file = File(
-      '${Directory.systemTemp.path}/ficha_venda_${num}_$modo.$ext',
-    );
-    await file.writeAsBytes(res.data!.bytes);
-    final ok = await launchUrl(
-      Uri.file(file.path),
-      mode: LaunchMode.externalApplication,
-    );
-    if (!ok && context.mounted) _snack(context, 'PDF salvo em ${file.path}');
-  } catch (e) {
-    if (context.mounted) _snack(context, 'Erro ao abrir o PDF: $e');
-  }
+) {
+  final num = form.formNumber.trim().isNotEmpty ? form.formNumber : form.id;
+  return showSaleFormPdfSheet(
+    context,
+    saleFormId: form.id,
+    numero: num,
+    modo: modo,
+  );
+}
+
+/// Folha do PDF da ficha nº [numero] — Compartilhar / Salvar no aparelho.
+/// Abrir com `launchUrl(Uri.file(...))` não funciona no Android nem no iOS.
+Future<void> showSaleFormPdfSheet(
+  BuildContext context, {
+  required String saleFormId,
+  required String numero,
+  required String modo,
+}) {
+  final assinado = modo == 'assinaturas';
+  return showFileDeliverySheet(
+    context,
+    title: assinado
+        ? 'PDF assinado da ficha nº $numero'
+        : 'PDF da ficha nº $numero',
+    expectedType: 'PDF',
+    generatingTitle: assinado
+        ? 'Buscando o PDF assinado…'
+        : 'Gerando o PDF da ficha…',
+    generatingHint: assinado
+        ? 'O PDF vem do Autentique com as assinaturas já feitas.'
+        : 'Costuma levar poucos segundos.',
+    readyTitle: 'PDF pronto',
+    readyNote: (file) => file.extension == 'zip'
+        ? 'Mais de um documento assinado: os PDFs vêm juntos num arquivo '
+            '.zip.'
+        : null,
+    failureHint: assinado
+        ? 'Se a assinatura acabou de acontecer, sincronize as assinaturas e '
+            'tente de novo.'
+        : null,
+    shareSubject: 'Ficha de venda nº $numero',
+    saveDialogTitle: 'Salvar PDF da ficha',
+    load: () async {
+      final res =
+          await SaleFormsService.instance.downloadPdf(saleFormId, modo: modo);
+      final data = res.data;
+      if (!res.success || data == null) {
+        return ApiResponse.error(
+          message: res.message ?? '',
+          statusCode: res.statusCode,
+          data: res.error,
+        );
+      }
+      final zip = data.contentType.contains('zip');
+      return ApiResponse.success(
+        data: DeliverableFile(
+          bytes: data.bytes,
+          fileName: 'ficha_venda_${numero}_$modo.${zip ? 'zip' : 'pdf'}',
+          mimeType: zip ? 'application/zip' : 'application/pdf',
+        ),
+        statusCode: res.statusCode,
+      );
+    },
+  );
 }
 
 /// Motivo obrigatório (cancelar, excluir, distratar) — mesmo diálogo do web.

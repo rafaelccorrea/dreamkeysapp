@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io' show File, Directory;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -14,6 +13,7 @@ import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/sale_forms_service.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import 'sale_form_row_actions.dart' show showSaleFormPdfSheet;
 import 'sale_form_tones.dart';
 
 /// Bottom sheet de assinaturas da FICHA DE VENDA — paridade com
@@ -464,33 +464,17 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
     }
   }
 
+  /// PDF original / assinado pela folha de arquivo do app (Compartilhar /
+  /// Salvar no aparelho) — `Uri.file` não abre no Android nem no iOS.
   Future<void> _abrirPdf(String modo) async {
     setState(() => _pdfBusy = modo);
-    final res = await SaleFormsService.instance
-        .downloadPdf(widget.saleFormId, modo: modo);
-    if (!mounted) return;
-    setState(() => _pdfBusy = null);
-    if (!res.success || res.data == null) {
-      _snack(res.message ??
-          'Falha ao baixar o PDF. Sincronize as assinaturas e tente de novo.');
-      return;
-    }
-    try {
-      final bytes = res.data!.bytes;
-      final dir = Directory.systemTemp;
-      final ext = res.data!.contentType.contains('zip') ? 'zip' : 'pdf';
-      final num = _numero.isNotEmpty ? _numero : widget.saleFormId;
-      final file = File('${dir.path}/ficha_venda_${num}_$modo.$ext');
-      await file.writeAsBytes(bytes);
-      final ok = await launchUrl(
-        Uri.file(file.path),
-        mode: LaunchMode.externalApplication,
-      );
-      if (!ok && mounted) _snack('PDF salvo em ${file.path}');
-    } catch (e) {
-      if (!mounted) return;
-      _snack('Erro ao abrir PDF: $e');
-    }
+    await showSaleFormPdfSheet(
+      context,
+      saleFormId: widget.saleFormId,
+      numero: _numero.isNotEmpty ? _numero : widget.saleFormId,
+      modo: modo,
+    );
+    if (mounted) setState(() => _pdfBusy = null);
   }
 
   /// Link da assinatura: usa `signatureUrl` quando já existe (sem POST).

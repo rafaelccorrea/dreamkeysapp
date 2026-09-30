@@ -12,9 +12,16 @@ import '../widgets/entity_selector.dart';
 class CreateDocumentPage extends StatefulWidget {
   final String? documentId;
 
+  /// Novo documento já vinculado a um imóvel (vindo da ficha do imóvel,
+  /// como o `?propertyId=` do web).
+  final String? initialPropertyId;
+  final String? initialPropertyName;
+
   const CreateDocumentPage({
     super.key,
     this.documentId,
+    this.initialPropertyId,
+    this.initialPropertyName,
   });
 
   @override
@@ -46,6 +53,9 @@ class _CreateDocumentPageState extends State<CreateDocumentPage> {
     _isEditing = widget.documentId != null;
     if (_isEditing) {
       _loadDocument();
+    } else if ((widget.initialPropertyId ?? '').trim().isNotEmpty) {
+      _selectedPropertyId = widget.initialPropertyId!.trim();
+      _selectedPropertyName = widget.initialPropertyName;
     }
   }
 

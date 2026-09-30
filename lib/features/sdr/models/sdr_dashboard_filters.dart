@@ -6,6 +6,8 @@ import 'sdr_metrics_model.dart';
 /// data do `SDRDashboardFiltersDrawer` web).
 enum SdrPeriodPreset {
   today('Hoje'),
+  // Atalho do web ("Hoje · Ontem · 7 dias · 30 dias").
+  yesterday('Ontem'),
   last7('7 dias'),
   last30('30 dias'),
   last90('90 dias'),
@@ -60,6 +62,21 @@ final RegExp _kSdrNameRegex =
 bool isSdrTeamName(String? name) =>
     name != null && name.isNotEmpty && _kSdrNameRegex.hasMatch(name);
 
+/// Limite de linhas da `transferList` que o web manda nas consultas de
+/// métricas (`transferListLimit: 800`, SDRDashboardPage.tsx) — sem ele o back
+/// devolve a lista inteira de transferências.
+const int kSdrTransferListLimit = 800;
+
+/// `filterSdrKanbanProjects` do web (`utils/sdrProjectFilter.ts`): funis ativos,
+/// não pessoais, com "SDR" ou "pré-atendimento" no nome (a mesma expressão das
+/// equipes). É o recorte com que o Dash SDR ABRE e para onde o "Limpar" volta:
+/// sem funil a API conta transferências de todos os funis e "Transferidos"
+/// incha (União 01–25/09: 1.340 × 464 só SDR).
+List<String> defaultSdrProjectIds(List<SdrProjectOption> projects) => projects
+    .where((p) => isSdrTeamName(p.name))
+    .map((p) => p.id)
+    .toList(growable: false);
+
 /// `defaultSdrTeamFilterIds` do web: equipes SDR por nome; sem nenhuma, a
 /// única equipe do usuário ou todas.
 List<String>? defaultSdrTeamFilterIds(List<SdrTeamOption> teams) {
@@ -108,6 +125,9 @@ class SdrDashboardFilters {
     switch (preset) {
       case SdrPeriodPreset.today:
         return (start: today, end: today);
+      case SdrPeriodPreset.yesterday:
+        final ontem = today.subtract(const Duration(days: 1));
+        return (start: ontem, end: ontem);
       case SdrPeriodPreset.last7:
         return (start: today.subtract(const Duration(days: 6)), end: today);
       case SdrPeriodPreset.last30:
@@ -170,7 +190,11 @@ class SdrDashboardFilters {
       if (clean.isNotEmpty) out[key] = clean;
     }
 
-    if (lists != null) out['lists'] = [lists.apiValue];
+    if (lists != null) {
+      out['lists'] = [lists.apiValue];
+      // Só nas métricas (as consultas irmãs vão com `lists: null`), como o web.
+      out['transferListLimit'] = ['$kSdrTransferListLimit'];
+    }
 
     final r = resolvedRange();
     final ymd = DateFormat('yyyy-MM-dd');

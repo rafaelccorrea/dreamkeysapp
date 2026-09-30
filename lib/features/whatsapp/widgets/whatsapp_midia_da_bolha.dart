@@ -15,6 +15,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../models/whatsapp_midia.dart';
 import '../models/whatsapp_models.dart';
+import 'whatsapp_tocador_de_audio.dart';
 
 // Mídia recebida/enviada dentro da conversa (29/09/2026).
 //
@@ -959,11 +960,45 @@ class _WhatsAppMidiaTocavelState extends State<WhatsAppMidiaTocavel> {
   bool _abrindo = false;
   bool _salvando = false;
 
+  /// O tocador do app não carregou este áudio: daqui em diante vai direto
+  /// para o player do sistema.
+  bool _semTocadorNoApp = false;
+
   bool get _ehVideo => widget.message.messageType == WhatsAppMessageType.video;
   bool get _ehVoz => widget.message.messageType == WhatsAppMessageType.voice;
 
+  /// Áudio toca na própria bolha (30/09/2026). Exceção: Ogg/Opus no iPhone —
+  /// o AVPlayer não lê Ogg, e é o formato das notas de voz do WhatsApp; ali
+  /// segue o player do sistema, como antes.
+  bool get _tocaNaBolha {
+    if (_ehVideo || _semTocadorNoApp) return false;
+    if (!Platform.isIOS) return true;
+    final mime = (widget.message.mediaMimeType ?? '').toLowerCase();
+    final nome = (widget.message.mediaFileName ?? '').toLowerCase();
+    final ogg = mime.contains('ogg') ||
+        mime.contains('opus') ||
+        nome.endsWith('.ogg') ||
+        nome.endsWith('.oga') ||
+        nome.endsWith('.opus');
+    if (ogg) return false;
+    // Nota de voz sem tipo informado: é Ogg/Opus (padrão do WhatsApp).
+    if (mime.isEmpty && _ehVoz) return false;
+    return true;
+  }
+
   Future<void> _tocar() async {
     if (_abrindo) return;
+    if (_tocaNaBolha) {
+      final ok = await WhatsAppTocadorDeAudio.instance.alternar(
+        id: widget.message.id,
+        fonte: () => WhatsAppAcoesDeMidia.urlValida(
+          widget.message,
+          widget.onRenovarMidia,
+        ),
+      );
+      if (ok || !mounted) return;
+      _semTocadorNoApp = true;
+    }
     setState(() => _abrindo = true);
     await WhatsAppAcoesDeMidia.tocar(
         context, widget.message, widget.onRenovarMidia);
@@ -985,44 +1020,75 @@ class _WhatsAppMidiaTocavelState extends State<WhatsAppMidiaTocavel> {
 
   /// Botão redondo de tocar, verde do WhatsApp; a tinta do ícone segue o
   /// tema (branco no claro, escura no escuro — o verde do escuro é claro).
-  Widget _botaoTocar(BuildContext context, Color verde) {
+  Widget _botaoTocar(
+    BuildContext context,
+    Color verde, {
+    bool tocando = false,
+    bool carregando = false,
+  }) {
     final tinta = ThemeHelpers.onPrimaryColor(context);
     return Container(
       width: 40,
       height: 40,
       decoration: BoxDecoration(color: verde, shape: BoxShape.circle),
       child: Center(
-        child: _abrindo
+        child: _abrindo || carregando
             ? SizedBox(
                 width: 16,
                 height: 16,
                 child: CircularProgressIndicator(strokeWidth: 2, color: tinta),
               )
-            : Padding(
-                padding: const EdgeInsets.only(left: 2),
-                child: Icon(LucideIcons.play, size: 18, color: tinta),
-              ),
+            : tocando
+                ? Icon(LucideIcons.pause, size: 18, color: tinta)
+                : Padding(
+                    padding: const EdgeInsets.only(left: 2),
+                    child: Icon(LucideIcons.play, size: 18, color: tinta),
+                  ),
       ),
     );
   }
 
   Widget _audio(BuildContext context) {
+    final tocador = WhatsAppTocadorDeAudio.instance;
+    return AnimatedBuilder(
+      animation: tocador,
+      builder: (context, _) => _audioComEstado(context, tocador),
+    );
+  }
+
+  /// Player da bolha (30/09/2026): tocar/pausar, trilha com o trecho ouvido,
+  /// "0:12 / 1:03" e velocidade 1x · 1,5x · 2x no áudio da vez; tocar na
+  /// trilha leva ao ponto. O back não manda a duração: antes do play vai o
+  /// que é ("Nota de voz" ou o nome do arquivo).
+  Widget _audioComEstado(
+    BuildContext context,
+    WhatsAppTocadorDeAudio tocador,
+  ) {
     final theme = Theme.of(context);
     final verde = _verde(context);
     final secundaria = ThemeHelpers.textSecondaryColor(context);
     final nome = (widget.message.mediaFileName ?? '').trim();
     final titulo = _ehVoz ? 'Nota de voz' : 'Áudio';
-    // O back não manda a duração: embaixo da onda vai o que é — "Nota de
-    // voz" ou o nome do arquivo (reticências no meio, extensão visível).
+    final id = widget.message.id;
+    final daVez = tocador.ehAtual(id);
+    final tocando = daVez && tocador.tocando;
+    final carregando = daVez && tocador.carregando && !tocando;
+    final duracao = daVez ? tocador.duracao : null;
+    final comTempo = duracao != null;
     final rotulo = _salvando
         ? 'Baixando…'
         : _abrindo
             ? 'Abrindo o player…'
-            : (_ehVoz || nome.isEmpty ? titulo : nomeAbreviado(nome, 30));
+            : duracao != null
+                ? '${formatarTempoDeAudio(tocador.posicao)} / '
+                    '${formatarTempoDeAudio(duracao)}'
+                : (_ehVoz || nome.isEmpty ? titulo : nomeAbreviado(nome, 30));
 
     return Semantics(
       button: true,
-      label: '$titulo, toque para ouvir',
+      label: tocando
+          ? '$titulo tocando, toque para pausar'
+          : '$titulo, toque para ouvir',
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 280),
         child: Material(
@@ -1034,24 +1100,54 @@ class _WhatsAppMidiaTocavelState extends State<WhatsAppMidiaTocavel> {
               padding: const EdgeInsets.fromLTRB(0, 3, 0, 1),
               child: Row(
                 children: [
-                  _botaoTocar(context, verde),
+                  _botaoTocar(
+                    context,
+                    verde,
+                    tocando: tocando,
+                    carregando: carregando,
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        SizedBox(
-                          height: 24,
-                          width: double.infinity,
-                          child: CustomPaint(
-                            painter: _TrilhaDoAudio(
-                              semente: widget.message.id.hashCode,
-                              onda: _ehVoz,
-                              corDaTrilha: secundaria.withValues(alpha: 0.42),
-                              corDoCursor: verde,
-                            ),
-                          ),
+                        // Sem LayoutBuilder (a bolha pode medir a mídia): a
+                        // largura sai da própria caixa no toque.
+                        Builder(
+                          builder: (trilhaCtx) {
+                            void irPara(Offset local) {
+                              final caixa =
+                                  trilhaCtx.findRenderObject() as RenderBox?;
+                              final largura = caixa?.size.width ?? 0;
+                              if (largura <= 0) return;
+                              tocador.buscar(id, local.dx / largura);
+                            }
+
+                            return GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTapDown: comTempo
+                                  ? (d) => irPara(d.localPosition)
+                                  : null,
+                              onHorizontalDragUpdate: comTempo
+                                  ? (d) => irPara(d.localPosition)
+                                  : null,
+                              child: SizedBox(
+                                height: 24,
+                                width: double.infinity,
+                                child: CustomPaint(
+                                  painter: _TrilhaDoAudio(
+                                    semente: widget.message.id.hashCode,
+                                    onda: _ehVoz,
+                                    corDaTrilha:
+                                        secundaria.withValues(alpha: 0.42),
+                                    corDoCursor: verde,
+                                    progresso: tocador.progressoDe(id),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
                         ),
                         const SizedBox(height: 3),
                         Row(
@@ -1064,7 +1160,7 @@ class _WhatsAppMidiaTocavelState extends State<WhatsAppMidiaTocavel> {
                               color: _ehVoz ? verde : secundaria,
                             ),
                             const SizedBox(width: 4),
-                            Flexible(
+                            Expanded(
                               child: Text(
                                 rotulo,
                                 maxLines: 1,
@@ -1073,9 +1169,13 @@ class _WhatsAppMidiaTocavelState extends State<WhatsAppMidiaTocavel> {
                                   color: secundaria,
                                   fontWeight: FontWeight.w600,
                                   fontSize: 11,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
                                 ),
                               ),
                             ),
+                            if (comTempo) _botaoVelocidade(context, tocador),
                           ],
                         ),
                       ],
@@ -1084,6 +1184,41 @@ class _WhatsAppMidiaTocavelState extends State<WhatsAppMidiaTocavel> {
                   _botaoSalvar(context, onTap: _salvar, ocupado: _salvando),
                 ],
               ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// "1x · 1,5x · 2x" como no WhatsApp — só no áudio da vez; vale também
+  /// para o próximo áudio.
+  Widget _botaoVelocidade(BuildContext context, WhatsAppTocadorDeAudio tocador) {
+    final texto = ThemeHelpers.textColor(context);
+    final rotulo = rotuloDaVelocidade(tocador.velocidade);
+    return Semantics(
+      button: true,
+      label: 'Velocidade $rotulo, toque para mudar',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => tocador.proximaVelocidade(),
+        child: Container(
+          margin: const EdgeInsets.only(left: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+          decoration: BoxDecoration(
+            color: ThemeHelpers.textSecondaryColor(context)
+                .withValues(alpha: 0.16),
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Text(
+            rotulo,
+            maxLines: 1,
+            softWrap: false,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: texto,
+              fontFeatures: const [FontFeature.tabularFigures()],
             ),
           ),
         ),
@@ -1223,11 +1358,16 @@ class _TrilhaDoAudio extends CustomPainter {
   final Color corDaTrilha;
   final Color corDoCursor;
 
+  /// 0..1 já tocado (30/09/2026): o trecho ouvido fica na cor do cursor e o
+  /// cursor anda até a posição, como no WhatsApp.
+  final double progresso;
+
   const _TrilhaDoAudio({
     required this.semente,
     required this.onda,
     required this.corDaTrilha,
     required this.corDoCursor,
+    this.progresso = 0,
   });
 
   @override
@@ -1236,12 +1376,18 @@ class _TrilhaDoAudio extends CustomPainter {
     const raio = 5.5;
     final meio = size.height / 2;
     const inicio = raio * 2 + 3;
+    final cursorX = (raio + 1) +
+        math.max(0.0, size.width - 2 - (raio + 1)) * progresso.clamp(0.0, 1.0);
     final pincel = Paint()
       ..color = corDaTrilha
+      ..strokeCap = StrokeCap.round;
+    final pincelTocado = Paint()
+      ..color = corDoCursor
       ..strokeCap = StrokeCap.round;
     if (onda) {
       const passo = 4.0;
       pincel.strokeWidth = 2.4;
+      pincelTocado.strokeWidth = 2.4;
       var s = semente & 0x7fffffff;
       var x = inicio;
       while (x <= size.width - 2) {
@@ -1254,20 +1400,28 @@ class _TrilhaDoAudio extends CustomPainter {
         canvas.drawLine(
           Offset(x, meio - altura / 2),
           Offset(x, meio + altura / 2),
-          pincel,
+          x <= cursorX ? pincelTocado : pincel,
         );
         x += passo;
       }
     } else if (size.width > inicio + 2) {
       pincel.strokeWidth = 3;
+      pincelTocado.strokeWidth = 3;
       canvas.drawLine(
         Offset(inicio, meio),
         Offset(size.width - 2, meio),
         pincel,
       );
+      if (cursorX > inicio) {
+        canvas.drawLine(
+          Offset(inicio, meio),
+          Offset(math.min(cursorX, size.width - 2), meio),
+          pincelTocado,
+        );
+      }
     }
     canvas.drawCircle(
-      Offset(raio + 1, meio),
+      Offset(cursorX, meio),
       raio,
       Paint()..color = corDoCursor,
     );
@@ -1278,7 +1432,8 @@ class _TrilhaDoAudio extends CustomPainter {
       old.semente != semente ||
       old.onda != onda ||
       old.corDaTrilha != corDaTrilha ||
-      old.corDoCursor != corDoCursor;
+      old.corDoCursor != corDoCursor ||
+      old.progresso != progresso;
 }
 
 // ─── Documento ──────────────────────────────────────────────────────────────

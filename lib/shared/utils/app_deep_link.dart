@@ -276,8 +276,13 @@ class AppDeepLink {
         // aprovação — o detalhe tem o painel de comunicação),
         // /properties/{id}/matches (Matches oculto) e
         // /properties/{id}/expenses/{eid} (sem tela própria): tudo no
-        // detalhe do imóvel.
-        return AppRoutes.propertyDetails(second);
+        // detalhe do imóvel — com a aba pedida (`?tab=updates` abre
+        // Atividades, como no web).
+        final tab = query?['tab']?.trim() ?? '';
+        final detail = AppRoutes.propertyDetails(second);
+        return tab.isEmpty
+            ? detail
+            : '$detail?tab=${Uri.encodeQueryComponent(tab)}';
 
       // ── Clientes ────────────────────────────────────────────────────
       case 'clients':

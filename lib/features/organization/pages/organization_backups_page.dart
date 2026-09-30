@@ -1,15 +1,16 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/services/api_service.dart';
 import '../../../shared/widgets/app_scaffold.dart';
+import '../../../shared/widgets/file_delivery_sheet.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../models/leads_export_models.dart';
 import '../organization_access.dart';
@@ -237,50 +238,65 @@ class _OrganizationBackupsPageState extends State<OrganizationBackupsPage> {
 
   Future<void> _downloadJob(LeadsExportJob job) async {
     setState(() => _busyJobId = job.jobId);
-    final res = await LeadsExportService.instance.downloadJobFile(
-      job.jobId,
-      fallbackName: job.fileName ?? 'leads_export.${job.format.apiValue}',
+    await _deliver(
+      title: 'Exportação de leads',
+      subtitle: job.fileName,
+      load: () => LeadsExportService.instance.downloadJobFile(
+        job.jobId,
+        fallbackName: job.fileName ?? 'leads_export.${job.format.apiValue}',
+      ),
     );
-    if (!mounted) return;
-    setState(() => _busyJobId = null);
-    await _openDownloaded(res.success ? res.data : null,
-        errorMessage: res.message);
+    if (mounted) setState(() => _busyJobId = null);
   }
 
   Future<void> _downloadBackup(LeadsExportBackup backup) async {
     setState(() => _busyBackupId = backup.id);
-    final res = await LeadsExportService.instance.downloadBackupFile(
-      backup.id,
-      fallbackName: backup.fileName,
+    await _deliver(
+      title: 'Backup de leads',
+      subtitle: backup.fileName,
+      load: () => LeadsExportService.instance.downloadBackupFile(
+        backup.id,
+        fallbackName: backup.fileName,
+      ),
     );
-    if (!mounted) return;
-    setState(() => _busyBackupId = null);
-    await _openDownloaded(res.success ? res.data : null,
-        errorMessage: res.message);
+    if (mounted) setState(() => _busyBackupId = null);
   }
 
-  /// Salva os bytes num ficheiro temporário e abre com o app do sistema
-  /// (mesmo padrão do download de PDF das propostas).
-  Future<void> _openDownloaded(
-    ({List<int> bytes, String fileName})? data, {
-    String? errorMessage,
-  }) async {
-    if (data == null) {
-      _snack(errorMessage ?? 'Erro ao baixar arquivo');
-      return;
-    }
-    try {
-      final safeName = data.fileName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-      final file = File('${Directory.systemTemp.path}/$safeName');
-      await file.writeAsBytes(data.bytes, flush: true);
-      final ok = await launchUrl(
-        Uri.file(file.path),
-        mode: LaunchMode.externalApplication,
-      );
-      if (!ok && mounted) _snack('Arquivo salvo em ${file.path}');
-    } catch (e) {
-      if (mounted) _snack('Erro ao abrir arquivo: $e');
-    }
+  /// Entrega o arquivo pela folha do app (Compartilhar / Salvar no
+  /// aparelho) — abrir com `launchUrl(Uri.file(...))` não funciona no
+  /// Android nem no iOS.
+  Future<void> _deliver({
+    required String title,
+    String? subtitle,
+    required Future<ApiResponse<({Uint8List bytes, String fileName})>>
+            Function()
+        load,
+  }) {
+    return showFileDeliverySheet(
+      context,
+      title: title,
+      subtitle: subtitle,
+      paper: FileDeliveryPaper.spreadsheet,
+      generatingTitle: 'Baixando o arquivo…',
+      readyTitle: 'Arquivo pronto',
+      shareSubject: title,
+      saveDialogTitle: 'Salvar arquivo',
+      load: () async {
+        final res = await load();
+        final data = res.data;
+        if (!res.success || data == null) {
+          return ApiResponse.error(
+            message: res.message ?? '',
+            statusCode: res.statusCode,
+            data: res.error,
+          );
+        }
+        return ApiResponse.success(
+          data: DeliverableFile(bytes: data.bytes, fileName: data.fileName),
+          statusCode: res.statusCode,
+        );
+      },
+    );
   }
 
   Future<void> _rerunBackup(LeadsExportBackup backup) async {

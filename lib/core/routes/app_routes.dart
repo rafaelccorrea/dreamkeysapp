@@ -139,6 +139,35 @@ import '../../shared/services/property_service.dart';
 
 /// Rotas da aplicação com transições customizadas
 class AppRoutes {
+  /// Marca a PRÓXIMA rota gerada como troca de aba (sem animação). Consumida
+  /// em `_buildRoute`, que roda de forma síncrona dentro do `pushNamed…`.
+  static bool _proximaEhTrocaDeAba = false;
+
+  /// Troca de aba: substitui a pilha pela rota da aba, sem animação — a barra
+  /// inferior fica parada e só o conteúdo muda. Use para a barra inferior e
+  /// para o "voltar" da raiz que leva à Home.
+  static void trocarDeAba(
+    NavigatorState navigator,
+    String rota, {
+    bool manterPilha = false,
+  }) {
+    // A rota é gerada de forma síncrona dentro do push: a marca vale só para
+    // ela e é desligada logo em seguida (mesmo se o push falhar).
+    _proximaEhTrocaDeAba = true;
+    try {
+      if (manterPilha) {
+        navigator.pushNamed(rota);
+      } else {
+        navigator.pushNamedAndRemoveUntil(
+          rota,
+          (route) => route.settings.name == rota,
+        );
+      }
+    } finally {
+      _proximaEhTrocaDeAba = false;
+    }
+  }
+
   AppRoutes._();
 
   static const String splash = '/';
@@ -537,7 +566,9 @@ class AppRoutes {
       }
     } else if (routeName != null && routeName.startsWith('/properties/')) {
       // Detalhes ou edição de propriedade (deve vir DEPOIS das rotas de ofertas)
-      final segments = routeName.split('/');
+      // `?tab=` (link do web, ex.: `?tab=updates`) abre o detalhe na aba.
+      final routeUri = Uri.parse(routeName);
+      final segments = routeUri.path.split('/');
       if (segments.length >= 3) {
         final id = segments[2];
         if (segments.length == 3) {
@@ -547,7 +578,11 @@ class AppRoutes {
               ? args['property'] as Property?
               : null;
           return _buildRoute(
-            PropertyDetailsPage(propertyId: id, initialProperty: initialProperty),
+            PropertyDetailsPage(
+              propertyId: id,
+              initialProperty: initialProperty,
+              initialTab: routeUri.queryParameters['tab'],
+            ),
             settings,
           );
         } else if (segments.length == 4 && segments[3] == 'edit') {
@@ -1064,6 +1099,22 @@ class AppRoutes {
     Widget page,
     RouteSettings settings,
   ) {
+    // Troca de ABA (barra inferior / voltar da raiz para a Home): sem
+    // animação, como a barra de abas nativa. Antes a tela nova deslizava por
+    // cima da atual — com a barra inferior junto, como se cada tela tivesse a
+    // sua — e sempre do mesmo lado, mesmo indo para uma aba à esquerda
+    // (relato do Edson, 01/10/2026). Empilhar telas (abrir detalhe) continua
+    // com a transição normal abaixo.
+    if (_proximaEhTrocaDeAba) {
+      _proximaEhTrocaDeAba = false;
+      return PageRouteBuilder<dynamic>(
+        settings: settings,
+        pageBuilder: (context, animation, secondaryAnimation) => page,
+        transitionDuration: Duration.zero,
+        reverseTransitionDuration: Duration.zero,
+      );
+    }
+
     // iPhone: transição e gesto de voltar nativos (paridade com apps de sistema).
     if (useCupertinoNativeTransitions) {
       return CupertinoPageRoute<dynamic>(

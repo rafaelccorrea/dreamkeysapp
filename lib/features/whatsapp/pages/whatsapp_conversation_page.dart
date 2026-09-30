@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show File;
 import 'dart:math' show max;
 
 import 'package:file_picker/file_picker.dart';
@@ -22,6 +23,8 @@ import '../models/whatsapp_midia.dart';
 import '../models/whatsapp_models.dart';
 import '../services/whatsapp_service.dart';
 import '../widgets/whatsapp_bandeja_de_anexos.dart';
+import '../widgets/whatsapp_gravador_de_voz.dart';
+import '../widgets/whatsapp_tocador_de_audio.dart';
 import '../widgets/whatsapp_conversation_card.dart'
     show WhatsAppAvatar, whatsAppSourceIcon;
 import '../widgets/whatsapp_message_bubble.dart';
@@ -92,6 +95,9 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
   /// momento. A caixa trava e o caminho vira template até chegar uma nova
   /// mensagem do cliente — paridade com `setIs24HoursWindowOpen(false)`.
   String? _janelaFechadaNaInbound;
+
+  /// Nota de voz do compositor (gravar → prévia → enviar).
+  final WhatsAppGravadorDeVoz _gravador = WhatsAppGravadorDeVoz();
 
   /// Renovações de URL de mídia em andamento, uma por mensagem.
   final Map<String, Future<String?>> _renovacoes = {};
@@ -172,6 +178,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
   @override
   void initState() {
     super.initState();
+    _gravador.addListener(_aoMudarGravador);
     _bootstrap();
     unawaited(_resolverUsuarioAtual());
     // Poll leve enquanto a thread está aberta (o painel usa socket/poll).
@@ -217,7 +224,105 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     _scrollController.dispose();
     _composerController.dispose();
     _composerFocus.dispose();
+    _gravador.removeListener(_aoMudarGravador);
+    _gravador.dispose();
+    // Áudio tocando não segue tocando depois de sair da conversa.
+    unawaited(WhatsAppTocadorDeAudio.instance.parar());
     super.dispose();
+  }
+
+  void _aoMudarGravador() {
+    if (mounted) setState(() {});
+  }
+
+  // ─── Nota de voz ─────────────────────────────────────────────────────────
+
+  /// Microfone: mesma regra de anexar (permissão, 1ª mensagem do cliente,
+  /// janela de 24h) — a nota sai pelo mesmo envio de mídia.
+  Future<void> _comecarGravacao({required bool segurando}) async {
+    final motivo = _motivoDeNaoAnexar();
+    if (motivo != null) {
+      _showSnack(
+        motivo.replaceFirst('para anexar', 'para gravar'),
+        isError: true,
+      );
+      return;
+    }
+    final erro = await _gravador.iniciar(segurando: segurando);
+    if (erro != null && mounted) _showSnack(erro, isError: true);
+  }
+
+  /// Envia a nota da prévia (uma mensagem de áudio, sem legenda). Falhou:
+  /// a nota volta para a prévia; sem resposta do servidor, não volta (pode
+  /// ter saído — mesma regra do lote de anexos).
+  Future<void> _enviarNotaDeVoz() async {
+    if (_sending) return;
+    if (!_canSend) {
+      _showSnack(
+        'Você não tem permissão para enviar mensagens WhatsApp.',
+        isError: true,
+      );
+      return;
+    }
+    if (!_canSendFreeText) {
+      _showSnack(_motivoDeNaoEnviar(), isError: true);
+      return;
+    }
+    final nota = _gravador.consumir();
+    if (nota == null) return;
+    final anexo = await WhatsAppAnexo.doArquivo(nota.caminho, nome: nota.nome);
+    if (!mounted) return;
+    if (anexo == null) {
+      _showSnack('A gravação se perdeu. Grave de novo.', isError: true);
+      return;
+    }
+    final viaQrCode = _usesUnofficial;
+    setState(() => _sending = true);
+    final res = await WhatsAppService.instance.sendMedia(
+      to: widget.phoneNumber,
+      anexo: anexo,
+      caption: '',
+      clientId: _clientId,
+      viaUnofficial: viaQrCode,
+    );
+    if (!mounted) return;
+    setState(() => _sending = false);
+
+    if (res.success) {
+      unawaited(_apagarArquivoDaNota(nota.caminho));
+      await _syncLatest();
+      _scrollToBottom();
+      return;
+    }
+    final erro = res.error;
+    if (erro is Map && erro['naoConfirmado'] == true) {
+      _showSnack(
+        'A resposta do servidor não chegou. A nota de voz pode ter saído: '
+        'confira a conversa antes de gravar de novo.',
+        isError: true,
+      );
+      await _syncLatest();
+      return;
+    }
+    final motivo = (res.message ?? '').trim();
+    if (!viaQrCode && _ehErroDeJanela24h(motivo)) {
+      setState(() => _janelaFechadaNaInbound = _lastInbound?.id ?? '');
+    }
+    _gravador.restaurar(nota);
+    _showSnack(
+      motivo.isNotEmpty
+          ? motivo
+          : 'Não foi possível enviar a nota de voz. Toque em enviar para '
+              'tentar de novo.',
+      isError: true,
+    );
+  }
+
+  Future<void> _apagarArquivoDaNota(String caminho) async {
+    try {
+      final f = File(caminho);
+      if (await f.exists()) await f.delete();
+    } catch (_) {}
   }
 
   Future<void> _bootstrap() async {
@@ -795,6 +900,15 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
       context,
       phoneNumber: widget.phoneNumber,
       clientId: _clientId,
+      // Variáveis já preenchidas, como no web: o nome da conversa (ou o do
+      // cadastro, se o apelido não servir) e o imóvel do card mais recente
+      // da conversa, que o sheet busca em paralelo.
+      nomeDoContato: _displayName,
+      nomeDoCadastro: widget.conversation?.clientName ??
+          _messages.map((m) => m.clientName).whereType<String>().lastOrNull,
+      kanbanTaskId:
+          _messages.map((m) => m.kanbanTaskId).whereType<String>().lastOrNull ??
+              widget.conversation?.kanbanTaskId,
     );
     if (!mounted) return;
     if (sent) {
@@ -1760,11 +1874,17 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     // modo escuro é claro demais para branco).
     final sobreVerde = ThemeHelpers.onPrimaryColor(context);
 
+    // Nota de voz: sem texto e sem anexo, o botão verde vira microfone
+    // (tocar ou segurar); gravando ou na prévia, o campo dá lugar ao painel
+    // de voz e o botão segue sendo o mesmo widget (o gesto não se perde).
+    final vozAtiva = !_gravador.ocioso;
+    final mostrarVoz = vozAtiva || !temConteudo;
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         // Atalho de template (sempre disponível no canal oficial).
-        if (!_usesUnofficial)
+        if (!_usesUnofficial && !vozAtiva)
           Padding(
             padding: const EdgeInsets.only(right: 7, bottom: 3),
             child: Tooltip(
@@ -1794,7 +1914,9 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
             ),
           ),
         Expanded(
-          child: Container(
+          child: vozAtiva
+              ? WhatsAppPainelDeVoz(gravador: _gravador)
+              : Container(
             constraints: const BoxConstraints(minHeight: 44),
             // Direita curta: o clipe (36) já traz o próprio respiro.
             padding: const EdgeInsets.only(left: 14, right: 4),
@@ -1854,6 +1976,22 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
           ),
         ),
         const SizedBox(width: 7),
+        if (mostrarVoz)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 1),
+            child: WhatsAppBotaoDeVoz(
+              gravador: _gravador,
+              habilitado: !_preparandoAnexos,
+              enviando: _sending,
+              onComecar: _comecarGravacao,
+              onEnviar: _enviarNotaDeVoz,
+              onCurtoDemais: () => _showSnack(
+                'Segure o microfone para gravar, ou toque uma vez para gravar '
+                'e de novo para parar.',
+              ),
+            ),
+          )
+        else
         Padding(
           padding: const EdgeInsets.only(bottom: 1),
           child: Semantics(

@@ -2,60 +2,52 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/services/api_service.dart';
 import '../../../shared/services/module_access_service.dart';
+import '../../../shared/utils/error_cause.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/minimal_body_chrome.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import '../../kanban/models/kanban_models.dart';
 import '../models/sdr_dashboard_filters.dart';
+import '../models/sdr_extra_models.dart';
 import '../models/sdr_metrics_model.dart';
 import '../models/sdr_settings_model.dart';
 import '../services/sdr_service.dart';
 import '../widgets/sdr_config_sheet.dart';
+import '../widgets/sdr_dash_detalhe_sheet.dart';
+import '../widgets/sdr_dash_pecas.dart';
 import '../widgets/sdr_dashboard_filters_drawer.dart';
-import '../widgets/sdr_tinta_legivel.dart';
-
-final NumberFormat _int = NumberFormat.decimalPattern('pt_BR');
-final NumberFormat _compactMoney = NumberFormat.compactCurrency(
-  locale: 'pt_BR',
-  symbol: 'R\$',
-  decimalDigits: 1,
-);
 
 /// Rota das configurações (fiação central em `AppRoutes.sdrSettings`).
 const String _kSdrSettingsRoute = '/sdr/settings';
 
-/// Abas do dashboard SDR.
-enum _SdrTab { overview, team, sources }
-
-/// Dashboard do **SDR com IA** — painel de agente. O protagonista do topo é o
-/// console de identidade do assistente (glyph de bot, nome, estado
-/// ativo/pausado e horário de atendimento vindos das configurações reais),
-/// seguido de um placar composto: número dominante de leads, mostrador de
-/// conversão e barra de funil empilhada — nada de fileira de pills.
-/// Violeta é o acento identitário (agente de IA); verde/âmbar/vermelho marcam
-/// estados. Abas flush com sublinhado (Visão geral / Equipe / Origens).
+/// Dash SDR — o funil do pré-atendimento, na estrutura e na ordem do web
+/// (`SDRDashboardPage.tsx`; lá só a aba "Funil" é visível, então a tela é
+/// uma página corrida). Redesenho de 30/09/2026:
+///   1. topo: o que a tela mostra, atualizar e o período (atalhos do web +
+///      régua dos últimos 30 dias);
+///   2. estações do funil: entradas (a base) e os três destinos — em
+///      qualificação, transferidos, perdidos — com a participação sobre as
+///      entradas, o sinal de saúde e o detalhe ao toque;
+///   3. leituras: conversão, resposta no WhatsApp, maior origem, leads/dia;
+///   4. leads & duplicados (a peneira);
+///   5. funil de conversão (passagem entre etapas);
+///   6. funil por etapa (colunas do funil SDR).
+/// A "Distribuição por estado" do web repete as estações (mesmos números,
+/// mesmo toque) — no celular ela mora nelas.
 ///
-/// Regras da tela:
-/// - Título de seção NUNCA trunca com reticências — cabeçalhos quebram linha
-///   e o contador flui como sufixo compacto.
-/// - Listas longas (atendentes, corretores, origens, campanhas) renderizam em
-///   lotes com "Carregar mais": o endpoint devolve os agregados completos de
-///   uma vez (sem page/limit no backend), então a paginação é client-side.
-/// - Appbar: Config abre o sheet de ajustes rápidos do agente
-///   ([SdrConfigSheet]); Filtros abre o [SdrDashboardFiltersDrawer] com badge
-///   de filtros ativos no botão.
+/// Eixo da tela = petróleo (`status.teal`); sinais: âmbar = em qualificação
+/// ou atenção, verde = transferido ou bom, vermelho = perdido ou crítico.
 ///
 /// Gating (sdr-01, igual ao web): módulo `kanban_management` + permissão
-/// `kanban:view_all_teams` — o dado é do CRM, toda empresa vê o seu. O
-/// console do agente e as configurações continuam do WhatsApp-IA
-/// (`whatsapp_ai` + `whatsapp:manage_config`).
+/// `kanban:view_all_teams`. O agente de IA do WhatsApp (`whatsapp_ai` +
+/// `whatsapp:manage_config`) fica num ícone da barra: ele não dá nome à tela
+/// (no web ele nem aparece aqui).
 class SdrDashboardPage extends StatefulWidget {
   const SdrDashboardPage({super.key});
 
@@ -64,49 +56,59 @@ class SdrDashboardPage extends StatefulWidget {
 }
 
 class _SdrDashboardPageState extends State<SdrDashboardPage> {
-  static const double _kPagePadH = 16;
-  static const double _kPagePadTop = 12;
-  static const double _kPagePadBottom = 88;
+  static const double _kPadH = 16;
+  static const double _kPadTop = 14;
+  static const double _kPadBottom = 88;
+  static const double _kSecaoGap = 30;
 
-  /// Coluna máxima em tablet/paisagem: o placar e as linhas não esticam de
-  /// ponta a ponta (o recuo extra entra no padding do ListView).
+  /// Coluna máxima em tablet/paisagem: o funil e as linhas não esticam de
+  /// ponta a ponta (o recuo extra entra no padding da lista).
   static const double _kMaxContentWidth = 760;
+
+  /// Etapas do "Funil por etapa" antes do "Mostrar todas" (o web pagina de
+  /// 10 em 10).
+  static const int _kEtapasIniciais = 10;
 
   double _sideGutter(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
-    return math.max(0, (width - _kMaxContentWidth - 2 * _kPagePadH) / 2);
+    return math.max(0, (width - _kMaxContentWidth - 2 * _kPadH) / 2);
   }
 
-  // Paginação client-side dos painéis. O endpoint `sdr/metrics` devolve os
-  // agregados completos de uma vez (sem page/limit no backend) — renderizar
-  // tudo trava a tela em empresas grandes. Cada lista cresce em lotes via
-  // "Carregar mais" e volta ao lote inicial a cada recarga de métricas.
-  static const int _kTeamPageSize = 12;
-  static const int _kBrokersPageSize = 8;
-  static const int _kSourcesPageSize = 10;
-  static const int _kCampaignsPageSize = 8;
-  int _teamVisible = _kTeamPageSize;
-  int _brokersVisible = _kBrokersPageSize;
-  int _sourcesVisible = _kSourcesPageSize;
-  int _campaignsVisible = _kCampaignsPageSize;
-
   bool _isLoading = true;
+  bool _recarregando = false;
+  bool _temDados = false;
   String? _errorMessage;
   int _errorStatus = 0;
+
+  /// Ordem dos pedidos: resposta de um recorte antigo não sobrescreve a do
+  /// recorte novo (troca rápida de período).
+  int _pedido = 0;
+  DateTime? _atualizadoEm;
   SdrMetrics _metrics = SdrMetrics.empty;
   SdrDashboardFilters _filters = SdrDashboardFilters.initial;
   List<SdrTeamOption> _teams = const [];
-  _SdrTab _activeTab = _SdrTab.overview;
+  bool _etapasTodas = false;
 
-  /// Configurações do assistente — alimentam o console de identidade
-  /// (ativo/pausado + janela de atendimento). Falha aqui não bloqueia a tela.
+  /// Funis ativos das equipes visíveis — traduzem equipe em `projectId` no
+  /// recorte (`SdrQueryContext`) e dão os nomes da linha "Vendo".
+  List<SdrProjectOption> _projects = const [];
+
+  /// Funis SDR ("sdr"/"pré-aten" no nome): o recorte com que a tela abre e
+  /// para onde "Voltar ao padrão" volta — igual ao web.
+  List<String> _funisSdr = const [];
+
+  /// Configurações do agente — só o estado (ativo/pausado) no ícone da barra.
   SdrSettings? _agentSettings;
+
+  /// Listas completas do recorte (detalhe das estações): pedidas no primeiro
+  /// toque e reaproveitadas entre as estações até o recorte mudar.
+  Future<ApiResponse<SdrLeadLists>>? _listas;
 
   bool get _hasAccess =>
       ModuleAccessService.instance.hasCompanyModule('kanban_management') &&
       ModuleAccessService.instance.hasPermission('kanban:view_all_teams');
 
-  /// Console do agente (Zezin) e configurações: só com o WhatsApp-IA.
+  /// Configurações do agente de IA: só com o WhatsApp-IA.
   bool get _hasAgent =>
       ModuleAccessService.instance.hasCompanyModule('whatsapp_ai') &&
       ModuleAccessService.instance.hasPermission('whatsapp:manage_config');
@@ -114,78 +116,78 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
   @override
   void initState() {
     super.initState();
-    _loadMetrics();
-    unawaited(_loadTeams());
+    unawaited(_inicializar());
     unawaited(_loadAgentStatus());
   }
 
-  // ─── Cores semânticas ──────────────────────────────────────────────────────
-  // Violeta = identidade do agente de IA; verde = sucesso/ativo; âmbar =
-  // atenção; vermelho = perda; azul = informação/origens.
-  //
-  // Contraste real no claro (30/09/2026): quase toda cor de significado
-  // aqui é texto (números, legendas, rótulo da aba, chip do período) ou
-  // ícone pequeno, e os tokens de status ficam em ~3:1 no branco. Saem por
-  // [sdrTintaLegivel] (≥ 4,5:1); no escuro voltam como vieram. As barras
-  // usam a mesma tinta para casar com a legenda.
-
-  Color _violet(BuildContext context) => sdrTintaLegivel(
-        context,
-        Theme.of(context).brightness == Brightness.dark
-            ? AppColors.status.purpleDarkMode
-            : AppColors.status.purple,
-      );
-
-  Color _green(BuildContext context) => sdrTintaLegivel(
-        context,
-        Theme.of(context).brightness == Brightness.dark
-            ? AppColors.status.greenDarkMode
-            : AppColors.status.green,
-      );
-
-  /// Âmbar: no claro parte do `message.warningText` (o `status.warning`
-  /// #E6B84C some no branco).
-  Color _amber(BuildContext context) => sdrTintaLegivel(
-        context,
-        Theme.of(context).brightness == Brightness.dark
-            ? AppColors.status.warningDarkMode
-            : AppColors.message.warningText,
-      );
-
-  Color _red(BuildContext context) => sdrTintaLegivel(
-        context,
-        Theme.of(context).brightness == Brightness.dark
-            ? AppColors.status.errorDarkMode
-            : AppColors.status.error,
-      );
-
-  Color _blue(BuildContext context) => sdrTintaLegivel(
-        context,
-        Theme.of(context).brightness == Brightness.dark
-            ? AppColors.status.blueDarkMode
-            : AppColors.status.blue,
-      );
-
   // ─── Dados ─────────────────────────────────────────────────────────────────
+
+  /// Recorte das consultas: equipes + funis (sem eles, a equipe iria como
+  /// `teamId` cru e o funil escolhido seria descartado).
+  SdrQueryContext get _contexto =>
+      SdrQueryContext(teams: _teams, projects: _projects);
+
+  /// Recorte padrão do web: 30 dias nos funis SDR (sem funil SDR na empresa,
+  /// sem recorte de funil).
+  SdrDashboardFilters get _filtrosPadrao => SdrDashboardFilters.initial
+      .copyWith(projectIds: Set<String>.from(_funisSdr));
+
+  /// O recorte atual é o padrão (funis SDR, sem equipe)?
+  bool get _ehPadrao =>
+      _filters.teamIds.isEmpty &&
+      _filters.projectIds.length == _funisSdr.length &&
+      _filters.projectIds.containsAll(_funisSdr);
+
+  /// Abertura na ordem do web: equipes → funis → recorte padrão (funis SDR) →
+  /// métricas. Pedir as métricas antes mostraria a soma de todos os funis e
+  /// "Transferidos" inchado até o recorte chegar.
+  Future<void> _inicializar() async {
+    if (!_hasAccess) return;
+    await _loadTeams();
+    await _loadProjects();
+    if (!mounted) return;
+    if (_funisSdr.isNotEmpty &&
+        _filters.projectIds.isEmpty &&
+        _filters.teamIds.isEmpty) {
+      setState(() => _filters = _filtrosPadrao);
+    }
+    await _loadMetrics();
+  }
+
+  Future<void> _loadProjects() async {
+    final res = await SdrService.instance
+        .getProjects(_teams.map((t) => t.id).toList(growable: false));
+    if (!mounted || !res.success || res.data == null) return;
+    setState(() {
+      _projects = res.data!;
+      _funisSdr = defaultSdrProjectIds(_projects);
+    });
+  }
 
   Future<void> _loadMetrics() async {
     if (!_hasAccess) return;
+    final pedido = ++_pedido;
     setState(() {
-      _isLoading = true;
-      _errorMessage = null;
+      if (_temDados) {
+        _recarregando = true;
+      } else {
+        _isLoading = true;
+      }
+      _listas = null;
     });
-    final res = await SdrService.instance.getMetrics(filters: _filters);
-    if (!mounted) return;
+    final res = await SdrService.instance
+        .getMetrics(filters: _filters, context: _contexto);
+    if (!mounted || pedido != _pedido) return;
     setState(() {
       _isLoading = false;
+      _recarregando = false;
       if (res.success && res.data != null) {
         _metrics = res.data!;
+        _temDados = true;
         _errorMessage = null;
         _errorStatus = 0;
-        _teamVisible = _kTeamPageSize;
-        _brokersVisible = _kBrokersPageSize;
-        _sourcesVisible = _kSourcesPageSize;
-        _campaignsVisible = _kCampaignsPageSize;
+        _atualizadoEm = DateTime.now();
+        _etapasTodas = false;
       } else {
         _errorMessage = res.message ?? 'Erro ao carregar métricas do SDR';
         _errorStatus = res.statusCode;
@@ -211,6 +213,47 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
     await Future.wait([_loadMetrics(), _loadAgentStatus()]);
   }
 
+  /// Listas do detalhe (`lists=full`, mesmo recorte das métricas). Falha não
+  /// fica guardada: o próximo toque tenta de novo.
+  Future<ApiResponse<SdrLeadLists>> _carregarListas({bool forcar = false}) {
+    final guardada = _listas;
+    if (!forcar && guardada != null) return guardada;
+    final futuro = SdrService.instance
+        .getLeadLists(filters: _filters, context: _contexto);
+    _listas = futuro;
+    unawaited(futuro.then((r) {
+      if (!r.success && identical(_listas, futuro)) _listas = null;
+    }));
+    return futuro;
+  }
+
+  void _abrirDetalhe(SdrDetalheTipo tipo) {
+    mostrarSdrDetalhe(
+      context,
+      tipo: tipo,
+      metricas: _metrics,
+      carregar: _carregarListas,
+    );
+  }
+
+  void _aplicarPreset(SdrPeriodPreset p) {
+    if (_filters.preset == p) return;
+    setState(() => _filters = _filters.copyWith(preset: p));
+    _loadMetrics();
+  }
+
+  /// Volta ao recorte padrão (funis SDR, sem equipe), mantendo o período.
+  void _voltarAoPadrao() {
+    setState(() => _filters = _filters.copyWith(
+          teamIds: const <String>{},
+          projectIds: Set<String>.from(_funisSdr),
+        ));
+    _loadMetrics();
+  }
+
+  static bool _mesmoConjunto(Set<String> a, Set<String> b) =>
+      a.length == b.length && a.containsAll(b);
+
   void _openFilters() {
     showModalBottomSheet<void>(
       context: context,
@@ -222,11 +265,22 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
         initialFilters: _filters,
         teams: _teams,
         onApply: (f) {
-          setState(() => _filters = f);
+          // Funil explícito manda no recorte (regra do web), e o app não tem
+          // seletor de funil: escolher equipe troca os funis SDR pelos funis
+          // da equipe; tirar todas as equipes volta aos funis SDR.
+          var novo = f;
+          if (!_mesmoConjunto(f.teamIds, _filters.teamIds)) {
+            novo = f.copyWith(
+              projectIds: f.teamIds.isNotEmpty
+                  ? const <String>{}
+                  : Set<String>.from(_funisSdr),
+            );
+          }
+          setState(() => _filters = novo);
           _loadMetrics();
         },
         onClear: () {
-          setState(() => _filters = SdrDashboardFilters.initial);
+          setState(() => _filters = _filtrosPadrao);
           _loadMetrics();
         },
       ),
@@ -237,9 +291,8 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
     Navigator.of(context).pushNamed(_kSdrSettingsRoute);
   }
 
-  /// Sheet de configurações rápidas do agente (botão de Config da appbar).
-  /// Salvar atualiza o console do agente na hora; "Todas as opções" leva à
-  /// página completa de configurações.
+  /// Ajustes rápidos do agente de IA (ícone da barra). Salvar atualiza o
+  /// estado do ícone na hora; "Todas as opções" leva à página completa.
   void _openConfigSheet() {
     showModalBottomSheet<void>(
       context: context,
@@ -274,12 +327,7 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
       title: 'Dash SDR',
       showBottomNavigation: false,
       actions: [
-        if (_hasAgent)
-          ChromeToolbarIconButton(
-            icon: LucideIcons.settings2,
-            tooltip: 'Configurações do agente',
-            onPressed: _openConfigSheet,
-          ),
+        if (_hasAgent) _acaoAgente(context),
         _BadgedToolbarAction(
           count: _filters.activeCount,
           child: ChromeToolbarIconButton(
@@ -289,562 +337,240 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
           ),
         ),
       ],
-      body: _isLoading
-          ? _buildSkeleton(context)
-          : _errorMessage != null
-              ? _buildError(context)
-              : RefreshIndicator(
-                  color: _violet(context),
-                  onRefresh: _refreshAll,
-                  child: ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: EdgeInsets.fromLTRB(
-                      _sideGutter(context),
-                      _kPagePadTop,
-                      _sideGutter(context),
-                      _kPagePadBottom,
-                    ),
-                    children: [
-                      if (_hasAgent) ...[
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: _kPagePadH),
-                          child: _buildAgentConsole(context),
-                        ),
-                        const SizedBox(height: 18),
-                      ],
-                      Padding(
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: _kPagePadH),
-                        child: _buildScoreboard(context),
-                      ),
-                      const SizedBox(height: 16),
-                      _buildTabsRail(context),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                            _kPagePadH, 14, _kPagePadH, 0),
-                        child: _buildActivePanel(context),
-                      ),
-                    ],
-                  ),
-                ),
+      body: _corpo(context),
     );
   }
 
-  // ─── Console do agente (protagonista do topo) ──────────────────────────────
-  // Identidade do assistente: glyph de bot com badge de estado, nome, papel e
-  // janela de atendimento real (das configurações). Tap leva às configurações.
+  /// O ícone do agente diz o estado sem texto (robô / robô desligado).
+  Widget _acaoAgente(BuildContext context) {
+    final ativo = _agentSettings?.enabled;
+    final estado = ativo == null ? '' : (ativo ? ' · ativo' : ' · pausado');
+    return ChromeToolbarIconButton(
+      icon: ativo == false ? LucideIcons.botOff : LucideIcons.bot,
+      tooltip: 'Agente de IA do WhatsApp$estado',
+      onPressed: _openConfigSheet,
+    );
+  }
 
-  Widget _buildAgentConsole(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final violet = _violet(context);
-    final green = _green(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final s = _agentSettings;
-    final bool? active = s?.enabled;
-    final statusTone = (active ?? false) ? green : secondary;
+  Widget _corpo(BuildContext context) {
+    if (_isLoading && !_temDados) return _buildSkeleton(context);
+    if (!_temDados && _errorMessage != null) return _buildError(context);
 
-    return InkWell(
-      onTap: _openSettings,
-      borderRadius: BorderRadius.circular(18),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Stack(
-            clipBehavior: Clip.none,
+    final gutter = _sideGutter(context);
+    final s = _metrics.summary;
+    final vazio = s.totalEntries == 0 &&
+        s.totalLeads == 0 &&
+        s.transferred == 0 &&
+        s.lost == 0 &&
+        s.transferredByEntry == 0;
+
+    return Stack(
+      children: [
+        RefreshIndicator(
+          color: SdrTom.eixo(context),
+          onRefresh: _refreshAll,
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: EdgeInsets.fromLTRB(
+              _kPadH + gutter,
+              _kPadTop,
+              _kPadH + gutter,
+              _kPadBottom,
+            ),
             children: [
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(18),
-                  // Tinta chapada (sem gradiente inventado — régua da casa).
-                  color: violet.withValues(alpha: isDark ? 0.20 : 0.12),
-                  border: Border.all(
-                    color: violet.withValues(alpha: isDark ? 0.45 : 0.32),
-                  ),
-                  boxShadow: ThemeHelpers.cardShadow(context),
-                ),
-                alignment: Alignment.center,
-                child: Icon(
-                  active == false ? LucideIcons.botOff : LucideIcons.bot,
-                  color: violet,
-                  size: 26,
-                ),
-              ),
-              if (active != null)
-                Positioned(
-                  right: -3,
-                  bottom: -3,
-                  child: Container(
-                    width: 19,
-                    height: 19,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: statusTone,
-                      border: Border.all(
-                        color: ThemeHelpers.backgroundColor(context),
-                        width: 2.5,
-                      ),
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(
-                      active ? LucideIcons.check : LucideIcons.pause,
-                      size: 10,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(width: 13),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        'Zezin',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          color: ThemeHelpers.textColor(context),
-                          letterSpacing: -0.5,
-                          height: 1.0,
-                        ),
-                      ),
-                    ),
-                    if (active != null) ...[
-                      const SizedBox(width: 8),
-                      _agentStatusChip(context, active),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Agente SDR · pré-atendimento com IA',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: secondary,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 12,
-                    height: 1.2,
-                  ),
-                ),
-                if (s != null) ...[
-                  const SizedBox(height: 5),
-                  Row(
-                    children: [
-                      Icon(LucideIcons.clock3, size: 11.5, color: secondary),
-                      const SizedBox(width: 5),
-                      Flexible(
-                        child: Text(
-                          _scheduleLabel(s),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: secondary,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            height: 1.1,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+              _topo(context),
+              if (_errorMessage != null) ...[
+                const SizedBox(height: 14),
+                _faixaErro(context),
+              ],
+              const SizedBox(height: 22),
+              if (vazio)
+                _vazio(context)
+              else ...[
+                _estacoes(context),
+                const SizedBox(height: 22),
+                _leituras(context),
+                const SizedBox(height: _kSecaoGap),
+                _peneira(context),
+                if (s.totalEntries > 0) ...[
+                  const SizedBox(height: _kSecaoGap),
+                  _funilConversao(context),
+                ],
+                if (_metrics.byColumn.isNotEmpty) ...[
+                  const SizedBox(height: _kSecaoGap),
+                  _funilPorEtapa(context),
                 ],
               ],
+            ],
+          ),
+        ),
+        if (_recarregando)
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: LinearProgressIndicator(
+              minHeight: 2,
+              color: SdrTom.eixo(context),
+              backgroundColor: Colors.transparent,
             ),
           ),
-          const SizedBox(width: 8),
-          Icon(
-            LucideIcons.chevronRight,
-            size: 16,
-            color: secondary.withValues(alpha: 0.7),
-          ),
-        ],
-      ),
+      ],
     );
   }
 
-  String _scheduleLabel(SdrSettings s) {
-    final start = SdrSettings.hourLabel(s.businessHoursStart);
-    final end = SdrSettings.hourLabel(s.businessHoursEnd);
-    final days = s.workOnWeekends ? 'todos os dias' : 'seg a sex';
-    return 'Atende das $start às $end · $days';
-  }
+  // ─── 1. Topo ───────────────────────────────────────────────────────────────
 
-  Widget _agentStatusChip(BuildContext context, bool active) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final tone =
-        active ? _green(context) : ThemeHelpers.textSecondaryColor(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
-      decoration: BoxDecoration(
-        color: tone.withValues(alpha: isDark ? 0.16 : 0.10),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: tone.withValues(alpha: 0.38)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            active ? LucideIcons.zap : LucideIcons.pause,
-            size: 10.5,
-            color: tone,
-          ),
-          const SizedBox(width: 4),
-          Text(
-            active ? 'Ativo' : 'Pausado',
-            style: TextStyle(
-              color: tone,
-              fontWeight: FontWeight.w900,
-              fontSize: 10.5,
-              letterSpacing: 0.2,
-              height: 1.0,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ─── Placar do período (composição, não fileira de pills) ──────────────────
-  // Número dominante de leads + mostrador de conversão + barra de funil
-  // empilhada com legenda + pulso do WhatsApp.
-
-  Widget _buildScoreboard(BuildContext context) {
+  Widget _topo(BuildContext context) {
     final theme = Theme.of(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final green = _green(context);
-    final amber = _amber(context);
-    final red = _red(context);
-    final s = _metrics.summary;
-    final total = s.totalLeads;
-
-    final captionParts = <String>[];
-    if (total > 0) {
-      captionParts.add(
-          '${_int.format(s.uniqueLeads)} único${s.uniqueLeads == 1 ? '' : 's'}');
-      if (s.duplicateLeads > 0) {
-        captionParts.add(
-            '${_int.format(s.duplicateLeads)} duplicado${s.duplicateLeads == 1 ? '' : 's'}');
-      }
-    }
-    final caption = total == 0
-        ? 'Nenhum lead captado no recorte atual.'
-        : captionParts.join(' · ');
-
+    final secundaria = ThemeHelpers.textSecondaryColor(context);
+    final range = _filters.resolvedRange();
+    final hora = _atualizadoEm;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Título à esquerda, período à direita; quando os dois não cabem
-        // numa linha (320dp, fonte grande, período personalizado), o chip
-        // desce inteiro em vez de espremer o título ou cortar as datas.
-        Wrap(
-          alignment: WrapAlignment.spaceBetween,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            // Título de seção nunca trunca nesta tela — quebra em linhas.
-            Text(
-              'LEADS NO PERÍODO',
-              softWrap: true,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: secondary,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1.4,
-                fontSize: 10,
-                height: 1.4,
-              ),
-            ),
-            _periodChip(context),
-          ],
-        ),
-        const SizedBox(height: 12),
         Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      _int.format(total),
-                      style: theme.textTheme.displaySmall?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        color: ThemeHelpers.textColor(context),
-                        letterSpacing: -1.2,
-                        height: 1.0,
-                      ),
+                  Text(
+                    'Funil em tempo real',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: ThemeHelpers.textColor(context),
+                      letterSpacing: -0.5,
+                      height: 1.15,
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
                   Text(
-                    caption,
+                    'Qualificação, conversão e transferências para corretores.',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: secondary,
-                      fontWeight: FontWeight.w600,
-                      height: 1.3,
+                      color: secundaria,
+                      height: 1.35,
                     ),
                   ),
+                  if (hora != null) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Icon(LucideIcons.clock3, size: 12, color: secundaria),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            'Atualizado às ${_hhmm(hora)}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: secundaria,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
-            if (total > 0) ...[
-              const SizedBox(width: 14),
-              _ConversionDial(
-                rate: s.conversionRate,
-                tone: green,
-                track: ThemeHelpers.borderLightColor(context)
-                    .withValues(alpha: 0.8),
-              ),
-            ],
+            const SizedBox(width: 12),
+            _BotaoAtualizar(
+              ocupado: _recarregando,
+              onTap: _refreshAll,
+            ),
           ],
         ),
-        if (total > 0) ...[
-          const SizedBox(height: 16),
-          _funnelCompositionBar(context, s, green, amber, red),
+        const SizedBox(height: 14),
+        _atalhosPeriodo(context),
+        const SizedBox(height: 12),
+        SdrReguaPeriodo(inicio: range.start, fim: range.end),
+        const SizedBox(height: 7),
+        _legendaRegua(context, range),
+        if (_filters.teamIds.isNotEmpty ||
+            _filters.projectIds.isNotEmpty) ...[
           const SizedBox(height: 10),
-          Wrap(
-            spacing: 14,
-            runSpacing: 6,
-            children: [
-              if (s.transferred > 0)
-                _legendItem(context, green, 'transferidos', s.transferred),
-              if (s.inQualification > 0)
-                _legendItem(
-                    context, amber, 'qualificando', s.inQualification),
-              if (s.lost > 0) _legendItem(context, red, 'perdidos', s.lost),
-              if (_funnelRest(s) > 0)
-                // Número é texto: cinza secundário cheio (a 60% ficava em
-                // ~2,8:1 no branco).
-                _legendItem(
-                  context,
-                  secondary,
-                  'outros',
-                  _funnelRest(s),
-                ),
-            ],
-          ),
+          _linhaVendo(context),
         ],
-        if (_metrics.whatsapp != null) ...[
-          const SizedBox(height: 14),
-          _awaitingPulseLine(context, _metrics.whatsapp!),
-        ],
-      ],
-    );
-  }
-
-  int _funnelRest(SdrSummary s) {
-    final known = s.transferred + s.inQualification + s.lost;
-    return math.max(0, s.totalLeads - known);
-  }
-
-  Widget _funnelCompositionBar(BuildContext context, SdrSummary s, Color green,
-      Color amber, Color red) {
-    final track =
-        ThemeHelpers.borderLightColor(context).withValues(alpha: 0.7);
-    final rest = _funnelRest(s);
-    final segments = <({int value, Color color})>[
-      (value: s.transferred, color: green),
-      (value: s.inQualification, color: amber),
-      (value: s.lost, color: red),
-      (value: rest, color: track),
-    ].where((seg) => seg.value > 0).toList(growable: false);
-
-    if (segments.isEmpty) {
-      return Container(
-        height: 10,
-        decoration: BoxDecoration(
-          color: track,
-          borderRadius: BorderRadius.circular(999),
-        ),
-      );
-    }
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(999),
-      child: SizedBox(
-        height: 10,
-        child: Row(
+        const SizedBox(height: 12),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            for (var i = 0; i < segments.length; i++) ...[
-              if (i > 0) const SizedBox(width: 2),
-              Expanded(
-                flex: segments[i].value,
-                child: Container(color: segments[i].color),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _legendItem(
-      BuildContext context, Color tone, String label, int value) {
-    final theme = Theme.of(context);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            color: tone,
-            borderRadius: BorderRadius.circular(3),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Text(
-          _int.format(value),
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: tone,
-            fontWeight: FontWeight.w900,
-            fontSize: 11.5,
-            height: 1.0,
-          ),
-        ),
-        const SizedBox(width: 3),
-        Text(
-          label,
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(context),
-            fontWeight: FontWeight.w600,
-            fontSize: 11,
-            height: 1.0,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _awaitingPulseLine(BuildContext context, SdrWhatsappMetrics w) {
-    final theme = Theme.of(context);
-    final awaiting = w.awaitingReplyCount;
-    final tone = awaiting > 0 ? _amber(context) : _green(context);
-    final label = awaiting > 0
-        ? '$awaiting conversa${awaiting == 1 ? '' : 's'} aguardando resposta no WhatsApp'
-        : 'Nenhuma conversa aguardando resposta no WhatsApp';
-    return Row(
-      children: [
-        Icon(
-          awaiting > 0 ? LucideIcons.clockAlert : LucideIcons.circleCheckBig,
-          size: 13,
-          color: tone,
-        ),
-        const SizedBox(width: 6),
-        Expanded(
-          // Duas linhas: em 320dp com fonte grande a frase inteira importa
-          // mais que a economia de altura.
-          child: Text(
-            label,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: tone,
-              fontWeight: FontWeight.w800,
-              fontSize: 11.5,
-              height: 1.25,
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Icon(LucideIcons.info, size: 13, color: secundaria),
             ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _periodChip(BuildContext context) {
-    final violet = _violet(context);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final active = _filters.activeCount > 0;
-    return InkWell(
-      onTap: _openFilters,
-      borderRadius: BorderRadius.circular(999),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: violet.withValues(alpha: isDark ? 0.16 : 0.08),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: violet.withValues(alpha: active ? 0.55 : 0.28),
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.calendarRange, size: 12, color: violet),
-            const SizedBox(width: 5),
-            Flexible(
+            const SizedBox(width: 6),
+            Expanded(
               child: Text(
-                _filters.periodLabel(),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: violet,
-                  fontWeight: FontWeight.w800,
+                'Entradas contam pela data de criação do card; transferidos e perdidos, pela data do evento.',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: secundaria,
                   fontSize: 11,
+                  height: 1.35,
                 ),
               ),
             ),
-            const SizedBox(width: 3),
-            Icon(LucideIcons.chevronDown, size: 12, color: violet),
           ],
         ),
-      ),
+      ],
     );
   }
 
-  // ─── Abas flush (sublinhado) ───────────────────────────────────────────────
+  static String _hhmm(DateTime t) =>
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
-  Widget _buildTabsRail(BuildContext context) {
+  /// Atalhos do período do web ("Hoje · Ontem · 7 dias · 30 dias") como abas
+  /// com sublinhado; o calendário abre os filtros para as outras janelas.
+  Widget _atalhosPeriodo(BuildContext context) {
+    const atalhos = [
+      SdrPeriodPreset.today,
+      SdrPeriodPreset.yesterday,
+      SdrPeriodPreset.last7,
+      SdrPeriodPreset.last30,
+    ];
+    final tinta = SdrTom.texto(context, SdrTom.eixo(context));
+    final outra = !atalhos.contains(_filters.preset);
     return Container(
       decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
-        ),
+        border: Border(bottom: BorderSide(color: SdrTom.trilho(context))),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: _kPagePadH - 8),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Expanded(
-            child: _FlushTab(
-              icon: LucideIcons.activity,
-              label: 'Visão geral',
-              tone: _violet(context),
-              selected: _activeTab == _SdrTab.overview,
-              onTap: () => setState(() => _activeTab = _SdrTab.overview),
+          for (final p in atalhos)
+            Expanded(
+              child: _AbaSublinhada(
+                ativa: _filters.preset == p,
+                tom: tinta,
+                onTap: () => _aplicarPreset(p),
+                child: Text(
+                  p.label,
+                  maxLines: 1,
+                  softWrap: false,
+                ),
+              ),
             ),
-          ),
-          Expanded(
-            child: _FlushTab(
-              icon: LucideIcons.users,
-              label: 'Equipe',
-              count: _metrics.byAgent.length,
-              tone: _green(context),
-              selected: _activeTab == _SdrTab.team,
-              onTap: () => setState(() => _activeTab = _SdrTab.team),
-            ),
-          ),
-          Expanded(
-            child: _FlushTab(
-              icon: LucideIcons.megaphone,
-              label: 'Origens',
-              count: _metrics.bySource.length,
-              tone: _blue(context),
-              selected: _activeTab == _SdrTab.sources,
-              onTap: () => setState(() => _activeTab = _SdrTab.sources),
+          SizedBox(
+            width: 52,
+            child: Tooltip(
+              message: 'Outro período',
+              child: _AbaSublinhada(
+                ativa: outra,
+                tom: tinta,
+                onTap: _openFilters,
+                child: Icon(
+                  LucideIcons.calendarDays,
+                  size: 18,
+                  color: outra
+                      ? tinta
+                      : ThemeHelpers.textSecondaryColor(context),
+                ),
+              ),
             ),
           ),
         ],
@@ -852,27 +578,101 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
     );
   }
 
-  Widget _buildActivePanel(BuildContext context) {
-    final child = switch (_activeTab) {
-      _SdrTab.overview => _buildOverviewPanel(context),
-      _SdrTab.team => _buildTeamPanel(context),
-      _SdrTab.sources => _buildSourcesPanel(context),
-    };
-    return child
-        .animate(key: ValueKey('sdr-panel-${_activeTab.name}'))
-        .fadeIn(duration: 240.ms);
+  Widget _legendaRegua(
+    BuildContext context,
+    ({DateTime start, DateTime end}) r,
+  ) {
+    final theme = Theme.of(context);
+    final estilo = theme.textTheme.labelSmall?.copyWith(
+      color: ThemeHelpers.textSecondaryColor(context),
+      fontWeight: FontWeight.w600,
+      fontSize: 11,
+    );
+    final agora = DateTime.now();
+    final hoje = DateTime(agora.year, agora.month, agora.day);
+    final fim = DateTime(r.end.year, r.end.month, r.end.day);
+    final inicio = DateTime(r.start.year, r.start.month, r.start.day);
+    final dias = fim.difference(inicio).inDays + 1;
+    final antesDaRegua = inicio
+        .isBefore(hoje.subtract(const Duration(days: SdrReguaPeriodo.dias - 1)));
+    final quantos = dias == 1 ? '1 dia' : '$dias dias';
+    final centro = _filters.preset == SdrPeriodPreset.thisMonth
+        ? 'Este mês · $quantos'
+        : quantos;
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            '${antesDaRegua ? '‹ ' : ''}${sdrDiaMes(inicio)}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: estilo,
+          ),
+        ),
+        Text(
+          centro,
+          maxLines: 1,
+          style: estilo?.copyWith(
+            color: ThemeHelpers.textColor(context),
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        Expanded(
+          child: Text(
+            fim == hoje ? '${sdrDiaMes(fim)} · hoje' : sdrDiaMes(fim),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.end,
+            style: estilo,
+          ),
+        ),
+      ],
+    );
   }
 
-  /// Cabeçalho sóbrio de painel: barra tonal curta + título w900 + hint.
-  /// Regra da tela: título de seção NUNCA trunca — quebra em quantas linhas
-  /// precisar (a barra tonal fica alinhada à primeira linha).
-  Widget _panelHeader(
-    BuildContext context, {
-    required String title,
-    required String hint,
-    required Color tone,
-  }) {
+  /// "Vendo" do web: o recorte de funil/equipe que está valendo. No padrão
+  /// (funis SDR) diz que é o padrão; fora dele, oferece voltar.
+  Widget _linhaVendo(BuildContext context) {
     final theme = Theme.of(context);
+    final secundaria = ThemeHelpers.textSecondaryColor(context);
+    final forte = TextStyle(
+      color: ThemeHelpers.textColor(context),
+      fontWeight: FontWeight.w800,
+    );
+
+    String nomes(Iterable<String> ids, Map<String, String> catalogo) {
+      final conhecidos =
+          ids.map((id) => catalogo[id]).whereType<String>().toList();
+      final faltam = ids.length - conhecidos.length;
+      return [
+        ...conhecidos,
+        if (faltam > 0) '+$faltam',
+      ].join(', ');
+    }
+
+    final partes = <InlineSpan>[const TextSpan(text: 'Vendo ')];
+    if (_filters.teamIds.isNotEmpty) {
+      final catalogo = {for (final t in _teams) t.id: t.name};
+      final varias = _filters.teamIds.length > 1;
+      partes
+        ..add(TextSpan(text: varias ? 'as equipes ' : 'a equipe '))
+        ..add(TextSpan(text: nomes(_filters.teamIds, catalogo), style: forte));
+    } else {
+      final catalogo = {for (final p in _projects) p.id: p.name};
+      final varios = _filters.projectIds.length > 1;
+      partes
+        ..add(TextSpan(
+          text: _ehPadrao
+              ? (varios ? 'os funis SDR ' : 'o funil SDR ')
+              : (varios ? 'os funis ' : 'o funil '),
+        ))
+        ..add(TextSpan(
+          text: nomes(_filters.projectIds, catalogo),
+          style: forte,
+        ));
+    }
+    if (_ehPadrao) partes.add(const TextSpan(text: ' · recorte padrão'));
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -880,808 +680,155 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.only(top: 9),
-              child: Container(
-                width: 20,
-                height: 3,
-                decoration: BoxDecoration(
-                  color: tone,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                title,
-                softWrap: true,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: ThemeHelpers.textColor(context),
-                  letterSpacing: -0.4,
-                  height: 1.25,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 5),
-        Padding(
-          padding: const EdgeInsets.only(left: 28),
-          child: Text(
-            hint,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
-              height: 1.35,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// Eyebrow de subseção. Regra da tela: o rótulo NUNCA trunca — quebra em
-  /// quantas linhas precisar, e o contador flui como sufixo compacto colado à
-  /// última palavra (nunca disputa espaço com o texto). O filete separador
-  /// desce para a própria linha, abaixo do rótulo.
-  Widget _subsectionHeader(
-      BuildContext context, String label, IconData icon, int count) {
-    final theme = Theme.of(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
               padding: const EdgeInsets.only(top: 1),
-              child: Icon(icon, size: 14, color: secondary),
+              child: Icon(
+                _filters.teamIds.isNotEmpty
+                    ? LucideIcons.users
+                    : LucideIcons.funnel,
+                size: 14,
+                color: secundaria,
+              ),
             ),
             const SizedBox(width: 6),
             Expanded(
               child: Text.rich(
-                TextSpan(
-                  children: [
-                    TextSpan(text: label.toUpperCase()),
-                    if (count > 0)
-                      WidgetSpan(
-                        alignment: PlaceholderAlignment.middle,
-                        child: Padding(
-                          padding: const EdgeInsets.only(left: 8),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 7, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: ThemeHelpers.borderLightColor(context)
-                                  .withValues(alpha: 0.7),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Text(
-                              _int.format(count),
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                fontWeight: FontWeight.w900,
-                                fontSize: 10,
-                                letterSpacing: 0.2,
-                                height: 1.0,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                softWrap: true,
+                TextSpan(children: partes),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.labelSmall?.copyWith(
-                  color: secondary,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 1.1,
-                  height: 1.5,
+                  color: secundaria,
+                  fontSize: 11.5,
+                  height: 1.35,
                 ),
               ),
             ),
           ],
         ),
-        const SizedBox(height: 8),
-        Container(
-          height: 1,
-          color: ThemeHelpers.borderLightColor(context).withValues(alpha: 0.5),
-        ),
+        if (!_ehPadrao)
+          TextButton.icon(
+            onPressed: _voltarAoPadrao,
+            style: TextButton.styleFrom(
+              foregroundColor: ThemeHelpers.textColor(context),
+              padding: const EdgeInsets.symmetric(horizontal: 0),
+              minimumSize: const Size(0, 36),
+            ),
+            icon: const Icon(LucideIcons.rotateCcw, size: 14),
+            label: Text(
+              _funisSdr.isEmpty ? 'Ver todos os funis' : 'Voltar ao padrão',
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ),
       ],
     );
   }
 
-  // ─── Painel: Visão geral ───────────────────────────────────────────────────
-
-  Widget _buildOverviewPanel(BuildContext context) {
-    final s = _metrics.summary;
-    final nodes = <Widget>[
-      _panelHeader(
-        context,
-        title: 'Como está o pré-atendimento',
-        hint: 'Atendimento no WhatsApp, entrada de leads e motivos de perda.',
-        tone: _violet(context),
-      ),
-      const SizedBox(height: 16),
-    ];
-
-    if (s.totalLeads == 0) {
-      nodes.add(_emptyState(
-        context,
-        icon: LucideIcons.inbox,
-        tone: _violet(context),
-        title: 'Sem leads no período',
-        body: 'Nenhum lead entrou no funil SDR neste recorte. Amplie o '
-            'período ou tire filtros de equipe para ver as métricas.',
-      ));
-      return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch, children: nodes);
-    }
-
-    // WhatsApp (atendimento).
-    final w = _metrics.whatsapp;
-    if (w != null) {
-      nodes.add(_subsectionHeader(
-          context, 'WhatsApp · atendimento', LucideIcons.messageCircle, 0));
-      nodes.add(const SizedBox(height: 12));
-      nodes.add(_whatsappBand(context, w));
-    }
-
-    // Entrada de leads por dia (mini gráfico de barras).
-    final days = _metrics.leadsByDay.where((d) => d.date != null).toList();
-    if (days.isNotEmpty) {
-      if (w != null) nodes.add(const SizedBox(height: 18));
-      nodes.add(_subsectionHeader(
-          context, 'Entrada de leads por dia', LucideIcons.chartColumn, 0));
-      nodes.add(const SizedBox(height: 12));
-      nodes.add(_leadsByDayChart(context, days));
-    }
-
-    // Motivos de perda.
-    final losses = [..._metrics.lossReasons]
-      ..sort((a, b) => b.count.compareTo(a.count));
-    if (losses.isNotEmpty) {
-      final top = losses.take(6).toList();
-      final maxCount = math.max(1, top.first.count);
-      nodes.add(const SizedBox(height: 18));
-      nodes.add(_subsectionHeader(context, 'Principais motivos de perda',
-          LucideIcons.circleX, losses.length));
-      nodes.add(const SizedBox(height: 12));
-      for (final l in top) {
-        nodes.add(_funnelRow(
-            context, l.reason, l.count, maxCount, _red(context)));
-      }
-    }
-
-    return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch, children: nodes);
-  }
-
-  Widget _funnelRow(BuildContext context, String label, int value, int total,
-      Color tone) {
-    final theme = Theme.of(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final frac = (value / total).clamp(0.0, 1.0);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: ThemeHelpers.textColor(context),
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                _int.format(value),
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: tone,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(width: 4),
-              Text(
-                '· ${(frac * 100).toStringAsFixed(0)}%',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: secondary,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: SizedBox(
-              height: 6,
-              child: Stack(
-                children: [
-                  Container(
-                    color: ThemeHelpers.borderLightColor(context)
-                        .withValues(alpha: 0.7),
-                  ),
-                  FractionallySizedBox(
-                    widthFactor: frac == 0 ? 0.005 : frac,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: tone,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Faixa de SLA do WhatsApp — três medidores em card único, sem borda
-  /// lateral, sombra neutra. Âmbar quando há conversas esperando resposta.
-  Widget _whatsappBand(BuildContext context, SdrWhatsappMetrics w) {
+  /// A recarga falhou com dado na tela: diz a causa, avisa que os números
+  /// são do último carregamento e oferece tentar de novo.
+  Widget _faixaErro(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final amber = _amber(context);
-    final green = _green(context);
-    final blue = _blue(context);
-    final awaitingTone = w.awaitingReplyCount > 0 ? amber : green;
-
-    Widget cell(IconData icon, String label, String value, String sub,
-        Color tone) {
-      return Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, size: 15, color: tone),
-            const SizedBox(height: 7),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Text(
-                value,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: ThemeHelpers.textColor(context),
-                  letterSpacing: -0.4,
-                ),
-              ),
-            ),
-            const SizedBox(height: 3),
-            // Três colunas em ~80dp cada no 320: o rótulo quebra em até 3
-            // linhas e, no limite, reticências (nunca corte seco).
-            Text(
-              label,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: ThemeHelpers.textSecondaryColor(context),
-                fontWeight: FontWeight.w700,
-                fontSize: 10,
-                height: 1.2,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              sub,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: ThemeHelpers.textSecondaryColor(context)
-                    .withValues(alpha: 0.8),
-                fontSize: 9.5,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
+    final causa = ErrorCause.fromApi(
+      message: _errorMessage,
+      statusCode: _errorStatus,
+    );
+    final vermelho = SdrTom.perdido(context);
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
       decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: awaitingTone.withValues(alpha: isDark ? 0.28 : 0.2),
-        ),
-        boxShadow: ThemeHelpers.cardShadow(context),
+        color: vermelho.withValues(alpha: isDark ? 0.12 : 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: vermelho.withValues(alpha: 0.28)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          cell(
-            LucideIcons.clock3,
-            'Aguardando resposta',
-            _int.format(w.awaitingReplyCount),
-            w.awaitingReplyCount > 0 ? 'precisa de atenção' : 'tudo em dia',
-            awaitingTone,
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(
+              causa.icon,
+              size: 16,
+              color: SdrTom.texto(context, vermelho),
+            ),
           ),
-          const SizedBox(width: 10),
-          cell(
-            LucideIcons.timer,
-            'Tempo médio 1ª resposta',
-            _latencyLabel(w.avgFirstResponseMinutes),
-            w.firstResponseSampleSize > 0
-                ? '${_int.format(w.firstResponseSampleSize)} respostas'
-                : 'sem amostras',
-            blue,
-          ),
-          const SizedBox(width: 10),
-          cell(
-            LucideIcons.gauge,
-            'Mediana 1ª resposta',
-            _latencyLabel(w.medianFirstResponseMinutes),
-            'no período',
-            blue,
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Minutos → rótulo humano (min ou h), paridade com
-  /// `fmtSdrWhatsappLatencyMinutes` do web.
-  String _latencyLabel(double? minutes) {
-    if (minutes == null) return '—';
-    if (minutes < 60) {
-      return '${minutes.toStringAsFixed(0)} min';
-    }
-    final hours = minutes / 60;
-    return '${hours.toStringAsFixed(1).replaceAll('.', ',')} h';
-  }
-
-  /// Gráfico de barras simples (sem lib) — entrada de leads por dia.
-  Widget _leadsByDayChart(BuildContext context, List<SdrDayPoint> days) {
-    final theme = Theme.of(context);
-    final violet = _violet(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final data = days.length > 31 ? days.sublist(days.length - 31) : days;
-    final maxTotal = data.fold<int>(0, (m, d) => math.max(m, d.total));
-    if (maxTotal == 0) return const SizedBox.shrink();
-    final fmtDay = DateFormat('dd/MM', 'pt_BR');
-    final first = data.first.date;
-    final last = data.last.date;
-    final peak = data.reduce((a, b) => b.total >= a.total ? b : a);
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
-      decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: ThemeHelpers.cardShadow(context),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            height: 72,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                for (var i = 0; i < data.length; i++) ...[
-                  if (i > 0) const SizedBox(width: 2),
-                  Expanded(
-                    child: Tooltip(
-                      message: data[i].date == null
-                          ? '${data[i].total}'
-                          : '${fmtDay.format(data[i].date!)} · ${data[i].total} lead${data[i].total == 1 ? '' : 's'}',
-                      child: Container(
-                        height: math.max(3, 72.0 * data[i].total / maxTotal),
-                        decoration: BoxDecoration(
-                          color: data[i] == peak
-                              ? violet
-                              : violet.withValues(alpha: 0.38),
-                          borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(3)),
-                        ),
-                      ),
-                    ),
+                Text(
+                  'Não deu para atualizar',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: ThemeHelpers.textColor(context),
                   ),
-                ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${causa.cause} Os números abaixo são do último carregamento.',
+                  maxLines: 5,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    height: 1.35,
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: _loadMetrics,
+                  style: TextButton.styleFrom(
+                    foregroundColor: ThemeHelpers.textColor(context),
+                    padding: const EdgeInsets.symmetric(horizontal: 0),
+                  ),
+                  icon: const Icon(LucideIcons.refreshCw, size: 14),
+                  label: const Text(
+                    'Tentar de novo',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
               ],
             ),
           ),
-          const SizedBox(height: 8),
-          // Datas nas pontas e o pico no meio; o pico encolhe com
-          // reticências se a fonte do sistema crescer (as datas não).
-          Row(
-            children: [
-              Text(
-                first != null ? fmtDay.format(first) : '',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: secondary,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(LucideIcons.trendingUp, size: 11, color: violet),
-                    const SizedBox(width: 4),
-                    Flexible(
-                      child: Text(
-                        'pico: ${_int.format(peak.total)}'
-                        '${peak.date != null ? ' em ${fmtDay.format(peak.date!)}' : ''}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: secondary,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                last != null ? fmtDay.format(last) : '',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: secondary,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
         ],
       ),
     );
   }
 
-  // ─── Painel: Equipe ────────────────────────────────────────────────────────
-
-  Widget _buildTeamPanel(BuildContext context) {
-    final green = _green(context);
-    final agents = [..._metrics.byAgent]
-      ..sort((a, b) => b.transferred.compareTo(a.transferred));
-
-    final nodes = <Widget>[
-      _panelHeader(
-        context,
-        title: 'Desempenho por atendente',
-        hint: 'Leads, transferências e conversão de cada pessoa no período.',
-        tone: green,
-      ),
-      const SizedBox(height: 16),
-    ];
-
-    if (agents.isEmpty) {
-      nodes.add(_emptyState(
-        context,
-        icon: LucideIcons.userX,
-        tone: green,
-        title: 'Sem atendentes no período',
-        body: 'Nenhum lead foi atribuído a atendentes neste recorte.',
-      ));
-    } else {
-      // Renderização incremental: o payload chega completo do backend, mas a
-      // lista cresce em lotes para não travar a tela em equipes grandes.
-      final visible =
-          agents.length > _teamVisible ? agents.sublist(0, _teamVisible) : agents;
-      var animIndex = 0;
-      for (var i = 0; i < visible.length; i++) {
-        nodes.add(
-          _AgentRow(rank: i + 1, agent: visible[i])
-              .animate(key: ValueKey('agent-${visible[i].agentId}-$i'))
-              .fadeIn(
-                delay: Duration(milliseconds: 30 * (animIndex++).clamp(0, 12)),
-                duration: 220.ms,
-              ),
-        );
-      }
-      if (agents.length > visible.length) {
-        nodes.add(_loadMoreControl(
-          context,
-          tone: green,
-          shown: visible.length,
-          total: agents.length,
-          step: _kTeamPageSize,
-          noun: 'atendentes',
-          onMore: () => setState(() => _teamVisible += _kTeamPageSize),
-        ));
-      } else if (agents.length > _kTeamPageSize) {
-        nodes.add(_collapseControl(
-          context,
-          onCollapse: () => setState(() => _teamVisible = _kTeamPageSize),
-        ));
-      }
-    }
-
-    final brokers = [..._metrics.topBrokers]
-      ..sort((a, b) => b.received.compareTo(a.received));
-    if (brokers.isNotEmpty) {
-      final maxReceived = math.max(1, brokers.first.received);
-      nodes.add(const SizedBox(height: 18));
-      nodes.add(_subsectionHeader(context, 'Corretores que mais receberam',
-          LucideIcons.award, brokers.length));
-      nodes.add(const SizedBox(height: 12));
-      final visibleBrokers = brokers.length > _brokersVisible
-          ? brokers.sublist(0, _brokersVisible)
-          : brokers;
-      for (final b in visibleBrokers) {
-        nodes.add(_funnelRow(
-            context, b.brokerName, b.received, maxReceived, _blue(context)));
-      }
-      if (brokers.length > visibleBrokers.length) {
-        nodes.add(_loadMoreControl(
-          context,
-          tone: _blue(context),
-          shown: visibleBrokers.length,
-          total: brokers.length,
-          step: _kBrokersPageSize,
-          noun: 'corretores',
-          onMore: () => setState(() => _brokersVisible += _kBrokersPageSize),
-        ));
-      } else if (brokers.length > _kBrokersPageSize) {
-        nodes.add(_collapseControl(
-          context,
-          onCollapse: () =>
-              setState(() => _brokersVisible = _kBrokersPageSize),
-        ));
-      }
-    }
-
-    return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch, children: nodes);
-  }
-
-  // ─── Painel: Origens ───────────────────────────────────────────────────────
-
-  Widget _buildSourcesPanel(BuildContext context) {
-    final blue = _blue(context);
-    final sources = [..._metrics.bySource]
-      ..sort((a, b) => b.totalLeads.compareTo(a.totalLeads));
-
-    final nodes = <Widget>[
-      _panelHeader(
-        context,
-        title: 'De onde vêm os leads',
-        hint: 'Volume e conversão por mídia, campanha e qualificação.',
-        tone: blue,
-      ),
-      const SizedBox(height: 16),
-    ];
-
-    if (sources.isEmpty) {
-      nodes.add(_emptyState(
-        context,
-        icon: LucideIcons.searchX,
-        tone: blue,
-        title: 'Sem origens no período',
-        body: 'Nenhum lead com origem registrada neste recorte.',
-      ));
-    } else {
-      final visibleSources = sources.length > _sourcesVisible
-          ? sources.sublist(0, _sourcesVisible)
-          : sources;
-      var animIndex = 0;
-      for (final src in visibleSources) {
-        nodes.add(
-          _SourceRow(source: src)
-              .animate(key: ValueKey('src-${src.source}'))
-              .fadeIn(
-                delay: Duration(milliseconds: 30 * (animIndex++).clamp(0, 12)),
-                duration: 220.ms,
-              ),
-        );
-      }
-      if (sources.length > visibleSources.length) {
-        nodes.add(_loadMoreControl(
-          context,
-          tone: blue,
-          shown: visibleSources.length,
-          total: sources.length,
-          step: _kSourcesPageSize,
-          noun: 'origens',
-          onMore: () => setState(() => _sourcesVisible += _kSourcesPageSize),
-        ));
-      } else if (sources.length > _kSourcesPageSize) {
-        nodes.add(_collapseControl(
-          context,
-          onCollapse: () =>
-              setState(() => _sourcesVisible = _kSourcesPageSize),
-        ));
-      }
-    }
-
-    final campaigns = [..._metrics.byCampaign]
-      ..sort((a, b) => b.totalLeads.compareTo(a.totalLeads));
-    if (campaigns.isNotEmpty) {
-      final maxLeads = math.max(1, campaigns.first.totalLeads);
-      nodes.add(const SizedBox(height: 18));
-      nodes.add(_subsectionHeader(
-          context, 'Campanhas', LucideIcons.flag, campaigns.length));
-      nodes.add(const SizedBox(height: 12));
-      final visibleCampaigns = campaigns.length > _campaignsVisible
-          ? campaigns.sublist(0, _campaignsVisible)
-          : campaigns;
-      for (final c in visibleCampaigns) {
-        nodes.add(_funnelRow(
-            context, c.campaign, c.totalLeads, maxLeads, blue));
-      }
-      if (campaigns.length > visibleCampaigns.length) {
-        nodes.add(_loadMoreControl(
-          context,
-          tone: blue,
-          shown: visibleCampaigns.length,
-          total: campaigns.length,
-          step: _kCampaignsPageSize,
-          noun: 'campanhas',
-          onMore: () =>
-              setState(() => _campaignsVisible += _kCampaignsPageSize),
-        ));
-      } else if (campaigns.length > _kCampaignsPageSize) {
-        nodes.add(_collapseControl(
-          context,
-          onCollapse: () =>
-              setState(() => _campaignsVisible = _kCampaignsPageSize),
-        ));
-      }
-    }
-
-    final quals = [..._metrics.byQualification]
-      ..sort((a, b) => b.totalLeads.compareTo(a.totalLeads));
-    if (quals.isNotEmpty) {
-      final maxLeads = math.max(1, quals.first.totalLeads);
-      nodes.add(const SizedBox(height: 18));
-      nodes.add(_subsectionHeader(
-          context, 'Por qualificação', LucideIcons.thermometer, quals.length));
-      nodes.add(const SizedBox(height: 12));
-      for (final q in quals) {
-        nodes.add(_funnelRow(context, _qualificationLabel(q.qualification),
-            q.totalLeads, maxLeads, _amber(context)));
-      }
-    }
-
-    return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch, children: nodes);
-  }
-
-  String _qualificationLabel(String raw) {
-    switch (raw.trim().toLowerCase()) {
-      case 'hot':
-        return 'Quente';
-      case 'warm':
-        return 'Morno';
-      case 'cold':
-        return 'Frio';
-      case 'unqualified':
-        return 'Não qualificado';
-      default:
-        return raw;
-    }
-  }
-
-  // ─── Paginação client-side (Carregar mais / Recolher) ──────────────────────
-
-  /// Controle de "Carregar mais" no padrão do app (outlined tonal + chevron),
-  /// com legenda de progresso — deixa claro quanto da lista já está visível.
-  Widget _loadMoreControl(
-    BuildContext context, {
-    required Color tone,
-    required int shown,
-    required int total,
-    required int step,
-    required String noun,
-    required VoidCallback onMore,
-  }) {
-    final theme = Theme.of(context);
-    final next = math.min(step, total - shown);
-    return Padding(
-      padding: const EdgeInsets.only(top: 2, bottom: 4),
-      child: Column(
-        children: [
-          Text(
-            'Mostrando ${_int.format(shown)} de ${_int.format(total)} $noun',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
-              fontWeight: FontWeight.w600,
-              fontSize: 10.5,
-            ),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: onMore,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: tone,
-              side: BorderSide(color: tone.withValues(alpha: 0.45)),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-            ),
-            icon: const Icon(LucideIcons.chevronDown, size: 16),
-            label: Text('Carregar mais (+${_int.format(next)})'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Volta a lista ao lote inicial depois de totalmente expandida.
-  Widget _collapseControl(
-    BuildContext context, {
-    required VoidCallback onCollapse,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 2),
-      child: Center(
-        child: TextButton.icon(
-          onPressed: onCollapse,
-          style: TextButton.styleFrom(
-            foregroundColor: ThemeHelpers.textSecondaryColor(context),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          ),
-          icon: const Icon(LucideIcons.chevronUp, size: 15),
-          label: const Text(
-            'Recolher lista',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ─── Estados ───────────────────────────────────────────────────────────────
-
-  /// Vazio que ensina: o que falta e o caminho (os filtros), com o botão
-  /// neutro "Ajustar filtros" — o recorte é a causa mais comum do vazio.
-  Widget _emptyState(
-    BuildContext context, {
-    required IconData icon,
-    required Color tone,
-    required String title,
-    required String body,
-  }) {
+  /// Sem nenhuma entrada no recorte: diz o que aparece aqui e o caminho.
+  Widget _vazio(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final eixo = SdrTom.eixo(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 4),
+      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 8),
       child: Column(
         children: [
           Container(
-            width: 64,
-            height: 64,
+            width: 60,
+            height: 60,
+            alignment: Alignment.center,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              // Tinta chapada (sem gradiente inventado).
-              color: tone.withValues(alpha: isDark ? 0.16 : 0.10),
-              border: Border.all(color: tone.withValues(alpha: 0.32)),
+              color: eixo.withValues(alpha: isDark ? 0.16 : 0.10),
             ),
-            child: Icon(icon, color: tone, size: 28),
+            child: Icon(
+              LucideIcons.inbox,
+              size: 26,
+              color: SdrTom.texto(context, eixo),
+            ),
           ),
           const SizedBox(height: 14),
           Text(
-            title,
+            'Nenhuma entrada no período',
             textAlign: TextAlign.center,
             style: theme.textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w900,
               color: ThemeHelpers.textColor(context),
-              letterSpacing: -0.2,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Text(
-            body,
+            'Aqui aparecem os leads que entram no funil SDR: quantos seguem em '
+            'qualificação, quantos foram para corretores e quantos se perderam. '
+            'Troque o período acima ou a equipe nos filtros.',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(
               color: ThemeHelpers.textSecondaryColor(context),
@@ -1701,7 +848,7 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
             style: OutlinedButton.styleFrom(
               foregroundColor: ThemeHelpers.textColor(context),
               side: BorderSide(color: ThemeHelpers.borderColor(context)),
-              minimumSize: const Size(0, 40),
+              minimumSize: const Size(0, 42),
               padding: const EdgeInsets.symmetric(horizontal: 16),
               textStyle: const TextStyle(
                 fontSize: 13,
@@ -1717,6 +864,1046 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
     );
   }
 
+  // ─── 2. Estações do funil ─────────────────────────────────────────────────
+
+  Widget _estacoes(BuildContext context) {
+    final s = _metrics.summary;
+    final e = s.totalEntries;
+    double sobreEntradas(int v) => e > 0 ? v / e : 0.0;
+    final perdaPct = e > 0 ? s.lostByEntry * 100 / e : 0.0;
+    final destinos = _metrics.transferAggregates.byDestinationTeam;
+    final motivos = [..._metrics.lossReasons]
+      ..sort((a, b) => b.count.compareTo(a.count));
+    final motivo = motivos.isEmpty ? null : motivos.first;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _estacaoEntradas(context),
+        const SizedBox(height: 4),
+        _Estacao(
+          icone: LucideIcons.hourglass,
+          rotulo: 'Em qualificação',
+          valor: s.inQualification,
+          fracao: sobreEntradas(s.inQualification),
+          tom: SdrTom.qualificacao(context),
+          detalhe: e > 0
+              ? '${sdrPct(sobreEntradas(s.inQualification) * 100)} do funil ainda em triagem'
+              : 'Leads abertos no SDR agora',
+          nota: s.inQualification > 0 ? 'Situação atual do funil SDR' : null,
+          notaIcone: LucideIcons.radar,
+          ultimo: false,
+          onTap: () => _abrirDetalhe(SdrDetalheTipo.qualificacao),
+        ),
+        _Estacao(
+          icone: LucideIcons.arrowRightLeft,
+          rotulo: 'Transferidos',
+          valor: s.transferredByEntry,
+          fracao: sobreEntradas(s.transferredByEntry),
+          tom: SdrTom.transferido(context),
+          detalhe:
+              '${sdrInt(s.transferred)} no período (evento) · ${sdrPct(s.conversaoCoorte)} de conversão',
+          nota: destinos.isNotEmpty
+              ? 'Principal destino: ${destinos.first.label}'
+              : 'Passagem para corretores e funil comercial',
+          notaIcone: LucideIcons.arrowUpRight,
+          ultimo: false,
+          onTap: () => _abrirDetalhe(SdrDetalheTipo.transferidos),
+        ),
+        _Estacao(
+          icone: LucideIcons.circleX,
+          rotulo: 'Perdidos',
+          valor: s.lostByEntry,
+          fracao: sobreEntradas(s.lostByEntry),
+          tom: SdrTom.perdido(context),
+          sinal: e > 0 ? sdrSinalPerda(perdaPct) : null,
+          sinalDica: 'taxa de perda',
+          detalhe: '${sdrInt(s.lost)} marcados no período (evento)',
+          nota: motivo == null
+              ? null
+              : 'Motivo principal: ${KanbanLossReason.tryParse(motivo.reason)?.label ?? motivo.reason} (${sdrInt(motivo.count)})',
+          notaIcone: LucideIcons.flag,
+          ultimo: true,
+          onTap: () => _abrirDetalhe(SdrDetalheTipo.perdidos),
+        ),
+      ],
+    );
+  }
+
+  /// A base do funil: o número grande da tela, com a evolução dos últimos
+  /// meses ao lado. Toque abre a lista de quem entrou.
+  Widget _estacaoEntradas(BuildContext context) {
+    final theme = Theme.of(context);
+    final s = _metrics.summary;
+    final e = s.totalEntries;
+    final eixo = SdrTom.eixo(context);
+    final secundaria = ThemeHelpers.textSecondaryColor(context);
+    final absorvidos = s.duplicateInbound ?? 0;
+    final brutos = s.grossEntries ?? e;
+    final detalhe = absorvidos > 0
+        ? '${sdrInt(brutos)} brutos (${sdrInt(absorvidos)} repetidos absorvidos pelo dedupe) · ${sdrInt(s.coorte)} na coorte'
+        : s.totalMovements != null
+            ? '${sdrInt(s.coorte)} na coorte · ${sdrInt(s.totalMovements!)} movimentações no período'
+            : '${sdrInt(s.coorte)} na coorte';
+    final meses = _metrics.byMonth.length > 6
+        ? _metrics.byMonth.sublist(_metrics.byMonth.length - 6)
+        : _metrics.byMonth;
+    final tendencia = meses.map((m) => m.totalLeads).toList(growable: false);
+
+    return InkWell(
+      onTap: () => _abrirDetalhe(SdrDetalheTipo.entradas),
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        LucideIcons.logIn,
+                        size: 14,
+                        color: SdrTom.texto(context, eixo),
+                      ),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          'ENTRADAS NO PERÍODO',
+                          maxLines: 2,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: secundaria,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1.1,
+                            height: 1.3,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      sdrInt(e),
+                      style: theme.textTheme.displaySmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: ThemeHelpers.textColor(context),
+                        letterSpacing: -1.4,
+                        height: 1.0,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    detalhe,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: secundaria,
+                      fontSize: 11.5,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (tendencia.length > 1) ...[
+              const SizedBox(width: 14),
+              SizedBox(
+                width: 92,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SdrMiniGrafico(valores: tendencia, cor: eixo, altura: 34),
+                    const SizedBox(height: 5),
+                    Text(
+                      'últimos ${tendencia.length} meses',
+                      maxLines: 2,
+                      textAlign: TextAlign.end,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: secundaria,
+                        fontSize: 10.5,
+                        height: 1.25,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(width: 2),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Icon(
+                LucideIcons.chevronRight,
+                size: 18,
+                color: secundaria.withValues(alpha: 0.7),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── 3. Leituras ──────────────────────────────────────────────────────────
+
+  /// Quatro leituras numa grade de fios (sem chapa de card): 2 colunas no
+  /// celular, 1 em tela muito estreita ou fonte grande, 4 no tablet.
+  Widget _leituras(BuildContext context) {
+    final itens = _itensLeitura(context);
+    final fio = SdrTom.trilho(context);
+    return LayoutBuilder(
+      builder: (context, c) {
+        final escala = MediaQuery.textScalerOf(context).scale(14) / 14;
+        final w = c.maxWidth;
+        final colunas = w >= 640
+            ? 4
+            : (w < 300 || (w < 380 && escala > 1.25))
+                ? 1
+                : 2;
+        final linhas = <Widget>[];
+        for (var i = 0; i < itens.length; i += colunas) {
+          final fatia = itens.sublist(i, math.min(i + colunas, itens.length));
+          linhas.add(
+            Container(
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: fio)),
+              ),
+              child: IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var j = 0; j < colunas; j++) ...[
+                      if (j > 0) Container(width: 1, color: fio),
+                      Expanded(
+                        child: j < fatia.length
+                            ? Padding(
+                                padding: EdgeInsets.only(
+                                  left: j == 0 ? 0 : 12,
+                                  right: j == colunas - 1 ? 0 : 12,
+                                  top: 14,
+                                  bottom: 14,
+                                ),
+                                child: fatia[j],
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+        linhas.add(Container(height: 1, color: fio));
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: linhas,
+        );
+      },
+    );
+  }
+
+  List<Widget> _itensLeitura(BuildContext context) {
+    final s = _metrics.summary;
+    final eixo = SdrTom.eixo(context);
+    final conv = s.conversaoCoorte;
+
+    final w = _metrics.whatsapp;
+    final media = sdrMinutos(w?.avgFirstResponseMinutes);
+    final mediana = sdrMinutos(w?.medianFirstResponseMinutes);
+    final aguardando = w?.awaitingReplyCount ?? 0;
+    final amostra = w?.firstResponseSampleSize ?? 0;
+
+    final fontes = [..._metrics.bySource]
+      ..sort((a, b) => b.totalLeads.compareTo(a.totalLeads));
+    final top = fontes.isEmpty ? null : fontes.first;
+    final fatiaTop = (top != null && s.totalLeads > 0)
+        ? top.totalLeads / s.totalLeads
+        : null;
+
+    // Leads por dia = média dos últimos 7 dias de cards criados
+    // (`dailyCreatedByDate`, janela de 30), como no web.
+    final diario = _metrics.dailyCreatedByDate;
+    final ult30 =
+        diario.length > 30 ? diario.sublist(diario.length - 30) : diario;
+    final ult7 = ult30.length > 7 ? ult30.sublist(ult30.length - 7) : ult30;
+    final soma7 = ult7.fold<int>(0, (a, d) => a + d.created);
+    final media7 = ult7.isEmpty ? null : (soma7 / ult7.length).round();
+    final pico7 =
+        ult7.isEmpty ? 0 : ult7.map((d) => d.created).reduce(math.max);
+
+    return [
+      _Leitura(
+        icone: LucideIcons.percent,
+        rotulo: 'Conversão',
+        valor: sdrPct(conv),
+        sinal: sdrSinalConversao(conv),
+        detalhe:
+            '${sdrInt(s.transferredByEntry)} transferidos de ${sdrInt(s.coorte)} que entraram',
+        nota: 'Coorte por data de entrada',
+        pe: SdrTrilho(
+          fracao: conv / 100,
+          cor: SdrTom.transferido(context),
+          altura: 5,
+        ),
+      ),
+      _Leitura(
+        icone: LucideIcons.messageCircle,
+        rotulo: 'Resp. WhatsApp',
+        valor: media ?? 'Sem amostra',
+        valorNome: media == null,
+        detalhe: mediana != null
+            ? 'Mediana $mediana · média ${media ?? '—'}'
+            : 'Tempo da primeira resposta no período',
+        nota: aguardando > 0
+            ? '${sdrInt(aguardando)} ${aguardando == 1 ? 'conversa aguardando' : 'conversas aguardando'} retorno'
+            : amostra > 0
+                ? 'Base de ${sdrInt(amostra)} conversas analisadas'
+                : null,
+        notaIcone: aguardando > 0 ? LucideIcons.clock3 : null,
+        notaTom: aguardando > 0 ? SdrTom.qualificacao(context) : null,
+        pe: const SdrPontilhado(),
+      ),
+      _Leitura(
+        icone: LucideIcons.megaphone,
+        rotulo: 'Maior origem',
+        valor: top?.source ?? 'Sem origem dominante',
+        valorNome: true,
+        detalhe: top != null
+            ? '${sdrInt(top.totalLeads)} leads · ${sdrPct(top.conversionRate)} de conversão'
+            : 'Nenhuma origem com volume no recorte',
+        nota: fatiaTop != null ? '${sdrPct(fatiaTop * 100)} do volume total' : null,
+        pe: fatiaTop != null
+            ? SdrTrilho(fracao: fatiaTop, cor: eixo, altura: 5)
+            : const SdrPontilhado(),
+      ),
+      _Leitura(
+        icone: LucideIcons.chartColumn,
+        rotulo: 'Leads por dia',
+        valor: media7 != null ? sdrInt(media7) : 'Sem dado',
+        valorNome: media7 == null,
+        detalhe: media7 != null
+            ? '${sdrInt(soma7)} leads nos últimos 7 dias'
+            : 'Média de cards criados por dia',
+        nota: media7 != null ? 'Pico de ${sdrInt(pico7)} leads em um dia' : null,
+        pe: ult7.length > 1
+            ? SdrMiniGrafico(
+                valores: ult7.map((d) => d.created).toList(growable: false),
+                cor: eixo,
+                altura: 24,
+              )
+            : const SdrPontilhado(),
+      ),
+    ];
+  }
+
+  // ─── 4. Leads & duplicados (a peneira) ────────────────────────────────────
+
+  Widget _peneira(BuildContext context) {
+    final theme = Theme.of(context);
+    final s = _metrics.summary;
+    final eixo = SdrTom.eixo(context);
+    final secundaria = ThemeHelpers.textSecondaryColor(context);
+    final fio = SdrTom.trilho(context);
+
+    // Bruto = cards criados + repetidos que o dedupe absorveu (sem card).
+    final cards = s.totalEntries;
+    final absorvidos = s.duplicateInbound ?? 0;
+    final total = s.grossEntries ?? cards + absorvidos;
+    final novos = s.uniqueLeads;
+    final ecoCards = s.duplicateCards ?? math.max(0, cards - novos);
+    final eco = s.duplicateLeads;
+    final ecoPct = total > 0 ? (eco * 100 / total).round() : 0;
+    final novosPct = total > 0 ? 100 - ecoPct : 0;
+    final dias = _metrics.leadsByDay.where((d) => d.date != null).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SdrSecaoCabecalho(
+          icone: LucideIcons.copy,
+          titulo: 'Leads & duplicados',
+          dica:
+              'Portais reenviam o mesmo lead. A peneira separa gente nova de eco: repetição não vira atendimento.',
+        ),
+        const SizedBox(height: 16),
+        Text(
+          '${sdrInt(total)} leads entrantes (brutos) no período',
+          style: theme.textTheme.labelLarge?.copyWith(
+            fontWeight: FontWeight.w800,
+            color: ThemeHelpers.textColor(context),
+          ),
+        ),
+        const SizedBox(height: 8),
+        SdrBarraPeneira(novos: novos, eco: eco),
+        const SizedBox(height: 12),
+        IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: _placarPeneira(
+                  context,
+                  amostra: Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: eixo,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                  rotulo: 'Gente nova',
+                  valor: novos,
+                  sub: '$novosPct% do que entrou',
+                  subTom: SdrTom.texto(context, eixo),
+                  ),
+                ),
+              ),
+              Container(width: 1, color: fio),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _placarPeneira(
+                  context,
+                  amostra: const SdrHachura(largura: 10, altura: 10),
+                  rotulo: 'Eco',
+                  valor: eco,
+                  sub: '$ecoPct% chegou repetido',
+                  subTom: ThemeHelpers.textColor(context),
+                  sub2: (ecoCards > 0 || absorvidos > 0)
+                      ? '${sdrInt(ecoCards)} viraram card · ${sdrInt(absorvidos)} absorvidos pelo dedupe'
+                      : null,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (dias.length > 1) ...[
+          const SizedBox(height: 18),
+          _colunasDias(context, dias),
+        ],
+        ..._frasesPeneira(context, dias, total: total, eco: eco, ecoPct: ecoPct)
+            .expand((f) => [const SizedBox(height: 10), f]),
+        if (dias.isEmpty && total == 0) ...[
+          const SizedBox(height: 10),
+          Text(
+            'Sem leads no período selecionado.',
+            style: theme.textTheme.bodySmall?.copyWith(color: secundaria),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _placarPeneira(
+    BuildContext context, {
+    required Widget amostra,
+    required String rotulo,
+    required int valor,
+    required String sub,
+    required Color subTom,
+    String? sub2,
+  }) {
+    final theme = Theme.of(context);
+    final secundaria = ThemeHelpers.textSecondaryColor(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            amostra,
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                rotulo.toUpperCase(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: secundaria,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.0,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            sdrInt(valor),
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w900,
+              color: ThemeHelpers.textColor(context),
+              letterSpacing: -0.6,
+              height: 1.1,
+            ),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          sub,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: subTom,
+            fontWeight: FontWeight.w800,
+            fontSize: 11.5,
+          ),
+        ),
+        if (sub2 != null) ...[
+          const SizedBox(height: 3),
+          Text(
+            sub2,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: secundaria,
+              fontSize: 11,
+              height: 1.3,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// Colunas por dia: sólido = gente nova, hachura = eco. Toque segura a
+  /// dica com o dia e os números.
+  Widget _colunasDias(BuildContext context, List<SdrDayPoint> dias) {
+    final theme = Theme.of(context);
+    final data = dias.length > 31 ? dias.sublist(dias.length - 31) : dias;
+    final maior = data.fold<int>(0, (m, d) => math.max(m, d.total));
+    if (maior <= 0) return const SizedBox.shrink();
+    const alturaMax = 64.0;
+    final eixo = SdrTom.eixo(context);
+    final secundaria = ThemeHelpers.textSecondaryColor(context);
+    // A altura do DIA sai do total; eco e gente nova dividem essa altura
+    // (o piso de 2dp vale para o dia inteiro — somar pisos por parte
+    // passaria dos 64 e estouraria a coluna).
+    ({double eco, double novos}) alturas(SdrDayPoint d) {
+      if (d.total <= 0) return (eco: 0.0, novos: 0.0);
+      final dia = math.max(2.0, alturaMax * d.total / maior);
+      final fatiaEco = (d.duplicates / d.total).clamp(0.0, 1.0).toDouble();
+      return (eco: dia * fatiaEco, novos: dia * (1 - fatiaEco));
+    }
+
+    String dm(DateTime d) =>
+        '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}';
+    final estilo = theme.textTheme.labelSmall?.copyWith(
+      color: secundaria,
+      fontSize: 10.5,
+      fontWeight: FontWeight.w600,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: alturaMax,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              for (var i = 0; i < data.length; i++) ...[
+                if (i > 0) SizedBox(width: data.length > 20 ? 1.5 : 3),
+                Expanded(
+                  child: Tooltip(
+                    message:
+                        '${dm(data[i].date!)} · ${sdrInt(data[i].total)} entradas · ${sdrInt(data[i].duplicates)} eco',
+                    child: Builder(builder: (context) {
+                      final a = alturas(data[i]);
+                      return Column(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          if (a.eco > 0)
+                            SizedBox(
+                              height: a.eco,
+                              width: double.infinity,
+                              child: CustomPaint(
+                                painter: SdrHachuraPainter(
+                                  traco: secundaria.withValues(alpha: 0.55),
+                                  fundo: SdrTom.trilho(context),
+                                ),
+                              ),
+                            ),
+                          if (a.novos > 0)
+                            Container(
+                              height: a.novos,
+                              width: double.infinity,
+                              color: eixo,
+                            ),
+                        ],
+                      );
+                    }),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Text(dm(data.first.date!), style: estilo),
+            Expanded(
+              child: Center(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(width: 8, height: 8, color: eixo),
+                      const SizedBox(width: 4),
+                      Text('gente nova', style: estilo),
+                      const SizedBox(width: 10),
+                      const SdrHachura(largura: 8, altura: 8, raio: 1),
+                      const SizedBox(width: 4),
+                      Text('eco', style: estilo),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Text(dm(data.last.date!), style: estilo),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// As leituras da peneira — os mesmos números, em frases curtas.
+  List<Widget> _frasesPeneira(
+    BuildContext context,
+    List<SdrDayPoint> dias, {
+    required int total,
+    required int eco,
+    required int ecoPct,
+  }) {
+    final negrito = TextStyle(
+      fontWeight: FontWeight.w900,
+      color: ThemeHelpers.textColor(context),
+    );
+    final frases = <Widget>[];
+    final razao = eco > 0 ? math.max(2, (total / eco).round()) : 0;
+    if (eco > 0 && razao >= 2) {
+      frases.add(_Frase(
+        icone: LucideIcons.funnel,
+        tom: SdrTom.eixo(context),
+        texto: [
+          const TextSpan(text: 'A cada '),
+          TextSpan(text: '${sdrInt(razao)} entradas', style: negrito),
+          const TextSpan(text: ', 1 chega repetida: foram '),
+          TextSpan(text: sdrInt(eco), style: negrito),
+          const TextSpan(text: ' atendimentos que a peneira poupou.'),
+        ],
+      ));
+    } else if (total > 0) {
+      frases.add(_Frase(
+        icone: LucideIcons.circleCheck,
+        tom: SdrTom.transferido(context),
+        texto: [
+          TextSpan(text: 'Nenhum eco', style: negrito),
+          const TextSpan(text: ' no período: tudo que entrou é gente nova.'),
+        ],
+      ));
+    }
+
+    SdrDayPoint? pico;
+    for (final d in dias) {
+      if (pico == null || d.duplicates > pico.duplicates) pico = d;
+    }
+    if (pico != null && pico.duplicates > 0 && pico.date != null) {
+      final d = pico.date!;
+      frases.add(_Frase(
+        icone: LucideIcons.triangleAlert,
+        tom: SdrTom.qualificacao(context),
+        texto: [
+          const TextSpan(text: 'O dia mais ruidoso foi '),
+          TextSpan(text: sdrDiaMes(d), style: negrito),
+          TextSpan(
+            text:
+                ': ${sdrInt(pico.duplicates)} ecos em ${sdrInt(pico.total)} entradas.',
+          ),
+        ],
+      ));
+    }
+
+    if (dias.length > 7) {
+      final ult7 = dias.sublist(dias.length - 7);
+      final tot7 = ult7.fold<int>(0, (a, d) => a + d.total);
+      final dup7 = ult7.fold<int>(0, (a, d) => a + d.duplicates);
+      if (tot7 > 0) {
+        final recente = (dup7 * 100 / tot7).round();
+        final tendencia = recente - ecoPct;
+        if (tendencia.abs() > 2) {
+          final subindo = tendencia > 0;
+          frases.add(_Frase(
+            icone: subindo ? LucideIcons.trendingUp : LucideIcons.trendingDown,
+            tom: subindo
+                ? SdrTom.qualificacao(context)
+                : SdrTom.transferido(context),
+            texto: [
+              const TextSpan(text: 'O eco está '),
+              TextSpan(text: subindo ? 'subindo' : 'caindo', style: negrito),
+              TextSpan(
+                text:
+                    ': $recente% nos últimos 7 dias, contra $ecoPct% no período todo.',
+              ),
+            ],
+          ));
+        }
+      }
+    }
+    return frases;
+  }
+
+  // ─── 5. Funil de conversão ────────────────────────────────────────────────
+
+  Widget _funilConversao(BuildContext context) {
+    final theme = Theme.of(context);
+    final s = _metrics.summary;
+    final e = s.totalEntries;
+    final perdidos = s.lostByEntry;
+    // "Contatados" = entradas − perdidos (a conta do web: quem avançou).
+    final contatados = math.max(0, e - perdidos);
+    final eixo = SdrTom.eixo(context);
+    final etapas = <({String rotulo, int valor, Color tom})>[
+      (rotulo: 'Entradas', valor: e, tom: eixo),
+      (rotulo: 'Contatados', valor: contatados, tom: eixo.withValues(alpha: 0.62)),
+      (
+        rotulo: 'Em qualificação',
+        valor: s.inQualification,
+        tom: SdrTom.qualificacao(context),
+      ),
+      (rotulo: 'Perdidos', valor: perdidos, tom: SdrTom.perdido(context)),
+    ];
+    final maior = math.max(1, etapas.map((x) => x.valor).reduce(math.max));
+    // Largura pela raiz (como o web): etapa pequena continua visível.
+    double largura(int v) => math.max(0.16, math.sqrt(v / maior));
+    final secundaria = ThemeHelpers.textSecondaryColor(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SdrSecaoCabecalho(
+          icone: LucideIcons.funnel,
+          titulo: 'Funil de conversão SDR',
+          dica:
+              '${sdrInt(e)} entradas (CRM) · ${sdrInt(s.transferredByEntry)} transferidos da coorte · ${sdrPct(s.conversaoCoorte)} de conversão',
+        ),
+        const SizedBox(height: 14),
+        LayoutBuilder(
+          builder: (context, c) {
+            final larguraFunil =
+                (c.maxWidth * 0.42).clamp(104.0, 240.0).toDouble();
+            return Column(
+              children: [
+                for (var i = 0; i < etapas.length; i++) ...[
+                  if (i > 0) const SizedBox(height: 3),
+                  IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        SizedBox(
+                          width: larguraFunil,
+                          child: CustomPaint(
+                            painter: SdrCamadaFunilPainter(
+                              topo: largura(etapas[i].valor),
+                              base: i + 1 < etapas.length
+                                  ? largura(etapas[i + 1].valor)
+                                  : largura(etapas[i].valor) * 0.82,
+                              cor: etapas[i].tom,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 7),
+                            child: _rotuloEtapaFunil(
+                              context,
+                              i: i,
+                              rotulo: etapas[i].rotulo,
+                              valor: etapas[i].valor,
+                              anterior: i > 0 ? etapas[i - 1].valor : null,
+                              base: e,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'Passagem = quanto cada etapa tem em relação à anterior. Os '
+          'transferidos saem do funil e entram só na conversão.',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: secundaria,
+            fontSize: 11,
+            height: 1.35,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _rotuloEtapaFunil(
+    BuildContext context, {
+    required int i,
+    required String rotulo,
+    required int valor,
+    required int? anterior,
+    required int base,
+  }) {
+    final theme = Theme.of(context);
+    final secundaria = ThemeHelpers.textSecondaryColor(context);
+    final ehPerda = rotulo == 'Perdidos';
+    final passagem =
+        (anterior != null && anterior > 0) ? valor * 100 / anterior : null;
+    // Passagem colorida só nas etapas de avanço (verde ≥ 50, âmbar ≥ 25,
+    // vermelho abaixo, como o web). Na perda, "passar mais" não é bom —
+    // fica neutra.
+    final tomPassagem = passagem == null || ehPerda
+        ? secundaria
+        : SdrTom.texto(
+            context,
+            passagem >= 50
+                ? SdrTom.transferido(context)
+                : passagem >= 25
+                    ? SdrTom.qualificacao(context)
+                    : SdrTom.perdido(context),
+          );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          rotulo,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: ThemeHelpers.textColor(context),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(
+                text: sdrInt(valor),
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: ThemeHelpers.textColor(context),
+                  letterSpacing: -0.3,
+                ),
+              ),
+              TextSpan(
+                text: i == 0
+                    ? '  topo do funil'
+                    : '  ${sdrPct(base > 0 ? valor * 100 / base : 0)} do total',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: secundaria,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        if (passagem != null) ...[
+          const SizedBox(height: 2),
+          Text(
+            '${sdrPct(passagem)} de passagem',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: tomPassagem,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  // ─── 6. Funil por etapa ───────────────────────────────────────────────────
+
+  Widget _funilPorEtapa(BuildContext context) {
+    final theme = Theme.of(context);
+    final colunas = _metrics.byColumn;
+    final maior = colunas.fold<int>(0, (m, c) => math.max(m, c.totalLeads));
+    final visiveis = _etapasTodas
+        ? colunas
+        : colunas.take(_kEtapasIniciais).toList(growable: false);
+    final secundaria = ThemeHelpers.textSecondaryColor(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SdrSecaoCabecalho(
+          icone: LucideIcons.columns3,
+          titulo: 'Funil por etapa',
+          dica: 'Leads em cada coluna do funil SDR, na ordem do quadro.',
+          trailing: Text(
+            colunas.length == 1 ? '1 etapa' : '${colunas.length} etapas',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: secundaria,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        for (var i = 0; i < visiveis.length; i++)
+          _linhaEtapa(
+            context,
+            indice: i,
+            coluna: visiveis[i],
+            anterior: i > 0 ? visiveis[i - 1].totalLeads : null,
+            maior: maior,
+            ultima: i == visiveis.length - 1,
+          ),
+        if (colunas.length > _kEtapasIniciais)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => setState(() => _etapasTodas = !_etapasTodas),
+              style: TextButton.styleFrom(
+                foregroundColor: secundaria,
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+              ),
+              icon: Icon(
+                _etapasTodas ? LucideIcons.chevronUp : LucideIcons.chevronDown,
+                size: 16,
+              ),
+              label: Text(
+                _etapasTodas
+                    ? 'Mostrar menos'
+                    : 'Mostrar as ${colunas.length} etapas',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _linhaEtapa(
+    BuildContext context, {
+    required int indice,
+    required SdrColumnMetric coluna,
+    required int? anterior,
+    required int maior,
+    required bool ultima,
+  }) {
+    final theme = Theme.of(context);
+    final secundaria = ThemeHelpers.textSecondaryColor(context);
+    final eixo = SdrTom.eixo(context);
+    final totalLeads = _metrics.summary.totalLeads;
+    final doTotal = totalLeads > 0 ? coluna.totalLeads * 100 / totalLeads : 0.0;
+    final passo = (anterior != null && anterior > 0)
+        ? coluna.totalLeads * 100 / anterior
+        : null;
+    final estilo = theme.textTheme.labelSmall?.copyWith(
+      color: secundaria,
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+    );
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 11),
+      decoration: BoxDecoration(
+        border: ultima
+            ? null
+            : Border(bottom: BorderSide(color: SdrTom.trilho(context))),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 30,
+            child: Text(
+              (indice + 1).toString().padLeft(2, '0'),
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: SdrTom.texto(context, eixo),
+                fontWeight: FontWeight.w900,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        coluna.columnTitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: ThemeHelpers.textColor(context),
+                          fontWeight: FontWeight.w700,
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      sdrInt(coluna.totalLeads),
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: ThemeHelpers.textColor(context),
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                SdrTrilho(
+                  fracao: maior > 0 ? coluna.totalLeads / maior : 0,
+                  cor: eixo,
+                  altura: 5,
+                ),
+                const SizedBox(height: 5),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${sdrPct(doTotal)} do total',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: estilo,
+                      ),
+                    ),
+                    if (passo != null)
+                      Text('passo ${sdrPct(passo)}', maxLines: 1, style: estilo),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Estados ───────────────────────────────────────────────────────────────
+
   Widget _buildError(BuildContext context) {
     return AppErrorState.fromApi(
       message: _errorMessage,
@@ -1725,139 +1912,361 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
     );
   }
 
-  /// Skeleton fiel ao layout novo: console do agente (glyph + nome + status),
-  /// placar (número dominante + mostrador + barra empilhada), rail de abas e
-  /// linhas de painel.
+  /// Esqueleto fiel à tela: topo (título, atalhos do período, régua), a base
+  /// do funil, as três estações com o ramal, a grade de leituras e a peneira.
   Widget _buildSkeleton(BuildContext context) {
+    final gutter = _sideGutter(context);
+    final fio = SdrTom.trilho(context);
+    Widget linhaFio() => Container(height: 1, color: fio);
+
+    Widget estacao() => Padding(
+          padding: const EdgeInsets.fromLTRB(28, 14, 0, 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: const [
+              Row(
+                children: [
+                  SkeletonBox(width: 16, height: 16, borderRadius: 5),
+                  SizedBox(width: 8),
+                  Expanded(child: SkeletonText(width: 130, height: 13)),
+                  SizedBox(width: 12),
+                  SkeletonText(width: 46, height: 20),
+                ],
+              ),
+              SizedBox(height: 10),
+              SkeletonBox(height: 6, borderRadius: 99),
+              SizedBox(height: 8),
+              SkeletonText(width: 210, height: 10),
+            ],
+          ),
+        );
+
+    Widget leitura() => const Padding(
+          padding: EdgeInsets.symmetric(vertical: 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonText(width: 90, height: 10),
+              SizedBox(height: 10),
+              SkeletonText(width: 70, height: 22),
+              SizedBox(height: 8),
+              SkeletonText(width: 120, height: 10),
+              SizedBox(height: 12),
+              SkeletonBox(height: 5, borderRadius: 99),
+            ],
+          ),
+        );
+
     return SingleChildScrollView(
       physics: const NeverScrollableScrollPhysics(),
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(
-          _kPagePadH + _sideGutter(context),
-          _kPagePadTop,
-          _kPagePadH + _sideGutter(context),
-          _kPagePadBottom,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      padding: EdgeInsets.fromLTRB(
+        _kPadH + gutter,
+        _kPadTop,
+        _kPadH + gutter,
+        _kPadBottom,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonText(width: 190, height: 20),
+                    SizedBox(height: 8),
+                    SkeletonText(width: 250, height: 11),
+                    SizedBox(height: 8),
+                    SkeletonText(width: 110, height: 10),
+                  ],
+                ),
+              ),
+              SizedBox(width: 12),
+              SkeletonBox(width: 40, height: 40, borderRadius: 12),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              for (var i = 0; i < 4; i++)
+                const Expanded(
+                  child: Center(child: SkeletonText(width: 44, height: 12)),
+                ),
+              const SizedBox(
+                width: 52,
+                child: Center(
+                  child: SkeletonBox(width: 18, height: 18, borderRadius: 5),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          linhaFio(),
+          const SizedBox(height: 12),
+          const SkeletonBox(height: 8, borderRadius: 3),
+          const SizedBox(height: 8),
+          const Row(
+            children: [
+              SkeletonText(width: 40, height: 10),
+              Spacer(),
+              SkeletonText(width: 50, height: 10),
+              Spacer(),
+              SkeletonText(width: 64, height: 10),
+            ],
+          ),
+          const SizedBox(height: 14),
+          const SkeletonText(width: 260, height: 10),
+          const SizedBox(height: 26),
+          const Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonText(width: 140, height: 10),
+                    SizedBox(height: 10),
+                    SkeletonText(width: 130, height: 38),
+                    SizedBox(height: 10),
+                    SkeletonText(width: 220, height: 10),
+                  ],
+                ),
+              ),
+              SizedBox(width: 14),
+              SkeletonBox(width: 92, height: 34, borderRadius: 8),
+            ],
+          ),
+          const SizedBox(height: 6),
+          estacao(),
+          estacao(),
+          estacao(),
+          const SizedBox(height: 16),
+          linhaFio(),
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: leitura()),
+                Container(width: 1, color: fio),
+                const SizedBox(width: 12),
+                Expanded(child: leitura()),
+              ],
+            ),
+          ),
+          linhaFio(),
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: leitura()),
+                Container(width: 1, color: fio),
+                const SizedBox(width: 12),
+                Expanded(child: leitura()),
+              ],
+            ),
+          ),
+          linhaFio(),
+          const SizedBox(height: 30),
+          const Row(
+            children: [
+              SkeletonBox(width: 30, height: 30, borderRadius: 9),
+              SizedBox(width: 10),
+              SkeletonText(width: 160, height: 15),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const SkeletonBox(height: 12, borderRadius: 99),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Estação do funil ────────────────────────────────────────────────────────
+
+/// Um destino das entradas: rótulo e número, trilho da participação sobre as
+/// entradas (com o sinal de saúde quando há), o detalhe e a nota. O ramal à
+/// esquerda liga a estação à base. Toque abre a lista.
+class _Estacao extends StatelessWidget {
+  const _Estacao({
+    required this.icone,
+    required this.rotulo,
+    required this.valor,
+    required this.fracao,
+    required this.tom,
+    required this.detalhe,
+    required this.ultimo,
+    required this.onTap,
+    this.nota,
+    this.notaIcone,
+    this.sinal,
+    this.sinalDica,
+  });
+
+  final IconData icone;
+  final String rotulo;
+  final int valor;
+  final double fracao;
+  final Color tom;
+  final String detalhe;
+  final String? nota;
+  final IconData? notaIcone;
+  final SdrSinal? sinal;
+
+  /// O que o sinal mede ("taxa de perda") — vai na dica do ícone.
+  final String? sinalDica;
+  final bool ultimo;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final tinta = SdrTom.texto(context, tom);
+    final secundaria = ThemeHelpers.textSecondaryColor(context);
+    final escala = MediaQuery.textScalerOf(context).scale(16) / 16;
+    final s = sinal;
+    final tintaSinal = s == null ? null : SdrTom.texto(context, s.tom(context));
+
+    return InkWell(
+      onTap: onTap,
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Console do agente — só para quem tem o WhatsApp-IA (fiel ao
-            // que vai aparecer).
-            if (_hasAgent) ...[
-              Row(
-                children: const [
-                  SkeletonBox(width: 56, height: 56, borderRadius: 18),
-                  SizedBox(width: 13),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+            SizedBox(
+              width: 22,
+              child: CustomPaint(
+                painter: SdrRamalPainter(
+                  cor: ThemeHelpers.borderColor(context),
+                  ultimo: ultimo,
+                  meio: 13 + 11 * escala,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(0, 12, 0, 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
                       children: [
-                        SkeletonText(width: 110, height: 17, borderRadius: 5),
-                        SizedBox(height: 7),
-                        SkeletonText(width: 190, height: 11, borderRadius: 4),
-                        SizedBox(height: 6),
-                        SkeletonText(width: 160, height: 10, borderRadius: 4),
+                        Icon(icone, size: 16, color: tinta),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            rotulo,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: ThemeHelpers.textColor(context),
+                              fontWeight: FontWeight.w800,
+                              height: 1.2,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          sdrInt(valor),
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            color: ThemeHelpers.textColor(context),
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.5,
+                            height: 1.0,
+                          ),
+                        ),
+                        const SizedBox(width: 2),
+                        Icon(
+                          LucideIcons.chevronRight,
+                          size: 16,
+                          color: secundaria.withValues(alpha: 0.7),
+                        ),
                       ],
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 22),
-            ],
-            // Placar.
-            Row(
-              children: const [
-                SkeletonText(width: 120, height: 10, borderRadius: 4),
-                Spacer(),
-                SkeletonBox(width: 88, height: 26, borderRadius: 999),
-              ],
-            ),
-            const SizedBox(height: 14),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: const [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SkeletonText(width: 110, height: 36, borderRadius: 8),
-                      SizedBox(height: 8),
-                      SkeletonText(width: 150, height: 11, borderRadius: 4),
-                    ],
-                  ),
-                ),
-                SizedBox(width: 14),
-                SkeletonBox(width: 74, height: 74, borderRadius: 999),
-              ],
-            ),
-            const SizedBox(height: 16),
-            const SkeletonBox(
-                width: double.infinity, height: 10, borderRadius: 999),
-            const SizedBox(height: 10),
-            const Wrap(
-              spacing: 14,
-              runSpacing: 6,
-              children: [
-                SkeletonText(width: 86, height: 10, borderRadius: 4),
-                SkeletonText(width: 86, height: 10, borderRadius: 4),
-                SkeletonText(width: 70, height: 10, borderRadius: 4),
-              ],
-            ),
-            const SizedBox(height: 22),
-            // Rail de abas flush (rótulos + filete), como o de verdade.
-            Row(
-              children: [
-                for (var i = 0; i < 3; i++)
-                  const Expanded(
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(vertical: 14),
-                      child: Center(
-                        child: SkeletonText(
-                          width: 76,
-                          height: 12,
-                          borderRadius: 4,
+                    const SizedBox(height: 9),
+                    Row(
+                      children: [
+                        Expanded(child: SdrTrilho(fracao: fracao, cor: tom)),
+                        const SizedBox(width: 10),
+                        Text(
+                          sdrPct(fracao * 100),
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: tinta,
+                            fontWeight: FontWeight.w900,
+                          ),
                         ),
+                        if (s != null && tintaSinal != null) ...[
+                          const SizedBox(width: 8),
+                          Tooltip(
+                            message: sinalDica == null
+                                ? s.palavra
+                                : '${sinalDica!}: ${s.palavra}',
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(s.icone, size: 13, color: tintaSinal),
+                                const SizedBox(width: 3),
+                                Text(
+                                  s.palavra,
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: tintaSinal,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 7),
+                    Text(
+                      detalhe,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: secundaria,
+                        fontSize: 11.5,
+                        height: 1.35,
                       ),
                     ),
-                  ),
-              ],
-            ),
-            Container(
-              height: 1,
-              color: ThemeHelpers.borderLightColor(context),
-            ),
-            const SizedBox(height: 20),
-            // Cabeçalho de painel.
-            Row(
-              children: const [
-                SkeletonBox(width: 20, height: 3, borderRadius: 2),
-                SizedBox(width: 8),
-                SkeletonText(width: 200, height: 15, borderRadius: 4),
-              ],
-            ),
-            const SizedBox(height: 8),
-            const Padding(
-              padding: EdgeInsets.only(left: 28),
-              child: SkeletonText(
-                  width: double.infinity, height: 11, borderRadius: 4),
-            ),
-            const SizedBox(height: 20),
-            for (var i = 0; i < 4; i++) ...[
-              Row(
-                children: const [
-                  Expanded(
-                    child:
-                        SkeletonText(width: 140, height: 12, borderRadius: 4),
-                  ),
-                  SizedBox(width: 12),
-                  SkeletonText(width: 40, height: 12, borderRadius: 4),
-                ],
+                    if (nota != null) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(top: 1),
+                            child: Icon(
+                              notaIcone ?? LucideIcons.info,
+                              size: 12,
+                              color: secundaria,
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          Expanded(
+                            child: Text(
+                              nota!,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: ThemeHelpers.textColor(context),
+                                fontWeight: FontWeight.w700,
+                                fontSize: 11.5,
+                                height: 1.35,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
               ),
-              const SizedBox(height: 7),
-              const SkeletonBox(
-                  width: double.infinity, height: 6, borderRadius: 999),
-              const SizedBox(height: 14),
-            ],
+            ),
           ],
         ),
       ),
@@ -1865,70 +2274,212 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
   }
 }
 
-// ─── Mostrador de conversão (arco custom, sem lib) ───────────────────────────
+// ─── Leitura (célula da grade) ───────────────────────────────────────────────
 
-class _ConversionDial extends StatelessWidget {
-  const _ConversionDial({
-    required this.rate,
-    required this.tone,
-    required this.track,
+/// Célula de leitura: rótulo, valor, sinal (quando há), detalhe, nota e um
+/// pé visual (trilho, minigráfico ou pontilhado). Leitura não é status: a
+/// marca do rótulo é neutra.
+class _Leitura extends StatelessWidget {
+  const _Leitura({
+    required this.icone,
+    required this.rotulo,
+    required this.valor,
+    required this.detalhe,
+    required this.pe,
+    this.valorNome = false,
+    this.sinal,
+    this.nota,
+    this.notaIcone,
+    this.notaTom,
   });
 
-  /// Percentual 0–100.
-  final double rate;
-  final Color tone;
-  final Color track;
-  static const double size = 74;
+  final IconData icone;
+  final String rotulo;
+  final String valor;
+
+  /// Valor que é um nome ("Facebook") ou uma frase curta: tipografia de nome,
+  /// em até 2 linhas, em vez do número grande.
+  final bool valorNome;
+  final SdrSinal? sinal;
+  final String detalhe;
+  final String? nota;
+  final IconData? notaIcone;
+  final Color? notaTom;
+  final Widget pe;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final frac = (rate / 100).clamp(0.0, 1.0).toDouble();
-    final label = rate >= 99.95
-        ? '100%'
-        : '${rate.toStringAsFixed(1).replaceAll('.', ',')}%';
+    final secundaria = ThemeHelpers.textSecondaryColor(context);
+    final s = sinal;
     return Column(
-      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SizedBox(
-          width: size,
-          height: size,
-          child: TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0, end: frac),
-            duration: const Duration(milliseconds: 750),
-            curve: Curves.easeOutCubic,
-            builder: (context, anim, _) => CustomPaint(
-              painter: _DialPainter(progress: anim, tone: tone, track: track),
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(13),
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      label,
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        color: ThemeHelpers.textColor(context),
-                        letterSpacing: -0.4,
-                        fontSize: 15,
-                        height: 1.0,
-                      ),
-                    ),
-                  ),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Icon(icone, size: 13, color: secundaria),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                rotulo.toUpperCase(),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: secundaria,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.9,
+                  fontSize: 10.5,
+                  height: 1.3,
                 ),
               ),
             ),
-          ),
+          ],
         ),
+        const SizedBox(height: 8),
+        if (valorNome)
+          Text(
+            valor,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: ThemeHelpers.textColor(context),
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.3,
+              height: 1.2,
+            ),
+          )
+        else
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              valor,
+              style: theme.textTheme.headlineSmall?.copyWith(
+                color: ThemeHelpers.textColor(context),
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.8,
+                height: 1.05,
+              ),
+            ),
+          ),
+        if (s != null) ...[
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Icon(
+                s.icone,
+                size: 12,
+                color: SdrTom.texto(context, s.tom(context)),
+              ),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  s.palavra,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: SdrTom.texto(context, s.tom(context)),
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
         const SizedBox(height: 6),
         Text(
-          'CONVERSÃO',
+          detalhe,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style: theme.textTheme.labelSmall?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(context),
-            fontWeight: FontWeight.w900,
-            letterSpacing: 1.2,
-            fontSize: 8.5,
-            height: 1.0,
+            color: secundaria,
+            fontSize: 11,
+            height: 1.35,
+          ),
+        ),
+        if (nota != null) ...[
+          const SizedBox(height: 4),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (notaIcone != null) ...[
+                Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: Icon(
+                    notaIcone,
+                    size: 12,
+                    color: notaTom == null
+                        ? secundaria
+                        : SdrTom.texto(context, notaTom!),
+                  ),
+                ),
+                const SizedBox(width: 4),
+              ],
+              Expanded(
+                child: Text(
+                  nota!,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: ThemeHelpers.textColor(context),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 11,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+        const Spacer(),
+        const SizedBox(height: 10),
+        pe,
+      ],
+    );
+  }
+}
+
+// ─── Frase de leitura (peneira) ──────────────────────────────────────────────
+
+class _Frase extends StatelessWidget {
+  const _Frase({required this.icone, required this.tom, required this.texto});
+
+  final IconData icone;
+  final Color tom;
+  final List<InlineSpan> texto;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 26,
+          height: 26,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            color: tom.withValues(alpha: isDark ? 0.18 : 0.10),
+          ),
+          child: Icon(icone, size: 14, color: SdrTom.texto(context, tom)),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text.rich(
+              TextSpan(children: texto),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: ThemeHelpers.textSecondaryColor(context),
+                height: 1.4,
+              ),
+            ),
           ),
         ),
       ],
@@ -1936,308 +2487,54 @@ class _ConversionDial extends StatelessWidget {
   }
 }
 
-class _DialPainter extends CustomPainter {
-  _DialPainter({
-    required this.progress,
-    required this.tone,
-    required this.track,
-  });
+// ─── Atalho do período (aba com sublinhado) ──────────────────────────────────
 
-  final double progress;
-  final Color tone;
-  final Color track;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    const stroke = 7.0;
-    final rect = (Offset.zero & size).deflate(stroke / 2);
-
-    final trackPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = stroke
-      ..color = track;
-    canvas.drawArc(rect, 0, math.pi * 2, false, trackPaint);
-
-    if (progress > 0) {
-      final progressPaint = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = stroke
-        ..strokeCap = StrokeCap.round
-        ..color = tone;
-      canvas.drawArc(
-          rect, -math.pi / 2, math.pi * 2 * progress, false, progressPaint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _DialPainter oldDelegate) =>
-      oldDelegate.progress != progress ||
-      oldDelegate.tone != tone ||
-      oldDelegate.track != track;
-}
-
-// ─── Aba flush (sublinhado, gramática compartilhada do app) ──────────────────
-
-class _FlushTab extends StatelessWidget {
-  const _FlushTab({
-    required this.icon,
-    required this.label,
-    required this.tone,
-    required this.selected,
+class _AbaSublinhada extends StatelessWidget {
+  const _AbaSublinhada({
+    required this.ativa,
+    required this.tom,
     required this.onTap,
-    this.count = 0,
+    required this.child,
   });
 
-  final IconData icon;
-  final String label;
-  final int count;
-  final Color tone;
-  final bool selected;
+  final bool ativa;
+  final Color tom;
   final VoidCallback onTap;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final fg = selected ? tone : ThemeHelpers.textSecondaryColor(context);
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        splashColor: tone.withValues(alpha: 0.12),
-        highlightColor: tone.withValues(alpha: 0.06),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 13),
+    return InkWell(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+            child: Center(
               child: FittedBox(
                 fit: BoxFit.scaleDown,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(icon, size: 16, color: fg),
-                    const SizedBox(width: 6),
-                    Text(
-                      label,
-                      maxLines: 1,
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: fg,
-                        fontWeight:
-                            selected ? FontWeight.w900 : FontWeight.w600,
-                        letterSpacing: 0.1,
-                      ),
-                    ),
-                    if (count > 0) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 1.5),
-                        decoration: BoxDecoration(
-                          color: tone.withValues(alpha: selected ? 0.18 : 0.12),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          count > 99 ? '99+' : '$count',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: selected
-                                ? tone
-                                : ThemeHelpers.textSecondaryColor(context),
-                            fontWeight: FontWeight.w900,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOut,
-              height: 2.5,
-              decoration: BoxDecoration(
-                color: selected ? tone : Colors.transparent,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(3)),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Linha de atendente ──────────────────────────────────────────────────────
-
-class _AgentRow extends StatelessWidget {
-  const _AgentRow({required this.rank, required this.agent});
-
-  final int rank;
-  final SdrAgentMetric agent;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    // Texto e ícone pequeno: tinta legível (≥ 4,5:1 no claro).
-    final green = sdrTintaLegivel(
-      context,
-      isDark ? AppColors.status.greenDarkMode : AppColors.status.green,
-    );
-    final amber = sdrTintaLegivel(
-      context,
-      isDark ? AppColors.status.warningDarkMode : AppColors.message.warningText,
-    );
-    final red = sdrTintaLegivel(
-      context,
-      isDark ? AppColors.status.errorDarkMode : AppColors.status.error,
-    );
-    final violet = sdrTintaLegivel(
-      context,
-      isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple,
-    );
-    final convFrac = (agent.conversionRate / 100).clamp(0.0, 1.0);
-    final isTop = rank == 1 && agent.transferred > 0;
-    final rankTone = isTop ? violet : secondary;
-
-    // Número na cor do significado + palavra inteira (sem "transf." /
-    // "qualif."): as leituras moram num Wrap sob o nome, então o nome não
-    // disputa a linha com três colunas de números em 320dp.
-    Widget stat(int value, String singular, String plural, Color tone) {
-      return Text.rich(
-        TextSpan(
-          children: [
-            TextSpan(
-              text: _int.format(value),
-              style: TextStyle(color: tone, fontWeight: FontWeight.w900),
-            ),
-            TextSpan(text: ' ${value == 1 ? singular : plural}'),
-          ],
-        ),
-        style: theme.textTheme.labelSmall?.copyWith(
-          color: secondary,
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          height: 1.3,
-        ),
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: rankTone.withValues(alpha: isDark ? 0.18 : 0.1),
-                  border: Border.all(
-                    color: rankTone.withValues(alpha: isTop ? 0.5 : 0.25),
+                child: DefaultTextStyle.merge(
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: ativa
+                        ? tom
+                        : ThemeHelpers.textSecondaryColor(context),
+                    fontWeight: ativa ? FontWeight.w900 : FontWeight.w600,
                   ),
-                ),
-                child: Center(
-                  child: isTop
-                      ? Icon(LucideIcons.crown, size: 14, color: rankTone)
-                      : Text(
-                          '$rank',
-                          style: TextStyle(
-                            color: rankTone,
-                            fontWeight: FontWeight.w900,
-                            fontSize: 12,
-                          ),
-                        ),
+                  child: child,
                 ),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      agent.agentName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: ThemeHelpers.textColor(context),
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.2,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${_int.format(agent.totalLeads)} lead${agent.totalLeads == 1 ? '' : 's'} no período',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: secondary,
-                        fontSize: 10.5,
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 2,
-                      children: [
-                        stat(agent.transferred, 'transferido', 'transferidos',
-                            green),
-                        stat(agent.inQualification, 'qualificando',
-                            'qualificando', amber),
-                        stat(agent.lost, 'perdido', 'perdidos', red),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
+            ),
           ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(999),
-                  child: SizedBox(
-                    height: 5,
-                    child: Stack(
-                      children: [
-                        Container(
-                          color: ThemeHelpers.borderLightColor(context)
-                              .withValues(alpha: 0.7),
-                        ),
-                        FractionallySizedBox(
-                          widthFactor: convFrac == 0 ? 0.005 : convFrac,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: green,
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                '${agent.conversionRate.toStringAsFixed(1).replaceAll('.', ',')}%',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: green,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 10.5,
-                ),
-              ),
-            ],
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            height: 2.5,
+            decoration: BoxDecoration(
+              color: ativa ? tom : Colors.transparent,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(3)),
+            ),
           ),
         ],
       ),
@@ -2245,110 +2542,47 @@ class _AgentRow extends StatelessWidget {
   }
 }
 
-// ─── Linha de origem ─────────────────────────────────────────────────────────
+// ─── Botão de atualizar (canto do topo) ──────────────────────────────────────
 
-class _SourceRow extends StatelessWidget {
-  const _SourceRow({required this.source});
+class _BotaoAtualizar extends StatelessWidget {
+  const _BotaoAtualizar({required this.ocupado, required this.onTap});
 
-  final SdrSourceMetric source;
+  final bool ocupado;
+  final Future<void> Function() onTap;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    // Texto e ícone pequeno: tinta legível (≥ 4,5:1 no claro).
-    final blue = sdrTintaLegivel(
-      context,
-      isDark ? AppColors.status.blueDarkMode : AppColors.status.blue,
-    );
-    final green = sdrTintaLegivel(
-      context,
-      isDark ? AppColors.status.greenDarkMode : AppColors.status.green,
-    );
-    final convFrac = (source.conversionRate / 100).clamp(0.0, 1.0);
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(9),
-                  color: blue.withValues(alpha: isDark ? 0.18 : 0.1),
-                ),
-                child: Icon(LucideIcons.megaphone, size: 14, color: blue),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      source.source,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: ThemeHelpers.textColor(context),
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.2,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${_int.format(source.totalLeads)} lead${source.totalLeads == 1 ? '' : 's'}'
-                      ' · ${_int.format(source.transferred)} transferido${source.transferred == 1 ? '' : 's'}'
-                      '${source.averageValue > 0 ? ' · ticket ${_compactMoney.format(source.averageValue)}' : ''}',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: secondary,
-                        fontSize: 10.5,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                '${source.conversionRate.toStringAsFixed(1).replaceAll('.', ',')}%',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: green,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: SizedBox(
-              height: 5,
-              child: Stack(
-                children: [
-                  Container(
-                    color: ThemeHelpers.borderLightColor(context)
-                        .withValues(alpha: 0.7),
-                  ),
-                  FractionallySizedBox(
-                    widthFactor: convFrac == 0 ? 0.005 : convFrac,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: green,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+    return Tooltip(
+      message: ocupado ? 'Atualizando' : 'Atualizar',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: ocupado ? null : () => onTap(),
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            width: 40,
+            height: 40,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: ThemeHelpers.borderColor(context)),
             ),
+            child: ocupado
+                ? SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: SdrTom.eixo(context),
+                    ),
+                  )
+                : Icon(
+                    LucideIcons.refreshCw,
+                    size: 17,
+                    color: ThemeHelpers.textColor(context),
+                  ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -2356,8 +2590,8 @@ class _SourceRow extends StatelessWidget {
 
 // ─── Ação da appbar com badge de filtros ativos ──────────────────────────────
 
-/// Envolve um [ChromeToolbarIconButton] com um badge sutil no canto — contador
-/// de filtros ativos do dashboard. Some quando `count == 0`.
+/// Envolve um [ChromeToolbarIconButton] com um selo no canto — quantos
+/// filtros fogem do padrão. Some quando `count == 0`.
 class _BadgedToolbarAction extends StatelessWidget {
   const _BadgedToolbarAction({required this.count, required this.child});
 
@@ -2366,12 +2600,10 @@ class _BadgedToolbarAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    // Selo com número branco em cima: fundo na tinta legível.
-    final tone = sdrTintaLegivel(
-      context,
-      isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple,
-    );
+    // Selo na tinta legível do eixo; o número usa o `onPrimaryColor` do tema
+    // (branco no claro, grafite no escuro — o petróleo claro do escuro não
+    // segura texto branco).
+    final tom = SdrTom.texto(context, SdrTom.eixo(context));
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -2386,7 +2618,7 @@ class _BadgedToolbarAction extends StatelessWidget {
                 height: 15,
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 decoration: BoxDecoration(
-                  color: tone,
+                  color: tom,
                   borderRadius: BorderRadius.circular(999),
                   border: Border.all(
                     color: ThemeHelpers.backgroundColor(context)
@@ -2397,8 +2629,8 @@ class _BadgedToolbarAction extends StatelessWidget {
                 alignment: Alignment.center,
                 child: Text(
                   '$count',
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: ThemeHelpers.onPrimaryColor(context),
                     fontSize: 8.5,
                     fontWeight: FontWeight.w900,
                     height: 1.0,

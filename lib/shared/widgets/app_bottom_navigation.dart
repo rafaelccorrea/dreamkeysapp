@@ -294,45 +294,37 @@ class AppBottomNavigation extends StatelessWidget {
     return -1;
   }
 
+  /// Troca de aba SEM animação (`AppRoutes.trocarDeAba`): a barra inferior
+  /// fica parada e só o conteúdo muda, como numa barra de abas nativa.
+  /// Antes cada aba deslizava por cima da anterior junto com a barra.
   static void navigateToIndex(BuildContext context, int index) {
     final currentRoute = ModalRoute.of(context)?.settings.name;
+    final nav = Navigator.of(context);
 
     switch (index) {
       case 0:
         if (currentRoute == AppRoutes.home) return;
-        Navigator.of(context).pushNamedAndRemoveUntil(
-          AppRoutes.home,
-          (route) => route.settings.name == AppRoutes.home,
-        );
+        AppRoutes.trocarDeAba(nav, AppRoutes.home);
         break;
       case 1:
         if (currentRoute == AppRoutes.properties) return;
-        Navigator.of(context).pushNamedAndRemoveUntil(
-          AppRoutes.properties,
-          (route) => route.settings.name == AppRoutes.properties,
-        );
+        AppRoutes.trocarDeAba(nav, AppRoutes.properties);
         break;
       case 2:
         if (currentRoute == AppRoutes.kanban) return;
-        Navigator.of(context).pushNamedAndRemoveUntil(
-          AppRoutes.kanban,
-          (route) => route.settings.name == AppRoutes.kanban,
-        );
+        AppRoutes.trocarDeAba(nav, AppRoutes.kanban);
         break;
       case 3:
         final slot3Route = _resolveSlot3().route;
         if (currentRoute == slot3Route) return;
-        Navigator.of(context).pushNamedAndRemoveUntil(
-          slot3Route,
-          (route) => route.settings.name == slot3Route,
-        );
+        AppRoutes.trocarDeAba(nav, slot3Route);
         break;
       case 4:
         if (currentRoute == AppRoutes.profile ||
             currentRoute == AppRoutes.profileEdit) {
           return;
         }
-        Navigator.of(context).pushNamed(AppRoutes.profile);
+        AppRoutes.trocarDeAba(nav, AppRoutes.profile, manterPilha: true);
         break;
     }
   }

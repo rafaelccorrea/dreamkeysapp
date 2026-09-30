@@ -258,12 +258,6 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
       currentBottomNavIndex: -1,
       showBottomNavigation: false,
       actions: [
-        // Assinaturas pendentes (web: link no topo da lista de fichas).
-        IconButton(
-          tooltip: 'Assinaturas pendentes',
-          icon: const Icon(LucideIcons.penLine, size: 19),
-          onPressed: _openPendentes,
-        ),
         // Painel de fichas (paridade com "Dash Fichas Venda" do web —
         // permissão sale_form:view_dashboard; backend valida o escopo).
         if (ModuleAccessService.instance
@@ -287,17 +281,18 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
           slivers: [
             SliverToBoxAdapter(
               child: Padding(
-                padding: EdgeInsets.fromLTRB(padH, 12, padH, 0),
+                padding: EdgeInsets.fromLTRB(padH, 14, padH, 0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _AcoesDoTopo(
+                    _Hero(
                       accent: accent,
+                      stats: _stats,
                       canCreate: canCreate,
                       onCreate: canCreate ? _openCreate : _createLocked,
                       onPendentes: _openPendentes,
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
                     Row(
                       children: [
                         Expanded(
@@ -319,8 +314,8 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
-                    _StatusChips(
+                    const SizedBox(height: 14),
+                    _PainelDeStatus(
                       current: _filters.effectiveStatuses.toSet(),
                       stats: _stats,
                       onChanged: (selected) {
@@ -336,25 +331,19 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
                         _load();
                       },
                     ),
-                    if (canViewAll) ...[
-                      const SizedBox(height: 8),
-                      _ExcluidasToggle(
-                        value: _showDeletedOnly,
-                        onChanged: (v) {
-                          setState(() => _showDeletedOnly = v);
-                          _load();
-                        },
-                      ),
-                    ],
-                    const SizedBox(height: 14),
-                    _CabecalhoDaLista(
+                    const SizedBox(height: 12),
+                    _LinhaDaLista(
                       total: _data?.total,
                       carregando: _loading,
                       excluidas: _showDeletedOnly,
                       sortBy: _filters.sortBy,
                       sortOrder: _filters.sortOrder,
+                      mostrarExcluidas: canViewAll,
+                      onExcluidas: () {
+                        setState(() => _showDeletedOnly = !_showDeletedOnly);
+                        _load();
+                      },
                     ),
-                    const SizedBox(height: 10),
                   ],
                 ),
               ),
@@ -362,16 +351,15 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
             if (_loading)
               SliverPadding(
                 padding: EdgeInsets.fromLTRB(padH, 0, padH, 32),
-                sliver: SliverList.separated(
-                  itemCount: 6,
-                  separatorBuilder: (_, _) => const SizedBox(height: 12),
+                sliver: SliverList.builder(
+                  itemCount: 7,
                   itemBuilder: (_, _) => const SaleFormCardSkeleton(),
                 ),
               )
             else if (_error != null)
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: padH),
+                  padding: EdgeInsets.fromLTRB(padH, 12, padH, 0),
                   child: AppErrorState.fromApi(
                     message: _error,
                     statusCode: _errorStatus,
@@ -384,7 +372,7 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
               SliverFillRemaining(
                 hasScrollBody: false,
                 child: Padding(
-                  padding: EdgeInsets.fromLTRB(padH, 8, padH, 32),
+                  padding: EdgeInsets.fromLTRB(padH, 24, padH, 32),
                   child: _EmptyState(
                     recorte: temRecorte,
                     excluidas: _showDeletedOnly,
@@ -396,12 +384,11 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
               )
             else
               SliverPadding(
-                padding: EdgeInsets.fromLTRB(padH, 0, padH, 32),
-                sliver: SliverList.separated(
+                padding: EdgeInsets.fromLTRB(padH, 0, padH, 40),
+                sliver: SliverList.builder(
                   itemCount: itens.length + (_loadingMore ? 1 : 0),
-                  separatorBuilder: (_, _) => const SizedBox(height: 12),
                   itemBuilder: (_, i) {
-                    // Próxima página chegando: esqueleto fiel ao card.
+                    // Próxima página chegando: esqueleto fiel à linha.
                     if (i >= itens.length) {
                       return const SaleFormCardSkeleton();
                     }
@@ -422,18 +409,21 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
   }
 }
 
-/// O que dá para fazer agora: criar uma ficha (CTA da marca — com cadeado e
-/// motivo para quem não pode criar) e ver o que espera assinatura. Lado a
-/// lado quando cabe; empilhado em tela estreita ou fonte grande.
-class _AcoesDoTopo extends StatelessWidget {
-  const _AcoesDoTopo({
+/// Hero da lista (01/10/2026), no molde do de Imóveis: flush, título à
+/// esquerda e a AÇÃO PRINCIPAL no canto superior direito. A linha de apoio
+/// responde a pergunta de quem abre a tela ("quantas e quantas esperam
+/// assinatura") e leva às assinaturas pendentes.
+class _Hero extends StatelessWidget {
+  const _Hero({
     required this.accent,
+    required this.stats,
     required this.canCreate,
     required this.onCreate,
     required this.onPendentes,
   });
 
   final Color accent;
+  final SaleFormStats? stats;
   final bool canCreate;
   final VoidCallback onCreate;
   final VoidCallback onPendentes;
@@ -441,102 +431,160 @@ class _AcoesDoTopo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final muted = ThemeHelpers.textSecondaryColor(context);
-    return LayoutBuilder(
-      builder: (context, c) {
-        // "Assinaturas pendentes" é longo: lado a lado só com folga (tablet
-        // ou paisagem); no celular, um embaixo do outro, sem espremer.
-        final escala = MediaQuery.textScalerOf(context).scale(1);
-        final empilhar = c.maxWidth < 420 || escala > 1.25;
-        final criar = _BotaoTopo(
-          icon: canCreate ? Icons.add_rounded : Icons.lock_outline_rounded,
-          label: 'Nova ficha',
-          cor: canCreate ? accent : muted,
-          cheio: canCreate,
-          bloqueado: !canCreate,
-          onTap: onCreate,
-        );
-        final pendentes = _BotaoTopo(
-          icon: LucideIcons.penLine,
-          label: 'Assinaturas pendentes',
-          cor: SaleFormTom.sucesso(context).texto,
-          cheio: false,
-          onTap: onPendentes,
-        );
-        if (empilhar) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [criar, const SizedBox(height: 8), pendentes],
-          );
-        }
-        return Row(
+    final st = stats;
+    final esperando = st == null ? null : st.waitingForSignature + st.processing;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(child: criar),
-            const SizedBox(width: 10),
-            Expanded(child: pendentes),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: accent,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 7),
+                      Flexible(
+                        child: Text(
+                          'VENDAS · FICHAS',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: accent,
+                            letterSpacing: 1.4,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 10.5,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Fichas de venda',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.5,
+                      height: 1.05,
+                      color: ThemeHelpers.textColor(context),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            _NovaFicha(accent: accent, canCreate: canCreate, onTap: onCreate),
           ],
-        );
-      },
+        ),
+        const SizedBox(height: 6),
+        // Linha de apoio: a leitura do momento + atalho para o que espera
+        // assinatura (antes era um botão grande só para isso).
+        Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 6,
+          runSpacing: 2,
+          children: [
+            Text(
+              st == null
+                  ? 'Registre, assine e acompanhe cada venda.'
+                  : '${st.total} ${st.total == 1 ? 'ficha' : 'fichas'}'
+                        '${esperando != null && esperando > 0 ? ' · $esperando em assinatura' : ''}',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: muted,
+              ),
+            ),
+            InkWell(
+              onTap: onPendentes,
+              borderRadius: BorderRadius.circular(6),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(LucideIcons.signature, size: 14, color: accent),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Minhas assinaturas pendentes',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: accent,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
 
-class _BotaoTopo extends StatelessWidget {
-  const _BotaoTopo({
-    required this.icon,
-    required this.label,
-    required this.cor,
-    required this.cheio,
+/// "Nova ficha" no canto do hero: compacto, na cor da marca. Sem permissão
+/// continua à vista com cadeado e diz o porquê ao tocar.
+class _NovaFicha extends StatelessWidget {
+  const _NovaFicha({
+    required this.accent,
+    required this.canCreate,
     required this.onTap,
-    this.bloqueado = false,
   });
-
-  final IconData icon;
-  final String label;
-  final Color cor;
-  final bool cheio;
-  final bool bloqueado;
+  final Color accent;
+  final bool canCreate;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final text = bloqueado
-        ? ThemeHelpers.textSecondaryColor(context)
-        : ThemeHelpers.textColor(context);
-    final fg = cheio ? Colors.white : text;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final cheio = canCreate;
     return Material(
-      color: cheio ? cor : Colors.transparent,
-      borderRadius: BorderRadius.circular(13),
+      color: cheio ? accent : Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(13),
+        borderRadius: BorderRadius.circular(12),
         child: Container(
-          constraints: const BoxConstraints(minHeight: 48),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          constraints: const BoxConstraints(minHeight: 42),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
           decoration: cheio
               ? null
               : BoxDecoration(
-                  borderRadius: BorderRadius.circular(13),
+                  borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: ThemeHelpers.borderColor(context)),
                 ),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 19, color: cheio ? Colors.white : cor),
-              const SizedBox(width: 8),
-              Flexible(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    softWrap: false,
-                    style: TextStyle(
-                      fontSize: 14.5,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.1,
-                      color: fg,
-                    ),
-                  ),
+              Icon(
+                cheio ? Icons.add_rounded : Icons.lock_outline_rounded,
+                size: 19,
+                color: cheio ? Colors.white : muted,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'Nova ficha',
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: cheio ? Colors.white : muted,
                 ),
               ),
             ],
@@ -610,13 +658,13 @@ class _SearchBar extends StatelessWidget {
             onSubmitted();
           },
           decoration: InputDecoration(
-            hintText: 'Buscar nº, comprador, vendedor ou imóvel',
+            hintText: 'Nº, comprador, vendedor ou imóvel',
             isDense: true,
-            prefixIcon: Icon(Icons.search_rounded, color: accent, size: 22),
+            prefixIcon: Icon(Icons.search_rounded, color: muted, size: 21),
             suffixIcon: sufixo,
             filled: true,
             fillColor: fill,
-            contentPadding: const EdgeInsets.symmetric(vertical: 13),
+            contentPadding: const EdgeInsets.symmetric(vertical: 12),
             border: borda(hair),
             enabledBorder: borda(hair),
             focusedBorder: borda(accent.withValues(alpha: 0.65), 1.4),
@@ -627,14 +675,16 @@ class _SearchBar extends StatelessWidget {
   }
 }
 
-/// Atalhos de status — MULTI, como o drawer do web (`statuses[]`): cada chip
-/// liga/desliga o seu status; "Todas" limpa. Mesmo estado do modal Filtros.
+/// Painel de status — UMA faixa horizontal, sem pílulas: quatro células
+/// iguais separadas por filete (número grande + rótulo), a marcada ganha o
+/// traço de 3px na cor do status, como a aba ativa do app. Tocar filtra por
+/// aquele status; tocar de novo volta a todas. A combinação de vários status
+/// continua no modal Filtros.
 ///
-/// Cada chip carrega a contagem do recorte atual. Com um status marcado o
-/// back só conta esse status, então só o marcado mostra número — os outros
-/// não são zero, estão fora do recorte.
-class _StatusChips extends StatelessWidget {
-  const _StatusChips({
+/// Com um status marcado o back só conta esse status: as outras células
+/// mostram "—" (estão fora do recorte, não são zero).
+class _PainelDeStatus extends StatelessWidget {
+  const _PainelDeStatus({
     required this.current,
     required this.onChanged,
     this.stats,
@@ -643,26 +693,11 @@ class _StatusChips extends StatelessWidget {
   final ValueChanged<Set<SaleFormStatus>> onChanged;
   final SaleFormStats? stats;
 
-  void _tap(SaleFormStatus? s) {
-    if (s == null) {
-      onChanged(<SaleFormStatus>{});
-      return;
-    }
-    final next = {...current};
-    if (!next.remove(s)) next.add(s);
-    onChanged(next);
-  }
-
-  int? _conta(SaleFormStatus? s) {
+  int? _conta(SaleFormStatus s) {
     final st = stats;
     if (st == null) return null;
-    final dentro = s == null
-        ? current.isEmpty
-        : (current.isEmpty || current.contains(s));
-    if (!dentro) return null;
+    if (current.isNotEmpty && !current.contains(s)) return null;
     switch (s) {
-      case null:
-        return st.total;
       case SaleFormStatus.waitingForSignature:
         return st.waitingForSignature;
       case SaleFormStatus.processing:
@@ -676,265 +711,115 @@ class _StatusChips extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final brand = Theme.of(context).colorScheme.primary;
-    final items = <(SaleFormStatus?, String, SaleFormTom)>[
-      (null, 'Todas', SaleFormTom(brand, brand)),
-      (
-        SaleFormStatus.waitingForSignature,
-        SaleFormStatus.waitingForSignature.shortLabel,
-        SaleFormTom.aviso(context),
-      ),
-      (
-        SaleFormStatus.processing,
-        SaleFormStatus.processing.shortLabel,
-        SaleFormTom.info(context),
-      ),
-      (
-        SaleFormStatus.finalized,
-        SaleFormStatus.finalized.shortLabel,
-        SaleFormTom.sucesso(context),
-      ),
-      (
-        SaleFormStatus.canceled,
-        SaleFormStatus.canceled.shortLabel,
-        SaleFormTom.erro(context),
-      ),
+    final itens = <(SaleFormStatus, String, SaleFormTom)>[
+      (SaleFormStatus.waitingForSignature, 'Aguardando',
+          SaleFormTom.aviso(context)),
+      (SaleFormStatus.processing, 'Assinando', SaleFormTom.info(context)),
+      (SaleFormStatus.finalized, 'Finalizadas', SaleFormTom.sucesso(context)),
+      (SaleFormStatus.canceled, 'Canceladas', SaleFormTom.erro(context)),
     ];
-    // Grid de largura uniforme (2 colunas) — alinhado, sem scroll horizontal.
-    // Item ímpar final ocupa a linha inteira para não deixar célula órfã.
-    return LayoutBuilder(
-      builder: (ctx, c) {
-        const gap = 8.0;
-        final half = (c.maxWidth - gap) / 2;
-        return Wrap(
-          spacing: gap,
-          runSpacing: gap,
-          children: [
-            for (var i = 0; i < items.length; i++)
-              SizedBox(
-                width: (items.length.isOdd && i == items.length - 1)
-                    ? c.maxWidth
-                    : half,
-                child: _StatusChip(
-                  label: items[i].$2,
-                  tom: items[i].$3,
-                  count: _conta(items[i].$1),
-                  selected: items[i].$1 == null
-                      ? current.isEmpty
-                      : current.contains(items[i].$1),
-                  onTap: () => _tap(items[i].$1),
-                ),
-              ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _StatusChip extends StatelessWidget {
-  const _StatusChip({
-    required this.label,
-    required this.tom,
-    required this.selected,
-    required this.onTap,
-    this.count,
-  });
-  final String label;
-  final SaleFormTom tom;
-  final bool selected;
-  final VoidCallback onTap;
-  final int? count;
-  @override
-  Widget build(BuildContext context) {
-    final muted = ThemeHelpers.textSecondaryColor(context);
-    final tone = tom.sinal;
-    final style = Theme.of(context).textTheme.labelMedium;
-    return Semantics(
-      button: true,
-      selected: selected,
-      child: Material(
-        color: selected ? tone.withValues(alpha: 0.13) : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            // Altura mínima igual em todas as células: a grade fica alinhada
-            // mesmo quando uma encolhe o conteúdo.
-            constraints: const BoxConstraints(minHeight: 40),
-            alignment: Alignment.center,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: selected
-                    ? tone.withValues(alpha: 0.55)
-                    : tone.withValues(alpha: 0.3),
-                width: 1.4,
-              ),
-            ),
-            // Rótulo + contagem nunca cortam: em 320dp encolhem juntos.
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: selected ? tone : tone.withValues(alpha: 0.6),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    label,
-                    maxLines: 1,
-                    softWrap: false,
-                    style: style?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: selected ? tom.texto : muted,
-                      letterSpacing: 0.1,
-                    ),
-                  ),
-                  if (count != null) ...[
-                    const SizedBox(width: 6),
-                    Text(
-                      '$count',
-                      maxLines: 1,
-                      softWrap: false,
-                      style: style?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        color: selected
-                            ? tom.texto
-                            : ThemeHelpers.textColor(context),
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// "Apenas excluídas" (só quem vê tudo) — linha flush com interruptor, como
-/// os atalhos de Imóveis: rótulo + o que acontece ao ligar.
-class _ExcluidasToggle extends StatelessWidget {
-  const _ExcluidasToggle({required this.value, required this.onChanged});
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final tom = SaleFormTom.erro(context);
-    final muted = ThemeHelpers.textSecondaryColor(context);
-    return Semantics(
-      button: true,
-      toggled: value,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () => onChanged(!value),
-          borderRadius: BorderRadius.circular(10),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Row(
-              children: [
-                Icon(
-                  value ? Icons.delete_rounded : Icons.delete_outline_rounded,
-                  size: 19,
-                  color: value ? tom.texto : muted,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Apenas excluídas',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 13.5,
-                          height: 1.1,
-                          color: value
-                              ? tom.texto
-                              : ThemeHelpers.textColor(context),
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        value
-                            ? 'Mostrando só as fichas excluídas (auditoria).'
-                            : 'Ver as fichas excluídas, guardadas para '
-                                  'auditoria.',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: muted,
-                          fontSize: 11.5,
-                          height: 1.3,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 10),
-                _Interruptor(ligado: value, tom: tom.sinal),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Interruptor chapado (sem degradê nem brilho) — só a trilha na cor.
-class _Interruptor extends StatelessWidget {
-  const _Interruptor({required this.ligado, required this.tom});
-  final bool ligado;
-  final Color tom;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeOutCubic,
-      width: 44,
-      height: 26,
-      padding: const EdgeInsets.all(3),
+    final hair = ThemeHelpers.borderLightColor(context);
+    return Container(
       decoration: BoxDecoration(
-        color: ligado
-            ? tom
-            : ThemeHelpers.borderColor(context).withValues(alpha: 0.9),
-        borderRadius: BorderRadius.circular(999),
+        border: Border(top: BorderSide(color: hair), bottom: BorderSide(color: hair)),
       ),
-      child: AnimatedAlign(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOutCubic,
-        alignment: ligado ? Alignment.centerRight : Alignment.centerLeft,
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var i = 0; i < itens.length; i++) ...[
+              if (i > 0) VerticalDivider(width: 1, thickness: 1, color: hair),
+              Expanded(
+                child: _CelulaDeStatus(
+                  rotulo: itens[i].$2,
+                  tom: itens[i].$3,
+                  n: _conta(itens[i].$1),
+                  marcada: current.contains(itens[i].$1),
+                  onTap: () {
+                    final s = itens[i].$1;
+                    onChanged(
+                      current.length == 1 && current.contains(s)
+                          ? <SaleFormStatus>{}
+                          : {s},
+                    );
+                  },
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CelulaDeStatus extends StatelessWidget {
+  const _CelulaDeStatus({
+    required this.rotulo,
+    required this.tom,
+    required this.n,
+    required this.marcada,
+    required this.onTap,
+  });
+  final String rotulo;
+  final SaleFormTom tom;
+  final int? n;
+  final bool marcada;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Semantics(
+      button: true,
+      selected: marcada,
+      label: '$rotulo ${n ?? ''}',
+      child: InkWell(
+        onTap: onTap,
         child: Container(
-          width: 20,
-          height: 20,
+          padding: const EdgeInsets.fromLTRB(8, 10, 6, 9),
           decoration: BoxDecoration(
-            color: Colors.white,
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.12),
-                blurRadius: 2,
-                offset: const Offset(0, 1),
+            color: marcada ? tom.sinal.withValues(alpha: 0.08) : null,
+            border: Border(
+              bottom: BorderSide(
+                color: marcada ? tom.sinal : Colors.transparent,
+                width: 3,
+              ),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  n == null ? '—' : '$n',
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.4,
+                    height: 1.05,
+                    color: n == null ? muted : tom.texto,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 3),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  rotulo,
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: marcada ? FontWeight.w900 : FontWeight.w700,
+                    color: marcada ? ThemeHelpers.textColor(context) : muted,
+                  ),
+                ),
               ),
             ],
           ),
@@ -944,15 +829,17 @@ class _Interruptor extends StatelessWidget {
   }
 }
 
-/// Linha entre os controles e a lista (como a "LISTAGEM" de Imóveis):
-/// quantas fichas o recorte tem e em que ordem elas estão.
-class _CabecalhoDaLista extends StatelessWidget {
-  const _CabecalhoDaLista({
+/// Linha entre os controles e a lista: quantas fichas o recorte tem, em que
+/// ordem, e (para quem vê tudo) o atalho de ver as excluídas.
+class _LinhaDaLista extends StatelessWidget {
+  const _LinhaDaLista({
     required this.total,
     required this.carregando,
     required this.excluidas,
     required this.sortBy,
     required this.sortOrder,
+    required this.mostrarExcluidas,
+    required this.onExcluidas,
   });
 
   final int? total;
@@ -960,78 +847,98 @@ class _CabecalhoDaLista extends StatelessWidget {
   final bool excluidas;
   final String sortBy;
   final String sortOrder;
+  final bool mostrarExcluidas;
+  final VoidCallback onExcluidas;
 
   static String _ordem(String by, String order) {
     final desc = order.toUpperCase() != 'ASC';
-    String az(String campo) => desc ? '$campo: Z → A' : '$campo: A → Z';
+    String az(String campo) => desc ? '$campo Z→A' : '$campo A→Z';
     switch (by) {
       case 'createdAt':
-        return desc ? 'Mais recentes primeiro' : 'Mais antigas primeiro';
+        return desc ? 'mais recentes primeiro' : 'mais antigas primeiro';
       case 'formNumber':
-        return desc ? 'Número: maior primeiro' : 'Número: menor primeiro';
+        return desc ? 'nº maior primeiro' : 'nº menor primeiro';
       case 'buyerName':
-        return az('Comprador');
+        return az('comprador');
       case 'sellerName':
-        return az('Vendedor');
+        return az('vendedor');
       case 'saleUnit':
-        return az('Unidade');
+        return az('unidade');
       case 'saleFormType':
-        return az('Tipo');
+        return az('tipo');
       case 'status':
-        return az('Status');
+        return az('status');
       case 'creatorName':
-        return az('Criado por');
+        return az('autor');
       default:
-        return desc ? 'Ordem decrescente' : 'Ordem crescente';
+        return desc ? 'ordem decrescente' : 'ordem crescente';
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final tom = excluidas ? SaleFormTom.erro(context).texto : _accent(context);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final erro = SaleFormTom.erro(context).texto;
     final n = total;
     final contagem = carregando || n == null
         ? 'Carregando'
         : excluidas
-        ? '$n ${n == 1 ? 'ficha excluída' : 'fichas excluídas'}'
+        ? '$n ${n == 1 ? 'excluída' : 'excluídas'}'
         : '$n ${n == 1 ? 'ficha' : 'fichas'}';
-    return Row(
-      children: [
-        Icon(
-          excluidas ? Icons.delete_outline_rounded : Icons.view_list_rounded,
-          size: 14,
-          color: tom,
-        ),
-        const SizedBox(width: 6),
-        Flexible(
-          child: Text(
-            contagem.toUpperCase(),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: tom,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 1.2,
-              fontSize: 10.5,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: contagem.toUpperCase(),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.1,
+                      color: excluidas ? erro : ThemeHelpers.textColor(context),
+                    ),
+                  ),
+                  TextSpan(text: '  ·  ${_ordem(sortBy, sortOrder)}'),
+                ],
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: muted),
             ),
           ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            _ordem(sortBy, sortOrder),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.right,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
-              fontWeight: FontWeight.w700,
-              fontSize: 11,
+          if (mostrarExcluidas)
+            InkWell(
+              onTap: onExcluidas,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      excluidas ? LucideIcons.arrowLeft : LucideIcons.trash2,
+                      size: 14,
+                      color: excluidas ? erro : muted,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      excluidas ? 'Voltar às ativas' : 'Excluídas',
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: excluidas ? erro : muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

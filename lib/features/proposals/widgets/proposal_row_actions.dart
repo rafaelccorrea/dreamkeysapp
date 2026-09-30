@@ -1,15 +1,28 @@
-import 'dart:io' show Directory, File;
-
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_colors.dart';
-import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
+import '../../../shared/services/api_service.dart';
 import '../../../shared/services/purchase_proposals_service.dart';
+import '../../../shared/widgets/file_delivery_sheet.dart';
 import '../../sale_forms/widgets/sale_form_row_actions.dart'
     show askSaleFormReason, linkedUsersFromRaw, showFichaPeopleSheet,
         showFichaTextSheet;
+import '../../sale_forms/widgets/sale_form_tones.dart';
+
+/// Cor do status da proposta — a mesma família de antes (`AppColors.status`:
+/// info, sucesso, erro), agora com o tom de TEXTO legível no claro. Uma
+/// fonte só para a linha da lista, o painel de status e a folha de ações.
+SaleFormTom proposalStatusTom(BuildContext context, ProposalStatus s) {
+  switch (s) {
+    case ProposalStatus.finalized:
+      return SaleFormTom.sucesso(context);
+    case ProposalStatus.canceled:
+      return SaleFormTom.erro(context);
+    case ProposalStatus.processing:
+      return SaleFormTom.info(context);
+  }
+}
 
 /// Ações do menu da proposta, na ordem do menu web (`PurchaseProposalsPage`).
 enum ProposalRowAction {
@@ -48,6 +61,14 @@ class ProposalRowRules {
   bool get canCancel => _canUpdate && !_deleted && _processing;
   bool get canDelete => _canDelete && !_deleted;
 
+  /// Proposta aberta (em andamento, não excluída) numa conta que não edita
+  /// propostas: assinaturas e edição aparecem TRAVADAS com o motivo — não
+  /// somem (o card antigo já avisava "envio para assinatura travado").
+  bool get travadaPorPermissao => !_canUpdate && !_deleted && _processing;
+
+  static const String motivoDaTrava =
+      'Sua conta não edita propostas. Peça ao administrador da empresa.';
+
   /// PDF: consolidado quando finalizada; parcial da etapa atual senão.
   int? get etapaDoPdf => finalizada ? null : p.etapa.number;
 
@@ -62,141 +83,6 @@ class ProposalRowRules {
       return (title: 'Motivo do cancelamento', body: canc);
     }
     return null;
-  }
-}
-
-/// Menu de ações da proposta (duas linhas por item, como no web).
-class ProposalActionsMenu extends StatelessWidget {
-  const ProposalActionsMenu({
-    super.key,
-    required this.rules,
-    required this.onAction,
-  });
-  final ProposalRowRules rules;
-  final ValueChanged<ProposalRowAction> onAction;
-
-  @override
-  Widget build(BuildContext context) {
-    final muted = ThemeHelpers.textSecondaryColor(context);
-    final text = ThemeHelpers.textColor(context);
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    final danger = dark ? AppColors.status.errorDarkMode : AppColors.status.error;
-    final info = dark ? AppColors.status.infoDarkMode : AppColors.status.info;
-    final ok = dark ? AppColors.status.successDarkMode : AppColors.status.success;
-    final motivo = rules.auditMotivo;
-    final etapa = rules.p.etapa.number;
-
-    return PopupMenuButton<ProposalRowAction>(
-      tooltip: 'Ações',
-      padding: EdgeInsets.zero,
-      offset: const Offset(0, 10),
-      color: ThemeHelpers.cardBackgroundColor(context),
-      elevation: 12,
-      shadowColor: Colors.black.withValues(alpha: 0.25),
-      constraints: const BoxConstraints(minWidth: 240, maxWidth: 300),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.7),
-        ),
-      ),
-      icon: Container(
-        width: 34,
-        height: 34,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: ThemeHelpers.borderLightColor(context).withValues(alpha: 0.7),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Icon(Icons.more_horiz_rounded, size: 19, color: muted),
-      ),
-      itemBuilder: (ctx) {
-        final topo = <PopupMenuEntry<ProposalRowAction>>[
-          if (rules.canPdf)
-            _item(ProposalRowAction.pdf, Icons.description_outlined,
-                'Baixar PDF',
-                rules.finalizada
-                    ? 'documento consolidado'
-                    : 'parcial da etapa $etapa',
-                info, text, muted),
-          if (rules.canSignatures)
-            _item(ProposalRowAction.assinaturas, Icons.draw_outlined,
-                'Assinaturas', 'enviar e acompanhar a etapa $etapa',
-                ok, text, muted),
-          if (rules.canEdit)
-            _item(ProposalRowAction.editar, Icons.edit_outlined, 'Editar',
-                'dados da proposta', muted, text, muted),
-          _item(ProposalRowAction.historico, Icons.history_rounded,
-              'Histórico', 'etapas e assinaturas', muted, text, muted),
-          _item(ProposalRowAction.usuariosVinculados, Icons.group_outlined,
-              'Usuários vinculados', 'quem pode ver esta proposta',
-              muted, text, muted),
-          if (motivo != null)
-            _item(ProposalRowAction.motivo, Icons.comment_outlined,
-                'Ver motivo', motivo.title.toLowerCase(), muted, text, muted),
-        ];
-        final fim = <PopupMenuEntry<ProposalRowAction>>[
-          if (rules.canCancel)
-            _item(ProposalRowAction.cancelar, Icons.close_rounded,
-                'Cancelar proposta', 'com motivo registrado',
-                danger, danger, muted),
-          if (rules.canDelete)
-            _item(ProposalRowAction.excluir, Icons.delete_outline_rounded,
-                'Excluir', 'sai da listagem · motivo obrigatório',
-                danger, danger, muted),
-        ];
-        return [
-          ...topo,
-          if (fim.isNotEmpty) const PopupMenuDivider(height: 8),
-          ...fim,
-        ];
-      },
-      onSelected: onAction,
-    );
-  }
-
-  PopupMenuItem<ProposalRowAction> _item(
-    ProposalRowAction v,
-    IconData icon,
-    String title,
-    String hint,
-    Color iconColor,
-    Color textColor,
-    Color muted,
-  ) {
-    return PopupMenuItem<ProposalRowAction>(
-      value: v,
-      height: 52,
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: iconColor),
-          const SizedBox(width: 11),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: textColor,
-                  ),
-                ),
-                Text(
-                  hint,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11.5, color: muted),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }
 
@@ -269,39 +155,63 @@ Future<bool> runProposalRowAction(
   }
 }
 
-Future<void> _openPdf(BuildContext context, PurchaseProposal p, int? etapa) async {
-  final res = await PurchaseProposalsService.instance.downloadPdf(
-    p.id,
+Future<void> _openPdf(BuildContext context, PurchaseProposal p, int? etapa) {
+  final num = p.proposalNumber.trim().isNotEmpty ? p.proposalNumber : p.id;
+  return showProposalPdfSheet(
+    context,
+    proposalId: p.id,
+    numero: num,
     etapa: etapa,
   );
-  if (!context.mounted) return;
-  if (!res.success || res.data == null) {
-    _snack(context, res.message ?? 'Erro ao carregar o PDF.');
-    return;
-  }
-  try {
-    final num = p.proposalNumber.trim().isNotEmpty ? p.proposalNumber : p.id;
-    final file = File(
-      '${Directory.systemTemp.path}/Proposta_$num${etapa != null ? '_Etapa$etapa' : ''}.pdf',
-    );
-    await file.writeAsBytes(res.data!.bytes);
-    final ok = await launchUrl(
-      Uri.file(file.path),
-      mode: LaunchMode.externalApplication,
-    );
-    // Salvou mas não abriu: é informação, não erro (snack neutro).
-    if (!ok && context.mounted) {
-      _snack(context, 'PDF salvo em ${file.path}', ok: null);
-    }
-  } catch (_) {
-    if (context.mounted) {
-      _snack(
-        context,
-        'Não foi possível abrir o PDF. Confira se há um leitor de PDF no '
-        'aparelho.',
+}
+
+/// Folha do PDF da proposta nº [numero] (da [etapa], ou consolidado quando
+/// nula) — Compartilhar / Salvar no aparelho. Abrir com
+/// `launchUrl(Uri.file(...))` não funciona no Android nem no iOS.
+Future<void> showProposalPdfSheet(
+  BuildContext context, {
+  required String proposalId,
+  required String numero,
+  int? etapa,
+}) {
+  return showFileDeliverySheet(
+    context,
+    title: etapa == null
+        ? 'PDF da proposta nº $numero'
+        : 'PDF da etapa $etapa · proposta nº $numero',
+    expectedType: 'PDF',
+    generatingTitle: 'Gerando o PDF da proposta…',
+    readyTitle: 'PDF pronto',
+    readyNote: (file) => file.extension == 'zip'
+        ? 'Mais de um documento: os PDFs vêm juntos num arquivo .zip.'
+        : null,
+    shareSubject: 'Proposta nº $numero',
+    saveDialogTitle: 'Salvar PDF da proposta',
+    load: () async {
+      final res = await PurchaseProposalsService.instance.downloadPdf(
+        proposalId,
+        etapa: etapa,
       );
-    }
-  }
+      final data = res.data;
+      if (!res.success || data == null) {
+        return ApiResponse.error(
+          message: res.message ?? '',
+          statusCode: res.statusCode,
+          data: res.error,
+        );
+      }
+      final zip = data.contentType.contains('zip');
+      return ApiResponse.success(
+        data: DeliverableFile(
+          bytes: data.bytes,
+          fileName: 'Proposta_$numero'
+              '${etapa != null ? '_Etapa$etapa' : ''}.${zip ? 'zip' : 'pdf'}',
+          mimeType: zip ? 'application/zip' : 'application/pdf',
+        ),
+        statusCode: res.statusCode,
+      );
+    },
+  );
 }
 
 /// Snack de retorno: verde quando deu certo, vermelho quando falhou e

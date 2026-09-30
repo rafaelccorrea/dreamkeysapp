@@ -25,6 +25,8 @@
       ignora, e deixá-la sem teto é o mesmo pedido amplo por outro nome.
     -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Nota de voz no WhatsApp do app (gravar e enviar). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 

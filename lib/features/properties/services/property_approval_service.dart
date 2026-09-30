@@ -743,6 +743,81 @@ class PropertyApprovalService {
     }
   }
 
+  /// `PATCH /properties/:id/approval-thread/:messageId` — edita o texto de
+  /// uma mensagem da conversa de aprovação. Só o AUTOR edita (o back devolve
+  /// 403 aos demais — o web avisa "Sem permissão para editar esta
+  /// mensagem."). Body `{ message }` (mesmas regras do envio: texto não
+  /// vazio, até 4000 caracteres). Devolve a entrada atualizada (com
+  /// `metadata.editedAt` e `metadata.editHistory`).
+  Future<ApiResponse<PropertyHistoryEntry>> patchApprovalThreadMessage(
+    String propertyId,
+    String messageId, {
+    required String message,
+  }) async {
+    try {
+      final response = await _api.patch<Map<String, dynamic>>(
+        '/properties/$propertyId/approval-thread/$messageId',
+        body: {'message': message},
+      );
+      if (response.success) {
+        final raw = response.data;
+        if (raw == null) {
+          // 2xx sem corpo legível: a edição valeu; quem chamou recarrega.
+          return ApiResponse.success(statusCode: response.statusCode);
+        }
+        final map = raw['id'] != null
+            ? raw
+            : (raw['data'] is Map<String, dynamic>
+                ? raw['data'] as Map<String, dynamic>
+                : raw);
+        return ApiResponse.success(
+          data: PropertyHistoryEntry.fromJson(map),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Não foi possível salvar a edição.',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [APPROVAL] approval-thread edit: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// `DELETE /properties/:id/approval-thread/:messageId` — exclui uma
+  /// mensagem da conversa de aprovação (só o autor; 403 aos demais). O web
+  /// confirma antes com "Excluir esta mensagem? Esta ação não pode ser
+  /// desfeita.".
+  Future<ApiResponse<void>> deleteApprovalThreadMessage(
+    String propertyId,
+    String messageId,
+  ) async {
+    try {
+      final response = await _api.delete<dynamic>(
+        '/properties/$propertyId/approval-thread/$messageId',
+      );
+      if (response.success) {
+        return ApiResponse.success(statusCode: response.statusCode);
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Não foi possível excluir a mensagem.',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [APPROVAL] approval-thread delete: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
   // ─── Notificar responsáveis sobre contato do proprietário ─────────────
 
   /// `POST /properties/:id/notify-responsibles-owner-contact` — avisa os

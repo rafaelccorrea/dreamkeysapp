@@ -1,17 +1,18 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../../core/constants/api_constants.dart';
+import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/services/api_service.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/purchase_proposals_service.dart';
-import '../../../core/routes/app_routes.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../sale_forms/widgets/fichas_filters_kit.dart';
+import '../../sale_forms/widgets/sale_form_tones.dart';
 import '../widgets/proposal_card.dart';
 import '../widgets/proposal_row_actions.dart';
 import '../widgets/proposal_signatures_sheet.dart';
@@ -20,10 +21,12 @@ import 'proposals_dashboard_page.dart';
 import 'create_proposal_page.dart';
 
 const double _kPadH = 16;
-const double _kFabBottom = 96;
 
-/// Coluna de leitura em tela larga (tablet/paisagem).
-const double _kMaxW = 720;
+/// Largura máxima do conteúdo em tablet/tela larga: a lista não estica uma
+/// linha em 1000dp — fica centralizada e as margens crescem.
+const double _kMaxConteudo = 720;
+
+final NumberFormat _inteiro = NumberFormat.decimalPattern('pt_BR');
 
 Color _accent(BuildContext context) {
   return Theme.of(context).brightness == Brightness.dark
@@ -31,12 +34,65 @@ Color _accent(BuildContext context) {
       : AppColors.primary.primary;
 }
 
+/// Contagem da base (`GET /fichas-proposta/stats`): o back devolve o total e
+/// o total de cada status (o web mostra os quatro). O `ProposalStats`
+/// compartilhado só lê o total, então a lista lê o mesmo JSON aqui — uma
+/// chamada só, como antes.
+class _Contagem {
+  const _Contagem({
+    required this.total,
+    required this.processing,
+    required this.finalized,
+    required this.canceled,
+  });
+
+  final int total;
+  final int? processing;
+  final int? finalized;
+  final int? canceled;
+
+  static int? _n(dynamic v) {
+    if (v is num) return v.toInt();
+    return int.tryParse('${v ?? ''}');
+  }
+
+  factory _Contagem.fromJson(Map<String, dynamic> j) => _Contagem(
+    total: _n(j['total']) ?? 0,
+    processing: _n(j['processing']),
+    finalized: _n(j['finalized']),
+    canceled: _n(j['canceled']),
+  );
+
+  int? doStatus(ProposalStatus s) {
+    switch (s) {
+      case ProposalStatus.processing:
+        return processing;
+      case ProposalStatus.finalized:
+        return finalized;
+      case ProposalStatus.canceled:
+        return canceled;
+    }
+  }
+}
+
+Future<_Contagem?> _carregarContagem() async {
+  try {
+    final res = await ApiService.instance.get<Map<String, dynamic>>(
+      ApiConstants.purchaseProposalsStats,
+    );
+    if (!res.success || res.data == null) return null;
+    return _Contagem.fromJson(res.data!);
+  } catch (_) {
+    return null;
+  }
+}
+
 /// Listagem de fichas de proposta — espelha `PurchaseProposalsPage.tsx` do
-/// imobx-front (mobile view).
-///
-/// Superfície do dia a dia: a contagem responde "quantas", a frase de
-/// recorte responde "quais e em que ordem", os filtros ativos viram
-/// etiquetas que se tiram com um toque, e cada card traz a ação da etapa.
+/// imobx-front e segue o molde da lista de fichas de venda (01/10/2026): no
+/// topo o hero com a ação principal no canto, depois busca + filtros, o
+/// painel de status com a contagem de cada um e a linha da lista (quantas e
+/// em que ordem); cada proposta é uma linha flush com a etapa da assinatura
+/// e a ação da etapa ali mesmo.
 class ProposalsPage extends StatefulWidget {
   const ProposalsPage({super.key});
 
@@ -49,11 +105,13 @@ class _ProposalsPageState extends State<ProposalsPage> {
   final _scroll = ScrollController();
 
   ProposalListResult? _data;
-  ProposalStats? _stats;
+  _Contagem? _stats;
   ProposalFilters _filters = const ProposalFilters(limit: 20);
   bool _loading = true;
   bool _loadingMore = false;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
   int _errorStatus = 0;
   bool _showDeletedOnly = false;
 
@@ -73,8 +131,7 @@ class _ProposalsPageState extends State<ProposalsPage> {
   }
 
   void _onScroll() {
-    if (_loadingMore || _loading) return;
-    if (_data == null) return;
+    if (_loadingMore || _loading || _data == null) return;
     if (_data!.page >= _data!.totalPages) return;
     if (_scroll.position.pixels >= _scroll.position.maxScrollExtent - 280) {
       _loadMore();
@@ -95,9 +152,9 @@ class _ProposalsPageState extends State<ProposalsPage> {
       _error = null;
     });
     final f = _withSearchAndDeleted(_filters.copyWith(page: 1));
-    final statsFut = PurchaseProposalsService.instance.getStats();
+    final statsFut = _carregarContagem();
     final res = await PurchaseProposalsService.instance.list(filters: f);
-    final statsRes = await statsFut;
+    final stats = await statsFut;
     if (!mounted) return;
     setState(() {
       _filters = f;
@@ -110,10 +167,9 @@ class _ProposalsPageState extends State<ProposalsPage> {
         _error = res.message ?? 'Não foi possível carregar as propostas.';
         _errorStatus = res.statusCode;
       }
-      if (statsRes.success && statsRes.data != null) {
-        _stats = statsRes.data;
-      }
+      if (stats != null) _stats = stats;
     });
+    if (mounted) FocusScope.of(context).unfocus();
   }
 
   Future<void> _loadMore() async {
@@ -155,122 +211,15 @@ class _ProposalsPageState extends State<ProposalsPage> {
     _load();
   }
 
-  // ─── Recorte ativo (etiquetas removíveis) ────────────────────────────────
-
-  /// Busca APLICADA (a do último carregamento), não o que está sendo
-  /// digitado — a frase de recorte não pode mentir sobre a lista.
-  String get _appliedSearch => (_filters.search ?? '').trim();
-
-  bool get _hasAnyFilter =>
-      _filters.drawerFilterCount > 0 ||
-      _showDeletedOnly ||
-      _appliedSearch.isNotEmpty;
-
-  void _patch(ProposalFilters next) {
-    setState(() => _filters = next);
-    _load();
-  }
-
-  void _clearSearch() {
-    _search.clear();
-    _load();
-  }
-
-  /// "Limpar tudo": o mesmo recorte do "Limpar filtros" do modal (que
-  /// também desliga "Apenas excluídas") + a busca.
-  void _clearAll() {
+  /// Estado vazio de um recorte: limpa busca, filtros e "Apenas excluídas"
+  /// de uma vez (o mesmo "Limpar" do modal de filtros).
+  void _limparRecorte() {
     _search.clear();
     setState(() {
       _filters = _filters.withoutListFilters();
       _showDeletedOnly = false;
     });
     _load();
-  }
-
-  static final DateFormat _dmy = DateFormat('dd/MM/yy');
-
-  String _periodLabel(DateTime? from, DateTime? to) {
-    if (from != null && to != null) {
-      return 'Criadas de ${_dmy.format(from)} a ${_dmy.format(to)}';
-    }
-    if (from != null) return 'Criadas desde ${_dmy.format(from)}';
-    return 'Criadas até ${_dmy.format(to!)}';
-  }
-
-  /// Filtros do modal que não aparecem na grade de status (o status já está
-  /// à vista ali) — cada um vira etiqueta com "x".
-  List<_ActiveFilter> _activeFilters() {
-    final f = _filters;
-    final out = <_ActiveFilter>[];
-    final q = _appliedSearch;
-    if (q.isNotEmpty) {
-      out.add(
-        _ActiveFilter(
-          icon: LucideIcons.search,
-          label: '"$q"',
-          onRemove: _clearSearch,
-        ),
-      );
-    }
-    final etapa = f.etapa;
-    if (etapa != null) {
-      out.add(
-        _ActiveFilter(
-          icon: LucideIcons.penLine,
-          label: 'Etapa ${etapa.number} · ${etapa.label}',
-          onRemove: () => _patch(f.copyWith(etapa: null)),
-        ),
-      );
-    }
-    final unit = f.saleUnit?.trim();
-    if (unit != null && unit.isNotEmpty) {
-      out.add(
-        _ActiveFilter(
-          icon: LucideIcons.building2,
-          label: unit,
-          onRemove: () => _patch(f.copyWith(saleUnit: null)),
-        ),
-      );
-    }
-    if (f.dateFrom != null || f.dateTo != null) {
-      out.add(
-        _ActiveFilter(
-          icon: LucideIcons.calendarRange,
-          label: _periodLabel(f.dateFrom, f.dateTo),
-          onRemove: () => _patch(f.copyWith(dateFrom: null, dateTo: null)),
-        ),
-      );
-    }
-    if ((f.userId ?? '').isNotEmpty) {
-      out.add(
-        _ActiveFilter(
-          icon: LucideIcons.userRound,
-          label: 'Autor escolhido',
-          onRemove: () => _patch(f.copyWith(userId: null)),
-        ),
-      );
-    }
-    return out;
-  }
-
-  String _orderLabel(ProposalFilters f) {
-    final desc = f.sortOrder.toUpperCase() != 'ASC';
-    switch (f.sortBy) {
-      case 'proposalNumber':
-        return desc ? 'maior número primeiro' : 'menor número primeiro';
-      case 'status':
-        return 'ordenadas por status';
-      case 'proponentName':
-        return desc ? 'comprador de Z a A' : 'comprador de A a Z';
-      case 'proposedPrice':
-        return desc ? 'maior valor primeiro' : 'menor valor primeiro';
-      case 'validityDays':
-        return desc ? 'maior validade primeiro' : 'menor validade primeiro';
-      case 'creatorName':
-        return desc ? 'autor de Z a A' : 'autor de A a Z';
-      default:
-        return desc ? 'mais recentes primeiro' : 'mais antigas primeiro';
-    }
   }
 
   // ─── Navegação ───────────────────────────────────────────────────────────
@@ -285,6 +234,19 @@ class _ProposalsPageState extends State<ProposalsPage> {
       );
       _load();
     }
+  }
+
+  /// "Nova proposta" travada: aparece com cadeado e diz o porquê (não some).
+  void _createLocked() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Criar fichas de proposta depende de permissão. Peça ao '
+          'administrador da empresa.',
+        ),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   Future<void> _openDetail(PurchaseProposal p) async {
@@ -337,8 +299,8 @@ class _ProposalsPageState extends State<ProposalsPage> {
     );
   }
 
-  /// Menu da linha (espelho do web). Navegação fica aqui; o resto no
-  /// despachante compartilhado.
+  /// Folha de ações da linha (espelho do menu do web). Navegação fica aqui;
+  /// o resto no despachante compartilhado.
   Future<void> _onAction(PurchaseProposal p, ProposalRowAction a) async {
     switch (a) {
       case ProposalRowAction.assinaturas:
@@ -389,16 +351,16 @@ class _ProposalsPageState extends State<ProposalsPage> {
     final canViewAll = ModuleAccessService.instance.hasPermission(
       'proposal:view_all',
     );
-    // Tela larga: coluna centrada de até 720 (sem LayoutBuilder entre o
-    // RefreshIndicator e a lista — isso quebra o pull-to-refresh).
-    final width = MediaQuery.sizeOf(context).width;
-    final padH = math.max(_kPadH, (width - _kMaxW) / 2);
-    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
-    final active = _activeFilters();
-    final showClearAll =
-        active.length > 1 ||
-        (active.isNotEmpty &&
-            (_filters.status != null || _showDeletedOnly));
+    final largura = MediaQuery.sizeOf(context).width;
+    final padH = largura > _kMaxConteudo + 2 * _kPadH
+        ? (largura - _kMaxConteudo) / 2
+        : _kPadH;
+    final buscaAplicada = _filters.search?.trim() ?? '';
+    final temRecorte =
+        _filters.drawerFilterCount > 0 ||
+        _showDeletedOnly ||
+        buscaAplicada.isNotEmpty;
+    final itens = _data?.items ?? const <PurchaseProposal>[];
 
     return AppScaffold(
       title: 'Fichas de proposta',
@@ -414,149 +376,684 @@ class _ProposalsPageState extends State<ProposalsPage> {
                 Navigator.of(context).pushNamed(AppRoutes.proposalsDashboard),
           ),
       ],
-      body: Stack(
-        children: [
-          RefreshIndicator(
-            color: accent,
-            onRefresh: _load,
-            child: CustomScrollView(
-              controller: _scroll,
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              physics: const AlwaysScrollableScrollPhysics(
-                parent: BouncingScrollPhysics(),
-              ),
-              slivers: [
-                SliverPadding(
-                  padding: EdgeInsets.fromLTRB(padH, 14, padH, 0),
-                  sliver: SliverToBoxAdapter(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: RefreshIndicator(
+        color: accent,
+        onRefresh: _load,
+        child: CustomScrollView(
+          controller: _scroll,
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: BouncingScrollPhysics(),
+          ),
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(padH, 14, padH, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _Hero(
+                      accent: accent,
+                      stats: _stats,
+                      canCreate: canCreate,
+                      onCreate: canCreate ? _openCreate : _createLocked,
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
                       children: [
-                        _ListHeader(
-                          total: _stats?.total,
-                          result: _data?.total,
-                          filtered: _hasAnyFilter,
-                          deletedOnly: _showDeletedOnly,
-                          orderLabel: _orderLabel(_filters),
-                        ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _SearchBar(
-                                controller: _search,
-                                accent: accent,
-                                onSubmitted: _load,
-                                onClear: _clearSearch,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            FichasFiltersButton(
-                              count: _filters.drawerFilterCount,
-                              onTap: () => _openFilters(canViewAll),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        _StatusChips(
-                          current: _filters.status,
-                          accent: accent,
-                          onChanged: (status) {
-                            setState(() {
-                              _filters = _filters.copyWith(status: status);
-                            });
-                            _load();
-                          },
-                        ),
-                        if (canViewAll) ...[
-                          const SizedBox(height: 10),
-                          _DeletedToggle(
-                            value: _showDeletedOnly,
+                        Expanded(
+                          child: _SearchBar(
+                            controller: _search,
                             accent: accent,
-                            onChanged: (v) {
-                              setState(() => _showDeletedOnly = v);
+                            aplicada: buscaAplicada,
+                            onSubmitted: _load,
+                            onClear: () {
+                              _search.clear();
                               _load();
                             },
                           ),
-                        ],
-                        if (active.isNotEmpty) ...[
-                          const SizedBox(height: 12),
-                          _ActiveFiltersRow(
-                            filters: active,
-                            onClearAll: showClearAll ? _clearAll : null,
-                          ),
-                        ],
-                        const SizedBox(height: 14),
+                        ),
+                        const SizedBox(width: 8),
+                        FichasFiltersButton(
+                          count: _filters.drawerFilterCount,
+                          onTap: () => _openFilters(canViewAll),
+                        ),
                       ],
                     ),
-                  ),
-                ),
-                if (_loading)
-                  SliverPadding(
-                    padding: EdgeInsets.fromLTRB(padH, 0, padH, _kFabBottom),
-                    sliver: SliverList.separated(
-                      itemCount: 6,
-                      separatorBuilder: (_, _) => const SizedBox(height: 12),
-                      itemBuilder: (_, _) => const ProposalCardSkeleton(),
-                    ),
-                  )
-                else if (_error != null)
-                  SliverPadding(
-                    padding: EdgeInsets.fromLTRB(padH, 8, padH, _kFabBottom),
-                    sliver: SliverToBoxAdapter(
-                      child: AppErrorState.fromApi(
-                        message: _error,
-                        statusCode: _errorStatus,
-                        onRetry: _load,
-                        dense: true,
-                      ),
-                    ),
-                  )
-                else if (_data == null || _data!.items.isEmpty)
-                  SliverFillRemaining(
-                    hasScrollBody: false,
-                    child: _EmptyState(
-                      filtered: _hasAnyFilter,
-                      deletedOnly: _showDeletedOnly,
-                      canCreate: canCreate,
-                      onClear: _clearAll,
-                    ),
-                  )
-                else
-                  SliverPadding(
-                    padding: EdgeInsets.fromLTRB(padH, 0, padH, _kFabBottom),
-                    sliver: SliverList.separated(
-                      itemCount: _data!.items.length + (_loadingMore ? 1 : 0),
-                      separatorBuilder: (_, _) => const SizedBox(height: 12),
-                      itemBuilder: (_, i) {
-                        // Próxima página: esqueleto do card, não spinner.
-                        if (i >= _data!.items.length) {
-                          return const ProposalCardSkeleton();
-                        }
-                        final p = _data!.items[i];
-                        return ProposalCard(
-                          proposal: p,
-                          accent: accent,
-                          onTap: () => _openDetail(p),
-                          onContinue: () => _openSignatures(p),
-                          onShowHistorico: () =>
-                              _openSignatures(p, showHistorico: true),
-                          onAction: (a) => _onAction(p, a),
+                    const SizedBox(height: 14),
+                    _PainelDeStatus(
+                      current: _filters.status,
+                      // A contagem do back é das ATIVAS: no modo "excluídas"
+                      // as células ficam em "—" (fora do recorte, não zero).
+                      stats: _showDeletedOnly ? null : _stats,
+                      onChanged: (status) {
+                        setState(
+                          () => _filters = _filters.copyWith(status: status),
                         );
+                        _load();
                       },
                     ),
+                    const SizedBox(height: 12),
+                    _LinhaDaLista(
+                      total: _data?.total,
+                      base: _stats?.total,
+                      recorte: temRecorte,
+                      carregando: _loading,
+                      excluidas: _showDeletedOnly,
+                      sortBy: _filters.sortBy,
+                      sortOrder: _filters.sortOrder,
+                      mostrarExcluidas: canViewAll,
+                      onExcluidas: () {
+                        setState(() => _showDeletedOnly = !_showDeletedOnly);
+                        _load();
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (_loading)
+              SliverPadding(
+                padding: EdgeInsets.fromLTRB(padH, 0, padH, 32),
+                sliver: SliverList.builder(
+                  itemCount: 7,
+                  itemBuilder: (_, _) => const ProposalCardSkeleton(),
+                ),
+              )
+            else if (_error != null)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(padH, 12, padH, 0),
+                  child: AppErrorState.fromApi(
+                    message: _error,
+                    statusCode: _errorStatus,
+                    onRetry: _load,
+                    dense: true,
                   ),
+                ),
+              )
+            else if (itens.isEmpty)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(padH, 24, padH, 32),
+                  child: _EmptyState(
+                    recorte: temRecorte,
+                    excluidas: _showDeletedOnly,
+                    canCreate: canCreate,
+                    onCreate: _openCreate,
+                    onLimpar: _limparRecorte,
+                  ),
+                ),
+              )
+            else
+              SliverPadding(
+                padding: EdgeInsets.fromLTRB(padH, 0, padH, 40),
+                sliver: SliverList.builder(
+                  itemCount: itens.length + (_loadingMore ? 1 : 0),
+                  itemBuilder: (_, i) {
+                    // Próxima página chegando: esqueleto fiel à linha.
+                    if (i >= itens.length) {
+                      return const ProposalCardSkeleton();
+                    }
+                    final p = itens[i];
+                    return ProposalCard(
+                      proposal: p,
+                      accent: accent,
+                      onTap: () => _openDetail(p),
+                      onContinue: () => _openSignatures(p),
+                      onShowHistorico: () =>
+                          _openSignatures(p, showHistorico: true),
+                      onAction: (a) => _onAction(p, a),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Hero da lista (01/10/2026), no molde do de fichas de venda: flush, título
+/// à esquerda e a AÇÃO PRINCIPAL no canto superior direito. A linha de apoio
+/// responde a pergunta de quem abre a tela ("quantas e quantas ainda estão
+/// em assinatura").
+class _Hero extends StatelessWidget {
+  const _Hero({
+    required this.accent,
+    required this.stats,
+    required this.canCreate,
+    required this.onCreate,
+  });
+
+  final Color accent;
+  final _Contagem? stats;
+  final bool canCreate;
+  final VoidCallback onCreate;
+
+  static const String _titulo = 'Fichas de proposta';
+  static const TextStyle _estiloTitulo = TextStyle(
+    fontSize: 22,
+    fontWeight: FontWeight.w900,
+    letterSpacing: -0.5,
+    height: 1.05,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final st = stats;
+    final andamento = st?.processing;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        LayoutBuilder(
+          builder: (context, c) {
+            // "Nova proposta" inteiro só quando cabe AO LADO do título numa
+            // linha (320dp, texto a 130%, deitado); senão vira "Nova" — o
+            // título nunca é cortado pelo botão.
+            final base = DefaultTextStyle.of(context).style;
+            final scaler = MediaQuery.textScalerOf(context);
+            double medir(String s, TextStyle estilo) {
+              final tp = TextPainter(
+                text: TextSpan(text: s, style: base.merge(estilo)),
+                maxLines: 1,
+                textDirection: Directionality.of(context),
+                textScaler: scaler,
+              )..layout();
+              final w = tp.width;
+              tp.dispose();
+              return w;
+            }
+
+            final wTitulo = medir(_titulo, _estiloTitulo);
+            final wBotao =
+                medir('Nova proposta', _NovaProposta.estiloRotulo) + 28 + 25;
+            final inteiro = wTitulo + 12 + wBotao <= c.maxWidth;
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: BoxDecoration(
+                              color: accent,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 7),
+                          Flexible(
+                            child: Text(
+                              'VENDAS · PROPOSTAS',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: accent,
+                                letterSpacing: 1.4,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 10.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _titulo,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: _estiloTitulo.copyWith(
+                          color: ThemeHelpers.textColor(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                _NovaProposta(
+                  accent: accent,
+                  canCreate: canCreate,
+                  rotulo: inteiro ? 'Nova proposta' : 'Nova',
+                  onTap: onCreate,
+                ),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 6),
+        // Linha de apoio: a leitura do momento (antes um número gigante
+        // solto no topo, sem título nem ação).
+        Text(
+          st == null
+              ? 'Registre a proposta e colha as assinaturas em três etapas.'
+              : '${_inteiro.format(st.total)} '
+                    '${st.total == 1 ? 'proposta' : 'propostas'}'
+                    '${andamento != null && andamento > 0 ? ' · ${_inteiro.format(andamento)} em andamento' : ''}',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: muted,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// "Nova proposta" no canto do hero: compacto, na cor da marca. Sem
+/// permissão continua à vista com cadeado e diz o porquê ao tocar.
+class _NovaProposta extends StatelessWidget {
+  const _NovaProposta({
+    required this.accent,
+    required this.canCreate,
+    required this.rotulo,
+    required this.onTap,
+  });
+  final Color accent;
+  final bool canCreate;
+  final String rotulo;
+  final VoidCallback onTap;
+
+  static const TextStyle estiloRotulo = TextStyle(
+    fontSize: 14,
+    fontWeight: FontWeight.w800,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final cheio = canCreate;
+    return Semantics(
+      button: true,
+      label: cheio ? 'Nova proposta' : 'Nova proposta (sem permissão)',
+      excludeSemantics: true,
+      child: Material(
+        color: cheio ? accent : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 42),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            decoration: cheio
+                ? null
+                : BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: ThemeHelpers.borderColor(context),
+                    ),
+                  ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  cheio ? Icons.add_rounded : Icons.lock_outline_rounded,
+                  size: 19,
+                  color: cheio ? Colors.white : muted,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  rotulo,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: estiloRotulo.copyWith(
+                    color: cheio ? Colors.white : muted,
+                  ),
+                ),
               ],
             ),
           ),
-          // Com o teclado aberto (busca), o botão sairia flutuando sobre a
-          // lista — some até o teclado fechar.
-          if (canCreate && !keyboardOpen)
-            Positioned(
-              right: padH,
-              bottom: 22,
-              child: SafeArea(
-                child: _CreateFab(accent: accent, onTap: _openCreate),
+        ),
+      ),
+    );
+  }
+}
+
+/// Busca da lista: o termo só vale ao buscar (teclado ou seta). A ponta
+/// direita diz o estado — seta quando há termo novo, "x" quando há busca
+/// valendo (limpa e recarrega).
+class _SearchBar extends StatelessWidget {
+  const _SearchBar({
+    required this.controller,
+    required this.accent,
+    required this.aplicada,
+    required this.onSubmitted,
+    required this.onClear,
+  });
+  final TextEditingController controller;
+  final Color accent;
+
+  /// Termo que está valendo na lista agora.
+  final String aplicada;
+  final VoidCallback onSubmitted;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final hair = ThemeHelpers.borderLightColor(context);
+    final fill = isDark
+        ? AppColors.background.backgroundTertiaryDarkMode
+        : AppColors.background.backgroundTertiary;
+    OutlineInputBorder borda(Color c, [double w = 1]) => OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide(color: c, width: w),
+    );
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: controller,
+      builder: (context, v, _) {
+        final digitado = v.text.trim();
+        Widget? sufixo;
+        if (digitado.isNotEmpty && digitado != aplicada) {
+          sufixo = IconButton(
+            tooltip: 'Buscar',
+            icon: Icon(Icons.arrow_forward_rounded, color: accent, size: 21),
+            onPressed: () {
+              FocusScope.of(context).unfocus();
+              onSubmitted();
+            },
+          );
+        } else if (digitado.isNotEmpty || aplicada.isNotEmpty) {
+          sufixo = IconButton(
+            tooltip: 'Limpar busca',
+            icon: Icon(Icons.close_rounded, color: muted, size: 20),
+            onPressed: onClear,
+          );
+        }
+        return TextField(
+          controller: controller,
+          style: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+          textInputAction: TextInputAction.search,
+          onSubmitted: (_) {
+            FocusScope.of(context).unfocus();
+            onSubmitted();
+          },
+          decoration: InputDecoration(
+            hintText: 'Nº da proposta ou comprador',
+            isDense: true,
+            prefixIcon: Icon(Icons.search_rounded, color: muted, size: 21),
+            suffixIcon: sufixo,
+            filled: true,
+            fillColor: fill,
+            contentPadding: const EdgeInsets.symmetric(vertical: 12),
+            border: borda(hair),
+            enabledBorder: borda(hair),
+            focusedBorder: borda(accent.withValues(alpha: 0.65), 1.4),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Painel de status — UMA faixa horizontal, sem pílulas: três células
+/// iguais separadas por filete (número grande + rótulo), a marcada ganha o
+/// traço de 3px na cor do status, como a aba ativa do app. Tocar filtra por
+/// aquele status; tocar de novo volta a todas (o status também está no modal
+/// Filtros).
+///
+/// A contagem é da base (`/stats`, como no web): não muda com a busca nem
+/// com os filtros — o recorte está na linha da lista logo abaixo.
+class _PainelDeStatus extends StatelessWidget {
+  const _PainelDeStatus({
+    required this.current,
+    required this.onChanged,
+    this.stats,
+  });
+  final ProposalStatus? current;
+  final ValueChanged<ProposalStatus?> onChanged;
+  final _Contagem? stats;
+
+  @override
+  Widget build(BuildContext context) {
+    final itens = <(ProposalStatus, String)>[
+      (ProposalStatus.processing, 'Em andamento'),
+      (ProposalStatus.finalized, 'Finalizadas'),
+      (ProposalStatus.canceled, 'Canceladas'),
+    ];
+    final hair = ThemeHelpers.borderLightColor(context);
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: hair),
+          bottom: BorderSide(color: hair),
+        ),
+      ),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var i = 0; i < itens.length; i++) ...[
+              if (i > 0) VerticalDivider(width: 1, thickness: 1, color: hair),
+              Expanded(
+                child: _CelulaDeStatus(
+                  rotulo: itens[i].$2,
+                  tom: proposalStatusTom(context, itens[i].$1),
+                  n: stats?.doStatus(itens[i].$1),
+                  marcada: current == itens[i].$1,
+                  onTap: () {
+                    final s = itens[i].$1;
+                    onChanged(current == s ? null : s);
+                  },
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CelulaDeStatus extends StatelessWidget {
+  const _CelulaDeStatus({
+    required this.rotulo,
+    required this.tom,
+    required this.n,
+    required this.marcada,
+    required this.onTap,
+  });
+  final String rotulo;
+  final SaleFormTom tom;
+  final int? n;
+  final bool marcada;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Semantics(
+      button: true,
+      selected: marcada,
+      label: '$rotulo ${n ?? ''}',
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(8, 10, 6, 9),
+          decoration: BoxDecoration(
+            color: marcada ? tom.sinal.withValues(alpha: 0.08) : null,
+            border: Border(
+              bottom: BorderSide(
+                color: marcada ? tom.sinal : Colors.transparent,
+                width: 3,
+              ),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  n == null ? '—' : _inteiro.format(n),
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.4,
+                    height: 1.05,
+                    color: n == null ? muted : tom.texto,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 3),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  rotulo,
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: marcada ? FontWeight.w900 : FontWeight.w700,
+                    color: marcada ? ThemeHelpers.textColor(context) : muted,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Linha entre os controles e a lista: quantas propostas o recorte tem (e de
+/// quantas na base), em que ordem, e (para quem vê tudo) o atalho de ver as
+/// excluídas.
+class _LinhaDaLista extends StatelessWidget {
+  const _LinhaDaLista({
+    required this.total,
+    required this.base,
+    required this.recorte,
+    required this.carregando,
+    required this.excluidas,
+    required this.sortBy,
+    required this.sortOrder,
+    required this.mostrarExcluidas,
+    required this.onExcluidas,
+  });
+
+  /// Resultado do recorte atual (`total` da listagem).
+  final int? total;
+
+  /// Base inteira (`/stats`).
+  final int? base;
+  final bool recorte;
+  final bool carregando;
+  final bool excluidas;
+  final String sortBy;
+  final String sortOrder;
+  final bool mostrarExcluidas;
+  final VoidCallback onExcluidas;
+
+  static String _ordem(String by, String order) {
+    final desc = order.toUpperCase() != 'ASC';
+    switch (by) {
+      case 'proposalNumber':
+        return desc ? 'nº maior primeiro' : 'nº menor primeiro';
+      case 'status':
+        return 'por status';
+      case 'proponentName':
+        return desc ? 'comprador Z→A' : 'comprador A→Z';
+      case 'proposedPrice':
+        return desc ? 'maior valor primeiro' : 'menor valor primeiro';
+      case 'validityDays':
+        return desc ? 'maior validade primeiro' : 'menor validade primeiro';
+      case 'creatorName':
+        return desc ? 'autor Z→A' : 'autor A→Z';
+      default:
+        return desc ? 'mais recentes primeiro' : 'mais antigas primeiro';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final erro = SaleFormTom.erro(context).texto;
+    final n = total;
+    final b = base;
+    final contagem = carregando || n == null
+        ? 'Carregando'
+        : excluidas
+        ? '${_inteiro.format(n)} ${n == 1 ? 'excluída' : 'excluídas'}'
+        : '${_inteiro.format(n)} ${n == 1 ? 'proposta' : 'propostas'}';
+    // Num recorte, "de quantas" na base — a mesma leitura do cabeçalho de
+    // antes ("no recorte, de N no total"), agora numa linha só.
+    final deBase =
+        !carregando &&
+            !excluidas &&
+            recorte &&
+            n != null &&
+            b != null &&
+            b != n
+        ? '  ·  de ${_inteiro.format(b)}'
+        : '';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: contagem.toUpperCase(),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.1,
+                      color: excluidas ? erro : ThemeHelpers.textColor(context),
+                    ),
+                  ),
+                  TextSpan(text: '$deBase  ·  ${_ordem(sortBy, sortOrder)}'),
+                ],
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: muted),
+            ),
+          ),
+          if (mostrarExcluidas)
+            InkWell(
+              onTap: onExcluidas,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      excluidas ? LucideIcons.arrowLeft : LucideIcons.trash2,
+                      size: 14,
+                      color: excluidas ? erro : muted,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      excluidas ? 'Voltar às ativas' : 'Excluídas',
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: excluidas ? erro : muted,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
         ],
@@ -565,577 +1062,127 @@ class _ProposalsPageState extends State<ProposalsPage> {
   }
 }
 
-/// Cabeçalho da lista: a contagem responde "quantas", a frase ao lado
-/// responde "quais e em que ordem". Sem eyebrow, sem ponto luminoso, sem
-/// faixa de KPI — a lista é a estrela.
-class _ListHeader extends StatelessWidget {
-  const _ListHeader({
-    required this.total,
-    required this.result,
-    required this.filtered,
-    required this.deletedOnly,
-    required this.orderLabel,
-  });
-
-  /// Base inteira (`/stats`).
-  final int? total;
-
-  /// Resultado do recorte atual (`total` da listagem).
-  final int? result;
-  final bool filtered;
-  final bool deletedOnly;
-  final String orderLabel;
-
-  static final NumberFormat _int = NumberFormat.decimalPattern('pt_BR');
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final textColor = ThemeHelpers.textColor(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final shown = filtered ? result : (total ?? result);
-    final n = shown ?? 0;
-    final noun = deletedOnly
-        ? (n == 1 ? 'proposta excluída' : 'propostas excluídas')
-        : (n == 1 ? 'proposta' : 'propostas');
-    final String scope;
-    if (deletedOnly) {
-      scope = 'Em auditoria, fora da lista normal · $orderLabel';
-    } else if (filtered) {
-      scope = total != null
-          ? 'No recorte, de ${_int.format(total)} no total · $orderLabel'
-          : 'No recorte · $orderLabel';
-    } else {
-      scope = 'Todas as fichas · $orderLabel';
-    }
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 150),
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              shown == null ? '—' : _int.format(n),
-              maxLines: 1,
-              softWrap: false,
-              style: theme.textTheme.displaySmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: textColor,
-                height: 1.0,
-                letterSpacing: -1.0,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 2),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  noun,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: textColor,
-                    fontWeight: FontWeight.w800,
-                    height: 1.1,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  scope,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: secondary,
-                    fontWeight: FontWeight.w600,
-                    height: 1.3,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _SearchBar extends StatelessWidget {
-  const _SearchBar({
-    required this.controller,
-    required this.accent,
-    required this.onSubmitted,
-    required this.onClear,
-  });
-
-  final TextEditingController controller;
-  final Color accent;
-  final VoidCallback onSubmitted;
-  final VoidCallback onClear;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final hairline = ThemeHelpers.borderLightColor(context);
-    final fill = isDark
-        ? AppColors.background.backgroundTertiaryDarkMode
-        : AppColors.background.backgroundTertiary;
-    return ValueListenableBuilder<TextEditingValue>(
-      valueListenable: controller,
-      builder: (context, value, _) {
-        return TextField(
-          controller: controller,
-          textInputAction: TextInputAction.search,
-          style: Theme.of(
-            context,
-          ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
-          onSubmitted: (_) {
-            FocusScope.of(context).unfocus();
-            onSubmitted();
-          },
-          decoration: InputDecoration(
-            hintText: 'Buscar nº, comprador, ficha…',
-            hintStyle: TextStyle(
-              color: secondary.withValues(alpha: 0.9),
-              fontWeight: FontWeight.w500,
-            ),
-            isDense: true,
-            prefixIcon: Icon(Icons.search_rounded, color: accent, size: 22),
-            suffixIcon: value.text.isEmpty
-                ? null
-                : IconButton(
-                    icon: Icon(Icons.close_rounded, size: 19, color: secondary),
-                    onPressed: onClear,
-                    tooltip: 'Limpar busca',
-                  ),
-            filled: true,
-            fillColor: fill,
-            contentPadding: const EdgeInsets.symmetric(vertical: 13),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: hairline),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: hairline),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(
-                color: accent.withValues(alpha: 0.65),
-                width: 1.4,
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _StatusChips extends StatelessWidget {
-  const _StatusChips({
-    required this.current,
-    required this.accent,
-    required this.onChanged,
-  });
-
-  final ProposalStatus? current;
-  final Color accent;
-  final ValueChanged<ProposalStatus?> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    final items = <(ProposalStatus?, String, Color)>[
-      (null, 'Todas', accent),
-      (
-        ProposalStatus.processing,
-        'Em andamento',
-        dark ? AppColors.status.infoDarkMode : AppColors.status.info,
-      ),
-      (
-        ProposalStatus.finalized,
-        'Finalizadas',
-        dark ? AppColors.status.successDarkMode : AppColors.status.success,
-      ),
-      (
-        ProposalStatus.canceled,
-        'Canceladas',
-        dark ? AppColors.status.errorDarkMode : AppColors.status.error,
-      ),
-    ];
-
-    // Grid de largura uniforme (2 colunas) — alinhado, sem scroll horizontal.
-    // Item ímpar final ocupa a linha inteira para não deixar célula órfã.
-    return LayoutBuilder(
-      builder: (ctx, c) {
-        const gap = 8.0;
-        final half = (c.maxWidth - gap) / 2;
-        return Wrap(
-          spacing: gap,
-          runSpacing: gap,
-          children: [
-            for (var i = 0; i < items.length; i++)
-              SizedBox(
-                width: (items.length.isOdd && i == items.length - 1)
-                    ? c.maxWidth
-                    : half,
-                child: _StatusChip(
-                  label: items[i].$2,
-                  tone: items[i].$3,
-                  selected: items[i].$1 == current,
-                  onTap: () => onChanged(items[i].$1),
-                ),
-              ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _StatusChip extends StatelessWidget {
-  const _StatusChip({
-    required this.label,
-    required this.tone,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final Color tone;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      selected: selected,
-      child: Material(
-        color: selected ? tone.withValues(alpha: 0.13) : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 42),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: selected
-                    ? tone.withValues(alpha: 0.55)
-                    : tone.withValues(alpha: 0.3),
-                width: 1.4,
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: selected ? tone : tone.withValues(alpha: 0.6),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: selected
-                          ? tone
-                          : ThemeHelpers.textSecondaryColor(context),
-                      letterSpacing: 0.1,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _DeletedToggle extends StatelessWidget {
-  const _DeletedToggle({
-    required this.value,
-    required this.accent,
-    required this.onChanged,
-  });
-
-  final bool value;
-  final Color accent;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      toggled: value,
-      button: true,
-      child: InkWell(
-        onTap: () => onChanged(!value),
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 42),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: value
-                  ? accent.withValues(alpha: 0.55)
-                  : ThemeHelpers.borderColor(context),
-            ),
-            color: value ? accent.withValues(alpha: 0.06) : null,
-          ),
-          child: Row(
-            children: [
-              Icon(
-                value ? Icons.toggle_on_rounded : Icons.toggle_off_outlined,
-                size: 22,
-                color: value
-                    ? accent
-                    : ThemeHelpers.textSecondaryColor(context),
-              ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  'Apenas excluídas',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: value
-                        ? accent
-                        : ThemeHelpers.textSecondaryColor(context),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Um recorte ativo que vira etiqueta removível.
-class _ActiveFilter {
-  final IconData icon;
-  final String label;
-  final VoidCallback onRemove;
-
-  const _ActiveFilter({
-    required this.icon,
-    required this.label,
-    required this.onRemove,
-  });
-}
-
-/// Etiquetas do recorte: o que está filtrando a lista, à vista, cada uma
-/// com "x" — sem precisar abrir o modal para descobrir.
-class _ActiveFiltersRow extends StatelessWidget {
-  const _ActiveFiltersRow({required this.filters, this.onClearAll});
-
-  final List<_ActiveFilter> filters;
-  final VoidCallback? onClearAll;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final text = ThemeHelpers.textColor(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final fill = isDark
-        ? AppColors.background.backgroundTertiaryDarkMode
-        : AppColors.background.backgroundTertiary;
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        for (final f in filters)
-          Semantics(
-            button: true,
-            label: 'Remover filtro ${f.label}',
-            child: Material(
-              color: fill,
-              borderRadius: BorderRadius.circular(10),
-              child: InkWell(
-                onTap: f.onRemove,
-                borderRadius: BorderRadius.circular(10),
-                child: Container(
-                  constraints: const BoxConstraints(minHeight: 36),
-                  padding: const EdgeInsets.fromLTRB(10, 6, 8, 6),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: ThemeHelpers.borderLightColor(context),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(f.icon, size: 14, color: secondary),
-                      const SizedBox(width: 6),
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 210),
-                        child: Text(
-                          f.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w700,
-                            color: text,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Icon(Icons.close_rounded, size: 15, color: secondary),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        if (onClearAll != null)
-          TextButton(
-            onPressed: onClearAll,
-            style: TextButton.styleFrom(
-              // Nunca vermelho: limpar não é destrutivo.
-              foregroundColor: secondary,
-              minimumSize: const Size(48, 36),
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              textStyle: const TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            child: const Text('Limpar tudo'),
-          ),
-      ],
-    );
-  }
-}
-
-/// Vazio que ENSINA: o que aparece aqui e como chegar lá.
+/// Vazio que ensina: o que aparece aqui e como chegar lá — e, num recorte,
+/// o caminho de volta (limpar busca e filtros).
 class _EmptyState extends StatelessWidget {
   const _EmptyState({
-    required this.filtered,
-    required this.deletedOnly,
+    required this.recorte,
+    required this.excluidas,
     required this.canCreate,
-    required this.onClear,
+    required this.onCreate,
+    required this.onLimpar,
   });
 
-  final bool filtered;
-  final bool deletedOnly;
+  final bool recorte;
+  final bool excluidas;
   final bool canCreate;
-  final VoidCallback onClear;
+  final VoidCallback onCreate;
+  final VoidCallback onLimpar;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final muted = ThemeHelpers.textSecondaryColor(context);
     final accent = _accent(context);
-    final String title;
-    final String body;
-    final IconData icon;
-    if (deletedOnly) {
-      icon = LucideIcons.archive;
-      title = 'Nenhuma proposta excluída';
-      body = 'Propostas excluídas saem da lista normal e ficam aqui para '
-          'auditoria, com o motivo registrado.';
-    } else if (filtered) {
-      icon = LucideIcons.searchX;
-      title = 'Nenhuma proposta neste recorte';
-      body = 'Tire uma etiqueta acima ou limpe tudo para voltar a ver as '
-          'outras propostas.';
-    } else {
-      icon = LucideIcons.fileSignature;
-      title = 'Nenhuma proposta ainda';
-      body = canCreate
-          ? 'Aqui ficam as fichas de proposta de compra. Registre a primeira '
-              'em "Nova proposta": o comprador assina primeiro, depois o '
-              'proprietário e, por fim, o corretor.'
-          : 'Aqui ficam as fichas de proposta de compra que você pode ver. '
-              'Quando alguém registrar uma proposta com você, ela aparece '
-              'nesta lista.';
-    }
+    final (icone, titulo, texto) = excluidas
+        ? (
+            LucideIcons.archive,
+            'Nenhuma proposta excluída neste recorte',
+            'Propostas excluídas saem da lista normal e ficam aqui para '
+                'auditoria, com o motivo registrado. Toque em "Voltar às '
+                'ativas" para ver as outras.',
+          )
+        : recorte
+        ? (
+            LucideIcons.searchX,
+            'Nenhuma proposta neste recorte',
+            'A busca ou os filtros não encontraram propostas. Amplie os '
+                'critérios ou limpe tudo para ver a lista completa.',
+          )
+        : (
+            LucideIcons.fileSignature,
+            'Nenhuma proposta ainda',
+            canCreate
+                ? 'Aqui ficam as fichas de proposta de compra. Registre a '
+                      'primeira em "Nova proposta": o comprador assina '
+                      'primeiro, depois o proprietário e, por fim, o '
+                      'corretor.'
+                : 'Aqui ficam as fichas de proposta de compra que você pode '
+                      'ver. Quando alguém registrar uma proposta com você, '
+                      'ela aparece nesta lista.',
+          );
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 420),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 112),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: isDark ? 0.16 : 0.08),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: accent.withValues(alpha: 0.22)),
-                ),
-                child: Icon(icon, size: 24, color: accent),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: muted.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: muted.withValues(alpha: 0.22)),
               ),
-              const SizedBox(height: 14),
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
+              child: Icon(icone, size: 24, color: muted),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              titulo,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: ThemeHelpers.textColor(context),
               ),
-              const SizedBox(height: 6),
-              Text(
-                body,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: muted,
-                  height: 1.45,
-                ),
-              ),
-              if (filtered || deletedOnly) ...[
-                const SizedBox(height: 16),
-                OutlinedButton.icon(
-                  onPressed: onClear,
-                  icon: const Icon(LucideIcons.filterX, size: 16),
-                  label: const Text('Limpar filtros'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: muted,
-                    side: BorderSide(color: ThemeHelpers.borderColor(context)),
-                    minimumSize: const Size(48, 44),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    textStyle: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              texto,
+              textAlign: TextAlign.center,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: muted, height: 1.45),
+            ),
+            if (recorte) ...[
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: onLimpar,
+                icon: const Icon(LucideIcons.filterX, size: 17),
+                label: const Text('Limpar busca e filtros'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: ThemeHelpers.textColor(context),
+                  side: BorderSide(color: ThemeHelpers.borderColor(context)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 12,
                   ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  textStyle: const TextStyle(fontWeight: FontWeight.w800),
                 ),
-              ],
+              ),
+            ] else if (canCreate) ...[
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: onCreate,
+                icon: const Icon(Icons.add_rounded, size: 19),
+                label: const Text('Nova proposta'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: accent,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
             ],
-          ),
+          ],
         ),
       ),
     );
@@ -1148,8 +1195,6 @@ class _LockedState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final text = ThemeHelpers.textColor(context);
     final muted = ThemeHelpers.textSecondaryColor(context);
     return Center(
       child: SingleChildScrollView(
@@ -1160,12 +1205,12 @@ class _LockedState extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 58,
-                height: 58,
+                width: 56,
+                height: 56,
                 decoration: BoxDecoration(
-                  color: muted.withValues(alpha: isDark ? 0.16 : 0.08),
+                  color: muted.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: muted.withValues(alpha: 0.25)),
+                  border: Border.all(color: muted.withValues(alpha: 0.22)),
                 ),
                 child: Icon(LucideIcons.lock, size: 25, color: muted),
               ),
@@ -1176,8 +1221,7 @@ class _LockedState extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 17,
                   fontWeight: FontWeight.w900,
-                  letterSpacing: -0.2,
-                  color: text,
+                  color: ThemeHelpers.textColor(context),
                 ),
               ),
               const SizedBox(height: 8),
@@ -1185,55 +1229,7 @@ class _LockedState extends StatelessWidget {
                 'Sua conta não tem a permissão de ver propostas. Peça ao '
                 'administrador da empresa para liberar o acesso.',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 13.5,
-                  height: 1.45,
-                  fontWeight: FontWeight.w500,
-                  color: muted,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CreateFab extends StatelessWidget {
-  const _CreateFab({required this.accent, required this.onTap});
-
-  final Color accent;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: accent,
-      shape: const StadiumBorder(),
-      elevation: 4,
-      // Sombra neutra: a cor da marca na sombra vira mancha no claro.
-      shadowColor: Colors.black.withValues(alpha: 0.35),
-      child: InkWell(
-        customBorder: const StadiumBorder(),
-        onTap: onTap,
-        child: const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 22, vertical: 14),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.add_rounded, color: Colors.white, size: 22),
-              SizedBox(width: 8),
-              Text(
-                'Nova proposta',
-                maxLines: 1,
-                softWrap: false,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 15,
-                  letterSpacing: 0.2,
-                ),
+                style: TextStyle(fontSize: 13.5, height: 1.45, color: muted),
               ),
             ],
           ),

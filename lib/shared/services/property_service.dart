@@ -489,6 +489,50 @@ enum PropertyStatus {
   }
 }
 
+/// Motivo da desativação do imóvel — os 9 valores do back
+/// (`property-deactivation-reason.enum.ts`), na mesma ordem e com os mesmos
+/// rótulos de `PropertyDeactivationReasonLabels` (web e back). O [value] é o
+/// que viaja no `reason` do `PATCH /properties/:id/deactivate`.
+enum PropertyDeactivationReason {
+  rentedByUs('rented_by_us', 'Alugado por esta imobiliária'),
+  rentedByOtherAgency(
+    'rented_by_other_agency',
+    'Alugado por outra imobiliária',
+  ),
+  soldByUs('sold_by_us', 'Vendido por esta imobiliária'),
+  soldByOtherAgency('sold_by_other_agency', 'Vendido por outra imobiliária'),
+  ownerWithdrew(
+    'owner_withdrew',
+    'Proprietário desistiu / retirou o imóvel',
+  ),
+  duplicateListing('duplicate_listing', 'Cadastro duplicado'),
+  incorrectData('incorrect_data', 'Dados incorretos'),
+  temporarilyUnavailable(
+    'temporarily_unavailable',
+    'Indisponível temporariamente',
+  ),
+  other('other', 'Outro');
+
+  final String value;
+  final String label;
+
+  const PropertyDeactivationReason(this.value, this.label);
+
+  static PropertyDeactivationReason? fromString(String? value) {
+    final v = value?.trim().toLowerCase() ?? '';
+    if (v.isEmpty) return null;
+    for (final e in PropertyDeactivationReason.values) {
+      if (e.value == v) return e;
+    }
+    return null;
+  }
+
+  /// Rótulo de um valor cru — cai no próprio valor quando o motivo não é
+  /// conhecido (a mesma regra do back ao escrever o histórico).
+  static String labelOf(String? raw) =>
+      fromString(raw)?.label ?? (raw?.trim() ?? '');
+}
+
 /// Modelo de Property
 class Property {
   final String id;
@@ -614,6 +658,69 @@ class Property {
   final double? mcmvSubsidy;
   final List<String>? mcmvDocumentation;
   final String? mcmvNotes;
+  // ─── Detalhe: proprietário, responsáveis, desativação e exclusão ──────
+  /// Responsáveis pelo imóvel (principal primeiro, depois os adicionais) com
+  /// nome/e-mail/telefone — `responsibles` do `GET /properties/:id`. `null`
+  /// quando a resposta não traz a lista (listagens).
+  final List<PropertyResponsible>? responsibles;
+
+  /// A API deixa o usuário ver os dados do proprietário (gestão ou
+  /// responsável pelo imóvel). O web só mostra a seção com `true`; `null`
+  /// (campo ausente) conta como "não pode".
+  final bool? canViewOwnerData;
+
+  /// Proprietário RESTRITO (responsável = União) e usuário sem acesso: o
+  /// bloco `owner` volta vazio de propósito e a ficha mostra "Dados
+  /// restritos" em vez de sumir.
+  final bool? ownerDataRestricted;
+
+  /// Data ISO da exclusão lógica (soft delete). Imóvel excluído abre só para
+  /// consulta (regra do web: nenhuma ação de escrita).
+  final String? deletedAt;
+
+  /// Motivo cru da última desativação (um `value` de
+  /// [PropertyDeactivationReason]).
+  final String? deactivationReason;
+
+  /// Rótulo legível do motivo, como o back devolve.
+  final String? deactivationReasonLabel;
+
+  /// Data ISO da última desativação.
+  final String? deactivatedAt;
+
+  /// Observação registrada na desativação.
+  final String? deactivationNotes;
+
+  // ─── Detalhe (onda 2): vitrine, negociação, vínculos e ficha adicional ─
+  /// Terceira chave da vitrine do site (`isSitePremiumLine`, aba "Site").
+  /// `null` quando a resposta não trouxe o campo (listagens).
+  final bool? isSitePremiumLine;
+
+  /// Nome do condomínio vinculado, como o detalhe devolve — o web usa quando
+  /// o cadastro do condomínio não pode ser lido.
+  final String? condominiumName;
+
+  /// Nome do empreendimento vinculado (mesma regra de [condominiumName]).
+  final String? empreendimentoName;
+
+  /// Aceita permuta: `true`/`false`; `null` = não informado (o bloco
+  /// Negociação do web só mostra a linha com valor).
+  final bool? acceptsExchange;
+
+  /// Valor máximo aceito em permuta (o "Sim, até …" do web).
+  final double? exchangeMaxValue;
+
+  /// Cômodos extras com quantidade (`extraRooms`), na ordem da API.
+  final List<PropertyExtraRoom>? extraRooms;
+
+  /// Ficha de venda vinculada (`linkedSaleForm` do detalhe).
+  final PropertyLinkedSaleForm? linkedSaleForm;
+
+  /// "Ficha adicional" — campos extras/importados do cadastro (W:393-500).
+  final PropertyAdditionalInfo? additionalInfo;
+
+  /// A galeria tem vídeo (`hasVideo`).
+  final bool? hasVideo;
 
   Property({
     required this.id,
@@ -697,6 +804,23 @@ class Property {
     this.mcmvSubsidy,
     this.mcmvDocumentation,
     this.mcmvNotes,
+    this.responsibles,
+    this.canViewOwnerData,
+    this.ownerDataRestricted,
+    this.deletedAt,
+    this.deactivationReason,
+    this.deactivationReasonLabel,
+    this.deactivatedAt,
+    this.deactivationNotes,
+    this.isSitePremiumLine,
+    this.condominiumName,
+    this.empreendimentoName,
+    this.acceptsExchange,
+    this.exchangeMaxValue,
+    this.extraRooms,
+    this.linkedSaleForm,
+    this.additionalInfo,
+    this.hasVideo,
   })  : typeRaw = (typeRaw == null || typeRaw.trim().isEmpty)
             ? type.value
             : typeRaw.trim().toLowerCase(),
@@ -716,6 +840,9 @@ class Property {
 
   /// Rótulo do status — do enum quando conhecido, senão o próprio valor cru.
   String get statusLabel => PropertyStatus.labelOf(statusRaw);
+
+  /// Excluído (soft delete) — a ficha fica só para consulta.
+  bool get isDeleted => (deletedAt ?? '').trim().isNotEmpty;
 
   factory Property.fromJson(Map<String, dynamic> json) {
     // Helper para converter valores que podem vir como String ou num
@@ -748,6 +875,25 @@ class Property {
         return double.tryParse(value.trim().replaceAll(',', '.'));
       }
       return null;
+    }
+
+    // Campos novos lidos com tolerância: bool, "true"/"false" ou 0/1; texto
+    // vazio vira null. Tipo inesperado vira null (= comportamento antigo) em
+    // vez de derrubar o parse da ficha inteira.
+    bool? parseBool(dynamic value) {
+      if (value is bool) return value;
+      if (value is num) return value != 0;
+      if (value is String) {
+        final v = value.trim().toLowerCase();
+        if (v == 'true' || v == '1') return true;
+        if (v == 'false' || v == '0') return false;
+      }
+      return null;
+    }
+
+    String? parseText(dynamic value) {
+      final v = value?.toString().trim() ?? '';
+      return v.isEmpty ? null : v;
     }
 
     return Property(
@@ -904,6 +1050,50 @@ class Property {
               ? List<String>.from((json['mcmv_documentation'] as List).map((e) => e.toString()))
               : null,
       mcmvNotes: json['mcmvNotes']?.toString() ?? json['mcmv_notes']?.toString(),
+      responsibles: () {
+        final raw = json['responsibles'];
+        if (raw is! List) return null;
+        return raw
+            .whereType<Map>()
+            .map((e) =>
+                PropertyResponsible.fromJson(Map<String, dynamic>.from(e)))
+            .toList();
+      }(),
+      canViewOwnerData:
+          parseBool(json['canViewOwnerData'] ?? json['can_view_owner_data']),
+      ownerDataRestricted: parseBool(
+        json['ownerDataRestricted'] ?? json['owner_data_restricted'],
+      ),
+      deletedAt: parseText(json['deletedAt'] ?? json['deleted_at']),
+      deactivationReason:
+          parseText(json['deactivationReason'] ?? json['deactivation_reason']),
+      deactivationReasonLabel: parseText(
+        json['deactivationReasonLabel'] ?? json['deactivation_reason_label'],
+      ),
+      deactivatedAt:
+          parseText(json['deactivatedAt'] ?? json['deactivated_at']),
+      deactivationNotes:
+          parseText(json['deactivationNotes'] ?? json['deactivation_notes']),
+      isSitePremiumLine: parseBool(
+        json['isSitePremiumLine'] ?? json['is_site_premium_line'],
+      ),
+      condominiumName:
+          parseText(json['condominiumName'] ?? json['condominium_name']),
+      empreendimentoName: parseText(
+        json['empreendimentoName'] ?? json['empreendimento_name'],
+      ),
+      acceptsExchange:
+          parseBool(json['acceptsExchange'] ?? json['accepts_exchange']),
+      exchangeMaxValue:
+          parseDouble(json['exchangeMaxValue'] ?? json['exchange_max_value']),
+      extraRooms: PropertyExtraRoom.listFrom(
+        json['extraRooms'] ?? json['extra_rooms'],
+      ),
+      linkedSaleForm: PropertyLinkedSaleForm.tryParse(
+        json['linkedSaleForm'] ?? json['linked_sale_form'],
+      ),
+      additionalInfo: PropertyAdditionalInfo.fromJson(json),
+      hasVideo: parseBool(json['hasVideo'] ?? json['has_video']),
     );
   }
 }
@@ -963,6 +1153,40 @@ class PropertyCaptor {
   }
 }
 
+/// Responsável pelo imóvel (principal ou adicional) — item de
+/// `responsibles` em `/properties/:id`: `{ id, name?, email?, phone? }`, com
+/// o principal primeiro. `avatar` quase nunca vem; a UI cai nas iniciais.
+class PropertyResponsible {
+  final String id;
+  final String? name;
+  final String? email;
+  final String? phone;
+  final String? avatar;
+
+  const PropertyResponsible({
+    required this.id,
+    this.name,
+    this.email,
+    this.phone,
+    this.avatar,
+  });
+
+  factory PropertyResponsible.fromJson(Map<String, dynamic> json) {
+    String? text(dynamic value) {
+      final v = value?.toString().trim() ?? '';
+      return v.isEmpty ? null : v;
+    }
+
+    return PropertyResponsible(
+      id: text(json['id']) ?? text(json['userId']) ?? '',
+      name: text(json['name']),
+      email: text(json['email']),
+      phone: text(json['phone']),
+      avatar: AvatarUrlResolver.resolve(text(json['avatar'])),
+    );
+  }
+}
+
 class PropertyImage {
   final String id;
   final String url;
@@ -971,6 +1195,16 @@ class PropertyImage {
   final bool isMain;
   final String createdAt;
 
+  /// `image` ou `video` (`mediaType` da galeria). Cadastro antigo sem o
+  /// campo conta como foto — a mesma leitura do back.
+  final String mediaType;
+
+  /// Duração do vídeo em segundos (até 1:40), quando informada.
+  final int? durationSeconds;
+
+  /// Aparece no site público (`showOnPublicSite`); `null` = não informado.
+  final bool? showOnPublicSite;
+
   PropertyImage({
     required this.id,
     required this.url,
@@ -978,7 +1212,45 @@ class PropertyImage {
     required this.category,
     required this.isMain,
     required this.createdAt,
+    this.mediaType = 'image',
+    this.durationSeconds,
+    this.showOnPublicSite,
   });
+
+  /// Item de mídia é vídeo — toca, não vira `<img>` (paridade
+  /// `isVideoMedia` do carrossel web).
+  bool get isVideo => mediaType.trim().toLowerCase() == 'video';
+
+  /// Capa do vídeo (quadro gerado no upload) — só quando é diferente do
+  /// próprio arquivo, a mesma regra do `videoPosterUrl` do web. Para foto,
+  /// `null`.
+  String? get posterUrl {
+    if (!isVideo) return null;
+    final thumb = thumbnailUrl?.trim() ?? '';
+    if (thumb.isEmpty || thumb == url) return null;
+    return thumb;
+  }
+
+  /// Cópia com campos trocados — preserva o tipo de mídia (reconstruir com
+  /// o construtor sem `mediaType` transformaria vídeo em foto).
+  PropertyImage copyWith({
+    String? url,
+    String? thumbnailUrl,
+    String? category,
+    bool? isMain,
+  }) {
+    return PropertyImage(
+      id: id,
+      url: url ?? this.url,
+      thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
+      category: category ?? this.category,
+      isMain: isMain ?? this.isMain,
+      createdAt: createdAt,
+      mediaType: mediaType,
+      durationSeconds: durationSeconds,
+      showOnPublicSite: showOnPublicSite,
+    );
+  }
 
   factory PropertyImage.fromJson(Map<String, dynamic> json) {
     final rawUrl = json['url'] ??
@@ -1001,6 +1273,14 @@ class PropertyImage {
       category: json['category']?.toString() ?? 'general',
       isMain: json['isMain'] as bool? ?? json['is_main'] as bool? ?? false,
       createdAt: json['createdAt']?.toString() ?? json['created_at']?.toString() ?? '',
+      mediaType: _optText(json['mediaType'] ?? json['media_type'])
+              ?.toLowerCase() ??
+          'image',
+      durationSeconds:
+          _optNum(json['durationSeconds'] ?? json['duration_seconds'])
+              ?.round(),
+      showOnPublicSite:
+          _optBool(json['showOnPublicSite'] ?? json['show_on_public_site']),
     );
   }
 }
@@ -1071,6 +1351,238 @@ class PropertyOwner {
       phone: json['phone']?.toString(),
       document: json['document']?.toString(),
       address: json['address']?.toString(),
+    );
+  }
+}
+
+// ─── Detalhe (onda 2): leitura tolerante ──────────────────────────────────
+
+String? _optText(dynamic value) {
+  if (value == null) return null;
+  final v = value.toString().trim();
+  return v.isEmpty || v == 'null' ? null : v;
+}
+
+bool? _optBool(dynamic value) {
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  if (value is String) {
+    final v = value.trim().toLowerCase();
+    if (v == 'true' || v == '1') return true;
+    if (v == 'false' || v == '0') return false;
+  }
+  return null;
+}
+
+num? _optNum(dynamic value) {
+  if (value is num) return value;
+  if (value is String) {
+    final v = value.trim().replaceAll(',', '.');
+    if (v.isEmpty) return null;
+    return num.tryParse(v);
+  }
+  return null;
+}
+
+/// Cômodo extra do cadastro (`extraRooms`: `{ name, quantity }`).
+class PropertyExtraRoom {
+  final String name;
+  final int quantity;
+
+  const PropertyExtraRoom({required this.name, required this.quantity});
+
+  /// Lista da API — ignora item sem nome ou com quantidade ≤ 0 (a mesma
+  /// regra de exibição do web). `null` quando o campo não veio.
+  static List<PropertyExtraRoom>? listFrom(dynamic raw) {
+    if (raw is! List) return null;
+    final out = <PropertyExtraRoom>[];
+    for (final item in raw) {
+      if (item is! Map) continue;
+      final name = _optText(item['name']);
+      final quantity = _optNum(item['quantity'])?.round() ?? 0;
+      if (name == null || quantity <= 0) continue;
+      out.add(PropertyExtraRoom(name: name, quantity: quantity));
+    }
+    return out;
+  }
+}
+
+/// Pessoa envolvida na ficha de venda vinculada — `role` cru da API
+/// (`criador`, `membro_vinculado`, `signatário (pending)`…).
+class PropertyLinkedSaleFormParticipant {
+  final String role;
+  final String name;
+  final String? email;
+
+  const PropertyLinkedSaleFormParticipant({
+    required this.role,
+    required this.name,
+    this.email,
+  });
+}
+
+/// Ficha de venda vinculada ao imóvel (`linkedSaleForm` do detalhe —
+/// `PropertyLinkedSaleFormDetailDto` do back).
+class PropertyLinkedSaleForm {
+  final String id;
+  final String formNumber;
+
+  /// `waiting_for_signature`, `processing`, `finalized`, `canceled`.
+  final String status;
+
+  /// Ficha finalizada — pode haver PDF assinado na Autentique.
+  final bool canDownloadSignedPdf;
+  final List<PropertyLinkedSaleFormParticipant> participants;
+
+  const PropertyLinkedSaleForm({
+    required this.id,
+    required this.formNumber,
+    required this.status,
+    required this.canDownloadSignedPdf,
+    this.participants = const <PropertyLinkedSaleFormParticipant>[],
+  });
+
+  /// `null` quando o campo não veio ou veio sem id.
+  static PropertyLinkedSaleForm? tryParse(dynamic raw) {
+    if (raw is! Map) return null;
+    final id = _optText(raw['id']);
+    if (id == null) return null;
+    final people = <PropertyLinkedSaleFormParticipant>[];
+    final list = raw['participants'];
+    if (list is List) {
+      for (final p in list) {
+        if (p is! Map) continue;
+        final name = _optText(p['name']);
+        if (name == null) continue;
+        people.add(
+          PropertyLinkedSaleFormParticipant(
+            role: _optText(p['role']) ?? '',
+            name: name,
+            email: _optText(p['email']),
+          ),
+        );
+      }
+    }
+    return PropertyLinkedSaleForm(
+      id: id,
+      formNumber: _optText(raw['formNumber']) ?? '',
+      status: _optText(raw['status']) ?? '',
+      canDownloadSignedPdf: _optBool(raw['canDownloadSignedPdf']) ?? false,
+      participants: people,
+    );
+  }
+}
+
+/// "Ficha adicional" do detalhe — campos extras do cadastro (migração/CRM)
+/// que o web lista em `propertyExtendedImportRows` (W:393-500). Tudo
+/// opcional; texto vazio vira `null`. As datas e motivos da fila de
+/// aprovação (publicação/disponibilidade) já moram em [Property].
+class PropertyAdditionalInfo {
+  final String? ownerId;
+  final String? lastUpdateEntryAt;
+  final String? soldAt;
+  final String? rentedAt;
+  final bool? isHighStandard;
+  final bool? hasPlaque;
+  final bool? hasExclusivity;
+  final bool? isPrivate;
+  final num? builtYear;
+  final String? alternativeCode;
+  final num? unitFloor;
+  final num? floors;
+  final num? buildings;
+  final num? elevators;
+  final String? sunPosition;
+  final String? propertySituation;
+  final num? lotArea;
+  final String? lotMeasureType;
+  final String? propertyUnity;
+  final String? visitTime;
+  final String? siteContact;
+  final String? houseRules;
+  final String? nearby;
+  final bool? bail;
+  final bool? suretyBond;
+  final bool? bondApplication;
+  final bool? credpagoGuarantee;
+  final bool? guarantor;
+  final num? ownersPercentage;
+  final num? ownersRate;
+  final String? siteMetaDescription;
+
+  const PropertyAdditionalInfo({
+    this.ownerId,
+    this.lastUpdateEntryAt,
+    this.soldAt,
+    this.rentedAt,
+    this.isHighStandard,
+    this.hasPlaque,
+    this.hasExclusivity,
+    this.isPrivate,
+    this.builtYear,
+    this.alternativeCode,
+    this.unitFloor,
+    this.floors,
+    this.buildings,
+    this.elevators,
+    this.sunPosition,
+    this.propertySituation,
+    this.lotArea,
+    this.lotMeasureType,
+    this.propertyUnity,
+    this.visitTime,
+    this.siteContact,
+    this.houseRules,
+    this.nearby,
+    this.bail,
+    this.suretyBond,
+    this.bondApplication,
+    this.credpagoGuarantee,
+    this.guarantor,
+    this.ownersPercentage,
+    this.ownersRate,
+    this.siteMetaDescription,
+  });
+
+  /// Lê direto do JSON do imóvel (os campos ficam na raiz do detalhe).
+  factory PropertyAdditionalInfo.fromJson(Map<String, dynamic> json) {
+    dynamic pick(String camel, String snake) => json[camel] ?? json[snake];
+    return PropertyAdditionalInfo(
+      ownerId: _optText(pick('ownerId', 'owner_id')),
+      lastUpdateEntryAt:
+          _optText(pick('lastUpdateEntryAt', 'last_update_entry_at')),
+      soldAt: _optText(pick('soldAt', 'sold_at')),
+      rentedAt: _optText(pick('rentedAt', 'rented_at')),
+      isHighStandard: _optBool(pick('isHighStandard', 'is_high_standard')),
+      hasPlaque: _optBool(pick('hasPlaque', 'has_plaque')),
+      hasExclusivity: _optBool(pick('hasExclusivity', 'has_exclusivity')),
+      isPrivate: _optBool(pick('isPrivate', 'is_private')),
+      builtYear: _optNum(pick('builtYear', 'built_year')),
+      alternativeCode: _optText(pick('alternativeCode', 'alternative_code')),
+      unitFloor: _optNum(pick('unitFloor', 'unit_floor')),
+      floors: _optNum(json['floors']),
+      buildings: _optNum(json['buildings']),
+      elevators: _optNum(json['elevators']),
+      sunPosition: _optText(pick('sunPosition', 'sun_position')),
+      propertySituation:
+          _optText(pick('propertySituation', 'property_situation')),
+      lotArea: _optNum(pick('lotArea', 'lot_area')),
+      lotMeasureType: _optText(pick('lotMeasureType', 'lot_measure_type')),
+      propertyUnity: _optText(pick('propertyUnity', 'property_unity')),
+      visitTime: _optText(pick('visitTime', 'visit_time')),
+      siteContact: _optText(pick('siteContact', 'site_contact')),
+      houseRules: _optText(pick('houseRules', 'house_rules')),
+      nearby: _optText(json['nearby']),
+      bail: _optBool(json['bail']),
+      suretyBond: _optBool(pick('suretyBond', 'surety_bond')),
+      bondApplication: _optBool(pick('bondApplication', 'bond_application')),
+      credpagoGuarantee:
+          _optBool(pick('credpagoGuarantee', 'credpago_guarantee')),
+      guarantor: _optBool(json['guarantor']),
+      ownersPercentage: _optNum(pick('ownersPercentage', 'owners_percentage')),
+      ownersRate: _optNum(pick('ownersRate', 'owners_rate')),
+      siteMetaDescription:
+          _optText(pick('siteMetaDescription', 'site_meta_description')),
     );
   }
 }
@@ -2046,18 +2558,58 @@ class PropertyService {
     }
   }
 
-  /// Desativa propriedade
-  Future<ApiResponse<Property>> deactivateProperty(String id) async {
-    debugPrint('🏠 [PROPERTY_SERVICE] Desativando propriedade: $id');
+  /// Desativa o imóvel — `PATCH /properties/:id/deactivate`, com o mesmo
+  /// corpo do `PropertyDeactivationModal` do web (`DeactivatePropertyDto`):
+  /// - [reason] é OBRIGATÓRIO: um `value` de [PropertyDeactivationReason]
+  ///   (alimenta as métricas da carteira; sem ele o back responde 400 — era
+  ///   o que acontecia quando o app mandava o corpo vazio);
+  /// - [notes] é opcional (até 2000 caracteres; vazio não vai);
+  /// - [scope]: `'all'` (padrão) desativa o cadastro — sai do site e da
+  ///   vitrine; `'sale'`/`'rent'` tiram o imóvel só da venda / só da locação:
+  ///   a finalidade muda e o imóvel SEGUE ativo (só para finalidade `ambos`;
+  ///   o back recusa nos outros casos).
+  /// Só master/admin/gestor: o back devolve 403 aos demais.
+  Future<ApiResponse<Property>> deactivateProperty(
+    String id, {
+    required String reason,
+    String? notes,
+    String scope = 'all',
+  }) async {
+    final motivo = reason.trim();
+    if (motivo.isEmpty) {
+      return ApiResponse.error(
+        message: 'Selecione o motivo da desativação.',
+        statusCode: 400,
+      );
+    }
+    const escoposValidos = {'all', 'sale', 'rent'};
+    final escopo = scope.trim().toLowerCase();
+    if (!escoposValidos.contains(escopo)) {
+      return ApiResponse.error(
+        message: 'Escopo de desativação inválido.',
+        statusCode: 400,
+      );
+    }
+
+    debugPrint(
+      '🏠 [PROPERTY_SERVICE] Desativando propriedade: $id ($escopo, $motivo)',
+    );
 
     try {
+      final body = <String, dynamic>{'reason': motivo, 'scope': escopo};
+      final nota = notes?.trim() ?? '';
+      if (nota.isNotEmpty) body['notes'] = nota;
+
       final response = await _apiService.patch<Map<String, dynamic>>(
         '/properties/$id/deactivate',
+        body: body,
       );
 
       if (response.success && response.data != null) {
         try {
-          final property = Property.fromJson(response.data!);
+          final root =
+              _extractPropertyPayload(response.data!) ?? response.data!;
+          final property = Property.fromJson(root);
           debugPrint('✅ [PROPERTY_SERVICE] Propriedade desativada: $id');
           return ApiResponse.success(
             data: property,
@@ -2140,6 +2692,25 @@ class PropertyService {
         statusCode: 0,
       );
     }
+  }
+
+  /// Atalho de [changePropertyStatus] com o status CRU, como o web chama
+  /// (`propertyApi.changePropertyStatus(id, {status, notes})`):
+  /// `PATCH /properties/:id/status`. Status que o app não reconhece nem sai
+  /// do aparelho — o back só aceita os 17 do enum.
+  Future<ApiResponse<Property>> changeStatus(
+    String id,
+    String status, {
+    String? notes,
+  }) async {
+    final known = PropertyStatus.fromString(status.replaceAll('-', '_'));
+    if (known == null) {
+      return ApiResponse.error(
+        message: 'Status não reconhecido pelo aplicativo.',
+        statusCode: 400,
+      );
+    }
+    return changePropertyStatus(id, status: known, notes: notes);
   }
 
   /// Republica no site um imóvel que já passou pela publicação e saiu por

@@ -125,17 +125,17 @@ class _SdrDashboardFiltersDrawerState extends State<SdrDashboardFiltersDrawer> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     // Os acentos viram texto (chip escolhido, "N ativos", "2 de 5", dias do
     // recorte) e ícone pequeno: tinta legível, ≥ 4,5:1 no claro.
+    // 30/09/2026 (redesenho do Dash SDR): a gaveta veste o eixo da tela — o
+    // petróleo no cabeçalho e no período (a régua do topo é petróleo); as
+    // equipes em azul, porque o verde da tela é "transferido".
     final cHeader = sdrTintaLegivel(
       context,
-      isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple,
+      isDark ? AppColors.status.tealDarkMode : AppColors.status.teal,
     );
-    final cPeriodo = sdrTintaLegivel(
-      context,
-      isDark ? AppColors.status.blueDarkMode : AppColors.status.blue,
-    );
+    final cPeriodo = cHeader;
     final cEquipes = sdrTintaLegivel(
       context,
-      isDark ? AppColors.status.greenDarkMode : AppColors.status.green,
+      isDark ? AppColors.status.blueDarkMode : AppColors.status.blue,
     );
     final mq = MediaQuery.of(context);
     final activeCount = _activeCount;

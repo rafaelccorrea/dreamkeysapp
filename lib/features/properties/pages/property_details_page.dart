@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderAbstractViewport;
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -15,6 +16,7 @@ import '../../../../shared/widgets/skeleton_box.dart';
 import '../../../../shared/widgets/shimmer_image.dart';
 import '../../../../shared/widgets/app_error_state.dart';
 import '../../../../shared/utils/error_cause.dart';
+import '../../../../shared/utils/property_finalidade.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../models/property_activity_models.dart';
@@ -26,6 +28,9 @@ import '../../appointments/pages/create_appointment_page.dart';
 import '../../appointments/models/appointment_model.dart';
 import '../../documents/services/document_service.dart';
 import '../../documents/models/document_model.dart';
+import '../../documents/pages/create_document_page.dart';
+import '../../documents/utils/document_file_actions.dart';
+import '../../documents/utils/document_permissions.dart';
 import '../../clients/services/client_service.dart';
 import '../../documents/widgets/entity_selector.dart';
 import '../../../../core/constants/api_constants.dart';
@@ -45,6 +50,14 @@ import '../utils/compute_property_score.dart';
 import '../utils/public_property_link.dart';
 import '../widgets/property_score_panel.dart';
 import '../widgets/property_share_sheet.dart';
+import '../widgets/property_presentation_pdf_sheet.dart';
+import '../widgets/details/property_activation_sheet.dart';
+import '../widgets/details/property_approval_banner.dart';
+import '../widgets/details/property_details_kit.dart'
+    show kPropertyDeletedReadOnlyReason;
+import '../widgets/details/property_owner_section.dart';
+import '../widgets/details/property_responsibles_section.dart';
+import '../widgets/details/property_status_change_sheet.dart';
 
 // Formatter de moeda
 final _currencyFormatter = NumberFormat.currency(
@@ -56,7 +69,23 @@ final _currencyFormatter = NumberFormat.currency(
 /// Aba interna da ficha de imóvel.
 enum _DetailsTab { details, activity, performance }
 
-extension on _DetailsTab {
+extension _DetailsTabQuery on _DetailsTab {
+  /// Aba pelo id do web (`?tab=`), com o apelido `updates` → Atividades
+  /// (o aviso de atualização aponta para `?tab=updates`, como no web).
+  static _DetailsTab? fromQuery(String? raw) {
+    final v = raw?.trim().toLowerCase() ?? '';
+    switch (v) {
+      case 'details':
+        return _DetailsTab.details;
+      case 'activity':
+      case 'updates':
+        return _DetailsTab.activity;
+      case 'performance':
+        return _DetailsTab.performance;
+    }
+    return null;
+  }
+
   String get label {
     switch (this) {
       case _DetailsTab.details:
@@ -97,10 +126,16 @@ class PropertyDetailsPage extends StatefulWidget {
   final String propertyId;
   final Property? initialProperty;
 
+  /// Aba inicial pelo id do web (`details`, `activity`, `performance`;
+  /// `updates` = Atividades) — vem do `?tab=` do link. Desconhecida ou sem
+  /// acesso → Detalhes.
+  final String? initialTab;
+
   const PropertyDetailsPage({
     super.key,
     required this.propertyId,
     this.initialProperty,
+    this.initialTab,
   });
 
   @override
@@ -126,6 +161,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   // Documentos
   List<Document> _documents = [];
   bool _isLoadingDocuments = false;
+  ApiResponse<dynamic>? _documentsFailure;
 
   // Checklists
   List<dynamic> _checklists = [];
@@ -259,7 +295,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  bool get _canEditProperty => _editPermission.canEdit;
+  /// Excluído (soft delete) abre só para consulta — nenhuma escrita (web).
+  bool get _isDeletedProperty => _property?.isDeleted == true;
+
+  bool get _canEditProperty =>
+      _editPermission.canEdit && !_isDeletedProperty;
 
   bool get _canDeleteProperty {
     final access = ModuleAccessService.instance;
@@ -282,6 +322,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   /// (não-quadradas, categoria errada) sem precisar mandar a publicação
   /// inteira de volta pra fila.
   bool get _canDeletePropertyImages {
+    if (_isDeletedProperty) return false;
     final access = ModuleAccessService.instance;
     final role = access.userRole?.toLowerCase() ?? '';
     if (role == 'master' || role == 'admin') return true;
@@ -301,6 +342,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   /// Apenas master/admin podem desfazer venda (SOLD â†’ AVAILABLE).
   bool get _canUndoSold {
+    if (_isDeletedProperty) return false;
     final access = ModuleAccessService.instance;
     final role = access.userRole?.toLowerCase() ?? '';
     if (role != 'master' && role != 'admin') return false;
@@ -310,14 +352,26 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   /// Perfis elevados (master/admin/manager) podem republicar no site — mesma
   /// regra do web (`canChangePropertyStatusElevated`).
   bool get _canChangePropertyStatusElevated {
+    if (_isDeletedProperty) return false;
     final role = ModuleAccessService.instance.userRole?.toLowerCase() ?? '';
     return role == 'master' || role == 'admin' || role == 'manager';
   }
 
-  /// Mostra o botão "Republicar no site" — espelha o web:
-  /// `canChangePropertyStatusElevated && !canUndoSold`.
-  bool get _canRepublishOnSite =>
-      _canChangePropertyStatusElevated && !_canUndoSold;
+  /// Quem pode republicar no site — espelha o web: perfis elevados
+  /// (`skipPermissionCheck`) OU `property:approve_publication`.
+  bool get _republishAllowed =>
+      _canChangePropertyStatusElevated ||
+      ModuleAccessService.instance
+          .hasPermission(AppPermissions.propertyApprovePublication);
+
+  /// "Republicar no site" some só quando "Tornar disponível" ocupa o lugar
+  /// (vendido + master/admin); quem não pode vê a ação travada.
+  bool get _canRepublishOnSite => _republishAllowed && !_canUndoSold;
+
+  /// Motivo do cadeado do Republicar — texto do PermissionButton do web.
+  static const String _republishLockedReason =
+      'Sem a permissão "Aprovar publicação de imóveis no site". Fale com o '
+      'seu gestor ou com o suporte.';
 
   bool _undoSoldLoading = false;
   bool _republishLoading = false;
@@ -449,7 +503,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     setState(() => _approvalBusy = false);
     if (res.success) {
       _approvalSnack('Disponibilidade aprovada.', ok: true);
-      _loadProperty();
+      _refreshAfterChange();
     } else {
       _approvalSnack(res.message ?? 'Falha ao aprovar disponibilidade.');
     }
@@ -470,7 +524,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     if (res.success) {
       _approvalSnack('Imóvel recusado. Motivo enviado ao responsável.',
           ok: true);
-      _loadProperty();
+      _refreshAfterChange();
     } else {
       _approvalSnack(res.message ?? 'Falha ao recusar disponibilidade.');
     }
@@ -484,7 +538,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     setState(() => _approvalBusy = false);
     if (res.success) {
       _approvalSnack('Publicação aprovada — imóvel já está no site.', ok: true);
-      _loadProperty();
+      _refreshAfterChange();
     } else {
       _approvalSnack(res.message ?? 'Falha ao aprovar publicação.');
     }
@@ -505,7 +559,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     if (res.success) {
       _approvalSnack('Publicação recusada. Responsável foi notificado.',
           ok: true);
-      _loadProperty();
+      _refreshAfterChange();
     } else {
       _approvalSnack(res.message ?? 'Falha ao recusar publicação.');
     }
@@ -520,6 +574,15 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   PropertyUpdatesResponse _updates = PropertyUpdatesResponse.empty;
   bool _loadingUpdates = false;
   bool _updatesLoaded = false;
+
+  /// Falhas das leituras da aba Atividades (a causa vai para o erro padrão).
+  ApiResponse<dynamic>? _historyFailure;
+  ApiResponse<dynamic>? _updatesFailure;
+
+  /// "Carregar mais atualizações" (páginas de 15, como o web).
+  static const int _kUpdatesPageSize = 15;
+  bool _loadingMoreUpdates = false;
+  bool _moreUpdatesFailed = false;
   final TextEditingController _updateComposer = TextEditingController();
   bool _submittingUpdate = false;
 
@@ -536,10 +599,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   void initState() {
     super.initState();
     _property = widget.initialProperty;
+    _activeTab =
+        _DetailsTabQuery.fromQuery(widget.initialTab) ?? _DetailsTab.details;
     // Sempre inicia em loading para evitar "tela vazia" com `initialProperty`
     // parcial e garantir feedback visual consistente.
     _isLoading = true;
     _loadProperty();
+    if (_activeTab == _DetailsTab.activity) _ensureActivityLoaded();
     _loadSiteBaseUrl();
     _loadApprovalThread();
     _detailsScrollController.addListener(_handleDetailsScroll);
@@ -564,6 +630,45 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   String? _publicPropertyUrl(Property property) =>
       PublicPropertyLink.buildUrl(property, _siteBaseUrl);
 
+  /// Toque numa ação travada: diz o motivo (a ação fica à vista em vez de
+  /// sumir, como o botão com cadeado do web).
+  void _showLockedReason(String reason) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.lock_outline_rounded,
+                size: 18,
+                color: ThemeHelpers.textSecondaryColor(context),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: Text(reason)),
+            ],
+          ),
+          duration: const Duration(seconds: 5),
+        ),
+      );
+  }
+
+  /// Apresentação em PDF para enviar ao cliente — de todos que veem o
+  /// imóvel (`property:view`, mesmo gate do botão da ficha web).
+  void _openPresentationPdf() {
+    final property = _property;
+    if (property == null) return;
+    showPropertyPresentationPdfSheet(
+      context,
+      propertyId:
+          property.id.trim().isNotEmpty ? property.id : widget.propertyId,
+      propertyTitle: property.title,
+      propertyCode: property.code,
+    );
+  }
+
   /// Sheet de ações do detalhe — substitui o PopupMenu nativo do Material
   /// (fora do padrão da casa). Mesma anatomia do sheet da listagem:
   /// grabber + header editorial + tiles com roundel tinted.
@@ -576,6 +681,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     showModalBottomSheet<void>(
       context: context,
       useSafeArea: true,
+      isScrollControlled: true,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.black54,
       builder: (sheetContext) {
@@ -583,6 +689,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         final isDark = theme.brightness == Brightness.dark;
         final muted = ThemeHelpers.textSecondaryColor(sheetContext);
 
+        // `lockedReason` != null: a ação existe mas não é desta pessoa —
+        // fica à vista, apagada, com cadeado e o motivo no lugar da dica
+        // (esconder ensinaria que a função não existe).
         Widget tile({
           required IconData icon,
           required String label,
@@ -591,17 +700,23 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           required VoidCallback onTap,
           bool destructive = false,
           bool badge = false,
+          String? lockedReason,
         }) {
+          final locked = lockedReason != null;
+          if (locked) color = muted;
           return Material(
             color: Colors.transparent,
             child: InkWell(
-              onTap: onTap,
+              onTap: locked ? null : onTap,
               borderRadius: BorderRadius.circular(14),
               splashColor: color.withValues(alpha: 0.16),
               highlightColor: color.withValues(alpha: 0.08),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(8, 10, 8, 10),
                 child: Row(
+                  crossAxisAlignment: locked
+                      ? CrossAxisAlignment.start
+                      : CrossAxisAlignment.center,
                   children: [
                     Stack(
                       clipBehavior: Clip.none,
@@ -654,15 +769,17 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                               fontWeight: FontWeight.w800,
                               letterSpacing: -0.15,
                               fontSize: 14.5,
-                              color: destructive
-                                  ? color
-                                  : ThemeHelpers.textColor(sheetContext),
+                              color: locked
+                                  ? muted
+                                  : destructive
+                                      ? color
+                                      : ThemeHelpers.textColor(sheetContext),
                             ),
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            subtitle,
-                            maxLines: 1,
+                            lockedReason ?? subtitle,
+                            maxLines: locked ? 4 : 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodySmall?.copyWith(
                               fontWeight: FontWeight.w500,
@@ -674,6 +791,17 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                         ],
                       ),
                     ),
+                    if (locked) ...[
+                      const SizedBox(width: 10),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Icon(
+                          Icons.lock_outline_rounded,
+                          size: 16,
+                          color: muted,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -681,7 +809,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           );
         }
 
-        return Container(
+        final sheet = Container(
           decoration: BoxDecoration(
             color: ThemeHelpers.cardBackgroundColor(sheetContext),
             borderRadius:
@@ -846,17 +974,100 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                             });
                           },
                         ),
-                      if (canEdit)
+                      // De todos que veem o imóvel — o PDF é o material que
+                      // o corretor manda ao cliente (mesmo gate do web).
+                      if (property != null)
+                        tile(
+                          icon: Icons.picture_as_pdf_outlined,
+                          label: 'Apresentação em PDF',
+                          subtitle:
+                              'Fotos, valores e seu contato para o cliente',
+                          color: isDark
+                              ? AppColors.status.infoDarkMode
+                              : AppColors.status.info,
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            Future.microtask(() {
+                              if (!mounted) return;
+                              _openPresentationPdf();
+                            });
+                          },
+                        ),
+                      if (property != null)
                         tile(
                           icon: Icons.edit_rounded,
                           label: 'Editar imóvel',
                           subtitle: 'Dados, valores, proprietário e galeria',
                           color: const Color(0xFF6366F1),
+                          lockedReason: _statusChangeLockReason(property),
                           onTap: () {
                             Navigator.of(sheetContext).pop();
                             Navigator.of(this.context).pushNamed(
                               '/properties/${widget.propertyId}/edit',
                             );
+                          },
+                        ),
+                      if (property != null)
+                        tile(
+                          icon: Icons.swap_horiz_rounded,
+                          label: 'Alterar status',
+                          subtitle: 'Disponível, reservado, vendido, alugado…',
+                          color: isDark
+                              ? AppColors.status.infoDarkMode
+                              : AppColors.status.info,
+                          lockedReason: _statusChangeLockReason(property),
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            Future.microtask(() {
+                              if (!mounted) return;
+                              _openStatusChange();
+                            });
+                          },
+                        ),
+                      if (property != null && !_canUndoSold)
+                        tile(
+                          icon: Icons.published_with_changes_rounded,
+                          label: 'Republicar no site',
+                          subtitle: 'Volta para Disponível, ativo e no site',
+                          color: isDark
+                              ? AppColors.status.successDarkMode
+                              : AppColors.status.success,
+                          lockedReason: property.isDeleted
+                              ? kPropertyDeletedReadOnlyReason
+                              : _republishAllowed
+                                  ? null
+                                  : _republishLockedReason,
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            _republishOnSite();
+                          },
+                        ),
+                      if (property != null)
+                        tile(
+                          icon: Icons.power_settings_new_rounded,
+                          label: property.isActive
+                              ? 'Desativar imóvel'
+                              : 'Ativar imóvel',
+                          subtitle: property.isActive
+                              ? 'Tira do site e da vitrine, ou só da venda '
+                                  'ou da locação'
+                              : 'Volta a aparecer na vitrine e no site',
+                          color: property.isActive
+                              ? ThemeHelpers.textColor(sheetContext)
+                              : (isDark
+                                  ? AppColors.status.successDarkMode
+                                  : AppColors.status.success),
+                          lockedReason: property.isDeleted
+                              ? kPropertyDeletedReadOnlyReason
+                              : _canChangePropertyStatusElevated
+                                  ? null
+                                  : kPropertyToggleActiveBlockedReason,
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            Future.microtask(() {
+                              if (!mounted) return;
+                              _openActivation();
+                            });
                           },
                         ),
                       if (hasOffersShortcut)
@@ -874,13 +1085,22 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                             );
                           },
                         ),
-                      if (canDelete)
+                      if (property != null)
                         tile(
                           icon: Icons.delete_outline_rounded,
                           label: 'Excluir permanentemente',
                           subtitle: 'Remove o imóvel do portfólio da empresa',
                           color: theme.colorScheme.error,
                           destructive: true,
+                          lockedReason: property.isDeleted
+                              ? kPropertyDeletedReadOnlyReason
+                              : canDelete
+                                  ? null
+                                  : !canEdit
+                                      ? _editPermission.reasonMessage
+                                      : 'Sem a permissão "Excluir imóveis". '
+                                          'Fale com o seu gestor ou com o '
+                                          'suporte.',
                           onTap: () {
                             Navigator.of(sheetContext).pop();
                             _deleteProperty();
@@ -888,24 +1108,26 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                         ),
                     ];
 
-                    return Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          for (var i = 0; i < actionTiles.length; i++) ...[
-                            if (i > 0)
-                              Padding(
-                                padding: const EdgeInsets.only(left: 62),
-                                child: Container(
-                                  height: 1,
-                                  color: ThemeHelpers.borderColor(sheetContext)
-                                      .withValues(alpha: 0.25),
+                    return Flexible(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            for (var i = 0; i < actionTiles.length; i++) ...[
+                              if (i > 0)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 62),
+                                  child: Container(
+                                    height: 1,
+                                    color: ThemeHelpers.borderColor(sheetContext)
+                                        .withValues(alpha: 0.25),
+                                  ),
                                 ),
-                              ),
-                            actionTiles[i],
+                              actionTiles[i],
+                            ],
                           ],
-                        ],
+                        ),
                       ),
                     );
                   },
@@ -913,6 +1135,14 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               ],
             ),
           ),
+        );
+        return ConstrainedBox(
+          // Teto de 0,88 com a lista rolando: deitado ou com fonte grande,
+          // as ações não estouram a folha.
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(sheetContext).size.height * 0.88,
+          ),
+          child: sheet,
         );
       },
     );
@@ -927,36 +1157,31 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     }
   }
 
+  /// Documentos do imóvel — 20 por vez, como o `useDocumentsByEntity` do
+  /// web. Falha fica registrada para a seção mostrar a causa.
   Future<void> _loadDocuments() async {
     if (widget.propertyId.isEmpty) return;
+    if (!DocumentPermissions.moduleEnabled) return;
 
     setState(() {
       _isLoadingDocuments = true;
     });
 
-    try {
-      final response = await _documentService.getDocuments(
-        filters: DocumentFilters(propertyId: widget.propertyId),
-        page: 1,
-        limit: 10,
-      );
-
-      if (mounted) {
-        setState(() {
-          _isLoadingDocuments = false;
-          if (response.success && response.data != null) {
-            _documents = response.data!.data;
-          }
-        });
+    final response = await _documentService.getDocuments(
+      filters: DocumentFilters(propertyId: widget.propertyId),
+      page: 1,
+      limit: 20,
+    );
+    if (!mounted) return;
+    setState(() {
+      _isLoadingDocuments = false;
+      if (response.success && response.data != null) {
+        _documents = response.data!.data;
+        _documentsFailure = null;
+      } else {
+        _documentsFailure = response;
       }
-    } catch (e) {
-      debugPrint('âŒ [PROPERTY_DETAILS] Erro ao carregar documentos: $e');
-      if (mounted) {
-        setState(() {
-          _isLoadingDocuments = false;
-        });
-      }
-    }
+    });
   }
 
   Future<void> _loadChecklists() async {
@@ -1108,7 +1333,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     super.dispose();
   }
 
-  Future<void> _loadProperty() async {
+  /// Carrega a ficha. [silent]: depois de uma ação na própria tela — não
+  /// troca o conteúdo pelo esqueleto (a rolagem fica onde está) nem recarrega
+  /// documentos/checklists/despesas/chaves, que a ação não mexe.
+  Future<void> _loadProperty({bool silent = false}) async {
     if (widget.propertyId.trim().isEmpty) {
       setState(() {
         _isLoading = false;
@@ -1117,13 +1345,15 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-      _errorStatus = 0;
-      _errorDetail = null;
-      _errorFromException = false;
-    });
+    if (!silent) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+        _errorStatus = 0;
+        _errorDetail = null;
+        _errorFromException = false;
+      });
+    }
 
     try {
       final response = await _propertyService.getPropertyById(
@@ -1140,23 +1370,32 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             });
             return;
           }
+          final condoId = property.condominiumId?.trim();
+          final condoChanged =
+              condoId != _property?.condominiumId?.trim();
           setState(() {
             _property = property;
             _isLoading = false;
-            _linkedCondominium = null;
+            if (!silent || condoChanged) _linkedCondominium = null;
           });
           _debugLogPropertyImageDiagnostics(
             property,
             source: 'loadProperty.success',
           );
           // Carregar dados relacionados após carregar propriedade
-          _loadDocuments();
-          _loadChecklists();
-          _loadExpenses();
-          _loadKeys();
-          final condoId = property.condominiumId?.trim();
-          if (condoId != null && condoId.isNotEmpty) {
+          if (!silent) {
+            _loadDocuments();
+            _loadChecklists();
+            _loadExpenses();
+            _loadKeys();
+          }
+          if (condoId != null &&
+              condoId.isNotEmpty &&
+              (!silent || condoChanged)) {
             _loadLinkedCondominium(condoId);
+          }
+          if (_activeTab == _DetailsTab.performance) {
+            _ensurePerformanceLoaded();
           }
         } else {
           setState(() {
@@ -1170,6 +1409,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             }
             _isLoading = false;
           });
+          if (silent) _warnStaleProperty();
         }
       }
     } catch (e) {
@@ -1184,8 +1424,80 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           }
           _isLoading = false;
         });
+        if (silent) _warnStaleProperty();
       }
     }
+  }
+
+  /// A ação deu certo, mas a ficha não recarregou: a tela avisa que pode
+  /// estar desatualizada e oferece tentar de novo.
+  void _warnStaleProperty() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text(
+          'Feito. A ficha não atualizou agora e pode estar desatualizada.',
+        ),
+        action: SnackBarAction(
+          label: 'Atualizar',
+          onPressed: () => _loadProperty(silent: true),
+        ),
+      ),
+    );
+  }
+
+  /// Depois de uma ação que muda o imóvel (status, ativo, aprovação,
+  /// reenvio, fotos, clientes): recarga silenciosa da ficha — nunca troca
+  /// `_property` pela resposta do PATCH, que vem sem os campos só do detalhe
+  /// (proprietário, responsáveis) — e o histórico é buscado de novo.
+  void _refreshAfterChange() {
+    if (!mounted) return;
+    _historyLoaded = false;
+    _updatesLoaded = false;
+    _engagementLoaded = false;
+    _loadProperty(silent: true).then((_) {
+      if (!mounted) return;
+      if (_activeTab == _DetailsTab.performance) _ensurePerformanceLoaded();
+    });
+    if (_activeTab == _DetailsTab.activity) _ensureActivityLoaded();
+  }
+
+  /// "Alterar status" — como no hero do web: todos veem; quem não pode
+  /// editar a ficha (ou imóvel excluído) abre a folha travada com o motivo.
+  Future<void> _openStatusChange() async {
+    final property = _property;
+    if (property == null) return;
+    final changed = await showPropertyStatusChangeSheet(
+      context: context,
+      property: property,
+      canRentOutKeepSale: _canChangePropertyStatusElevated,
+      lockedReason: _statusChangeLockReason(property),
+    );
+    if (changed) _refreshAfterChange();
+  }
+
+  String? _statusChangeLockReason(Property property) =>
+      propertyStatusChangeLockReason(
+        property: property,
+        permission: _editPermission,
+      );
+
+  /// Ativar/Desativar (escopo + motivo) — master/admin/gestor, como o
+  /// `PropertyActiveToggle` do web.
+  Future<void> _openActivation() async {
+    final property = _property;
+    if (property == null) return;
+    final changed = await showPropertyActivationSheet(
+      context: context,
+      property: property,
+      canToggle: _canChangePropertyStatusElevated,
+      lockedReason: property.isDeleted ? kPropertyDeletedReadOnlyReason : null,
+    );
+    if (changed) _refreshAfterChange();
+  }
+
+  void _openApprovalsQueue() {
+    Navigator.of(context).pushNamed(AppRoutes.propertyApprovals);
   }
 
   Future<void> _confirmAndUndoSold() async {
@@ -1226,13 +1538,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       if (!mounted) return;
 
       if (response.success && response.data != null) {
-        setState(() => _property = response.data);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('Imóvel disponível novamente.'),
             backgroundColor: AppColors.status.success,
           ),
         );
+        _refreshAfterChange();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1270,13 +1582,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       if (!mounted) return;
 
       if (response.success && response.data != null) {
-        setState(() => _property = response.data);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('Imóvel republicado no site.'),
             backgroundColor: AppColors.status.success,
           ),
         );
+        _refreshAfterChange();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1335,10 +1647,15 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
     if (!_historyLoaded && !_loadingHistory) {
       setState(() => _loadingHistory = true);
-      final h = await _activityService.getHistory(id);
+      final h = await _activityService.getHistoryResult(id);
       if (mounted) {
         setState(() {
-          _history = h;
+          if (h.success) {
+            _history = h.data ?? const [];
+            _historyFailure = null;
+          } else {
+            _historyFailure = h;
+          }
           _loadingHistory = false;
           _historyLoaded = true;
         });
@@ -1346,10 +1663,19 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     }
     if (!_updatesLoaded && !_loadingUpdates) {
       setState(() => _loadingUpdates = true);
-      final u = await _activityService.getUpdates(id);
+      final u = await _activityService.getUpdatesPage(
+        id,
+        limit: _kUpdatesPageSize,
+      );
       if (mounted) {
         setState(() {
-          _updates = u;
+          if (u.success && u.data != null) {
+            _updates = u.data!;
+            _updatesFailure = null;
+          } else {
+            _updatesFailure = u;
+          }
+          _moreUpdatesFailed = false;
           _loadingUpdates = false;
           _updatesLoaded = true;
         });
@@ -1357,13 +1683,65 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     }
   }
 
+  /// Tenta de novo as leituras da aba Atividades que falharam.
+  Future<void> _retryActivity() async {
+    setState(() {
+      if (_historyFailure != null) _historyLoaded = false;
+      if (_updatesFailure != null) _updatesLoaded = false;
+    });
+    await _ensureActivityLoaded();
+  }
+
+  /// Próxima página de atualizações — "Carregar mais atualizações".
+  Future<void> _loadMoreUpdates() async {
+    final id = _property?.id ?? widget.propertyId;
+    if (_loadingMoreUpdates || id.trim().isEmpty) return;
+    setState(() {
+      _loadingMoreUpdates = true;
+      _moreUpdatesFailed = false;
+    });
+    final next = await _activityService.getUpdatesPage(
+      id,
+      page: _updates.page + 1,
+      limit: _kUpdatesPageSize,
+    );
+    if (!mounted) return;
+    setState(() {
+      _loadingMoreUpdates = false;
+      final data = next.data;
+      if (next.success && data != null) {
+        // Sem repetir o que já está na tela (uma atualização nova empurra
+        // a paginação uma posição).
+        final seen = {for (final u in _updates.data) u.id};
+        _updates = PropertyUpdatesResponse(
+          data: [
+            ..._updates.data,
+            ...data.data.where((u) => !seen.contains(u.id)),
+          ],
+          total: data.total,
+          page: data.page,
+          limit: data.limit,
+        );
+      } else {
+        _moreUpdatesFailed = true;
+      }
+    });
+  }
+
   Future<void> _ensurePerformanceLoaded() async {
     if (_engagementLoaded || _loadingEngagement) return;
     final id = _property?.id ?? widget.propertyId;
     if (id.trim().isEmpty) return;
+    // Como o web: só mede imóvel publicado no site; totais dos últimos 3
+    // dias e origem dos últimos 30.
+    if (_property?.isAvailableForSite != true) return;
     setState(() => _loadingEngagement = true);
-    final stats = await _activityService.getEngagement(id);
-    final byChannel = await _activityService.getEngagementByChannel(id);
+    final results = await Future.wait<Object?>([
+      _activityService.getEngagement(id, days: 3),
+      _activityService.getEngagementByChannel(id, days: 30),
+    ]);
+    final stats = results[0] as PropertyEngagementStats?;
+    final byChannel = results[1] as List<PropertyEngagementByChannel>;
     if (mounted) {
       setState(() {
         _engagement = stats;
@@ -1624,21 +2002,15 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           ),
         Builder(
           builder: (context) {
-            // Esconde o menu por completo se o usuário não tem nenhuma ação
-            // disponível (visualização-pura para imóvel de outro corretor).
+            // A Apresentação em PDF é de todos que veem o imóvel (mesmo gate
+            // do web): o menu só some enquanto o imóvel não carregou.
+            if (_property == null) return const SizedBox.shrink();
             final canEdit = _canEditProperty;
             final canDelete = _canDeleteProperty;
             // Ofertas oculta no app: o atalho do sheet ⋯ fica desligado
             // (o gate original de pendências segue preservado atrás do flag).
             final hasOffersShortcut = FeatureVisibility.offersEnabled &&
-                _property != null &&
                 _property!.hasPendingOffers == true;
-            final canShare = _property != null &&
-                _property!.isAvailableForSite == true &&
-                _siteBaseUrl != null;
-            if (!canEdit && !canDelete && !hasOffersShortcut && !canShare) {
-              return const SizedBox.shrink();
-            }
             // Sheet da casa no lugar do PopupMenu nativo do Material.
             return ChromeToolbarIconButton(
               icon: Icons.more_horiz_rounded,
@@ -1814,7 +2186,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ),
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.only(top: 14),
+            padding: const EdgeInsets.only(top: 18),
             child: _buildSectionTabs(context, theme),
           ),
         ),
@@ -2043,7 +2415,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       // Quando o user deleta uma ou mais fotos pelo fullscreen, recarregamos
       // o property pra refletir nova `mainImage`/`images` (e contadores).
       if (didMutate == true && mounted) {
-        _loadProperty();
+        _refreshAfterChange();
       }
     });
   }
@@ -2225,6 +2597,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final access = ModuleAccessService.instance;
     final role = access.userRole?.toLowerCase() ?? '';
     final canUndoSold =
+        !property.isDeleted &&
         (role == 'master' || role == 'admin') &&
         property.status == PropertyStatus.sold;
     final disponivelTone =
@@ -2311,10 +2684,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   ),
                 ),
               ),
-            PropertySituationPill(
-              isActive: property.isActive,
-              isAvailableForSite: property.isAvailableForSite ?? false,
-            ),
+            if (property.isDeleted)
+              _buildDeletedPill(context, property)
+            else
+              PropertySituationPill(
+                isActive: property.isActive,
+                isAvailableForSite: property.isAvailableForSite ?? false,
+              ),
           ],
         ),
         // Nas 9 etapas do funil de locação, a trilha responde "em que ponto
@@ -2326,6 +2702,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             child: PropertyRentalFunnelTrail(status: property.status),
           ),
         ],
+        // Gestão ao lado do status, como a faixa do hero do web.
+        ..._buildStatusActionsBlock(context, property, isDark),
         const SizedBox(height: 14),
         // 2) Linha CRM: código (à esquerda) + matches badge (canto direito).
         Row(
@@ -2393,13 +2771,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           ],
         ),
 
-        // 3) Valores + botão "Republicar no site" (como no web).
+        // 3) Valores (o "Republicar no site" foi para a faixa de gestão,
+        // ao lado do status — onde o web o põe).
         const SizedBox(height: 12),
         _buildPriceShowcase(context, theme, property, isDark),
-        if (_canRepublishOnSite) ...[
-          const SizedBox(height: 12),
-          _buildRepublishButton(context, theme),
-        ],
 
         // 3) Eyebrow: inativo, site, destaque, atualizado
         const SizedBox(height: 10),
@@ -2439,6 +2814,43 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           _buildIdentityFooter(theme, property, muted),
         ],
       ],
+    );
+  }
+
+  /// Selo "Excluído em …" (web) — a ficha fica só para consulta.
+  Widget _buildDeletedPill(BuildContext context, Property property) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final when = DateTime.tryParse(property.deletedAt ?? '');
+    final label = when == null
+        ? 'Excluído · só consulta'
+        : 'Excluído em ${DateFormat('dd/MM/yyyy HH:mm').format(when.toLocal())}';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: muted.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: muted.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.delete_outline_rounded, size: 14, color: muted),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: ThemeHelpers.textColor(context),
+                fontWeight: FontWeight.w800,
+                fontSize: 11,
+                height: 1,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -2495,6 +2907,35 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           ),
         ],
       ],
+    );
+  }
+
+  /// Tom das seções de pessoas do imóvel (Proprietário, Responsáveis) — o
+  /// índigo da aba Detalhes, o mesmo do web.
+  static const Color _kPeopleTone = Color(0xFF6366F1);
+
+  /// Contador compacto para o cabeçalho de uma seção (trailing).
+  Widget _buildSectionCountBadge(
+    BuildContext context,
+    String label,
+    Color accent,
+  ) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: accent.withValues(alpha: 0.32)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.3,
+          color: accent,
+        ),
+      ),
     );
   }
 
@@ -2960,10 +3401,41 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     Property property,
     bool isDark,
   ) {
-    final hasSale = property.salePrice != null;
-    final hasRent = property.rentPrice != null;
+    // O hero segue a FINALIDADE, não a mera presença do valor (regra do
+    // web): imóvel só para locação com preço de venda preenchido não está à
+    // venda, e anunciar o valor aqui contradizia filtros e site.
+    final finalidade = PropertyFinalidade.tryParse(property.finalidade);
+    final hasSale = (property.salePrice ?? 0) > 0 &&
+        anunciaVenda(
+          finalidade: finalidade,
+          salePrice: property.salePrice,
+          rentPrice: property.rentPrice,
+        );
+    final hasRent = (property.rentPrice ?? 0) > 0 &&
+        anunciaLocacao(
+          finalidade: finalidade,
+          salePrice: property.salePrice,
+          rentPrice: property.rentPrice,
+        );
+    final outside = valorForaDaFinalidade(
+      finalidade: finalidade,
+      salePrice: property.salePrice,
+      rentPrice: property.rentPrice,
+    );
+    final outsideNote = _buildPriceOutsideFinalidadeNote(
+      theme,
+      property,
+      finalidade,
+      sale: outside.venda,
+      rent: outside.locacao,
+    );
     if (!hasSale && !hasRent) {
-      return _buildPriceUnavailableCard(context, theme, isDark);
+      final card = _buildPriceUnavailableCard(context, theme, isDark);
+      if (outsideNote == null) return card;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [card, outsideNote],
+      );
     }
 
     // Bloco de preço editorial — **sem caixa** (cores paridade web).
@@ -2979,13 +3451,63 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ? _buildPriceDualLayout(theme, property, isDark)
         : _buildPriceSingleLayout(theme, property, hasSale, isDark);
     final extras = _buildPriceExtrasLine(theme, property, isDark);
-    if (extras == null) return priceBlock;
+    if (extras == null && outsideNote == null) return priceBlock;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         priceBlock,
-        extras,
+        if (extras != null) extras,
+        if (outsideNote != null) outsideNote,
       ],
+    );
+  }
+
+  /// Valor preenchido que a finalidade não anuncia: em vez de sumir sem
+  /// explicação, a linha diz qual é e por que não aparece.
+  Widget? _buildPriceOutsideFinalidadeNote(
+    ThemeData theme,
+    Property property,
+    PropertyFinalidade? finalidade, {
+    required bool sale,
+    required bool rent,
+  }) {
+    if (!sale && !rent) return null;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final marcado = switch (finalidade) {
+      PropertyFinalidade.venda => 'marcado só para venda',
+      PropertyFinalidade.locacao => 'marcado só para locação',
+      _ => 'sem essa finalidade',
+    };
+    final partes = <String>[
+      if (sale && property.salePrice != null)
+        'venda de ${_currencyFormatter.format(property.salePrice)}',
+      if (rent && property.rentPrice != null)
+        'aluguel de ${_currencyFormatter.format(property.rentPrice)}',
+    ];
+    final valor = partes.join(' e ');
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(Icons.info_outline_rounded, size: 15, color: muted),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              'O valor de $valor está preenchido, mas não é anunciado: o '
+              'imóvel está $marcado.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: muted,
+                fontWeight: FontWeight.w600,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -3231,82 +3753,17 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ TABS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  Widget _buildSectionTabs(BuildContext context, ThemeData theme) {
-    final isDark = theme.brightness == Brightness.dark;
-    final cardBg = isDark
-        ? AppColors.background.cardBackgroundDarkMode
-        : AppColors.background.cardBackground;
-    final borderColor = isDark
-        ? AppColors.border.borderDarkMode
-        : AppColors.border.border;
-    final muted = ThemeHelpers.textSecondaryColor(context);
+  /// Abas que esta pessoa vê, na ordem do web.
+  List<_DetailsTab> get _visibleTabs => _DetailsTab.values;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
-      child: Container(
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: cardBg,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: borderColor.withValues(alpha: isDark ? 0.55 : 0.7)),
-        ),
-        child: Row(
-          children: _DetailsTab.values.map((tab) {
-            final active = tab == _activeTab;
-            final tabAccent = tab.tone;
-            return Expanded(
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () => _onTabSelected(tab),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    decoration: BoxDecoration(
-                      color: active ? tabAccent : null,
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: active
-                          ? [
-                              BoxShadow(
-                                color: tabAccent.withValues(alpha: 0.35),
-                                blurRadius: 10,
-                                offset: const Offset(0, 3),
-                              ),
-                            ]
-                          : null,
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          tab.icon,
-                          size: 16,
-                          color: active ? Colors.white : muted,
-                        ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            tab.label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.labelLarge?.copyWith(
-                              color: active ? Colors.white : muted,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 12,
-                              letterSpacing: -0.1,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }).toList(),
-        ),
-      ),
+  /// Abas com sublinhado na cor de cada uma (a régua proíbe pílulas):
+  /// dividem a largura quando cabem; senão rolam na horizontal, com a ativa
+  /// sempre à vista.
+  Widget _buildSectionTabs(BuildContext context, ThemeData theme) {
+    return _DetailsTabBar(
+      tabs: _visibleTabs,
+      active: _activeTab,
+      onSelect: _onTabSelected,
     );
   }
 
@@ -3337,8 +3794,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         (property.hasPendingOffers == true ||
             (property.totalOffersCount != null &&
                 property.totalOffersCount! > 0));
-    final hasClients = (property.clients ?? []).isNotEmpty;
-    final hasDocuments = !_isLoadingDocuments && _documents.isNotEmpty;
     final hasChecklists = !_isLoadingChecklists && _checklists.isNotEmpty;
     final hasExpenses = !_isLoadingExpenses && _expenses.isNotEmpty;
     final condoId = property.condominiumId?.trim() ?? '';
@@ -3389,6 +3844,36 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         // no par pareado logo abaixo do mapa, dentro da seção.
         child: _buildMapSection(context, theme, property),
       ),
+      // Pessoas do imóvel em sequência: quem é o dono, quem responde e quem
+      // captou (Captação segue imediatamente antes do status da chave).
+      if (PropertyOwnerSection.isVisible(property))
+        _buildFlushSection(
+          theme: theme,
+          title: 'Proprietário',
+          icon: Icons.person_outline_rounded,
+          tone: _kPeopleTone,
+          child: PropertyOwnerSection(property: property),
+        ),
+      if (PropertyResponsiblesSection.isVisible(property))
+        _buildFlushSection(
+          theme: theme,
+          title: 'Responsáveis',
+          icon: Icons.badge_outlined,
+          tone: _kPeopleTone,
+          headerTrailing: _buildSectionCountBadge(
+            context,
+            PropertyResponsiblesSection.resolve(property).length == 1
+                ? '1 responsável'
+                : '${PropertyResponsiblesSection.resolve(property).length} '
+                    'responsáveis',
+            _kPeopleTone,
+          ),
+          child: PropertyResponsiblesSection(
+            property: property,
+            currentUserId: ModuleAccessService.instance.userId,
+            tone: _kPeopleTone,
+          ),
+        ),
       // Captação — saiu do hero de identidade e virou seção própria,
       // imediatamente ANTES do status da chave (ordem pedida pelo dono).
       if (_hasCaptorsContent(property))
@@ -3410,14 +3895,23 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         tone: const Color(0xFFF59E0B),
         child: _buildKeyStatusSection(context, theme, property),
       ),
-      if (hasClients)
-        _buildFlushSection(
-          theme: theme,
-          title: 'Clientes vinculados',
-          icon: Icons.people_alt_outlined,
-          tone: const Color(0xFF0EA5E9),
-          child: _buildClientsSection(context, theme, property),
-        ),
+      // Sempre à vista, como no web: o vazio ensina e vincula o primeiro.
+      _buildFlushSection(
+        theme: theme,
+        title: 'Clientes vinculados',
+        icon: Icons.people_alt_outlined,
+        tone: const Color(0xFF0EA5E9),
+        headerTrailing: (property.clients ?? const []).isEmpty
+            ? null
+            : _buildSectionCountBadge(
+                context,
+                (property.clients ?? const []).length == 1
+                    ? '1 cliente'
+                    : '${(property.clients ?? const []).length} clientes',
+                const Color(0xFF0EA5E9),
+              ),
+        child: _buildClientsSection(context, theme, property),
+      ),
       if (hasOffers)
         _buildFlushSection(
           theme: theme,
@@ -3442,14 +3936,23 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           tone: const Color(0xFF0891B2),
           child: _buildChecklistsSection(context, theme, property),
         ),
-      if (hasDocuments)
-        _buildFlushSection(
-          theme: theme,
-          title: 'Documentos',
-          icon: Icons.folder_open_outlined,
-          tone: const Color(0xFF0284C7),
-          child: _buildDocumentsSection(context, theme, property),
-        ),
+      // Sempre à vista, como no web: vazio ensina e oferece o primeiro.
+      _buildFlushSection(
+        theme: theme,
+        title: 'Documentos',
+        icon: Icons.folder_open_outlined,
+        tone: const Color(0xFF0284C7),
+        headerTrailing: _documents.isEmpty
+            ? null
+            : _buildSectionCountBadge(
+                context,
+                _documents.length == 1
+                    ? '1 documento'
+                    : '${_documents.length} documentos',
+                const Color(0xFF0284C7),
+              ),
+        child: _buildDocumentsSection(context, theme, property),
+      ),
       _buildFlushSection(
         theme: theme,
         title: 'Ações rápidas',
@@ -4075,39 +4578,71 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   /// Botão "Republicar no site" — perfis elevados (master/admin/manager).
   /// Volta o imóvel para Disponível, ativo e visível no site (backend valida).
-  Widget _buildRepublishButton(BuildContext context, ThemeData theme) {
-    final isDark = theme.brightness == Brightness.dark;
-    final accent =
+  /// Faixa de gestão do hero: ações compactas que mexem no estado do
+  /// imóvel. Cada uma aparece para todos a quem o web mostra, travada com o
+  /// motivo quando a pessoa não pode.
+  List<Widget> _buildStatusActionsBlock(
+    BuildContext context,
+    Property property,
+    bool isDark,
+  ) {
+    final green =
         isDark ? AppColors.status.successDarkMode : AppColors.status.success;
-
-    return SizedBox(
-      width: double.infinity,
-      child: OutlinedButton.icon(
-        onPressed: _republishLoading ? null : _republishOnSite,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: accent,
-          side: BorderSide(color: accent.withValues(alpha: 0.5)),
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
-        ),
-        icon: _republishLoading
-            ? SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(accent),
-                ),
-              )
-            : const Icon(Icons.published_with_changes_rounded, size: 20),
-        label: Text(
-          _republishLoading ? 'Republicando...' : 'Republicar no site',
-          style: const TextStyle(fontWeight: FontWeight.w700),
-        ),
+    final neutral = ThemeHelpers.textColor(context);
+    final deleted = property.isDeleted;
+    final statusLock = _statusChangeLockReason(property);
+    final chips = <Widget>[
+      // Todos veem; travado abre a folha com o status atual e o motivo.
+      _HeroActionChip(
+        icon: Icons.swap_horiz_rounded,
+        label: 'Alterar status',
+        tone: neutral,
+        lockedReason: statusLock,
+        onLockedTap: (_) => _openStatusChange(),
+        onTap: _openStatusChange,
       ),
+      if (!_canUndoSold && !deleted)
+        _HeroActionChip(
+          icon: Icons.published_with_changes_rounded,
+          label: _republishLoading ? 'Republicando…' : 'Republicar no site',
+          tone: green,
+          busy: _republishLoading,
+          lockedReason: _republishAllowed ? null : _republishLockedReason,
+          onLockedTap: _showLockedReason,
+          onTap: _republishOnSite,
+        ),
+      // Web: o interruptor Ativo/Inativo só existe para a gestão (os demais
+      // acham a ação travada, com o motivo, no menu ⋯).
+      if (_canChangePropertyStatusElevated && !deleted)
+        _HeroActionChip(
+          icon: Icons.power_settings_new_rounded,
+          label: property.isActive ? 'Desativar' : 'Ativar',
+          tone: property.isActive ? neutral : green,
+          onTap: _openActivation,
+        ),
+    ];
+    final access = ModuleAccessService.instance;
+    final rights = PropertyApprovalBanner.approverRights(
+      role: access.userRole,
+      explicitPermissions: access.userPermissionNames,
     );
+    return [
+      const SizedBox(height: 12),
+      Wrap(spacing: 8, runSpacing: 8, children: chips),
+      // Recusa / em análise logo abaixo do status: o motivo e o "Reenviar"
+      // aparecem antes de preço e características.
+      if (PropertyApprovalBanner.hasContent(property)) ...[
+        const SizedBox(height: 14),
+        PropertyApprovalBanner(
+          property: property,
+          canApproveAvailability: rights.availability,
+          canApprovePublication: rights.publication,
+          onResent: _refreshAfterChange,
+          onOpenQueue: _openApprovalsQueue,
+          resendLockedReason: deleted ? kPropertyDeletedReadOnlyReason : null,
+        ),
+      ],
+    ];
   }
 
   String _formatActivityDateTime(DateTime dt) {
@@ -4123,6 +4658,14 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     Property property,
   ) {
     const accent = Color(0xFFD97706);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final total = _updates.total;
+    final updatesFailure = _updatesFailure;
+    final historyFailure = _historyFailure;
+    final updatesLock = property.isDeleted
+        ? kPropertyDeletedReadOnlyReason
+        : (_canEditProperty ? null : _editPermission.reasonMessage);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -4131,19 +4674,56 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           title: 'Atualizações',
           icon: Icons.campaign_outlined,
           tone: accent,
+          headerTrailing: total > 0
+              ? Text(
+                  '$total registro${total > 1 ? 's' : ''}',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: muted,
+                    fontWeight: FontWeight.w700,
+                  ),
+                )
+              : null,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _buildUpdateComposer(context, theme, accent),
+              // Web: só quem pode editar a ficha registra atualização.
+              if (updatesLock == null)
+                _buildUpdateComposer(context, theme, accent)
+              else
+                _buildLockedLine(context, updatesLock),
               const SizedBox(height: 14),
               if (_loadingUpdates && !_updatesLoaded)
-                _buildInlineLoader(context, accent)
+                _buildActivitySkeleton(context)
+              else if (updatesFailure != null && _updates.data.isEmpty)
+                AppErrorState.fromApi(
+                  message: updatesFailure.message,
+                  statusCode: updatesFailure.statusCode,
+                  error: updatesFailure.error,
+                  onRetry: _retryActivity,
+                  dense: true,
+                )
               else if (_updates.data.isEmpty)
                 _buildActivityEmpty(
-                    context, theme, 'Nenhuma atualização ainda.')
-              else
-                ..._updates.data
-                    .map((u) => _buildUpdateTile(context, theme, u)),
+                  context,
+                  theme,
+                  'Nenhuma atualização registrada ainda.',
+                  hint: updatesLock == null
+                      ? 'Registre acima o que mudou: visita, contato com o '
+                          'proprietário, ajuste de valor.'
+                      : null,
+                )
+              else ...[
+                for (var i = 0; i < _updates.data.length; i++)
+                  _buildUpdateTile(
+                    context,
+                    theme,
+                    _updates.data[i],
+                    accent: accent,
+                    last: i == _updates.data.length - 1,
+                  ),
+                if (_updates.data.length < total)
+                  _buildLoadMoreUpdates(context, theme, total),
+              ],
             ],
           ),
         ),
@@ -4157,10 +4737,23 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (_loadingHistory && !_historyLoaded)
-                _buildInlineLoader(context, accent)
+                _buildActivitySkeleton(context)
+              else if (historyFailure != null && _history.isEmpty)
+                AppErrorState.fromApi(
+                  message: historyFailure.message,
+                  statusCode: historyFailure.statusCode,
+                  error: historyFailure.error,
+                  onRetry: _retryActivity,
+                  dense: true,
+                )
               else if (_history.isEmpty)
                 _buildActivityEmpty(
-                    context, theme, 'Sem histórico registrado.')
+                  context,
+                  theme,
+                  'Sem histórico registrado.',
+                  hint: 'Cada alteração no cadastro, mudança de status e '
+                      'aprovação aparece aqui, com quem fez e quando.',
+                )
               else
                 ..._history.map((h) => _buildHistoryTile(context, theme, h)),
             ],
@@ -4170,18 +4763,138 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  Widget _buildInlineLoader(BuildContext context, Color accent) {
+  /// "Carregar mais atualizações" — com o que falta e a falha no lugar.
+  Widget _buildLoadMoreUpdates(
+    BuildContext context,
+    ThemeData theme,
+    int total,
+  ) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final remaining = total - _updates.data.length;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 18),
-      child: Center(
-        child: SizedBox(
-          width: 22,
-          height: 22,
-          child: CircularProgressIndicator(
-            strokeWidth: 2.4,
-            valueColor: AlwaysStoppedAnimation<Color>(accent),
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_moreUpdatesFailed)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                'Não foi possível carregar mais agora. Confira a conexão e '
+                'tente de novo.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: muted,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          OutlinedButton.icon(
+            onPressed: _loadingMoreUpdates ? null : _loadMoreUpdates,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: ThemeHelpers.textColor(context),
+              side: BorderSide(color: ThemeHelpers.borderColor(context)),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            icon: _loadingMoreUpdates
+                ? SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(muted),
+                    ),
+                  )
+                : Icon(
+                    _moreUpdatesFailed
+                        ? Icons.refresh_rounded
+                        : Icons.expand_more_rounded,
+                    size: 18,
+                  ),
+            label: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                _loadingMoreUpdates
+                    ? 'Carregando…'
+                    : _moreUpdatesFailed
+                        ? 'Tentar de novo'
+                        : 'Carregar mais atualizações ($remaining)',
+                maxLines: 1,
+                softWrap: false,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
           ),
-        ),
+        ],
+      ),
+    );
+  }
+
+  /// Esqueleto da linha do tempo (ponto + 2 linhas), no lugar do spinner.
+  Widget _buildActivitySkeleton(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < 3; i++)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SkeletonBox(width: 22, height: 22, borderRadius: 11),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SkeletonText(width: 150, height: 11),
+                      const SizedBox(height: 8),
+                      SkeletonText(
+                        width: i.isEven ? double.infinity : 200,
+                        height: 13,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Ação que a pessoa não pode fazer aqui: à vista, com cadeado e o motivo.
+  Widget _buildLockedLine(BuildContext context, String reason) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: ThemeHelpers.borderLightColor(context)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(Icons.lock_outline_rounded, size: 16, color: muted),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              reason,
+              style: TextStyle(
+                fontSize: 12.5,
+                height: 1.4,
+                fontWeight: FontWeight.w600,
+                color: muted,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -4189,15 +4902,33 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   Widget _buildActivityEmpty(
     BuildContext context,
     ThemeData theme,
-    String message,
-  ) {
+    String message, {
+    String? hint,
+  }) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Text(
-        message,
-        style: theme.textTheme.bodyMedium?.copyWith(
-          color: ThemeHelpers.textSecondaryColor(context),
-        ),
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            message,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: ThemeHelpers.textColor(context),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          if (hint != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              hint,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: muted,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -4207,6 +4938,12 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     ThemeData theme,
     Color accent,
   ) {
+    final isDark = theme.brightness == Brightness.dark;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final green =
+        isDark ? AppColors.status.successDarkMode : AppColors.status.success;
+    final nearLimitTone =
+        isDark ? AppColors.message.warningTextDarkMode : AppColors.message.warningText;
     return Container(
       decoration: BoxDecoration(
         color: ThemeHelpers.cardBackgroundColor(context),
@@ -4214,93 +4951,167 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         border: Border.all(color: ThemeHelpers.borderColor(context)),
       ),
       padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          TextField(
-            controller: _updateComposer,
-            onTapOutside: (_) => FocusScope.of(context).unfocus(),
-            maxLines: 3,
-            minLines: 1,
-            maxLength: 2000,
-            decoration: InputDecoration(
-              hintText: 'Escreva uma atualização sobre o imóvel…',
-              border: InputBorder.none,
-              counterText: '',
-              isDense: true,
-            ),
-          ),
-          const SizedBox(height: 6),
-          FilledButton.icon(
-            onPressed: _submittingUpdate ? null : _submitPropertyUpdate,
-            style: FilledButton.styleFrom(
-              backgroundColor: accent,
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-            ),
-            icon: _submittingUpdate
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+      child: ValueListenableBuilder<TextEditingValue>(
+        valueListenable: _updateComposer,
+        builder: (context, value, _) {
+          final count = value.text.length;
+          final canSubmit = value.text.trim().isNotEmpty && !_submittingUpdate;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _updateComposer,
+                onTapOutside: (_) => FocusScope.of(context).unfocus(),
+                maxLines: 4,
+                minLines: 2,
+                maxLength: 2000,
+                enabled: !_submittingUpdate,
+                decoration: const InputDecoration(
+                  hintText: 'Registre uma atualização sobre este imóvel…',
+                  border: InputBorder.none,
+                  counterText: '',
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '$count/2000',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: count >= 1800 ? nearLimitTone : muted,
+                        fontWeight: FontWeight.w700,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
                     ),
-                  )
-                : const Icon(Icons.send_rounded, size: 16),
-            label: const Text('Publicar'),
-          ),
-        ],
+                  ),
+                  FilledButton.icon(
+                    onPressed: canSubmit ? _submitPropertyUpdate : null,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: green,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: green.withValues(alpha: 0.4),
+                      disabledForegroundColor:
+                          Colors.white.withValues(alpha: 0.85),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
+                    ),
+                    icon: _submittingUpdate
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : const Icon(Icons.send_rounded, size: 16),
+                    label: Text(_submittingUpdate ? 'Enviando…' : 'Registrar'),
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 
+  /// Atualização na linha do tempo (flush): ponto (engrenagem =
+  /// automática, lápis = manual), data · autor, selo e o texto.
   Widget _buildUpdateTile(
     BuildContext context,
     ThemeData theme,
-    PropertyUpdateEntry update,
-  ) {
+    PropertyUpdateEntry update, {
+    required Color accent,
+    bool last = false,
+  }) {
     final muted = ThemeHelpers.textSecondaryColor(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final dotTone = update.isSystem ? muted : accent;
+    final author = update.user?.name?.trim() ?? '';
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(vertical: 12),
       decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: ThemeHelpers.borderColor(context)),
+        border: last
+            ? null
+            : Border(
+                bottom: BorderSide(
+                  color: ThemeHelpers.borderLightColor(context),
+                ),
+              ),
       ),
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '${update.user?.name ?? 'Sistema'} · ${_formatActivityDateTime(update.createdAt)}',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: muted,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: muted.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  update.isSystem ? 'Automático' : 'Manual',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: muted,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
+          Container(
+            width: 22,
+            height: 22,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: dotTone.withValues(alpha: isDark ? 0.2 : 0.12),
+              border: Border.all(color: dotTone.withValues(alpha: 0.35)),
+            ),
+            child: Icon(
+              update.isSystem
+                  ? Icons.settings_outlined
+                  : Icons.edit_outlined,
+              size: 12,
+              color: dotTone,
+            ),
           ),
-          const SizedBox(height: 6),
-          Text(update.content, style: theme.textTheme.bodyMedium),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        [
+                          _formatActivityDateTime(update.createdAt),
+                          if (author.isNotEmpty) author,
+                        ].join(' · '),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: muted,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: muted.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        update.isSystem ? 'Automático' : 'Manual',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: muted,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  update.content,
+                  style: theme.textTheme.bodyMedium?.copyWith(height: 1.4),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -4378,25 +5189,40 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     Property property,
   ) {
     const accent = Color(0xFF10B981);
+    final muted = ThemeHelpers.textSecondaryColor(context);
     final published = property.isAvailableForSite == true;
-    final engagementChild = !published
-        ? _buildActivityEmpty(
-            context,
-            theme,
-            'Imóvel fora do site — sem métricas de engajamento.',
-          )
-        : (_loadingEngagement && !_engagementLoaded)
-            ? _buildInlineLoader(context, accent)
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildEngagementMetrics(context, theme),
-                  if (_engagementByChannel.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    _buildEngagementByChannel(context, theme),
-                  ],
-                ],
-              );
+    final Widget engagementChild;
+    if (!published) {
+      // Texto do web: fora do site não há o que medir — e diz o que fazer.
+      engagementChild = _buildActivityEmpty(
+        context,
+        theme,
+        'Imóvel fora do site público no momento.',
+        hint: 'Publique o imóvel no site público para acompanhar '
+            'visualizações, cliques e impressões — e liberar os atalhos Ver '
+            'no site e Compartilhar no WhatsApp.',
+      );
+    } else if (_loadingEngagement || !_engagementLoaded) {
+      engagementChild = _buildEngagementSkeleton(context);
+    } else if (_engagement == null) {
+      engagementChild = _buildActivityEmpty(
+        context,
+        theme,
+        'Sem dados disponíveis ainda.',
+        hint: 'As visitas e os cliques no anúncio do site aparecem aqui.',
+      );
+    } else {
+      engagementChild = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildEngagementMetrics(context, theme),
+          if (_engagementByChannel.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            _buildEngagementByChannel(context, theme),
+          ],
+        ],
+      );
+    }
     final scoreResult = computePropertyScore(property);
 
     return Column(
@@ -4411,6 +5237,15 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           title: 'Engajamento no site',
           icon: Icons.insights_rounded,
           tone: accent,
+          headerTrailing: published
+              ? Text(
+                  'últimos 3 dias',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: muted,
+                    fontWeight: FontWeight.w700,
+                  ),
+                )
+              : null,
           child: engagementChild,
         ),
         _buildFlushSection(
@@ -4425,66 +5260,137 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  Widget _buildEngagementMetrics(BuildContext context, ThemeData theme) {
-    final stats = _engagement;
-    final items = <(String, int, IconData)>[
-      ('Visualizações', stats?.views ?? 0, Icons.visibility_outlined),
-      ('WhatsApp', stats?.whatsappClicks ?? 0, Icons.chat_outlined),
-      ('Telefone', stats?.phoneClicks ?? 0, Icons.call_outlined),
-      ('Impressões', stats?.prints ?? 0, Icons.bar_chart_rounded),
-    ];
-    return GridView.count(
-      crossAxisCount: 2,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisSpacing: 10,
-      mainAxisSpacing: 10,
-      childAspectRatio: 2.4,
-      children: items.map((it) {
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            color: ThemeHelpers.cardBackgroundColor(context),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: ThemeHelpers.borderColor(context)),
+  /// Esqueleto da faixa de números do engajamento.
+  Widget _buildEngagementSkeleton(BuildContext context) {
+    return Row(
+      children: [
+        for (var i = 0; i < 4; i++) ...[
+          if (i > 0) const SizedBox(width: 10),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SkeletonBox(width: 30, height: 30, borderRadius: 9),
+                SizedBox(height: 8),
+                SkeletonText(width: 56, height: 10),
+                SizedBox(height: 6),
+                SkeletonText(width: 36, height: 18),
+              ],
+            ),
           ),
-          child: Row(
-            children: [
-              Icon(it.$3, size: 20, color: const Color(0xFF10B981)),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      '${it.$2}',
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    Text(
-                      it.$1,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: ThemeHelpers.textSecondaryColor(context),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      }).toList(),
+        ],
+      ],
     );
   }
 
+  /// Os 4 números do web (Visualizações, WhatsApp, Telefone, Impressões) em
+  /// faixa flush: 4 colunas quando cabem, senão 2 × 2 — altura pelo
+  /// conteúdo (a grade de proporção fixa estourava a 320dp com fonte grande).
+  Widget _buildEngagementMetrics(BuildContext context, ThemeData theme) {
+    final stats = _engagement;
+    final isDark = theme.brightness == Brightness.dark;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final items = <(String, int, IconData, Color)>[
+      (
+        'Visualizações',
+        stats?.views ?? 0,
+        Icons.visibility_outlined,
+        isDark ? AppColors.status.infoDarkMode : AppColors.status.info,
+      ),
+      (
+        'WhatsApp',
+        stats?.whatsappClicks ?? 0,
+        Icons.chat_outlined,
+        isDark ? AppColors.status.successDarkMode : AppColors.status.success,
+      ),
+      (
+        'Telefone',
+        stats?.phoneClicks ?? 0,
+        Icons.call_outlined,
+        isDark ? AppColors.status.tealDarkMode : AppColors.status.teal,
+      ),
+      (
+        'Impressões',
+        stats?.prints ?? 0,
+        Icons.print_outlined,
+        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple,
+      ),
+    ];
+
+    Widget cell((String, int, IconData, Color) it) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(9),
+              color: it.$4.withValues(alpha: isDark ? 0.18 : 0.12),
+            ),
+            child: Icon(it.$3, size: 16, color: it.$4),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            it.$1,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: muted,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '${it.$2}',
+              maxLines: 1,
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: ThemeHelpers.textColor(context),
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final scale = MediaQuery.textScalerOf(context).scale(1);
+        final cols = constraints.maxWidth / scale >= 340 ? 4 : 2;
+        final rows = <Widget>[];
+        for (var start = 0; start < items.length; start += cols) {
+          if (rows.isNotEmpty) rows.add(const SizedBox(height: 14));
+          rows.add(
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var i = start; i < start + cols; i++) ...[
+                  if (i > start) const SizedBox(width: 10),
+                  Expanded(child: cell(items[i])),
+                ],
+              ],
+            ),
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: rows,
+        );
+      },
+    );
+  }
+
+  /// "Por origem — últimos 30 dias" (até 8, como o web), em linhas flush.
   Widget _buildEngagementByChannel(BuildContext context, ThemeData theme) {
     final muted = ThemeHelpers.textSecondaryColor(context);
+    final channels = _engagementByChannel.take(8).toList();
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
           'Por origem — últimos 30 dias',
@@ -4493,44 +5399,46 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             fontWeight: FontWeight.w700,
           ),
         ),
-        const SizedBox(height: 8),
-        ..._engagementByChannel.map((ch) {
-          final parts = <String>[
-            '${ch.views} visualizações',
-            if (ch.whatsappClicks > 0) '${ch.whatsappClicks} WA',
-            if (ch.phoneClicks > 0) '${ch.phoneClicks} tel',
-            if (ch.emailClicks > 0) '${ch.emailClicks} e-mail',
-            if (ch.favorites > 0) '${ch.favorites} fav',
-          ];
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Row(
+        const SizedBox(height: 4),
+        for (var i = 0; i < channels.length; i++)
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 9),
+            decoration: BoxDecoration(
+              border: i == channels.length - 1
+                  ? null
+                  : Border(
+                      bottom: BorderSide(
+                        color: ThemeHelpers.borderLightColor(context),
+                      ),
+                    ),
+            ),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.public, size: 16, color: Color(0xFF10B981)),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        ch.label,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      Text(
-                        parts.join(' · '),
-                        style:
-                            theme.textTheme.bodySmall?.copyWith(color: muted),
-                      ),
-                    ],
+                Text(
+                  channels[i].label,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
                   ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  [
+                    '${channels[i].views} visualizações',
+                    if (channels[i].whatsappClicks > 0)
+                      '${channels[i].whatsappClicks} WA',
+                    if (channels[i].phoneClicks > 0)
+                      '${channels[i].phoneClicks} tel',
+                    if (channels[i].emailClicks > 0)
+                      '${channels[i].emailClicks} e-mail',
+                    if (channels[i].favorites > 0)
+                      '${channels[i].favorites} fav',
+                  ].join(' · '),
+                  style: theme.textTheme.bodySmall?.copyWith(color: muted),
                 ),
               ],
             ),
-          );
-        }),
+          ),
       ],
     );
   }
@@ -4997,6 +5905,15 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         color: const Color(0xFFE6B84C),
         onTap: () => _openScheduleVisit(property),
       ),
+      (
+        icon: Icons.picture_as_pdf_outlined,
+        title: 'Apresentação em PDF',
+        subtitle: 'Fotos, valores e seu contato para enviar ao cliente',
+        color: theme.brightness == Brightness.dark
+            ? AppColors.status.infoDarkMode
+            : AppColors.status.info,
+        onTap: _openPresentationPdf,
+      ),
       // Matches e Ofertas ocultas no app: as linhas só voltam com os flags.
       if (FeatureVisibility.matchesEnabled)
         (
@@ -5033,16 +5950,16 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       ),
     ];
 
-    final children = <Widget>[];
-    for (var i = 0; i < actions.length; i++) {
-      if (i > 0) {
-        children.add(Container(
+    Widget divider() => Container(
           height: 1,
           // Recuada: alinhada ao texto (40 do roundel + 14 do gap).
           margin: const EdgeInsets.only(left: 54),
           color: ThemeHelpers.borderColor(context).withValues(alpha: 0.30),
-        ));
-      }
+        );
+
+    final children = <Widget>[];
+    for (var i = 0; i < actions.length; i++) {
+      if (i > 0) children.add(divider());
       final action = actions[i];
       children.add(_buildQuickActionRow(
         context,
@@ -5053,6 +5970,27 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         color: action.color,
         onTap: action.onTap,
       ));
+    }
+
+    // Web: "Gerar Proposta" com o módulo de IA e o imóvel disponível. O
+    // gerador ainda não existe no app — fica à vista, travado, com o motivo.
+    if (ModuleAccessService.instance.isModuleAvailableForCompany(
+          'ai_assistant',
+        ) &&
+        property.status == PropertyStatus.available) {
+      children
+        ..add(divider())
+        ..add(_buildQuickActionRow(
+          context,
+          theme,
+          icon: Icons.description_outlined,
+          title: 'Gerar proposta (IA)',
+          subtitle: 'Proposta escrita pela IA a partir deste imóvel',
+          color: AppColors.status.purple,
+          lockedReason: 'Por enquanto só no painel web: o gerador de '
+              'proposta com IA ainda não chegou ao app.',
+          onTap: () {},
+        ));
     }
 
     return Column(
@@ -5069,13 +6007,17 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     required String subtitle,
     required Color color,
     required VoidCallback onTap,
+    String? lockedReason,
   }) {
     final isDark = theme.brightness == Brightness.dark;
     final muted = ThemeHelpers.textSecondaryColor(context);
+    final locked = lockedReason != null;
+    if (locked) color = muted;
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: onTap,
+        // Travada: o toque explica o motivo em vez de não fazer nada.
+        onTap: locked ? () => _showLockedReason(lockedReason) : onTap,
         borderRadius: BorderRadius.circular(12),
         splashColor: color.withValues(alpha: 0.16),
         highlightColor: color.withValues(alpha: 0.08),
@@ -5108,13 +6050,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                         fontWeight: FontWeight.w800,
                         letterSpacing: -0.15,
                         fontSize: 14.5,
-                        color: ThemeHelpers.textColor(context),
+                        color: locked ? muted : ThemeHelpers.textColor(context),
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      subtitle,
-                      maxLines: 1,
+                      lockedReason ?? subtitle,
+                      maxLines: locked ? 3 : 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
                         fontWeight: FontWeight.w500,
@@ -5128,9 +6070,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               ),
               const SizedBox(width: 10),
               Icon(
-                Icons.chevron_right_rounded,
-                size: 20,
-                color: muted.withValues(alpha: 0.55),
+                locked
+                    ? Icons.lock_outline_rounded
+                    : Icons.chevron_right_rounded,
+                size: locked ? 17 : 20,
+                color: muted.withValues(alpha: locked ? 0.85 : 0.55),
               ),
             ],
           ),
@@ -5429,166 +6373,494 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
+  /// Rótulos do web (`getClientTypeLabel`).
+  static String _clientTypeLabel(String raw) {
+    switch (raw.trim().toLowerCase()) {
+      case 'buyer':
+        return 'Comprador';
+      case 'seller':
+        return 'Vendedor';
+      case 'renter':
+        return 'Locatário';
+      case 'lessor':
+        return 'Locador';
+      case 'investor':
+        return 'Investidor';
+      case '':
+      case 'general':
+        return 'Geral';
+    }
+    return raw;
+  }
+
+  /// Rótulos do web (`getInterestTypeLabel`) + os valores que o app
+  /// gravava antes (compra/aluguel/ambos), para vínculos antigos lerem bem.
+  static String _clientInterestLabel(String raw) {
+    switch (raw.trim().toLowerCase()) {
+      case '':
+      case 'interested':
+        return 'Interessado';
+      case 'contacted':
+        return 'Contatado';
+      case 'viewing':
+        return 'Visualizando';
+      case 'negotiating':
+        return 'Negociando';
+      case 'closed':
+        return 'Fechado';
+      case 'buy':
+        return 'Compra';
+      case 'rent':
+        return 'Aluguel';
+      case 'both':
+        return 'Compra e aluguel';
+    }
+    return raw;
+  }
+
   Widget _buildClientsSection(
     BuildContext context,
     ThemeData theme,
     Property property,
   ) {
-    final clients = property.clients ?? [];
-    final isDark = theme.brightness == Brightness.dark;
+    final clients = property.clients ?? const <PropertyClient>[];
+    final readOnly = property.isDeleted;
+
+    Widget linkButton(String label) {
+      if (readOnly) {
+        return _buildLockedLine(context, kPropertyDeletedReadOnlyReason);
+      }
+      return OutlinedButton.icon(
+        onPressed: () => _showLinkClientModal(context, property),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: ThemeHelpers.textColor(context),
+          side: BorderSide(color: ThemeHelpers.borderColor(context)),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
+        label: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            label,
+            maxLines: 1,
+            softWrap: false,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+      );
+    }
+
+    if (clients.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildActivityEmpty(
+            context,
+            theme,
+            'Nenhum cliente vinculado',
+            hint: 'Vincule clientes interessados nesta propriedade para '
+                'acompanhar negociações.',
+          ),
+          const SizedBox(height: 4),
+          linkButton('Vincular clientes'),
+        ],
+      );
+    }
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(
-              child: Text(
-                clients.isEmpty
-                    ? 'Vincule clientes interessados a este imóvel.'
-                    : '${clients.length} cliente(s) vinculado(s)',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
+        for (var i = 0; i < clients.length; i++)
+          _buildLinkedClientRow(
+            context,
+            theme,
+            property,
+            clients[i],
+            last: i == clients.length - 1,
+          ),
+        const SizedBox(height: 12),
+        linkButton('Vincular clientes'),
+      ],
+    );
+  }
+
+  /// Cliente vinculado em linha flush — quem é, o interesse e como falar
+  /// com ele, sem abrir a ficha do cliente.
+  Widget _buildLinkedClientRow(
+    BuildContext context,
+    ThemeData theme,
+    Property property,
+    PropertyClient client, {
+    bool last = false,
+  }) {
+    final isDark = theme.brightness == Brightness.dark;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    const tone = Color(0xFF0EA5E9);
+    final name = client.name.trim().isEmpty
+        ? 'Nome não disponível'
+        : client.name.trim();
+    final initial = client.name.trim().isEmpty
+        ? '?'
+        : client.name.trim().characters.first.toUpperCase();
+    final contact = [
+      if (client.email.trim().isNotEmpty) client.email.trim(),
+      if (client.phone.trim().isNotEmpty) client.phone.trim(),
+    ].join(' · ');
+    final contactedAt = DateTime.tryParse(client.contactedAt ?? '');
+    final notes = client.notes?.trim() ?? '';
+
+    Widget pill(String text) => Container(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+          decoration: BoxDecoration(
+            color: tone.withValues(alpha: isDark ? 0.18 : 0.10),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            text,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: ThemeHelpers.textColor(context),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        );
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => Navigator.of(context)
+            .pushNamed(AppRoutes.clientDetails(client.id)),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            border: last
+                ? null
+                : Border(
+                    bottom: BorderSide(
+                      color: ThemeHelpers.borderLightColor(context),
+                    ),
+                  ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: tone.withValues(alpha: isDark ? 0.2 : 0.12),
+                ),
+                child: Text(
+                  initial,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: ThemeHelpers.textColor(context),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: 8),
-            TextButton.icon(
-              onPressed: () {
-                _showLinkClientModal(context, property);
-              },
-              icon: const Icon(Icons.add, size: 18),
-              label: const Text('Adicionar'),
-            ),
-          ],
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        pill(_clientTypeLabel(client.type)),
+                        pill(_clientInterestLabel(client.interestType)),
+                      ],
+                    ),
+                    if (contact.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        contact,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: muted,
+                        ),
+                      ),
+                    ],
+                    if (client.responsibleUserName.trim().isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        'Responsável: ${client.responsibleUserName.trim()}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: muted,
+                        ),
+                      ),
+                    ],
+                    if (notes.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        notes,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: muted,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ],
+                    if (contactedAt != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        'Último contato: '
+                        '${DateFormat('dd/MM/yyyy').format(contactedAt.toLocal())}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: muted,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Ações do cliente',
+                onPressed: () =>
+                    _showLinkedClientActions(property, client, name),
+                icon: Icon(Icons.more_vert_rounded, color: muted, size: 20),
+              ),
+            ],
+          ),
         ),
-        const SizedBox(height: 12),
-        if (clients.isEmpty)
-          Center(
+      ),
+    );
+  }
+
+  /// Menu do cliente vinculado — Visualizar, Editar e Desvincular (o web
+  /// esconde o desvincular com o imóvel excluído; aqui fica travado).
+  void _showLinkedClientActions(
+    Property property,
+    PropertyClient client,
+    String name,
+  ) {
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        final isDark = theme.brightness == Brightness.dark;
+        final muted = ThemeHelpers.textSecondaryColor(sheetContext);
+        final danger =
+            isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+
+        Widget action({
+          required IconData icon,
+          required String label,
+          required VoidCallback onTap,
+          String? lockedReason,
+          bool destructive = false,
+        }) {
+          final locked = lockedReason != null;
+          final color = locked
+              ? muted
+              : destructive
+                  ? danger
+                  : ThemeHelpers.textColor(sheetContext);
+          return InkWell(
+            onTap: locked
+                ? null
+                : () {
+                    Navigator.of(sheetContext).pop();
+                    onTap();
+                  },
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              child: Column(
+              padding: const EdgeInsets.fromLTRB(20, 12, 16, 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(
-                    Icons.people_outline,
-                    size: 44,
-                    color: ThemeHelpers.textSecondaryColor(context),
+                  Icon(icon, size: 20, color: color),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          label,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: color,
+                          ),
+                        ),
+                        if (locked) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            lockedReason,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: muted,
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'Nenhum cliente vinculado',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
+                  if (locked)
+                    Icon(Icons.lock_outline_rounded, size: 16, color: muted),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(sheetContext).size.height * 0.88,
+          ),
+          child: Container(
+            decoration: BoxDecoration(
+              color: ThemeHelpers.cardBackgroundColor(sheetContext),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 14, 8, 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Fechar',
+                          onPressed: () => Navigator.of(sheetContext).pop(),
+                          icon: Icon(Icons.close_rounded, color: muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    height: 1,
+                    color: ThemeHelpers.borderLightColor(sheetContext),
+                  ),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          action(
+                            icon: Icons.visibility_outlined,
+                            label: 'Visualizar',
+                            onTap: () => Navigator.of(context).pushNamed(
+                              AppRoutes.clientDetails(client.id),
+                            ),
+                          ),
+                          action(
+                            icon: Icons.edit_outlined,
+                            label: 'Editar',
+                            onTap: () => Navigator.of(context).pushNamed(
+                              AppRoutes.clientEdit(client.id),
+                            ),
+                          ),
+                          action(
+                            icon: Icons.link_off_rounded,
+                            label: 'Desvincular cliente',
+                            destructive: true,
+                            lockedReason: property.isDeleted
+                                ? kPropertyDeletedReadOnlyReason
+                                : null,
+                            onTap: () =>
+                                _confirmUnlinkClient(property, client, name),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
-          )
-        else
-          ...clients.map((client) {
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? AppColors.background.backgroundSecondaryDarkMode
-                        : AppColors.background.backgroundSecondary,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: ThemeHelpers.borderLightColor(context),
-                    ),
-                  ),
-                  child: InkWell(
-                    onTap: () {
-                      Navigator.of(
-                        context,
-                      ).pushNamed(AppRoutes.clientDetails(client.id));
-                    },
-                    child: Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 24,
-                          child: Text(
-                            client.name[0].toUpperCase(),
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                client.name,
-                                style: theme.textTheme.bodyLarge?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              if (client.email.isNotEmpty) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  client.email,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: ThemeHelpers.textSecondaryColor(
-                                      context,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                              if (client.phone.isNotEmpty) ...[
-                                const SizedBox(height: 2),
-                                Text(
-                                  client.phone,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: ThemeHelpers.textSecondaryColor(
-                                      context,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.primary.primary.withValues(
-                                  alpha: 0.1,
-                                ),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                client.interestType,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: AppColors.primary.primary,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Icon(
-                              Icons.arrow_forward_ios,
-                              size: 16,
-                              color: ThemeHelpers.textSecondaryColor(context),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              }),
-      ],
+          ),
+        );
+      },
     );
+  }
+
+  Future<void> _confirmUnlinkClient(
+    Property property,
+    PropertyClient client,
+    String name,
+  ) async {
+    final danger = Theme.of(context).brightness == Brightness.dark
+        ? AppColors.status.errorDarkMode
+        : AppColors.status.error;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: ThemeHelpers.cardBackgroundColor(ctx),
+        title: const Text('Desvincular cliente?'),
+        content: SingleChildScrollView(
+          child: Text(
+            '$name deixa de aparecer entre os clientes deste imóvel. O '
+            'cadastro do cliente não muda e dá para vincular de novo.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            style: TextButton.styleFrom(
+              foregroundColor: ThemeHelpers.textSecondaryColor(ctx),
+            ),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: danger,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Desvincular'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final res = await _clientService.disassociateClientFromProperty(
+      client.id,
+      property.id,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          res.success
+              ? 'Cliente desvinculado com sucesso!'
+              : (res.message ?? 'Erro ao desvincular cliente'),
+        ),
+        backgroundColor:
+            res.success ? AppColors.status.success : AppColors.status.error,
+      ),
+    );
+    if (res.success) _refreshAfterChange();
   }
 
   Widget _buildExpensesSection(
@@ -6108,196 +7380,494 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     ThemeData theme,
     Property property,
   ) {
-    final isDark = theme.brightness == Brightness.dark;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    if (!DocumentPermissions.moduleEnabled) {
+      return _buildLockedLine(
+        context,
+        'Documentos fazem parte de um módulo que não está incluído no plano '
+        'atual da empresa. Fale com o administrador.',
+      );
+    }
+    final failure = _documentsFailure;
+    final createLock = property.isDeleted
+        ? kPropertyDeletedReadOnlyReason
+        : DocumentPermissions.canCreate
+            ? null
+            : 'Sem a permissão para criar documentos. Fale com o seu gestor '
+                'ou com o suporte.';
 
+    Widget addButton(String label) {
+      if (createLock != null) return _buildLockedLine(context, createLock);
+      return OutlinedButton.icon(
+        onPressed: () => _openDocumentCreate(property),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: ThemeHelpers.textColor(context),
+          side: BorderSide(color: ThemeHelpers.borderColor(context)),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        icon: const Icon(Icons.add_rounded, size: 18),
+        label: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            label,
+            maxLines: 1,
+            softWrap: false,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+      );
+    }
+
+    if (_isLoadingDocuments && _documents.isEmpty) {
+      return _buildActivitySkeleton(context);
+    }
+    if (failure != null && _documents.isEmpty) {
+      return AppErrorState.fromApi(
+        message: failure.message,
+        statusCode: failure.statusCode,
+        error: failure.error,
+        onRetry: _loadDocuments,
+        dense: true,
+      );
+    }
+    if (_documents.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildActivityEmpty(
+            context,
+            theme,
+            'Nenhum documento encontrado',
+            hint: 'Este imóvel ainda não possui documentos. Matrícula, IPTU, '
+                'contratos e laudos ficam aqui, à mão de quem atende.',
+          ),
+          const SizedBox(height: 4),
+          addButton('Adicionar primeiro documento'),
+        ],
+      );
+    }
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.description,
-                    color: AppColors.primary.primary,
-                    size: 24,
+        for (var i = 0; i < _documents.length; i++)
+          _buildDocumentRow(
+            context,
+            theme,
+            _documents[i],
+            last: i == _documents.length - 1,
+          ),
+        const SizedBox(height: 12),
+        addButton('Adicionar documento'),
+        if (_isLoadingDocuments)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: LinearProgressIndicator(
+              minHeight: 2,
+              color: muted,
+              backgroundColor: muted.withValues(alpha: 0.12),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Documento em linha flush: situação no ícone, nome, "tipo · tamanho ·
+  /// situação · vencimento", descrição; toque abre o documento e o ⋯ traz
+  /// Visualizar / Baixar / Editar / Excluir.
+  Widget _buildDocumentRow(
+    BuildContext context,
+    ThemeData theme,
+    Document document, {
+    bool last = false,
+  }) {
+    final isDark = theme.brightness == Brightness.dark;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final Color tone;
+    final IconData icon;
+    switch (document.status) {
+      case DocumentStatus.approved:
+        tone = isDark
+            ? AppColors.status.successDarkMode
+            : AppColors.status.success;
+        icon = Icons.check_circle_outline_rounded;
+      case DocumentStatus.rejected:
+        tone = isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+        icon = Icons.cancel_outlined;
+      case DocumentStatus.pendingReview:
+        tone = isDark
+            ? AppColors.message.warningTextDarkMode
+            : AppColors.message.warningText;
+        icon = Icons.schedule_rounded;
+      default:
+        tone = muted;
+        icon = Icons.insert_drive_file_outlined;
+    }
+    final expiry = document.expiryDate;
+    final meta = [
+      document.type.label,
+      _formatFileSize(document.fileSize),
+      document.status.label,
+      if (expiry != null)
+        'vence ${DateFormat('dd/MM/yyyy').format(expiry.toLocal())}',
+    ].join(' · ');
+    final name = (document.title ?? '').trim().isNotEmpty
+        ? document.title!.trim()
+        : document.originalName;
+    final description = document.description?.trim() ?? '';
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _openDocument(document),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            border: last
+                ? null
+                : Border(
+                    bottom: BorderSide(
+                      color: ThemeHelpers.borderLightColor(context),
+                    ),
                   ),
-                  const SizedBox(width: 12),
-                  Flexible(
-                    child: Text(
-                      'Documentos',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  color: tone.withValues(alpha: isDark ? 0.18 : 0.10),
+                ),
+                child: Icon(icon, size: 18, color: tone),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        height: 1.3,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      meta,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: muted,
+                        fontWeight: FontWeight.w600,
+                        height: 1.35,
+                      ),
+                    ),
+                    if (description.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        description,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: muted,
+                          height: 1.35,
                         ),
                       ),
                     ],
-                  ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                TextButton.icon(
-                  onPressed: () {
-                    Navigator.of(
-                      context,
-                    ).pushNamed(AppRoutes.documentCreate).then((_) {
-                      _loadDocuments();
-                    });
+              ),
+              IconButton(
+                tooltip: 'Ações do documento',
+                onPressed: () => _showDocumentActions(document),
+                icon: Icon(Icons.more_vert_rounded, color: muted, size: 20),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  static String _formatFileSize(int bytes) {
+    if (bytes <= 0) return '0 KB';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).ceil()} KB';
+    final mb = bytes / (1024 * 1024);
+    return '${mb.toStringAsFixed(1).replaceAll('.', ',')} MB';
+  }
+
+  void _openDocument(Document document) {
+    Navigator.of(context)
+        .pushNamed(AppRoutes.documentDetails(document.id))
+        .then((_) {
+      if (mounted) _loadDocuments();
+    });
+  }
+
+  void _openDocumentCreate(Property property) {
+    Navigator.of(context)
+        .push(
+      MaterialPageRoute<void>(
+        builder: (_) => CreateDocumentPage(
+          initialPropertyId: property.id,
+          initialPropertyName: property.title,
+        ),
+      ),
+    )
+        .then((_) {
+      if (mounted) _loadDocuments();
+    });
+  }
+
+  /// Ações do documento — as do web (Visualizar, Download, Editar, Excluir),
+  /// cada uma travada com a frase do web quando falta a permissão.
+  void _showDocumentActions(Document document) {
+    final name = (document.title ?? '').trim().isNotEmpty
+        ? document.title!.trim()
+        : document.originalName;
+    final deleted = _property?.isDeleted == true;
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        final isDark = theme.brightness == Brightness.dark;
+        final muted = ThemeHelpers.textSecondaryColor(sheetContext);
+        final danger =
+            isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+
+        Widget action({
+          required IconData icon,
+          required String label,
+          required VoidCallback onTap,
+          String? lockedReason,
+          bool destructive = false,
+        }) {
+          final locked = lockedReason != null;
+          final color = locked
+              ? muted
+              : destructive
+                  ? danger
+                  : ThemeHelpers.textColor(sheetContext);
+          return InkWell(
+            onTap: locked
+                ? null
+                : () {
+                    Navigator.of(sheetContext).pop();
+                    onTap();
                   },
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Adicionar'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            _isLoadingDocuments
-                ? const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(24),
-                      child: CircularProgressIndicator(),
-                    ),
-                  )
-                : _documents.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        children: [
-                          Icon(
-                            Icons.description_outlined,
-                            size: 48,
-                            color: ThemeHelpers.textSecondaryColor(context),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 16, 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(icon, size: 20, color: color),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          label,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: color,
                           ),
-                          const SizedBox(height: 12),
+                        ),
+                        if (locked) ...[
+                          const SizedBox(height: 2),
                           Text(
-                            'Nenhum documento vinculado',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: ThemeHelpers.textSecondaryColor(context),
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Adicione contratos, IPTU, matrícula e outros documentos relacionados a esta propriedade',
+                            lockedReason,
                             style: theme.textTheme.bodySmall?.copyWith(
-                              color: ThemeHelpers.textSecondaryColor(context),
+                              color: muted,
+                              height: 1.35,
                             ),
-                            textAlign: TextAlign.center,
                           ),
-                          const SizedBox(height: 16),
-                          OutlinedButton.icon(
-                            onPressed: () {
-                              Navigator.of(
-                                context,
-                              ).pushNamed(AppRoutes.documentCreate).then((_) {
-                                _loadDocuments();
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (locked)
+                    Icon(Icons.lock_outline_rounded, size: 16, color: muted),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(sheetContext).size.height * 0.88,
+          ),
+          child: Container(
+            decoration: BoxDecoration(
+              color: ThemeHelpers.cardBackgroundColor(sheetContext),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 14, 8, 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Fechar',
+                          onPressed: () => Navigator.of(sheetContext).pop(),
+                          icon: Icon(Icons.close_rounded, color: muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    height: 1,
+                    color: ThemeHelpers.borderLightColor(sheetContext),
+                  ),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          action(
+                            icon: Icons.visibility_outlined,
+                            label: 'Visualizar',
+                            onTap: () => _openDocument(document),
+                          ),
+                          action(
+                            icon: Icons.download_rounded,
+                            label: 'Baixar',
+                            lockedReason: DocumentPermissions.canDownload
+                                ? null
+                                : 'Você não tem permissão para fazer '
+                                    'download de documentos',
+                            onTap: () => DocumentFileActions.download(
+                              context,
+                              document.fileUrl,
+                              document.originalName,
+                            ),
+                          ),
+                          action(
+                            icon: Icons.edit_outlined,
+                            label: 'Editar',
+                            lockedReason: deleted
+                                ? kPropertyDeletedReadOnlyReason
+                                : DocumentPermissions.canUpdate
+                                    ? null
+                                    : 'Você não tem permissão para editar '
+                                        'documentos',
+                            onTap: () {
+                              Navigator.of(context)
+                                  .pushNamed(
+                                    AppRoutes.documentEdit(document.id),
+                                  )
+                                  .then((_) {
+                                if (mounted) _loadDocuments();
                               });
                             },
-                            icon: const Icon(Icons.add),
-                            label: const Text('Adicionar Documento'),
+                          ),
+                          action(
+                            icon: Icons.delete_outline_rounded,
+                            label: 'Excluir',
+                            destructive: true,
+                            lockedReason: deleted
+                                ? kPropertyDeletedReadOnlyReason
+                                : DocumentPermissions.canDelete
+                                    ? null
+                                    : 'Você não tem permissão para excluir '
+                                        'documentos',
+                            onTap: () => _confirmDeleteDocument(document),
                           ),
                         ],
                       ),
                     ),
-                  )
-                : Column(
-                    children: [
-                      ..._documents.take(5).map((document) {
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 12),
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? AppColors
-                                      .background
-                                      .backgroundSecondaryDarkMode
-                                : AppColors.background.backgroundSecondary,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: ThemeHelpers.borderLightColor(context),
-                            ),
-                          ),
-                          child: InkWell(
-                            onTap: () {
-                              Navigator.of(context).pushNamed(
-                                AppRoutes.documentDetails(document.id),
-                              );
-                            },
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.description,
-                                  color: AppColors.primary.primary,
-                                  size: 24,
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        document.title ?? document.originalName,
-                                        style: theme.textTheme.bodyLarge
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      if (document.description != null &&
-                                          document.description!.isNotEmpty) ...[
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          document.description!,
-                                          style: theme.textTheme.bodySmall
-                                              ?.copyWith(
-                                                color:
-                                                    ThemeHelpers.textSecondaryColor(
-                                                      context,
-                                                    ),
-                                              ),
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Icon(
-                                  Icons.arrow_forward_ios,
-                                  size: 16,
-                                  color: ThemeHelpers.textSecondaryColor(
-                                    context,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      }),
-                      if (_documents.length > 5) ...[
-                        const SizedBox(height: 8),
-                        OutlinedButton.icon(
-                          onPressed: () {
-                            Navigator.of(
-                              context,
-                            ).pushNamed(AppRoutes.documents);
-                          },
-                          icon: const Icon(Icons.visibility),
-                          label: Text('Ver Todos (${_documents.length})'),
-                          style: OutlinedButton.styleFrom(
-                            minimumSize: const Size(double.infinity, 40),
-                          ),
-                        ),
-                      ],
-                    ],
                   ),
-      ],
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
+  }
+
+  /// "Excluir documento" — texto do modal do web; Cancelar neutro e
+  /// Excluir vermelho de texto branco.
+  Future<void> _confirmDeleteDocument(Document document) async {
+    final name = (document.title ?? '').trim().isNotEmpty
+        ? document.title!.trim()
+        : document.originalName;
+    final danger = Theme.of(context).brightness == Brightness.dark
+        ? AppColors.status.errorDarkMode
+        : AppColors.status.error;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: ThemeHelpers.cardBackgroundColor(ctx),
+        title: const Text('Excluir documento'),
+        content: SingleChildScrollView(
+          child: Text(
+            'Tem certeza que deseja excluir este documento?\n\n"$name"',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            style: TextButton.styleFrom(
+              foregroundColor: ThemeHelpers.textSecondaryColor(ctx),
+            ),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: danger,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final res = await _documentService.deleteDocuments([document.id]);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          res.success
+              ? 'Documento excluído com sucesso!'
+              : (res.message ?? 'Erro ao excluir documento'),
+        ),
+        backgroundColor:
+            res.success ? AppColors.status.success : AppColors.status.error,
+      ),
+    );
+    if (res.success) _loadDocuments();
   }
 
   /// Localização com MAPA REAL (paridade `PropertyMap` do web): tiles CARTO
@@ -6836,11 +8406,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   ) async {
     final selectedClientIdRef = <String?>[null];
     final selectedClientNameRef = <String?>[null];
-    final selectedInterestTypeRef = <String?>[null];
     final notesController = TextEditingController();
     final formKey = GlobalKey<FormState>();
-
-    final interestTypes = ['buy', 'rent', 'both'];
 
     final result = await showModalBottomSheet<bool>(
       context: context,
@@ -6883,7 +8450,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                     children: [
                       Expanded(
                         child: Text(
-                          'Vincular Cliente',
+                          'Vincular cliente',
                           style: Theme.of(context).textTheme.titleLarge
                               ?.copyWith(fontWeight: FontWeight.bold),
                         ),
@@ -6906,36 +8473,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                         selectedClientNameRef[0] = name;
                       });
                     },
-                  ),
-                  const SizedBox(height: 16),
-                  // Interest Type
-                  Text(
-                    'Tipo de Interesse *',
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: interestTypes.map((type) {
-                      final labels = {
-                        'buy': 'Compra',
-                        'rent': 'Aluguel',
-                        'both': 'Ambos',
-                      };
-                      final isSelected = selectedInterestTypeRef[0] == type;
-                      return ChoiceChip(
-                        label: Text(labels[type] ?? type),
-                        selected: isSelected,
-                        onSelected: (selected) {
-                          setModalState(() {
-                            selectedInterestTypeRef[0] = selected ? type : null;
-                          });
-                        },
-                      );
-                    }).toList(),
                   ),
                   const SizedBox(height: 16),
                   // Notes (optional)
@@ -6971,23 +8508,14 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                                 );
                                 return;
                               }
-                              if (selectedInterestTypeRef[0] == null) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: const Text(
-                                      'Por favor, selecione o tipo de interesse',
-                                    ),
-                                    backgroundColor: AppColors.status.error,
-                                  ),
-                                );
-                                return;
-                              }
                               Navigator.pop(context, true);
                             }
                           },
                           icon: const Icon(Icons.link),
-                          label: const Text('Vincular Cliente'),
+                          label: const Text('Vincular cliente'),
                           style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.status.success,
+                            foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 16),
                           ),
                         ),
@@ -7002,6 +8530,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                           icon: const Icon(Icons.close),
                           label: const Text('Cancelar'),
                           style: OutlinedButton.styleFrom(
+                            foregroundColor:
+                                ThemeHelpers.textSecondaryColor(context),
                             padding: const EdgeInsets.symmetric(vertical: 16),
                           ),
                         ),
@@ -7018,9 +8548,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
     // Usar try-finally para garantir que o controller seja sempre descartado
     try {
-      if (result != true ||
-          selectedClientIdRef[0] == null ||
-          selectedInterestTypeRef[0] == null) {
+      if (result != true || selectedClientIdRef[0] == null) {
         return;
       }
 
@@ -7034,7 +8562,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       final response = await _clientService.associateClientToProperty(
         selectedClientIdRef[0]!,
         property.id,
-        interestType: selectedInterestTypeRef[0]!,
+        // Mesmo padrão do web (`usePropertyClients`): vínculo nasce como
+        // "Interessado".
+        interestType: 'interested',
         notes: notes,
       );
 
@@ -7047,7 +8577,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             ),
           );
           // Recarregar propriedade para atualizar lista de clientes
-          _loadProperty();
+          _refreshAfterChange();
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -9092,6 +10622,276 @@ class _ApprovalThreadBubble extends StatelessWidget {
 ///
 /// Avatar: foto se houver `avatar`, senão iniciais do nome em fundo gradiente
 /// derivado do accent (ou de um palette estável por hash do nome).
+/// Barra de abas do detalhe — sublinhado de 2,5 na cor da aba ativa, ícone
+/// na cor e rótulo no texto do tema (contraste), filete embaixo. Mede os
+/// rótulos na escala real do texto: cabendo, as abas dividem a largura;
+/// não cabendo (320dp, fonte grande, 5 abas), rolam na horizontal e a ativa
+/// é trazida para a vista — sem mexer na rolagem da página.
+class _DetailsTabBar extends StatefulWidget {
+  const _DetailsTabBar({
+    required this.tabs,
+    required this.active,
+    required this.onSelect,
+  });
+
+  final List<_DetailsTab> tabs;
+  final _DetailsTab active;
+  final ValueChanged<_DetailsTab> onSelect;
+
+  @override
+  State<_DetailsTabBar> createState() => _DetailsTabBarState();
+}
+
+class _DetailsTabBarState extends State<_DetailsTabBar> {
+  static const double _hPad = 14;
+  static const double _iconSize = 17;
+  static const double _gap = 6;
+  static const TextStyle _labelStyle = TextStyle(
+    fontSize: 13,
+    fontWeight: FontWeight.w800,
+    letterSpacing: -0.1,
+  );
+
+  final ScrollController _scroll = ScrollController();
+  final Map<_DetailsTab, GlobalKey> _keys = {};
+
+  GlobalKey _keyOf(_DetailsTab tab) => _keys.putIfAbsent(tab, GlobalKey.new);
+
+  @override
+  void initState() {
+    super.initState();
+    _revealActive(animate: false);
+  }
+
+  @override
+  void didUpdateWidget(covariant _DetailsTabBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.active != widget.active) _revealActive();
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// Traz a aba ativa para a vista só na rolagem horizontal da barra
+  /// (`ensureVisible` rolaria a página inteira também).
+  void _revealActive({bool animate = true}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      final box =
+          _keys[widget.active]?.currentContext?.findRenderObject();
+      if (box is! RenderBox || !box.attached) return;
+      final viewport = RenderAbstractViewport.maybeOf(box);
+      if (viewport == null) return;
+      final target = viewport
+          .getOffsetToReveal(box, 0.5)
+          .offset
+          .clamp(0.0, _scroll.position.maxScrollExtent)
+          .toDouble();
+      if (animate) {
+        _scroll.animateTo(
+          target,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+        );
+      } else {
+        _scroll.jumpTo(target);
+      }
+    });
+  }
+
+  double _naturalWidth(BuildContext context, _DetailsTab tab) {
+    final painter = TextPainter(
+      text: TextSpan(text: tab.label, style: _labelStyle),
+      textDirection: TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout();
+    final width = painter.width;
+    painter.dispose();
+    return _hPad * 2 + _iconSize + _gap + width + 1;
+  }
+
+  Widget _tab(BuildContext context, _DetailsTab tab, {required bool expand}) {
+    final active = tab == widget.active;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final content = Container(
+      key: _keyOf(tab),
+      padding: const EdgeInsets.fromLTRB(_hPad, 12, _hPad, 10),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: active ? tab.tone : Colors.transparent,
+            width: 2.5,
+          ),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(tab.icon, size: _iconSize, color: active ? tab.tone : muted),
+          const SizedBox(width: _gap),
+          Flexible(
+            child: Text(
+              tab.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: _labelStyle.copyWith(
+                color: active ? ThemeHelpers.textColor(context) : muted,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    final button = Semantics(
+      selected: active,
+      button: true,
+      child: InkWell(
+        onTap: () => widget.onSelect(tab),
+        child: content,
+      ),
+    );
+    return expand ? Expanded(child: button) : button;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(0, 4, 0, 0),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
+        ),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const side = 16.0;
+          final available = constraints.maxWidth - side * 2;
+          final natural = widget.tabs.fold<double>(
+            0,
+            (sum, tab) => sum + _naturalWidth(context, tab),
+          );
+          if (natural <= available) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: side),
+              child: Row(
+                children: [
+                  for (final tab in widget.tabs)
+                    _tab(context, tab, expand: true),
+                ],
+              ),
+            );
+          }
+          return SingleChildScrollView(
+            controller: _scroll,
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: side - 4),
+            child: Row(
+              children: [
+                for (final tab in widget.tabs)
+                  _tab(context, tab, expand: false),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Ação compacta da faixa de gestão do hero. Travada: apagada, com cadeado,
+/// e o toque explica o motivo em vez de sumir.
+class _HeroActionChip extends StatelessWidget {
+  const _HeroActionChip({
+    required this.icon,
+    required this.label,
+    required this.tone,
+    required this.onTap,
+    this.lockedReason,
+    this.onLockedTap,
+    this.busy = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color tone;
+  final VoidCallback onTap;
+  final String? lockedReason;
+  final void Function(String reason)? onLockedTap;
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final reason = lockedReason;
+    final locked = reason != null;
+    final color = locked ? muted : tone;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: busy
+            ? null
+            : locked
+                ? () => onLockedTap?.call(reason)
+                : onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Ink(
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+          decoration: BoxDecoration(
+            color: locked ? null : tone.withValues(alpha: isDark ? 0.14 : 0.08),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: locked
+                  ? ThemeHelpers.borderColor(context)
+                  : tone.withValues(alpha: isDark ? 0.45 : 0.35),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (busy)
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(color),
+                  ),
+                )
+              else
+                Icon(icon, size: 15, color: color),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                    height: 1.2,
+                    color: color,
+                  ),
+                ),
+              ),
+              if (locked) ...[
+                const SizedBox(width: 6),
+                Icon(Icons.lock_outline_rounded, size: 13, color: muted),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _CaptorTile extends StatelessWidget {
   const _CaptorTile({
     required this.captor,

@@ -57,6 +57,67 @@ class PropertyActivityService {
     }
   }
 
+  /// Como [getUpdates], mas diz quando falhou — a tela mostra a causa e
+  /// "Tentar de novo" em vez de "nenhuma atualização". Páginas de 15, como a
+  /// ficha web.
+  Future<ApiResponse<PropertyUpdatesResponse>> getUpdatesPage(
+    String propertyId, {
+    int page = 1,
+    int limit = 15,
+  }) async {
+    try {
+      final response = await _api.get<Map<String, dynamic>>(
+        '/properties/$propertyId/updates',
+        queryParameters: {'page': '$page', 'limit': '$limit'},
+      );
+      if (response.success && response.data != null) {
+        return ApiResponse.success(
+          data: PropertyUpdatesResponse.fromJson(response.data!),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? '',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('[ACTIVITY] atualizações (página $page): $e');
+      return ApiResponse.error(message: '', statusCode: 0, data: e);
+    }
+  }
+
+  /// Como [getHistory], mas diz quando falhou.
+  Future<ApiResponse<List<PropertyHistoryEntry>>> getHistoryResult(
+    String propertyId, {
+    int limit = 100,
+  }) async {
+    try {
+      final response = await _api.get<List<dynamic>>(
+        '/properties/$propertyId/history',
+        queryParameters: {'limit': '$limit', 'enrich': 'true'},
+      );
+      if (response.success && response.data != null) {
+        return ApiResponse.success(
+          data: response.data!
+              .whereType<Map>()
+              .map((e) =>
+                  PropertyHistoryEntry.fromJson(Map<String, dynamic>.from(e)))
+              .toList(),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? '',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('[ACTIVITY] histórico: $e');
+      return ApiResponse.error(message: '', statusCode: 0, data: e);
+    }
+  }
+
   /// `POST /properties/:id/updates` → cria atualização manual.
   Future<PropertyUpdateEntry?> createUpdate(
     String propertyId,

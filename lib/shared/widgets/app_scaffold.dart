@@ -71,10 +71,8 @@ class _AppScaffoldState extends State<AppScaffold> {
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
         if (currentRoute == AppRoutes.home) return;
-        Navigator.of(context).pushNamedAndRemoveUntil(
-          AppRoutes.home,
-          (route) => false,
-        );
+        // Voltar da raiz leva à Home como troca de aba (sem deslizar por cima).
+        AppRoutes.trocarDeAba(Navigator.of(context), AppRoutes.home);
       },
       child: Scaffold(
         backgroundColor: Colors.transparent,

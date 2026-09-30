@@ -80,6 +80,17 @@ class SdrLeadRow {
     this.detail,
     this.date,
     this.stateLabel,
+    this.qualification,
+    this.createdAt,
+    this.dueDate,
+    this.lossReason,
+    this.transferId,
+    this.originalTaskId,
+    this.duplicatedTaskId,
+    this.fromTeam,
+    this.toTeam,
+    this.assignedTo,
+    this.transferredBy,
   });
 
   /// Card que o toque abre no Kanban do app.
@@ -100,6 +111,34 @@ class SdrLeadRow {
   /// Estado derivado do `result` (lista do período).
   final String? stateLabel;
 
+  /// 30/09/2026 (paridade do detalhe com o web): os campos que os cartões do
+  /// web mostram e o app descartava.
+
+  /// Qualificação do lead ("Qualific.:").
+  final String? qualification;
+
+  /// Entrada do card ("Entrada:").
+  final DateTime? createdAt;
+
+  /// Prazo (lista "Em qualificação": "Prazo:"; ordena do mais cedo ao sem
+  /// prazo).
+  final DateTime? dueDate;
+
+  /// Motivo da perda como veio (código; o rótulo sai do `KanbanLossReason`).
+  final String? lossReason;
+
+  /// Transferência: id, card do SDR (original) e card do corretor (cópia).
+  final String? transferId;
+  final String? originalTaskId;
+  final String? duplicatedTaskId;
+
+  /// Transferência: funil/equipe de origem e de destino, corretor que recebeu
+  /// e quem executou.
+  final String? fromTeam;
+  final String? toTeam;
+  final String? assignedTo;
+  final String? transferredBy;
+
   bool matches(String term) {
     if (term.isEmpty) return true;
     final hay = [
@@ -117,18 +156,12 @@ class SdrLeadRow {
   }
 }
 
-String _resultLabel(String? result) {
-  switch ((result ?? '').toLowerCase()) {
-    case 'won':
-      return 'Transferido';
-    case 'lost':
-      return 'Perdido';
-    case 'cancelled':
-      return 'Cancelado';
-    default:
-      return 'Em qualificação';
-  }
-}
+/// Estado na lista do período — a regra do web (`partitionLeadsForDrill`): a
+/// lista é a coorte de entrada que segue no funil SDR, então cada lead é
+/// «Perdido» (result = lost) ou «Em qualificação». Os transferidos saíram do
+/// funil e não entram nesta base.
+String _resultLabel(String? result) =>
+    (result ?? '').toLowerCase() == 'lost' ? 'Perdido' : 'Em qualificação';
 
 /// As quatro listas do `sdr/metrics?lists=full`.
 class SdrLeadLists {
@@ -176,6 +209,8 @@ class SdrLeadLists {
                 funnel: funnelOf(m),
                 date: _dt(m['createdAt']),
                 stateLabel: _resultLabel(_sOrNull(m['result'])),
+                qualification: _sOrNull(m['qualification']),
+                createdAt: _dt(m['createdAt']),
               ))
           .where((r) => r.taskId.isNotEmpty)
           .toList(growable: false),
@@ -192,6 +227,9 @@ class SdrLeadLists {
                 funnel: funnelOf(m),
                 date: _dt(m['createdAt']),
                 stateLabel: 'Em qualificação',
+                qualification: _sOrNull(m['qualification']),
+                createdAt: _dt(m['createdAt']),
+                dueDate: _dt(m['dueDate']),
               ))
           .where((r) => r.taskId.isNotEmpty)
           .toList(growable: false),
@@ -209,6 +247,9 @@ class SdrLeadLists {
                 detail: _sOrNull(m['lossReason']),
                 date: _dt(m['resultDate']) ?? _dt(m['createdAt']),
                 stateLabel: 'Perdido',
+                qualification: _sOrNull(m['qualification']),
+                createdAt: _dt(m['createdAt']),
+                lossReason: _sOrNull(m['lossReason']),
               ))
           .where((r) => r.taskId.isNotEmpty)
           .toList(growable: false),
@@ -235,6 +276,14 @@ class SdrLeadLists {
               detail: dest.isEmpty ? null : dest,
               date: _dt(m['transferredAt']),
               stateLabel: 'Transferido',
+              qualification: _sOrNull(m['qualification']),
+              transferId: _sOrNull(m['transferId']),
+              originalTaskId: orig.isEmpty ? null : orig,
+              duplicatedTaskId: dup.isEmpty ? null : dup,
+              fromTeam: _sOrNull(m['fromTeam']),
+              toTeam: _sOrNull(m['toTeam']),
+              assignedTo: _sOrNull(m['assignedTo']),
+              transferredBy: _sOrNull(m['transferredBy']),
             );
           })
           .where((r) => r.taskId.isNotEmpty)

@@ -11,6 +11,16 @@ int _asInt(dynamic v) {
   return int.tryParse(v.toString()) ?? (double.tryParse(v.toString())?.round() ?? 0);
 }
 
+/// Nulo quando o campo não veio — o web usa `??` para cair na conta de
+/// reserva, e zero não é o mesmo que "não veio".
+int? _asIntOrNull(dynamic v) {
+  if (v == null) return null;
+  if (v is num) return v.round();
+  final s = v.toString().trim();
+  if (s.isEmpty) return null;
+  return int.tryParse(s) ?? double.tryParse(s)?.round();
+}
+
 double _asDouble(dynamic v) {
   if (v == null) return 0;
   if (v is double) return v;
@@ -58,6 +68,11 @@ class SdrSummary {
     required this.entriesCohort,
     this.lostByEntry = 0,
     this.transferredByEntry = 0,
+    this.entriesCohortRaw,
+    this.grossEntries,
+    this.duplicateCards,
+    this.duplicateInbound,
+    this.totalMovements,
   });
 
   final int totalLeads;
@@ -85,6 +100,36 @@ class SdrSummary {
   /// Transferidos cujo lead de origem foi criado no período.
   final int transferredByEntry;
 
+  /// `entriesCohort` como veio da API (nulo em back antigo). O [entriesCohort]
+  /// acima cai em `totalEntries`; a conta do web cai em entradas +
+  /// transferidos da coorte — ver [coorte].
+  final int? entriesCohortRaw;
+
+  /// Leads entrantes BRUTOS = entradas + repetidos absorvidos pelo dedupe.
+  final int? grossEntries;
+
+  /// Repetidos que viraram card (entradas − únicos).
+  final int? duplicateCards;
+
+  /// Repetidos absorvidos pelo dedupe de entrada (não viraram card).
+  final int? duplicateInbound;
+
+  /// Legado informativo: transferidos + perdidos (evento) + em qualificação.
+  final int? totalMovements;
+
+  /// Coorte real de entrada — base da conversão em todo o painel
+  /// (`summary.entriesCohort ?? entradas + transferredByEntry` do web).
+  int get coorte => entriesCohortRaw ?? (totalEntries + transferredByEntry);
+
+  /// Conversão oficial do painel: transferidos da coorte ÷ coorte. O back já
+  /// devolve em `conversionRate` quando manda `entriesCohort`; a conta local é
+  /// só a reserva de payload antigo (igual ao web).
+  double get conversaoCoorte {
+    if (entriesCohortRaw != null) return conversionRate;
+    final base = coorte;
+    return base > 0 ? transferredByEntry * 100 / base : 0;
+  }
+
   static const SdrSummary zero = SdrSummary(
     totalLeads: 0,
     totalEntries: 0,
@@ -110,6 +155,28 @@ class SdrSummary {
       entriesCohort: _asInt(json['entriesCohort'] ?? json['totalEntries']),
       lostByEntry: _asInt(json['lostByEntry']),
       transferredByEntry: _asInt(json['transferredByEntry']),
+      entriesCohortRaw: _asIntOrNull(json['entriesCohort']),
+      grossEntries: _asIntOrNull(json['grossEntries']),
+      duplicateCards: _asIntOrNull(json['duplicateCards']),
+      duplicateInbound: _asIntOrNull(json['duplicateInbound']),
+      totalMovements: _asIntOrNull(json['totalMovements']),
+    );
+  }
+}
+
+/// Cards criados por dia (`dailyCreatedByDate`, vem também com
+/// `lists=none`) — base do "Leads por dia" do web.
+class SdrDailyCreated {
+  const SdrDailyCreated({required this.date, required this.created});
+
+  /// `yyyy-MM-dd`, como a API manda (a ordem de texto é a ordem do tempo).
+  final String date;
+  final int created;
+
+  factory SdrDailyCreated.fromJson(Map<String, dynamic> json) {
+    return SdrDailyCreated(
+      date: _asString(json['date']),
+      created: _asInt(json['created']),
     );
   }
 }
@@ -363,6 +430,7 @@ class SdrMetrics {
     this.byColumn = const [],
     this.listTotals = SdrListTotals.zero,
     this.transferAggregates = SdrTransferAggregates.empty,
+    this.dailyCreatedByDate = const [],
   });
 
   final SdrSummary summary;
@@ -384,6 +452,9 @@ class SdrMetrics {
 
   /// Agregados de transferência (também vêm com `lists=none`).
   final SdrTransferAggregates transferAggregates;
+
+  /// Cards criados por dia, em ordem de data.
+  final List<SdrDailyCreated> dailyCreatedByDate;
 
   static const SdrMetrics empty = SdrMetrics(
     summary: SdrSummary.zero,
@@ -444,6 +515,12 @@ class SdrMetrics {
           ? SdrTransferAggregates.fromJson(
               Map<String, dynamic>.from(json['transferAggregates'] as Map))
           : SdrTransferAggregates.empty,
+      dailyCreatedByDate: (_asMapList(json['dailyCreatedByDate'])
+              .map(SdrDailyCreated.fromJson)
+              .where((d) => d.date.isNotEmpty)
+              .toList()
+            ..sort((a, b) => a.date.compareTo(b.date)))
+          .toList(growable: false),
     );
   }
 }
@@ -590,6 +667,19 @@ class SdrLabelCount {
       );
 }
 
+/// Uma linha das tabelas cruzadas de transferência (origem → destino).
+class SdrFluxo {
+  const SdrFluxo({
+    required this.origem,
+    required this.destino,
+    required this.contagem,
+  });
+
+  final String origem;
+  final String destino;
+  final int contagem;
+}
+
 /// Agregados de transferência (`transferAggregates`).
 class SdrTransferAggregates {
   const SdrTransferAggregates({
@@ -598,6 +688,10 @@ class SdrTransferAggregates {
     required this.byAttendant,
     required this.byTransferredBy,
     required this.byResponsible,
+    this.byFunnel = const [],
+    this.originToDestinationFunnel = const [],
+    this.originToResponsible = const [],
+    this.originToTransferredBy = const [],
   });
 
   final List<SdrLabelCount> byDestinationTeam;
@@ -612,6 +706,15 @@ class SdrTransferAggregates {
   /// Corretor que recebeu.
   final List<SdrLabelCount> byResponsible;
 
+  /// Funil/equipe de ORIGEM ("Por funil / equipe (origem)" do web).
+  final List<SdrLabelCount> byFunnel;
+
+  /// Tabelas cruzadas do web: origem → funil de destino, origem → corretor
+  /// (quem recebeu), origem → quem transferiu.
+  final List<SdrFluxo> originToDestinationFunnel;
+  final List<SdrFluxo> originToResponsible;
+  final List<SdrFluxo> originToTransferredBy;
+
   static const SdrTransferAggregates empty = SdrTransferAggregates(
     byDestinationTeam: [],
     byDestinationFunnel: [],
@@ -625,20 +728,28 @@ class SdrTransferAggregates {
       byDestinationFunnel.isEmpty &&
       byAttendant.isEmpty &&
       byTransferredBy.isEmpty &&
-      byResponsible.isEmpty;
+      byResponsible.isEmpty &&
+      byFunnel.isEmpty &&
+      originToDestinationFunnel.isEmpty &&
+      originToResponsible.isEmpty &&
+      originToTransferredBy.isEmpty;
 
   static final RegExp _uuid = RegExp(
     r'^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
     caseSensitive: false,
   );
 
-  /// `transferAggToGroups` do web: rótulo que é UUID vira "Não identificado"
-  /// e as contagens se somam; ordena do maior para o menor.
-  static List<SdrLabelCount> _grouped(dynamic raw) {
+  /// `transferAggToGroups` do web: rótulo que é UUID vira [semNome] ("Não
+  /// identificado"; "SDR não identificado" no dono do lead) e as contagens
+  /// se somam; ordena do maior para o menor.
+  static List<SdrLabelCount> _grouped(
+    dynamic raw, {
+    String semNome = 'Não identificado',
+  }) {
     final map = <String, int>{};
     for (final r in _asMapList(raw).map(SdrLabelCount.fromJson)) {
       final l = r.label.trim();
-      final label = l.isEmpty || _uuid.hasMatch(l) ? 'Não identificado' : l;
+      final label = l.isEmpty || _uuid.hasMatch(l) ? semNome : l;
       map[label] = (map[label] ?? 0) + r.count;
     }
     return map.entries
@@ -647,13 +758,34 @@ class SdrTransferAggregates {
       ..sort((a, b) => b.count.compareTo(a.count));
   }
 
+  /// Linhas cruzadas `{from, <chaveDestino>, count}`.
+  static List<SdrFluxo> _fluxos(dynamic raw, String chaveDestino) {
+    return _asMapList(raw)
+        .map((m) => SdrFluxo(
+              origem: _asString(m['from'], '—'),
+              destino: _asString(m[chaveDestino], '—'),
+              contagem: _asInt(m['count']),
+            ))
+        .where((f) => f.contagem > 0)
+        .toList(growable: false);
+  }
+
   factory SdrTransferAggregates.fromJson(Map<String, dynamic> json) =>
       SdrTransferAggregates(
         byDestinationTeam: _grouped(json['byDestinationTeam']),
         byDestinationFunnel: _grouped(json['byDestinationFunnel']),
-        byAttendant: _grouped(json['byAttendant']),
+        byAttendant: _grouped(
+          json['byAttendant'],
+          semNome: 'SDR não identificado',
+        ),
         byTransferredBy: _grouped(json['byTransferredBy']),
         byResponsible: _grouped(json['byResponsible']),
+        byFunnel: _grouped(json['byFunnel']),
+        originToDestinationFunnel:
+            _fluxos(json['originToDestinationFunnel'], 'to'),
+        originToResponsible: _fluxos(json['originToResponsible'], 'responsible'),
+        originToTransferredBy:
+            _fluxos(json['originToTransferredBy'], 'transferredBy'),
       );
 }
 

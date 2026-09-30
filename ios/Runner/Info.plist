@@ -58,7 +58,7 @@
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>O Intellisys precisa salvar imagens dos imóveis na sua biblioteca de fotos quando solicitado.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>O Intellisys pode utilizar o microfone ao capturar vídeos curtos dos imóveis.</string>
+	<string>O Intellisys usa o microfone para gravar notas de voz nas conversas de WhatsApp e ao capturar vídeos curtos dos imóveis.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Use o Face ID para entrar no Intellisys de forma rápida e segura.</string>
 	<key>NSUserNotificationsUsageDescription</key>

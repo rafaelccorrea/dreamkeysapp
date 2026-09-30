@@ -512,6 +512,109 @@ class WhatsAppMessageListResult {
 
 // ─── Template aprovado (Meta Cloud API) ──────────────────────────────────────
 
+List<String> _toStringList(dynamic v) {
+  if (v is! List) return const [];
+  return [for (final x in v) x == null ? '' : x.toString()];
+}
+
+/// Maior {{n}} do texto, como `contarVars` do web (teto de 100: texto
+/// malformado não cria 1.000 campos).
+int _highestPlaceholder(String? text) {
+  if (text == null || text.isEmpty) return 0;
+  var highest = 0;
+  for (final m in RegExp(r'\{\{(\d+)\}\}').allMatches(text)) {
+    final n = int.tryParse(m.group(1) ?? '') ?? 0;
+    if (n > highest && n <= 100) highest = n;
+  }
+  return highest;
+}
+
+/// Botão do template (QUICK_REPLY, URL, PHONE_NUMBER, COPY_CODE…).
+class WhatsAppTemplateButton {
+  final String type;
+  final String text;
+  final String? url;
+  final String? phoneNumber;
+
+  const WhatsAppTemplateButton({
+    required this.type,
+    required this.text,
+    this.url,
+    this.phoneNumber,
+  });
+
+  factory WhatsAppTemplateButton.fromJson(Map<String, dynamic> json) {
+    return WhatsAppTemplateButton(
+      type: (_toStringOrNull(json['type']) ?? '').toUpperCase(),
+      text: _toStringOrNull(json['text']) ?? '',
+      url: _toStringOrNull(json['url']),
+      phoneNumber: _toStringOrNull(json['phoneNumber']) ??
+          _toStringOrNull(json['phone_number']),
+    );
+  }
+}
+
+/// Componente do template como o back devolve em `GET /whatsapp/templates`
+/// (`normalizeTemplateComponents`): cabeçalho, corpo, rodapé e botões, com os
+/// exemplos que a Meta guarda — é o que a prévia desenha. Também lê o formato
+/// cru da Graph API (`example.header_text`, `example.body_text[0]`).
+class WhatsAppTemplateComponent {
+  /// HEADER | BODY | FOOTER | BUTTONS.
+  final String type;
+
+  /// Só no HEADER: TEXT | IMAGE | VIDEO | DOCUMENT | LOCATION.
+  final String? format;
+  final String? text;
+  final List<WhatsAppTemplateButton> buttons;
+
+  /// Exemplos das variáveis, na ordem {{1}}…{{n}}.
+  final List<String> exampleHeaderText;
+  final List<String> exampleBodyText;
+
+  const WhatsAppTemplateComponent({
+    required this.type,
+    this.format,
+    this.text,
+    this.buttons = const [],
+    this.exampleHeaderText = const [],
+    this.exampleBodyText = const [],
+  });
+
+  factory WhatsAppTemplateComponent.fromJson(Map<String, dynamic> json) {
+    final type = (_toStringOrNull(json['type']) ?? '').toUpperCase();
+    final example = _toMap(json['example']);
+    var exampleHeader = _toStringList(json['exampleHeaderText']);
+    if (exampleHeader.isEmpty) {
+      exampleHeader = _toStringList(example?['header_text']);
+    }
+    var exampleBody = _toStringList(json['exampleBodyText']);
+    if (exampleBody.isEmpty) {
+      final rows = example?['body_text'];
+      if (rows is List && rows.isNotEmpty) {
+        exampleBody = _toStringList(rows.first);
+      }
+    }
+    final buttons = <WhatsAppTemplateButton>[];
+    final rawButtons = json['buttons'];
+    if (rawButtons is List) {
+      for (final b in rawButtons) {
+        final map = _toMap(b);
+        if (map != null) buttons.add(WhatsAppTemplateButton.fromJson(map));
+      }
+    }
+    final format = _toStringOrNull(json['format'])?.toUpperCase();
+    return WhatsAppTemplateComponent(
+      type: type,
+      // Cabeçalho sem formato é de texto (mesma leitura do back e do web).
+      format: type == 'HEADER' ? (format ?? 'TEXT') : format,
+      text: _toStringOrNull(json['text']),
+      buttons: buttons,
+      exampleHeaderText: exampleHeader,
+      exampleBodyText: exampleBody,
+    );
+  }
+}
+
 class WhatsAppTemplate {
   final String name;
   final String language;
@@ -520,6 +623,9 @@ class WhatsAppTemplate {
   final int bodyVariableCount;
   final int headerVariableCount;
 
+  /// Estrutura completa do template (prévia antes do envio).
+  final List<WhatsAppTemplateComponent> components;
+
   const WhatsAppTemplate({
     required this.name,
     required this.language,
@@ -527,11 +633,55 @@ class WhatsAppTemplate {
     this.category,
     this.bodyVariableCount = 0,
     this.headerVariableCount = 0,
+    this.components = const [],
   });
 
   bool get isApproved => status.toUpperCase() == 'APPROVED';
 
+  WhatsAppTemplateComponent? _component(String type) {
+    for (final c in components) {
+      if (c.type == type) return c;
+    }
+    return null;
+  }
+
+  WhatsAppTemplateComponent? get header => _component('HEADER');
+  WhatsAppTemplateComponent? get body => _component('BODY');
+  WhatsAppTemplateComponent? get footer => _component('FOOTER');
+
+  List<WhatsAppTemplateButton> get buttons =>
+      _component('BUTTONS')?.buttons ?? const [];
+
+  /// Cabeçalho de texto — o único que leva `headerParameters`.
+  bool get hasTextHeader => header?.format == 'TEXT';
+
+  /// Cabeçalho de imagem, vídeo, documento ou localização.
+  bool get hasMediaHeader => header != null && !hasTextHeader;
+
+  /// Variáveis do cabeçalho, como `varsDoCabecalho` do web: maior {{n}} do
+  /// texto do cabeçalho; sem cabeçalho de texto, a contagem do back.
+  int get headerVariables =>
+      hasTextHeader ? _highestPlaceholder(header?.text) : headerVariableCount;
+
+  /// Variáveis do corpo, como `varsDoCorpo` do web: maior {{n}} do texto do
+  /// corpo; sem texto, a contagem do back.
+  int get bodyVariables {
+    final text = body?.text;
+    if (text != null && text.isNotEmpty) return _highestPlaceholder(text);
+    return bodyVariableCount;
+  }
+
   factory WhatsAppTemplate.fromJson(Map<String, dynamic> json) {
+    final components = <WhatsAppTemplateComponent>[];
+    final rawComponents = json['components'];
+    if (rawComponents is List) {
+      for (final c in rawComponents) {
+        final map = _toMap(c);
+        if (map != null) {
+          components.add(WhatsAppTemplateComponent.fromJson(map));
+        }
+      }
+    }
     return WhatsAppTemplate(
       name: _toStringOrNull(json['name']) ?? '',
       language: _toStringOrNull(json['language']) ?? 'pt_BR',
@@ -539,6 +689,7 @@ class WhatsAppTemplate {
       category: _toStringOrNull(json['category']),
       bodyVariableCount: _toInt(json['bodyVariableCount']),
       headerVariableCount: _toInt(json['headerVariableCount']),
+      components: components,
     );
   }
 }
